@@ -11,6 +11,41 @@ from .llm import LLMError
 from .persona import PersonaService
 from .transcription import Transcriber, TranscriptionError
 
+
+def suggest_persona_updates(db, video, transcript_text: str) -> None:
+    """新视频（非广告）进入后，自动建议人设扩充（待作者确认）。"""
+    if video.is_ad or not transcript_text:
+        return
+    current = db.query(PersonaTag).filter(PersonaTag.status == "confirmed").all()
+    result = PersonaService().suggest_updates(transcript_text, current)
+    if not result["suggestions"]:
+        return
+    latest = db.query(PersonaTag).order_by(PersonaTag.version.desc()).first()
+    version = latest.version if latest else 1
+    for item in result["suggestions"]:
+        dup = (
+            db.query(PersonaTag)
+            .filter(PersonaTag.label == item["label"], PersonaTag.status.in_(["suggested", "confirmed"]))
+            .first()
+        )
+        if dup:
+            continue
+        description = item.get("description", "")
+        reason = item.get("reason", "")
+        if reason:
+            description = f"{description}（依据：{reason}）"
+        db.add(
+            PersonaTag(
+                label=item["label"],
+                description=description,
+                category="style",
+                source="ai",
+                status="suggested",
+                version=version,
+            )
+        )
+    db.commit()
+
 CORRECT_SYSTEM = (
     "你是转写校对助手。修正转写稿中的错别字、行业术语（如面试/求职/offer 相关词汇），"
     "保持口语原样，不增删内容。只输出修正后的文本。"
@@ -62,17 +97,22 @@ def import_video_task(db, payload: dict) -> None:
         db.refresh(video)
 
     transcript = video.transcript
-    if transcript and not video.tags_confirmed:
+    if transcript:
+        text = transcript.corrected_text or transcript.transcript_text
+        if not video.tags_confirmed:
+            try:
+                suggestion = PersonaService().suggest_video_tags(text)
+                video.main_topic = suggestion["main_topic"]
+                video.is_ad = suggestion["is_ad"]
+                video.tags = json.dumps(suggestion["tags"], ensure_ascii=False)
+                db.commit()
+            except Exception:
+                # 预打标签失败不影响转写结果；保持 tags_confirmed=False 待后续重试/手填
+                db.rollback()
+        # 人设增量建议（广告视频不参与）
         try:
-            suggestion = PersonaService().suggest_video_tags(
-                transcript.corrected_text or transcript.transcript_text
-            )
-            video.main_topic = suggestion["main_topic"]
-            video.is_ad = suggestion["is_ad"]
-            video.tags = json.dumps(suggestion["tags"], ensure_ascii=False)
-            db.commit()
+            suggest_persona_updates(db, video, text)
         except Exception:
-            # 预打标签失败不影响转写结果；保持 tags_confirmed=False 待后续重试/手填
             db.rollback()
 
 

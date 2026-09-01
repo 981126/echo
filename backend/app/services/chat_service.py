@@ -13,9 +13,10 @@ from .requirements_service import list_requirements
 
 SYSTEM_PROMPT = (
     "你是 echo 系统的 AI 助手，帮助作者查询和分析自媒体创作数据（抖音/B站/小红书，"
-    "赛道：求职/面试/赚钱/知识）。你可以调用只读工具查询素材库、人设、需求、指标、选题。"
-    "严格禁止执行任何写操作（生成、修改、删除）：如果作者要求写操作，"
-    "礼貌说明请到网页工作台操作或等待作者确认。用简体中文回答，简洁、口语化、直接。"
+    "赛道：求职/面试/赚钱/知识）。你可以调用工具查询素材库、人设、需求、指标、选题、复盘，"
+    "也可以在作者明确同意后生成脚本草稿（写操作）。"
+    "写操作规则：涉及生成/修改/删除时必须先向作者说明并征得明确同意，才允许调用工具执行；"
+    "作者未明确同意时，只提供方案不执行。用简体中文回答，简洁、口语化、直接。"
 )
 
 TOOLS = [
@@ -67,7 +68,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_metrics_summary",
-            "description": "获取指标汇总（M4 前不可用）",
+            "description": "获取指标汇总（按视频/赛道/平台）",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -75,8 +76,47 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_today_topics",
-            "description": "获取今日选题（M3 前不可用）",
+            "description": "获取最新一批匹配选题",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_review_report",
+            "description": "获取最新复盘报告（ABCD）",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_radar",
+            "description": "获取赛道雷达（各赛道互动率）",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_drafts",
+            "description": "搜索脚本草稿",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_draft",
+            "description": "根据选题生成脚本草稿（写操作，必须先获得作者明确同意）",
+            "parameters": {
+                "type": "object",
+                "properties": {"topic": {"type": "string"}},
+                "required": ["topic"],
+            },
         },
     },
 ]
@@ -138,6 +178,17 @@ def _get_persona(db: Session) -> dict:
     }
 
 
+def _search_drafts(db: Session, args: dict) -> list[dict]:
+    from ..models.draft import Draft
+
+    limit = min(int(args.get("limit") or 10), 50)
+    rows = db.query(Draft).order_by(Draft.updated_at.desc()).limit(limit).all()
+    return [
+        {"id": d.id, "title": d.title, "cover_text": d.cover_text, "source": d.source, "status": d.status}
+        for d in rows
+    ]
+
+
 def _dispatch(db: Session, name: str, args: dict) -> dict:
     if name == "search_videos":
         return {"videos": _search_videos(db, args)}
@@ -148,9 +199,85 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
     if name == "list_requirements":
         return {"requirements": list_requirements()}
     if name == "get_metrics_summary":
-        return {"available": False, "message": "指标看板将在 M4 上线，敬请期待"}
+        from .metrics import summary
+
+        data = summary(db)
+        return {
+            "by_topic": data["by_topic"],
+            "by_platform": data["by_platform"],
+            "top_videos": [
+                {
+                    "filename": v["filename"],
+                    "plays": v["plays"],
+                    "likes": v["likes"],
+                    "favorites": v["favorites"],
+                    "comments": v["comments"],
+                    "main_topic": v["main_topic"],
+                }
+                for v in data["per_video"][:10]
+            ],
+        }
     if name == "get_today_topics":
-        return {"available": False, "message": "每日选题将在 M3 上线，目前可手动生成"}
+        from ..models.hot_topic import TopicCandidate
+        from ..core.pipeline import today_key
+
+        key = today_key()
+        rows = (
+            db.query(TopicCandidate)
+            .filter(TopicCandidate.run_date == key)
+            .order_by(TopicCandidate.score.desc())
+            .all()
+        )
+        if not rows:
+            # 回退到最近一批
+            latest = (
+                db.query(TopicCandidate)
+                .order_by(TopicCandidate.run_date.desc())
+                .first()
+            )
+            if latest:
+                rows = (
+                    db.query(TopicCandidate)
+                    .filter(TopicCandidate.run_date == latest.run_date)
+                    .order_by(TopicCandidate.score.desc())
+                    .all()
+                )
+        return {
+            "topics": [
+                {"title": r.title, "platform": r.platform, "score": r.score, "draft_id": r.draft_id}
+                for r in rows
+            ]
+        }
+    if name == "get_review_report":
+        from .review import latest_report
+
+        rep = latest_report(db)
+        if not rep:
+            return {"available": False, "message": "还没有复盘报告，可先在看板生成"}
+        c = rep["content"]
+        return {
+            "run_date": rep["run_date"],
+            "C_next_action": c.get("C_next_action", ""),
+            "D_topic_direction": c.get("D_topic_direction", ""),
+            "B_attribution": c.get("B_attribution", []),
+            "radar": c.get("radar", []),
+        }
+    if name == "get_radar":
+        from .review import _radar
+
+        return {"radar": _radar(db)}
+    if name == "search_drafts":
+        return {"drafts": _search_drafts(db, args)}
+    if name == "generate_draft":
+        from .generation import generate_draft
+
+        draft = generate_draft(db, str(args.get("topic", "")))
+        return {
+            "draft_id": draft.id,
+            "title": draft.title,
+            "cover_text": draft.cover_text,
+            "script": draft.script,
+        }
     return {"error": f"未知工具: {name}"}
 
 

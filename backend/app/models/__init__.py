@@ -1,5 +1,6 @@
 from .chat import ChatMessage
 from .draft import Draft
+from .feedback import Feedback
 from .hot_topic import HotTopic, TopicCandidate
 from .metrics import MetricsSnapshot, ReviewReport
 from .persona import PersonaTag
@@ -19,4 +20,5 @@ __all__ = [
     "PipelineRun",
     "MetricsSnapshot",
     "ReviewReport",
+    "Feedback",
 ]

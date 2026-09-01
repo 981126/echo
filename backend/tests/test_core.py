@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.diff import has_meaningful_change  # noqa: E402
 from app.core.digest import build_digest_html, build_failure_html  # noqa: E402
 from app.core.metrics import engagement_rate, normalize_snapshot, retention_cutoff_date  # noqa: E402
 from app.core.review import best_topic_by_engagement, heuristic_direction  # noqa: E402
@@ -164,6 +165,16 @@ def test_review_heuristics():
     direction = heuristic_direction(best, worst)
     assert "赚钱" in direction
     assert heuristic_direction(None, None) != ""
+
+
+
+
+
+def test_has_meaningful_change():
+    assert has_meaningful_change("大家好今天我们聊聊求职", "大家好今天我们聊聊赚钱") is True
+    assert has_meaningful_change(" 一样的文本 ", "一样的文本") is False
+    assert has_meaningful_change("", "非空") is False
+    assert has_meaningful_change("原稿", "") is False
 
 
 

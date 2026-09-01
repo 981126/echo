@@ -21,7 +21,7 @@
           <span class="badge ok">匹配 {{ c.score }}</span>
           <p class="muted" style="margin: 2px 0">{{ c.reason }}</p>
         </div>
-        <a v-if="c.draft_id" class="btn sm" :href="'#/drafts/'">草稿 #{{ c.draft_id }}</a>
+        <a v-if="c.draft_id" class="btn sm" :href="'#/drafts?id=' + c.draft_id">草稿 #{{ c.draft_id }}</a>
       </div>
     </div>
   </div>
