@@ -1,0 +1,28 @@
+"""人设档案接口契约。"""
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class PersonaTagOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    label: str
+    description: str = ""
+    category: str = "style"
+    source: str = "ai"
+    status: str = "suggested"
+    version: int = 1
+    created_at: datetime
+
+
+class PersonaTagCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=100)
+    description: str = ""
+    category: str = "style"  # style | topic | redline
+    source: str = "manual"
+
+
+class PersonaDecision(BaseModel):
+    status: str = Field(pattern="^(confirmed|rejected)$")
