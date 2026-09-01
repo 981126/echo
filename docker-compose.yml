@@ -1,0 +1,21 @@
+# echo — NAS 部署（M3 完善）
+services:
+  echo:
+    build: .
+    container_name: echo
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/app/data      # 持久化：数据库/视频/转写/备份（核心资产）
+      - ./requirements:/app/requirements:ro
+      - ./docs:/app/docs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

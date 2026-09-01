@@ -1,0 +1,24 @@
+# 环境与密钥
+.env
+*.env.local
+
+# 运行时数据（NAS 卷）
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / 前端
+node_modules/
+dist/
+.vite/
+
+# 系统
+.DS_Store
+*.log
