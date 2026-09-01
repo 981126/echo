@@ -5,6 +5,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.digest import build_digest_html, build_failure_html  # noqa: E402
+from app.core.metrics import engagement_rate, normalize_snapshot, retention_cutoff_date  # noqa: E402
+from app.core.review import best_topic_by_engagement, heuristic_direction  # noqa: E402
 from app.core.matching import keyword_fallback_match  # noqa: E402
 from app.core.pipeline import can_run, today_key  # noqa: E402
 from app.core.requirement_file import next_requirement_id, parse_requirement_file  # noqa: E402
@@ -133,6 +135,35 @@ def test_pipeline_idempotency():
     assert can_run("failed") is True
     assert can_run("running") is False
     assert can_run(None) is True
+
+
+
+
+
+def test_normalize_snapshot():
+    assert normalize_snapshot({"plays": "100", "likes": -5, "comments": None, "bad": "x"}) == {
+        "plays": 100, "likes": 0, "favorites": 0, "comments": 0, "followers_gained": 0
+    }
+
+
+def test_engagement_rate():
+    assert engagement_rate(0, 1, 1, 1) == 0.0
+    assert engagement_rate(1000, 50, 20, 10) == 8.0  # 80/1000
+
+
+def test_retention_cutoff_date():
+    d = retention_cutoff_date(30)
+    assert d.count("-") == 2
+
+
+def test_review_heuristics():
+    stats = [{"topic": "求职", "engagement": 3.0}, {"topic": "赚钱", "engagement": 9.0}]
+    best = best_topic_by_engagement(stats)
+    assert best["topic"] == "赚钱"
+    worst = min(stats, key=lambda x: x["engagement"])
+    direction = heuristic_direction(best, worst)
+    assert "赚钱" in direction
+    assert heuristic_direction(None, None) != ""
 
 
 
