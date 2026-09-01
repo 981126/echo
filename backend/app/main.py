@@ -1,10 +1,12 @@
 """echo 后端入口。"""
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from .api import persona, tasks, videos
+from .api import chat, drafts, persona, requirements, tasks, videos
 from .config import get_settings
 from .db import init_db
 from .scheduler import setup_scheduler
@@ -19,7 +21,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="echo", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="echo", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,8 +42,19 @@ API_DEPENDENCIES = [Depends(require_token)]
 app.include_router(videos.router, prefix="/api/videos", tags=["videos"], dependencies=API_DEPENDENCIES)
 app.include_router(persona.router, prefix="/api/persona", tags=["persona"], dependencies=API_DEPENDENCIES)
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"], dependencies=API_DEPENDENCIES)
+app.include_router(drafts.router, prefix="/api/drafts", tags=["drafts"], dependencies=API_DEPENDENCIES)
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"], dependencies=API_DEPENDENCIES)
+app.include_router(
+    requirements.router, prefix="/api/requirements", tags=["requirements"], dependencies=API_DEPENDENCIES
+)
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# 托管前端构建产物（存在时挂载；/api 路由已先行注册，不受影响）
+_FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if _FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="static")

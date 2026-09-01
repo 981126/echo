@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.requirement_file import next_requirement_id, parse_requirement_file  # noqa: E402
 from app.core.signature import (  # noqa: E402
     build_canonicalized_query,
     build_string_to_sign,
@@ -11,7 +12,7 @@ from app.core.signature import (  # noqa: E402
     hmac_sha1_sign,
     utcnow_rfc1123,
 )
-from app.core.topics import MAIN_TOPICS, is_valid_platform, normalize_main_topic  # noqa: E402
+from app.core.topics import is_valid_platform, normalize_main_topic  # noqa: E402
 from app.core.transcript import (  # noqa: E402
     estimate_duration_seconds,
     normalize_text,
@@ -62,6 +63,21 @@ def test_signature_helpers():
     assert "GMT" in utcnow_rfc1123()
     sts = build_string_to_sign("POST", "application/json", b"{}", "application/json", "date", "", "/api?x=1")
     assert sts.startswith("POST\napplication/json")
+
+
+def test_parse_requirement_file():
+    text = "# R-003: 微信推送\n\n- **状态**: 已确认\n- **原文摘要**: 测试摘要\n"
+    data = parse_requirement_file(text, "R-003.md")
+    assert data["id"] == "R-003"
+    assert data["title"] == "微信推送"
+    assert data["status"] == "已确认"
+    assert data["summary"] == "测试摘要"
+
+
+def test_next_requirement_id():
+    assert next_requirement_id([]) == "R-001"
+    assert next_requirement_id(["R-001.md", "R-003.md"]) == "R-004"
+    assert next_requirement_id(["README.md"]) == "R-001"
 
 
 if __name__ == "__main__":

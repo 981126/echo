@@ -39,12 +39,16 @@ fi
 
 # 4) 前端
 if [ -f frontend/package.json ]; then
-  echo "==> [frontend] lint"
-  (cd frontend && npm run lint) || FAIL=1
-  echo "==> [frontend] build"
-  (cd frontend && npm run build) || FAIL=1
+  if [ -d frontend/node_modules ]; then
+    echo "==> [frontend] lint"
+    (cd frontend && npm run lint) || FAIL=1
+    echo "==> [frontend] build"
+    (cd frontend && npm run build) || FAIL=1
+  else
+    echo "==> [frontend] 依赖未安装，跳过 lint/build（npm install 后启用）"
+  fi
 else
-  echo "==> [frontend] 暂无代码（M2 起启用检查）"
+  echo "==> [frontend] 暂无代码"
 fi
 
 # 5) 文档与需求归档完整性（自描述体系必须存在）

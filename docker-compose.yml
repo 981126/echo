@@ -12,7 +12,7 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ./data:/app/data      # 持久化：数据库/视频/转写/备份（核心资产）
-      - ./requirements:/app/requirements:ro
+      - ./requirements:/app/requirements
       - ./docs:/app/docs:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
