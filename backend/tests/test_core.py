@@ -4,7 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.digest import build_digest_html, build_failure_html  # noqa: E402
+from app.core.matching import keyword_fallback_match  # noqa: E402
+from app.core.pipeline import can_run, today_key  # noqa: E402
 from app.core.requirement_file import next_requirement_id, parse_requirement_file  # noqa: E402
+from app.core.retrieval import TfidfIndex  # noqa: E402
 from app.core.signature import (  # noqa: E402
     build_canonicalized_query,
     build_string_to_sign,
@@ -78,6 +82,58 @@ def test_next_requirement_id():
     assert next_requirement_id([]) == "R-001"
     assert next_requirement_id(["R-001.md", "R-003.md"]) == "R-004"
     assert next_requirement_id(["README.md"]) == "R-001"
+
+
+
+
+def test_tfidf_search_returns_relevant():
+    docs = [
+        "今天聊聊面试官最反感的回答方式，很多人都在踩坑",
+        "如何通过副业赚钱，普通人也能月入过万",
+        "AI 时代哪些岗位会被替代",
+    ]
+    index = TfidfIndex().build(docs)
+    hits = index.search("面试 回答", top_k=1)
+    assert hits and hits[0]["index"] == 0
+
+
+def test_keyword_fallback_match():
+    items = [
+        {"title": "2026 求职季，应届生怎么办", "platform": "douyin", "heat": "100"},
+        {"title": "猫咪日常", "platform": "douyin", "heat": "1"},
+    ]
+    result = keyword_fallback_match(items, ["求职", "面试"], top_n=5)
+    assert len(result) == 1
+    assert result[0]["score"] == 20
+    assert "求职" in result[0]["reason"]
+
+
+def test_digest_html():
+    items = [
+        {
+            "title": "测试选题",
+            "platform": "douyin",
+            "score": 80,
+            "reason": "命中",
+            "draft_id": 7,
+            "cover_text": "别踩坑",
+            "script": "大家好……",
+        }
+    ]
+    html = build_digest_html(items, "http://nas:8000")
+    assert "测试选题" in html
+    assert "http://nas:8000/#/drafts/7" in html
+    assert "别踩坑" in html
+    assert "boom" in build_failure_html("boom")
+
+
+def test_pipeline_idempotency():
+    assert today_key().count("-") == 2
+    assert can_run("done") is True
+    assert can_run("failed") is True
+    assert can_run("running") is False
+    assert can_run(None) is True
+
 
 
 if __name__ == "__main__":

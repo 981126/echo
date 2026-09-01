@@ -6,7 +6,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FAIL=0
-PY=${PYTHON:-python3}
+if [ -n "${PYTHON:-}" ]; then
+  PY=$PYTHON
+else
+  PY=python3
+  for cand in python3.12 python3.11 python3.10; do
+    if command -v "$cand" >/dev/null 2>&1; then PY=$cand; break; fi
+  done
+fi
 # 沙箱/受限环境：把 pyc 缓存指到可写临时目录，避免 PermissionError
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${TMPDIR:-/tmp}/echo-pycache}"
 mkdir -p "$PYTHONPYCACHEPREFIX"

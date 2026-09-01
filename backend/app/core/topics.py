@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """纯逻辑（无第三方依赖）：赛道与平台规范化。"""
 MAIN_TOPICS = ["求职", "面试", "赚钱", "知识", "其他"]
 PLATFORMS = ["douyin", "bilibili", "xiaohongshu"]

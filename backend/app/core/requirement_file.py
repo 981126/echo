@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """纯逻辑（无第三方依赖）：需求归档文件解析与编号。"""
 import re
 

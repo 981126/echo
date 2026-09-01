@@ -3,6 +3,7 @@
     <nav v-if="!isLogin" class="sidebar">
       <div class="logo">echo · 回声</div>
       <RouterLink to="/videos">素材库</RouterLink>
+      <RouterLink to="/topics">每日选题</RouterLink>
       <RouterLink to="/timeline">时间线</RouterLink>
       <RouterLink to="/drafts">脚本工作台</RouterLink>
       <RouterLink to="/chat">AI 对话</RouterLink>

@@ -1,0 +1,35 @@
+"""热点与选题候选模型。"""
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+from ..db import Base
+
+
+class HotTopic(Base):
+    __tablename__ = "hot_topics"
+    __table_args__ = (UniqueConstraint("platform", "title", "topic_date", name="uq_hot"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(20), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    heat: Mapped[str] = mapped_column(String(50), default="")
+    url: Mapped[str] = mapped_column(String(500), default="")
+    raw: Mapped[str] = mapped_column(Text, default="{}")
+    topic_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TopicCandidate(Base):
+    __tablename__ = "topic_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_date: Mapped[str] = mapped_column(String(10), index=True)
+    hot_topic_id: Mapped[int | None] = mapped_column(ForeignKey("hot_topics.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(255))  # 改写后的选题
+    platform: Mapped[str] = mapped_column(String(20), default="")
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    draft_id: Mapped[int | None] = mapped_column(ForeignKey("drafts.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

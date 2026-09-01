@@ -2,13 +2,25 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models.draft import Draft
 from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
+from ..services.generation import generate_draft
 
 router = APIRouter()
+
+
+class GenerateIn(BaseModel):
+    topic: str
+
+
+@router.post("/generate", response_model=DraftOut)
+def generate(payload: GenerateIn, db: Session = Depends(get_db)):
+    """根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。"""
+    return generate_draft(db, payload.topic)
 
 
 @router.get("", response_model=list[DraftOut])

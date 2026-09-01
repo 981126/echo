@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # 每日流水线
     daily_push_time: str = "07:00"
     tz: str = "Asia/Shanghai"
+    pipeline_topics_count: int = 3
+    web_base_url: str = "http://localhost:8000"  # 邮件内"去工作台"链接前缀
+
+    # 热点源
+    hot_source_mode: str = "mock"  # mock | real
 
     # 路径
     data_dir: Path = Path("./data")

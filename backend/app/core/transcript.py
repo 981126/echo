@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """纯逻辑（无第三方依赖）：转写文本处理。"""
 import re
 

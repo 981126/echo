@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """纯逻辑（无第三方依赖）：阿里云 REST 签名构造（HMAC-SHA1）。
 
 阿里云录音文件识别（FileTrans）签名算法：
