@@ -46,6 +46,7 @@
         <div class="tile-actions">
           <n-button size="small" type="primary" ghost @click="openEdit(v)">编辑</n-button>
           <n-button v-if="!v.tags_confirmed" size="small" secondary @click="confirmTags(v)">确认标签</n-button>
+          <span v-else class="action-spacer" />
         </div>
       </div>
     </div>
