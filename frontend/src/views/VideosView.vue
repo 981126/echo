@@ -43,10 +43,8 @@
           <n-tag v-for="t in v.tags" :key="t" size="small" :bordered="false">{{ t }}</n-tag>
           <span v-if="!v.tags.length" class="muted">无标签</span>
         </div>
-        <div class="tile-actions">
-          <n-button size="small" type="primary" ghost @click="openEdit(v)">编辑</n-button>
-          <n-button v-if="!v.tags_confirmed" size="small" secondary @click="confirmTags(v)">确认标签</n-button>
-          <span v-else class="action-spacer" />
+        <div v-if="!v.tags_confirmed" class="tile-actions">
+          <n-button size="small" secondary @click="confirmTags(v)">确认标签</n-button>
         </div>
       </div>
     </div>
@@ -111,18 +109,11 @@
             <label class="form-label">原始文案（可选）</label>
             <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
           </div>
-          <div class="form-item full" v-if="editing.correctedText !== null || editing.transcriptText">
-            <label class="form-label">转写 / 校对稿</label>
-            <div v-if="editing.transcriptText" class="prose panel" style="margin-bottom: 8px; background: var(--bg)">
-              <strong class="muted">ASR 转写（只读）</strong>
+          <div class="form-item full" v-if="editing.transcriptText">
+            <label class="form-label">ASR 转写（只读）</label>
+            <div class="prose panel" style="margin-bottom: 0; background: var(--bg)">
               <p style="white-space: pre-wrap">{{ editing.transcriptText }}</p>
             </div>
-            <n-input
-              v-model:value="editing.correctedText"
-              type="textarea"
-              :rows="6"
-              placeholder="AI 校对稿，可直接修改（分析以此为准）"
-            />
           </div>
         </div>
         <div class="row">
@@ -268,7 +259,6 @@ async function openEdit(v) {
     coverUrl: v.cover_url || null,
     sourceText: tr?.source_text || '',
     transcriptText: tr?.transcript_text || '',
-    correctedText: tr ? (tr.corrected_text ?? '') : null,
     plannedTs: parseTs(v.planned_publish_at),
     publishedTs: parseTs(v.published_at)
   }
@@ -282,8 +272,7 @@ async function openEdit(v) {
     plannedTs: editing.value.plannedTs,
     publishedTs: editing.value.publishedTs,
     tagsText: tagsText.value,
-    sourceText: editing.value.sourceText,
-    correctedText: editing.value.correctedText
+    sourceText: editing.value.sourceText
   }
   showEdit.value = true
 }
@@ -309,7 +298,6 @@ async function saveEdit() {
     body.tags = tagsText.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
   }
   if (editing.value.sourceText !== o.sourceText) body.source_text = editing.value.sourceText || null
-  if (editing.value.correctedText !== o.correctedText) body.corrected_text = editing.value.correctedText || null
   try {
     await api('/api/videos/' + editing.value.id, { method: 'PATCH', body: JSON.stringify(body) })
     message.success('已保存')

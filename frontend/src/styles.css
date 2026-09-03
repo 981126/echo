@@ -312,24 +312,15 @@ details.fold { margin-top: 8px; }
 @media (max-width: 820px) { .grid-videos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .grid-videos { grid-template-columns: 1fr; } }
 .card-tile .tile-actions { display: flex; gap: 6px; margin-top: 12px; }
-.card-tile .tile-actions .n-button { flex: 1; }
-.card-tile .tile-actions .action-spacer { flex: 1; }
 
-/* AI 对话：对话框上下居中 */
-.chat-layout { min-height: calc(100vh - 120px); align-items: center; }
-.chat-main { flex: 1; min-width: 0; }
-@media (max-width: 860px) {
-  .chat-layout { min-height: 0; align-items: stretch; }
-}
-
-/* AI 对话：固定高度内滚动（上下稳定居中窗口） */
-.chat-layout { height: calc(100vh - 160px); min-height: 440px; align-items: stretch; }
+/* AI 对话：固定高度滚动窗口，顶部留约 15% 空间，不顶到页面头 */
+.chat-layout { margin-top: 10vh; height: calc(88vh - 150px); min-height: 440px; align-items: stretch; }
 .conv-panel { height: 100%; max-height: none; }
 .chat-main { height: 100%; display: flex; flex-direction: column; }
 .chat-main > .panel:first-of-type { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; margin-bottom: 10px; }
 .chat-main > .panel:first-of-type .chat-box { flex: 1; max-height: none; }
 @media (max-width: 860px) {
-  .chat-layout { height: auto; min-height: 0; }
+  .chat-layout { height: auto; min-height: 0; margin-top: 0; }
   .conv-panel { height: auto; max-height: 38vh; }
   .chat-main { height: auto; }
   .chat-main > .panel:first-of-type { flex: none; display: block; }
