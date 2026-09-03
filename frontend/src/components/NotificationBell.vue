@@ -1,7 +1,13 @@
 <template>
   <div class="notif-wrap">
     <n-badge :value="unreadCount" :max="99" :show="unreadCount > 0" type="error">
-      <n-button quaternary circle size="small" class="notif-btn" @click="toggle">🔔</n-button>
+      <n-button quaternary circle size="small" class="notif-btn" aria-label="通知" @click.stop="toggle">
+        <svg class="bell-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+        </svg>
+      </n-button>
     </n-badge>
 
     <transition name="drop">
@@ -101,7 +107,8 @@ async function clearAll() {
   notifs.value = []
 }
 
-function onDocClick() {
+function onDocClick(e) {
+  if (e.target && e.target.closest && e.target.closest('.notif-wrap')) return
   open.value = false
 }
 

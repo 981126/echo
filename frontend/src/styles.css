@@ -329,7 +329,8 @@ details.fold { margin-top: 8px; }
 
 /* ---------- 通知铃铛（R-019） ---------- */
 .notif-wrap { position: fixed; top: 14px; right: 18px; z-index: 90; }
-.notif-btn { font-size: 15px; }
+.notif-btn { display: inline-flex; align-items: center; justify-content: center; }
+.bell-icon { display: block; }
 .notif-panel {
   position: absolute; top: 34px; right: 0; width: 360px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;

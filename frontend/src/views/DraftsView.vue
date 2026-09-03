@@ -8,10 +8,10 @@
 
     <div v-if="!drafts.length" class="panel empty">暂无草稿</div>
     <div class="grid">
-      <div v-for="d in drafts" :key="d.id" class="card-tile">
+      <div v-for="d in drafts" :key="d.id" class="card-tile" @click="open(d)">
         <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
         <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }} · {{ statusName(d.status) }}</p>
-        <div class="tile-actions">
+        <div class="tile-actions" @click.stop>
           <n-button size="small" type="primary" ghost @click="open(d)">编辑</n-button>
           <n-button size="small" secondary @click="like(d, true)">👍 采用</n-button>
           <n-button size="small" secondary @click="like(d, false)">👎 不用</n-button>
@@ -19,54 +19,59 @@
       </div>
     </div>
 
-    <div v-if="editing" class="panel" style="margin-top: 22px">
-      <div class="row" style="justify-content: space-between; margin-bottom: 14px">
-        <span class="section-title" style="margin: 0">编辑草稿 #{{ editing.id }}</span>
-        <n-button size="small" secondary @click="editing = null">关闭</n-button>
-      </div>
-      <div class="form-grid">
-        <div class="form-item">
-          <label class="form-label">标题</label>
-          <n-input v-model:value="editing.title" placeholder="视频标题" />
+    <n-modal
+      v-model:show="showEdit"
+      preset="card"
+      :title="editing ? (editing.id ? '编辑草稿 #' + editing.id : '新建草稿') : '草稿'"
+      style="width: min(820px, 94vw)"
+      :mask-closable="false"
+      @close="closeEdit"
+    >
+      <div v-if="editing" style="max-height: 74vh; overflow-y: auto; padding-right: 6px">
+        <div class="form-grid">
+          <div class="form-item">
+            <label class="form-label">标题</label>
+            <n-input v-model:value="editing.title" placeholder="视频标题" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">封面字</label>
+            <n-input v-model:value="editing.cover_text" placeholder="与标题不同，3-8 字" />
+          </div>
         </div>
-        <div class="form-item">
-          <label class="form-label">封面字</label>
-          <n-input v-model:value="editing.cover_text" placeholder="与标题不同，3-8 字" />
-        </div>
-      </div>
 
-      <div class="form-item">
-        <label class="form-label">口播脚本（Markdown，可插图）</label>
-        <div class="md-toolbar">
-          <n-button size="tiny" secondary @click="wrap('**', '**', '加粗文字')"><b>B</b></n-button>
-          <n-button size="tiny" secondary @click="wrap('*', '*', '斜体文字')"><i>I</i></n-button>
-          <n-button size="tiny" secondary @click="linePrefix('## ')">H2</n-button>
-          <n-button size="tiny" secondary @click="linePrefix('> ')">引用</n-button>
-          <n-button size="tiny" secondary @click="linePrefix('- ')">列表</n-button>
-          <n-button size="tiny" secondary @click="insertHr">分隔线</n-button>
-          <n-button size="tiny" secondary @click="insertLink">链接</n-button>
-          <n-button size="tiny" secondary @click="imgInput && imgInput.click()">🖼 插图</n-button>
-          <input ref="imgInput" type="file" accept="image/*" class="file-hidden" @change="onImage" />
-          <span class="grow" />
-          <n-button size="tiny" :type="preview ? 'primary' : 'default'" @click="preview = !preview">
-            {{ preview ? '返回编辑' : '预览' }}
-          </n-button>
+        <div class="form-item">
+          <label class="form-label">口播脚本（Markdown，可插图）</label>
+          <div class="md-toolbar">
+            <n-button size="tiny" secondary @click="wrap('**', '**', '加粗文字')"><b>B</b></n-button>
+            <n-button size="tiny" secondary @click="wrap('*', '*', '斜体文字')"><i>I</i></n-button>
+            <n-button size="tiny" secondary @click="linePrefix('## ')">H2</n-button>
+            <n-button size="tiny" secondary @click="linePrefix('> ')">引用</n-button>
+            <n-button size="tiny" secondary @click="linePrefix('- ')">列表</n-button>
+            <n-button size="tiny" secondary @click="insertHr">分隔线</n-button>
+            <n-button size="tiny" secondary @click="insertLink">链接</n-button>
+            <n-button size="tiny" secondary @click="imgInput && imgInput.click()">🖼 插图</n-button>
+            <input ref="imgInput" type="file" accept="image/*" class="file-hidden" @change="onImage" />
+            <span class="grow" />
+            <n-button size="tiny" :type="preview ? 'primary' : 'default'" @click="preview = !preview">
+              {{ preview ? '返回编辑' : '预览' }}
+            </n-button>
+          </div>
+          <n-input
+            v-if="!preview"
+            ref="scriptInput"
+            v-model:value="editing.script"
+            type="textarea"
+            :rows="16"
+            placeholder="在这里撰写 / 改写脚本"
+          />
+          <div v-else class="prose md-preview" v-html="renderMd(editing.script)" />
         </div>
-        <n-input
-          v-if="!preview"
-          ref="scriptInput"
-          v-model:value="editing.script"
-          type="textarea"
-          :rows="16"
-          placeholder="在这里撰写 / 改写脚本"
-        />
-        <div v-else class="prose md-preview" v-html="renderMd(editing.script)" />
+        <div class="row">
+          <n-button type="primary" @click="save">保存</n-button>
+          <n-button secondary @click="closeEdit">取消</n-button>
+        </div>
       </div>
-      <div class="row">
-        <n-button type="primary" @click="save">保存</n-button>
-        <n-button secondary @click="editing = null">取消</n-button>
-      </div>
-    </div>
+    </n-modal>
   </div>
 </template>
 
@@ -78,6 +83,7 @@ import { renderMd } from '../md'
 
 const drafts = ref([])
 const editing = ref(null)
+const showEdit = ref(false)
 const preview = ref(false)
 const scriptInput = ref(null)
 const imgInput = ref(null)
@@ -102,13 +108,19 @@ async function load() {
 
 async function createDraft() {
   const d = await api('/api/drafts', { method: 'POST', body: JSON.stringify({ title: '', cover_text: '', script: '' }) })
-  open(d)
+  open(d, true)
 }
 
-function open(d) {
+function open(d, isNew = false) {
   editing.value = { ...d }
   preview.value = false
-  if (editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
+  showEdit.value = true
+  if (!isNew && editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
+}
+
+function closeEdit() {
+  showEdit.value = false
+  editing.value = null
 }
 
 function wrap(prefix, suffix, placeholder) {
@@ -156,7 +168,6 @@ async function onImage(e) {
   if (!f) return
   try {
     const r = await uploadImage(f)
-    // 在光标处插入图片语法
     const el = textarea()
     if (el) {
       const value = editing.value.script
@@ -183,7 +194,7 @@ async function save() {
   }
   await api(`/api/drafts/${editing.value.id}`, { method: 'PATCH', body: JSON.stringify(body) })
   message.success('已保存（AI 原稿改写差异已进入人设学习）')
-  editing.value = null
+  closeEdit()
   load()
 }
 
