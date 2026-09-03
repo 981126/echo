@@ -86,6 +86,8 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             task.progress = 100
             db.commit()
         _notify(db, kind=kind, payload=payload, status="done", result=result)
+        if kind == "import_video":
+            _maybe_optimize_prompt(db, payload)
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         task = db.get(BackgroundTask, task_id)
@@ -96,3 +98,32 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
         _notify(db, kind=kind, payload=payload, status="failed", error=str(exc))
     finally:
         db.close()
+
+
+def _maybe_optimize_prompt(db, payload: dict) -> None:
+    """每次导入新视频后，基于当前启用的生成提示词自动产出候选新版（不启用）+ 通知。"""
+    from .models.video import Video
+    from .prompt_service import optimize
+
+    try:
+        video = db.get(Video, int(payload.get("video_id") or 0))
+        if video is None or not video.transcript:
+            return
+        text = video.transcript.corrected_text or video.transcript.transcript_text
+        if not text:
+            return
+        candidate = optimize(db, "generation", material=text[:3000])
+        if candidate is None:
+            return
+        db.add(
+            Notification(
+                kind="prompt_candidate",
+                status="done",
+                title="生成提示词有新候选",
+                message=f"基于新素材自动优化了生成提示词 v{candidate.version}，待你启用",
+                target="/prompts?key=generation",
+            )
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001 自动优化失败不影响导入主流程
+        db.rollback()

@@ -10,6 +10,7 @@ const routes = [
   { path: '/chat', component: () => import('./views/ChatView.vue'), meta: { title: 'AI 对话' } },
   { path: '/persona', component: () => import('./views/PersonaView.vue'), meta: { title: '人设档案' } },
   { path: '/requirements', component: () => import('./views/RequirementsView.vue'), meta: { title: '需求管理' } },
+  { path: '/prompts', component: () => import('./views/PromptsView.vue'), meta: { title: 'AI 提示词' } },
   { path: '/dashboard', component: () => import('./views/DashboardView.vue'), meta: { title: '看板' } }
 ]
 

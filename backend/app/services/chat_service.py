@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..models.persona import PersonaTag
 from ..models.video import Video
 from .llm import DeepSeekClient, LLMError
+from .prompt_service import get_prompt
 from .requirements_service import list_requirements
 
 SYSTEM_PROMPT = (
@@ -298,7 +299,7 @@ class ChatService:
         self.llm = llm or DeepSeekClient()
 
     def reply(self, db: Session, user_message: str, history: list[dict]) -> str:
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages: list[dict] = [{"role": "system", "content": get_prompt("chat")}]
         messages.extend(history[-20:])
         messages.append({"role": "user", "content": user_message})
 

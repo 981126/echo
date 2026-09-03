@@ -13,6 +13,7 @@ from ..models.metrics import ReviewReport
 from .llm import LLMError
 from .metrics import summary
 from .persona import PersonaService
+from .prompt_service import get_prompt
 
 REVIEW_SYSTEM = (
     "你是自媒体数据分析专家。基于以下视频数据，输出复盘 JSON："
@@ -55,7 +56,7 @@ def _llm_abcd(db: Session, data: dict, radar: list[dict[str, Any]]) -> dict:
     try:
         llm_data = persona.llm.chat_json(
             [
-                {"role": "system", "content": REVIEW_SYSTEM},
+                {"role": "system", "content": get_prompt("review", db)},
                 {
                     "role": "user",
                     "content": "视频数据：\n" + "\n".join(lines) + f"\n\n赛道雷达：\n{radar_lines}",

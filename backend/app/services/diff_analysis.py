@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..core.diff import has_meaningful_change
 from ..models.persona import PersonaTag
 from .llm import DeepSeekClient, LLMError
+from .prompt_service import get_prompt
 
 DIFF_SYSTEM = (
     "你是人设学习专家。对比作者对 AI 脚本的改写，提炼作者真实的风格偏好。"
@@ -24,7 +25,7 @@ def analyze_diff(original: str, edited: str, llm=None) -> list[dict]:
     try:
         data = llm.chat_json(
             [
-                {"role": "system", "content": DIFF_SYSTEM},
+                {"role": "system", "content": get_prompt("diff")},
                 {"role": "user", "content": user},
             ],
             temperature=0.3,

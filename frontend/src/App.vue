@@ -61,7 +61,8 @@ const navs = [
   { to: '/chat', label: 'AI 对话' },
   { to: '/persona', label: '人设档案' },
   { to: '/dashboard', label: '数据看板' },
-  { to: '/requirements', label: '需求管理' }
+  { to: '/requirements', label: '需求管理' },
+  { to: '/prompts', label: 'AI 提示词' }
 ]
 
 const themeOverrides = {

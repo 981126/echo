@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from ..core.topics import normalize_topics
+from .prompt_service import get_prompt
 from ..models.persona import PersonaTag
 from .llm import DeepSeekClient, LLMError
 
@@ -15,6 +16,13 @@ PERSONA_INIT_SYSTEM = (
     '{"tags":[{"label":"简短标签(2-6字)","description":"一句话描述"}],'
     '"redlines":["作者明确不做的表达或内容"]}'
 )
+
+PERSONA_UPDATES_SYSTEM = (
+    "你是人设迭代专家。基于当前人设档案和一条新视频转写稿，"
+    "判断是否有值得扩充的新标签。若没有，返回空列表。"
+    '只输出 JSON：{"suggestions":[{"label":"标签","description":"描述","reason":"为什么"}]}'
+)
+
 
 VIDEO_TAGS_SYSTEM = (
     "你是视频内容标注助手。根据视频转写稿输出 JSON："
@@ -35,7 +43,7 @@ class PersonaService:
             t for t in transcripts if t
         )
         messages = [
-            {"role": "system", "content": PERSONA_INIT_SYSTEM},
+            {"role": "system", "content": get_prompt("persona_init")},
             {"role": "user", "content": content},
         ]
         try:
@@ -57,7 +65,7 @@ class PersonaService:
     def suggest_video_tags(self, transcript: str) -> dict:
         """AI 预打标签：赛道（可多选）/ 是否广告 / 自定义标签。"""
         messages = [
-            {"role": "system", "content": VIDEO_TAGS_SYSTEM},
+            {"role": "system", "content": get_prompt("video_tags")},
             {"role": "user", "content": transcript},
         ]
         try:
@@ -77,11 +85,7 @@ class PersonaService:
         current_summary = "\n".join(
             f"- {t.label}: {t.description}" for t in confirmed
         ) or "（暂无已确认人设）"
-        system = (
-            "你是人设迭代专家。基于当前人设档案和一条新视频转写稿，"
-            "判断是否有值得扩充的新标签。若没有，返回空列表。"
-            '只输出 JSON：{"suggestions":[{"label":"标签","description":"描述","reason":"为什么"}]}'
-        )
+        system = PERSONA_UPDATES_SYSTEM
         user = f"当前人设：\n{current_summary}\n\n新视频转写稿：\n{new_transcript}"
         try:
             data = self.llm.chat_json(

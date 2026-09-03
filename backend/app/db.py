@@ -109,3 +109,11 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_videos()
     _migrate_chat()
+    # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
+    from .services.prompt_service import ensure_defaults
+
+    session = SessionLocal()
+    try:
+        ensure_defaults(session)
+    finally:
+        session.close()

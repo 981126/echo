@@ -12,6 +12,7 @@ from ..models.persona import PersonaTag
 from ..models.video import Transcript, Video
 from .llm import LLMError
 from .persona import PersonaService
+from .prompt_service import get_prompt
 from .transcription import Transcriber
 
 
@@ -65,7 +66,7 @@ def correct_transcript(transcript_text: str, source_text: str = "", llm=None) ->
         user = f"原始文案（仅供参考，可能与口播不一致）：\n{source_text or '无'}\n\n转写稿：\n{text}"
         corrected = llm.chat(
             [
-                {"role": "system", "content": CORRECT_SYSTEM},
+                {"role": "system", "content": get_prompt("correct")},
                 {"role": "user", "content": user},
             ],
             temperature=0.2,

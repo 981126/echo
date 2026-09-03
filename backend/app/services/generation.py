@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..core.retrieval import TfidfIndex
 from ..core.style_profile import build_style_profile, format_style_profile
+from .prompt_service import get_prompt
 from ..models.draft import Draft
 from ..models.metrics import MetricsSnapshot
 from ..models.persona import PersonaTag
@@ -120,7 +121,7 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
     try:
         data = llm.chat_json(
             [
-                {"role": "system", "content": GENERATION_SYSTEM},
+                {"role": "system", "content": get_prompt("generation", db)},
                 {"role": "user", "content": user},
             ],
             temperature=0.8,
