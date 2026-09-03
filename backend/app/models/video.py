@@ -15,6 +15,7 @@ class Video(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     filename: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")  # 视频标题（选题标题）
     cover_path: Mapped[str] = mapped_column(String(255), default="")  # data/covers 下的封面文件名
     platforms: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组 douyin/bilibili/xiaohongshu
     status: Mapped[str] = mapped_column(String(20), default="planned")  # planned | published

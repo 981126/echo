@@ -79,6 +79,8 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="视频不存在")
     data = payload.model_dump(exclude_unset=True)
 
+    if "title" in data:
+        video.title = (data["title"] or "").strip()[:200]
     if "platforms" in data:
         platforms = normalize_platforms(data["platforms"])
         if data["platforms"] and not platforms:

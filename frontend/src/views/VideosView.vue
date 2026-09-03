@@ -21,19 +21,20 @@
 
     <div v-if="loading" class="panel empty">加载中…</div>
     <div v-else-if="!videos.length" class="panel empty">暂无视频</div>
-    <div v-else class="grid">
+    <div v-else class="grid grid-videos">
       <div v-for="v in videos" :key="v.id" class="card-tile">
         <div class="tile-cover" :class="{ has: v.cover_url }" @click="openEdit(v)">
           <img v-if="v.cover_url" :src="v.cover_url" alt="封面" />
           <span v-else>ECHO</span>
         </div>
-        <h3 class="tile-title" style="word-break: break-all" @click="openEdit(v)">{{ v.filename }}</h3>
+        <h3 class="tile-title" style="word-break: break-all" @click="openEdit(v)">{{ v.title || v.filename }}</h3>
         <div class="row" style="gap: 6px">
           <n-tag v-if="v.is_ad" size="small" :bordered="false" round type="error">广告</n-tag>
           <n-tag v-for="p in v.platforms" :key="p" size="small" :bordered="false" round>{{ platformName(p) }}</n-tag>
           <n-tag v-for="t in v.main_topics" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
         </div>
-        <p class="tile-meta" style="margin-top: 8px">
+        <p class="tile-meta" style="word-break: break-all; margin-top: 8px">{{ v.filename }}</p>
+        <p class="tile-meta" style="margin-top: -2px">
           {{ v.status === 'published' ? '已发布' : '计划中' }}
           <template v-if="v.planned_publish_at"> · 计划 {{ fmt(v.planned_publish_at) }}</template>
           <template v-if="v.published_at"> · 发布 {{ fmt(v.published_at) }}</template>
@@ -58,6 +59,10 @@
       @close="closeEdit"
     >
       <div v-if="editing" style="max-height: 72vh; overflow-y: auto; padding-right: 6px">
+        <div class="form-item">
+          <label class="form-label">标题</label>
+          <n-input v-model:value="editing.title" placeholder="视频标题（选题标题）" />
+        </div>
         <div class="row" style="gap: 18px; align-items: flex-start; margin-bottom: 14px">
           <div class="cover-edit" @click="coverInput && coverInput.click()">
             <img v-if="editing.coverUrl" :src="editing.coverUrl" alt="封面" />
@@ -268,6 +273,7 @@ async function openEdit(v) {
   }
   tagsText.value = (v.tags || []).join(', ')
   orig.value = {
+    title: editing.value.title,
     platforms: [...editing.value.platforms],
     main_topics: [...editing.value.main_topics],
     status: editing.value.status,
@@ -291,6 +297,7 @@ async function saveEdit() {
   const o = orig.value
   if (!o) return
   const body = {}
+  if ((editing.value.title || '') !== (o.title || '')) body.title = editing.value.title || ''
   if (arrKey(editing.value.platforms) !== arrKey(o.platforms)) body.platforms = editing.value.platforms || []
   if (arrKey(editing.value.main_topics) !== arrKey(o.main_topics)) body.main_topics = editing.value.main_topics || []
   if (editing.value.status !== o.status) body.status = editing.value.status

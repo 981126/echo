@@ -97,8 +97,8 @@ const model = computed(() => {
       id: v.id,
       date,
       status: v.published_at ? 'published' : 'planned',
-      title: ((v.main_topics && v.main_topics[0]) || v.filename).slice(0, 10),
-      fullTitle: v.filename,
+      title: (v.title || (v.main_topics && v.main_topics[0]) || v.filename).slice(0, 14),
+      fullTitle: v.title || v.filename,
       coverUrl: v.cover_url || ''
     })
   }

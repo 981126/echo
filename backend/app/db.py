@@ -51,6 +51,8 @@ def _migrate_videos() -> None:
     with engine.begin() as conn:
         cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(videos)").fetchall()}
         adds = []
+        if "title" not in cols:
+            adds.append("title VARCHAR(255) NOT NULL DEFAULT ''")
         if "platforms" not in cols:
             adds.append("platforms TEXT NOT NULL DEFAULT '[]'")
         if "main_topics" not in cols:

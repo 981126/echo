@@ -305,3 +305,17 @@ details.fold { margin-top: 8px; }
 /* ---------- 脚本工作台 Markdown 编辑器（R-018） ---------- */
 .md-toolbar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 8px; }
 .md-preview { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-height: 220px; background: var(--bg); }
+
+/* 素材库一行 5 个 */
+.grid-videos { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .grid-videos { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .grid-videos { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .grid-videos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .grid-videos { grid-template-columns: 1fr; } }
+
+/* AI 对话：对话框上下居中 */
+.chat-layout { min-height: calc(100vh - 120px); align-items: center; }
+.chat-main { flex: 1; min-width: 0; }
+@media (max-width: 860px) {
+  .chat-layout { min-height: 0; align-items: stretch; }
+}

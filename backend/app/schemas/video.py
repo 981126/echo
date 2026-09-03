@@ -24,6 +24,7 @@ class VideoOut(BaseModel):
 
     id: int
     filename: str
+    title: str = ""
     cover_url: Optional[str] = None
     platforms: list[str] = []
     status: str = "planned"
@@ -56,6 +57,7 @@ class VideoDetailOut(VideoOut):
 
 
 class VideoUpdate(BaseModel):
+    title: Optional[str] = None
     platforms: Optional[list[str]] = None
     status: Optional[str] = Field(default=None, pattern="^(planned|published)$")
     planned_publish_at: Optional[datetime] = None
