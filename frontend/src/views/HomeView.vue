@@ -37,7 +37,7 @@
 
     <div class="toolbar" style="margin-top: 24px">
       <span class="section-title" style="margin: 0">热点选题</span>
-      <n-button size="small" secondary :loading="refreshing" @click="loadHot">刷新</n-button>
+      <n-button size="small" secondary :loading="refreshing" @click="refreshHot">刷新</n-button>
     </div>
     <div class="panel">
       <div v-if="!hotItems.length" class="empty">暂无热点，点「刷新」抓取</div>
@@ -136,12 +136,22 @@ async function loadVideos() {
 }
 
 async function loadHot() {
-  refreshing.value = true
   try {
     const h = await api('/api/topics/hot')
     hotItems.value = h.items || []
   } catch (e) {
     message.error(e.message)
+  }
+}
+
+async function refreshHot() {
+  refreshing.value = true
+  try {
+    const r = await api('/api/topics/refresh', { method: 'POST', body: '{}' })
+    message.success(`热点已刷新（${r.fetched || 0} 条）`)
+    await loadHot()
+  } catch (e) {
+    message.error('刷新失败：' + e.message)
   } finally {
     refreshing.value = false
   }
