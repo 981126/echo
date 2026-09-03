@@ -4,6 +4,9 @@
     cd backend && pip install -r requirements.txt
     python scripts/persona_golden_test.py "为什么面试总被挂"
 """
+
+from __future__ import annotations
+
 import sys
 from datetime import datetime
 from pathlib import Path

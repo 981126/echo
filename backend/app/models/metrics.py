@@ -1,4 +1,7 @@
 """指标快照与复盘报告模型。"""
+
+from __future__ import annotations
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint

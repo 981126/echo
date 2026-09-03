@@ -1,4 +1,7 @@
 """应用配置：全部来自环境变量（.env），前缀 ECHO_。"""
+
+from __future__ import annotations
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -43,6 +46,8 @@ class Settings(BaseSettings):
     db_path: Path = Path("./data/echo.db")
     inbox_dir: Path = Path("./data/inbox")
     videos_dir: Path = Path("./data/videos")
+    covers_dir: Path = Path("./data/covers")   # 素材封面（作者上传，jpg/png）
+    uploads_dir: Path = Path("./data/uploads")  # 编辑器插入的图片等附件
 
     @property
     def sqlalchemy_url(self) -> str:

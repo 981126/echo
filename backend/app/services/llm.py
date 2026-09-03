@@ -1,4 +1,7 @@
 """DeepSeek LLM 适配器（OpenAI 兼容接口）。"""
+
+from __future__ import annotations
+
 import json
 
 import httpx

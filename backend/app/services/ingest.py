@@ -1,4 +1,7 @@
 """内容导入流水线：转写 → AI 校对 → 预打标签；人设初始化。"""
+
+from __future__ import annotations
+
 import json
 
 from sqlalchemy import func
@@ -9,7 +12,7 @@ from ..models.persona import PersonaTag
 from ..models.video import Transcript, Video
 from .llm import LLMError
 from .persona import PersonaService
-from .transcription import Transcriber, TranscriptionError
+from .transcription import Transcriber
 
 
 def suggest_persona_updates(db, video, transcript_text: str) -> None:
@@ -80,19 +83,26 @@ def import_video_task(db, payload: dict) -> None:
         return
     settings = get_settings()
 
-    if video.transcript is None:
+    if video.transcript is None or (
+        not video.transcript.transcript_text and video.transcript.asr_status != "done"
+    ):
         path = settings.videos_dir / video.filename
         transcriber = Transcriber(settings)
         text = transcriber.transcribe(path)
         corrected = correct_transcript(text)
-        db.add(
-            Transcript(
-                video_id=video.id,
-                transcript_text=text,
-                corrected_text=corrected,
-                asr_status="done",
+        if video.transcript is None:
+            db.add(
+                Transcript(
+                    video_id=video.id,
+                    transcript_text=text,
+                    corrected_text=corrected,
+                    asr_status="done",
+                )
             )
-        )
+        else:
+            video.transcript.transcript_text = text
+            video.transcript.corrected_text = corrected
+            video.transcript.asr_status = "done"
         db.commit()
         db.refresh(video)
 
@@ -102,7 +112,8 @@ def import_video_task(db, payload: dict) -> None:
         if not video.tags_confirmed:
             try:
                 suggestion = PersonaService().suggest_video_tags(text)
-                video.main_topic = suggestion["main_topic"]
+                if suggestion.get("main_topics"):
+                    video.main_topics = json.dumps(suggestion["main_topics"], ensure_ascii=False)
                 video.is_ad = suggestion["is_ad"]
                 video.tags = json.dumps(suggestion["tags"], ensure_ascii=False)
                 db.commit()

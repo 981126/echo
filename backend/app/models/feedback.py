@@ -1,7 +1,10 @@
 """反馈模型：草稿评分/喜欢（显式信号，辅助人设学习）。"""
+
+from __future__ import annotations
+
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base

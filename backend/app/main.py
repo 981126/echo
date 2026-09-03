@@ -1,4 +1,7 @@
 """echo 后端入口。"""
+
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -6,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import chat, drafts, metrics, persona, pipeline, requirements, review, tasks, topics, videos
+from .api import chat, drafts, metrics, persona, pipeline, requirements, review, tasks, topics, uploads, videos
 from .config import get_settings
 from .db import init_db
 from .scheduler import setup_scheduler
@@ -51,12 +54,20 @@ app.include_router(topics.router, prefix="/api/topics", tags=["topics"], depende
 app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"], dependencies=API_DEPENDENCIES)
 app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"], dependencies=API_DEPENDENCIES)
 app.include_router(review.router, prefix="/api/review", tags=["review"], dependencies=API_DEPENDENCIES)
+app.include_router(uploads.router, prefix="/api/uploads", tags=["uploads"], dependencies=API_DEPENDENCIES)
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
+
+# 静态资源：作者上传的封面 / 编辑器插图（data/ 下，dev 用相对路径）
+_settings = get_settings()
+_settings.covers_dir.mkdir(parents=True, exist_ok=True)
+_settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/covers", StaticFiles(directory=str(_settings.covers_dir)), name="covers")
+app.mount("/uploads", StaticFiles(directory=str(_settings.uploads_dir)), name="uploads")
 
 # 托管前端构建产物（存在时挂载；/api 路由已先行注册，不受影响）
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"

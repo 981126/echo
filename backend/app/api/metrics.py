@@ -1,4 +1,7 @@
 """指标接口：手动录入 / 批量导入 / 抓取触发 / 查询。"""
+
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session

@@ -2,7 +2,10 @@
 
 所有 LLM 调用在未配置密钥时安全降级（返回默认值），保证开发/测试离线可跑。
 """
-from ..core.topics import normalize_main_topic
+
+from __future__ import annotations
+
+from ..core.topics import normalize_topics
 from ..models.persona import PersonaTag
 from .llm import DeepSeekClient, LLMError
 
@@ -15,9 +18,10 @@ PERSONA_INIT_SYSTEM = (
 
 VIDEO_TAGS_SYSTEM = (
     "你是视频内容标注助手。根据视频转写稿输出 JSON："
-    '{"main_topic":"求职|面试|赚钱|知识|其他","is_ad":false,'
+    '{"main_topics":["求职|面试|赚钱|知识|其他"],"is_ad":false,'
     '"tags":["简短标签1","简短标签2"]}'
-    "is_ad 表示是否为商务广告（口播中明显推广产品/品牌）。只输出 JSON。"
+    "main_topics 为赛道数组（可多个，至少一个）；is_ad 表示是否为商务广告"
+    "（口播中明显推广产品/品牌）。只输出 JSON。"
 )
 
 
@@ -51,7 +55,7 @@ class PersonaService:
         return result
 
     def suggest_video_tags(self, transcript: str) -> dict:
-        """AI 预打标签：主赛道 / 是否广告 / 自定义标签。"""
+        """AI 预打标签：赛道（可多选）/ 是否广告 / 自定义标签。"""
         messages = [
             {"role": "system", "content": VIDEO_TAGS_SYSTEM},
             {"role": "user", "content": transcript},
@@ -60,8 +64,9 @@ class PersonaService:
             data = self.llm.chat_json(messages)
         except LLMError:
             data = {}
+        values = data.get("main_topics") or data.get("main_topic") or []
         return {
-            "main_topic": normalize_main_topic(str(data.get("main_topic", ""))),
+            "main_topics": normalize_topics(values),
             "is_ad": bool(data.get("is_ad", False)),
             "tags": [str(t).strip() for t in data.get("tags") or [] if str(t).strip()],
         }

@@ -1,5 +1,9 @@
 """复盘服务：A 报表 / B 归因 / C 建议 / D 赛道雷达（LLM + 启发式兜底）。"""
+
+from __future__ import annotations
+
 import json
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +22,7 @@ REVIEW_SYSTEM = (
 )
 
 
-def _radar(db: Session) -> dict:
+def _radar(db: Session) -> list[dict[str, Any]]:
     data = summary(db)
     radar = []
     for topic, s in data["by_topic"].items():
@@ -35,11 +39,12 @@ def _radar(db: Session) -> dict:
     return radar
 
 
-def _llm_abcd(db: Session, data: dict, radar: list[dict]) -> dict:
+def _llm_abcd(db: Session, data: dict, radar: list[dict[str, Any]]) -> dict:
     lines = []
     for v in data["per_video"][:15]:
         lines.append(
-            f"- {v['filename']} | 赛道:{v['main_topic']} | 平台:{v['platform']} | "
+            f"- {v['filename']} | 赛道:{'、'.join(v.get('main_topics') or ['未标'])} | "
+            f"平台:{'、'.join(v.get('platforms') or ['未定'])} | "
             f"播放:{v['plays']} 赞:{v['likes']} 藏:{v['favorites']} 评:{v['comments']}"
         )
     radar_lines = "\n".join(
@@ -53,7 +58,7 @@ def _llm_abcd(db: Session, data: dict, radar: list[dict]) -> dict:
                 {"role": "system", "content": REVIEW_SYSTEM},
                 {
                     "role": "user",
-                    "content": f"视频数据：\n" + "\n".join(lines) + f"\n\n赛道雷达：\n{radar_lines}",
+                    "content": "视频数据：\n" + "\n".join(lines) + f"\n\n赛道雷达：\n{radar_lines}",
                 },
             ],
             temperature=0.4,

@@ -1,4 +1,7 @@
 """需求管理接口契约。"""
+
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
 
 

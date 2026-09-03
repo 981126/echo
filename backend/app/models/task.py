@@ -1,4 +1,7 @@
 """后台任务模型：长任务状态跟踪（批量转写/人设分析等）。"""
+
+from __future__ import annotations
+
 import json
 from datetime import datetime
 

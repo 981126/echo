@@ -1,6 +1,8 @@
-from __future__ import annotations
 
 """纯逻辑（无第三方依赖）：需求归档文件解析与编号。"""
+
+from __future__ import annotations
+
 import re
 
 STATUSES = ["已登记", "澄清中", "已确认", "实施中", "已完成", "已搁置", "已拒绝"]

@@ -1,4 +1,7 @@
 """草稿接口契约。"""
+
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 

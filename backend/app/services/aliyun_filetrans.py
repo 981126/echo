@@ -7,6 +7,9 @@
 提交任务：POST https://filetrans.cn-shanghai.aliyuncs.com/api/v2/batch_submit_task
 查询结果：POST https://filetrans.cn-shanghai.aliyuncs.com/api/v2/batch_get_task_result
 """
+
+from __future__ import annotations
+
 import json
 from pathlib import Path
 

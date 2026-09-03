@@ -1,4 +1,7 @@
 """视频与转写稿模型。"""
+
+from __future__ import annotations
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
@@ -12,15 +15,21 @@ class Video(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     filename: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    platform: Mapped[str] = mapped_column(String(20), default="")  # douyin/bilibili/xiaohongshu
+    cover_path: Mapped[str] = mapped_column(String(255), default="")  # data/covers 下的封面文件名
+    platforms: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组 douyin/bilibili/xiaohongshu
     status: Mapped[str] = mapped_column(String(20), default="planned")  # planned | published
     planned_publish_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_ad: Mapped[bool] = mapped_column(Boolean, default=False)  # 商务广告（不参与人设学习）
-    main_topic: Mapped[str] = mapped_column(String(50), default="")  # 求职/面试/赚钱/知识/其他
+    main_topics: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组 求职/面试/赚钱/知识/其他
     tags: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组（自定义标签）
     tags_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # AI 预打标签是否经作者确认
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    @property
+    def cover_url(self) -> str | None:
+        """封面静态地址（data/covers 由 main.py 挂载到 /covers）。"""
+        return f"/covers/{self.cover_path}" if self.cover_path else None
 
     transcript: Mapped["Transcript | None"] = relationship(
         back_populates="video", uselist=False, cascade="all, delete-orphan"

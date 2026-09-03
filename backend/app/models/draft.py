@@ -1,4 +1,7 @@
 """脚本草稿模型：工作台改写、AI 原稿留底（供改稿差异分析）。"""
+
+from __future__ import annotations
+
 import json
 from datetime import datetime
 

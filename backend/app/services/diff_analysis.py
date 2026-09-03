@@ -1,4 +1,7 @@
 """改稿差异分析：作者把 AI 原稿改成了什么 → 提炼风格偏好（人设建议）。"""
+
+from __future__ import annotations
+
 from sqlalchemy.orm import Session
 
 from ..core.diff import has_meaningful_change

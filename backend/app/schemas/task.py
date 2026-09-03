@@ -1,4 +1,7 @@
 """后台任务接口契约。"""
+
+from __future__ import annotations
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

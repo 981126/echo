@@ -4,6 +4,9 @@
     cd backend && pip install -r requirements.txt
     python scripts/transcribe_all.py
 """
+
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

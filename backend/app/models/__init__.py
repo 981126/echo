@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .chat import ChatMessage
 from .draft import Draft
 from .feedback import Feedback

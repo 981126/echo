@@ -1,4 +1,7 @@
 """人设档案接口：查看/手动添加/确认或拒绝 AI 建议/触发初始化。"""
+
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 

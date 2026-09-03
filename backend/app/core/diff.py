@@ -1,4 +1,7 @@
 """纯逻辑（无第三方依赖）：改稿差异判断。"""
+
+from __future__ import annotations
+
 from .transcript import normalize_text
 
 

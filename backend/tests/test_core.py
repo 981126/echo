@@ -1,4 +1,7 @@
 """纯逻辑测试（无第三方依赖，可离线运行；同时兼容 pytest）。"""
+
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

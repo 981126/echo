@@ -1,4 +1,7 @@
 """反馈服务：草稿评分/喜欢存储 + 近期好评选题（进入生成上下文）。"""
+
+from __future__ import annotations
+
 from sqlalchemy.orm import Session
 
 from ..models.draft import Draft

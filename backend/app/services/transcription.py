@@ -1,4 +1,7 @@
 """ASR 转写适配器：mock（开发/测试）或阿里云 FileTrans。"""
+
+from __future__ import annotations
+
 from pathlib import Path
 
 from ..config import get_settings

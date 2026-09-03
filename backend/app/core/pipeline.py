@@ -1,6 +1,8 @@
-from __future__ import annotations
 
 """纯逻辑（无第三方依赖）：流水线幂等键。"""
+
+from __future__ import annotations
+
 import datetime
 
 

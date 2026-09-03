@@ -1,4 +1,7 @@
 """邮件推送：QQ SMTP（每日选题 + 失败告警）。未配置 SMTP 时安全跳过（开发模式）。"""
+
+from __future__ import annotations
+
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText

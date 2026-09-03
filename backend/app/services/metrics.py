@@ -1,10 +1,27 @@
 """指标服务：三通道（手动/导入/cookie best-effort）+ 留存清理。"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 from ..core.metrics import normalize_snapshot, retention_cutoff_date
 from ..models.hot_topic import HotTopic
 from ..models.metrics import MetricsSnapshot
 from ..models.video import Video
+
+
+def _parse_list(raw) -> list:
+    """解析 JSON 数组字段；非法/空返回 []。"""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return [str(x) for x in data] if isinstance(data, list) else []
+    except (ValueError, TypeError):
+        return []
 
 
 def upsert_snapshot(
@@ -96,9 +113,9 @@ def series_for_video(db: Session, video_id: int) -> list[dict]:
 def summary(db: Session) -> dict:
     """按视频的最新快照汇总 + 按赛道/平台聚合。"""
     videos = db.query(Video).all()
-    per_video = []
-    topic_stats: dict[str, dict] = {}
-    platform_stats: dict[str, dict] = {}
+    per_video: list[dict[str, Any]] = []
+    topic_stats: dict[str, dict[str, int]] = {}
+    platform_stats: dict[str, dict[str, int]] = {}
     for v in videos:
         latest = (
             db.query(MetricsSnapshot)
@@ -108,11 +125,13 @@ def summary(db: Session) -> dict:
         )
         if latest is None:
             continue
-        item = {
+        platforms = _parse_list(v.platforms)
+        main_topics = _parse_list(v.main_topics)
+        item: dict[str, Any] = {
             "video_id": v.id,
             "filename": v.filename,
-            "platform": v.platform,
-            "main_topic": v.main_topic,
+            "platforms": platforms,
+            "main_topics": main_topics,
             "published_at": str(v.published_at or ""),
             "plays": latest.plays,
             "likes": latest.likes,
@@ -122,20 +141,20 @@ def summary(db: Session) -> dict:
             "snapshot_date": latest.snapshot_date,
         }
         per_video.append(item)
-        topic = v.main_topic or "未标"
-        topic_stats.setdefault(topic, {"videos": 0, "plays": 0, "likes": 0, "favorites": 0, "comments": 0})
-        ts = topic_stats[topic]
-        ts["videos"] += 1
-        ts["plays"] += latest.plays
-        ts["likes"] += latest.likes
-        ts["favorites"] += latest.favorites
-        ts["comments"] += latest.comments
-        plat = v.platform or "未定"
-        platform_stats.setdefault(plat, {"videos": 0, "plays": 0, "likes": 0})
-        ps = platform_stats[plat]
-        ps["videos"] += 1
-        ps["plays"] += latest.plays
-        ps["likes"] += latest.likes
+        for topic in main_topics or ["未标"]:
+            ts = topic_stats.setdefault(
+                topic, {"videos": 0, "plays": 0, "likes": 0, "favorites": 0, "comments": 0}
+            )
+            ts["videos"] += 1
+            ts["plays"] += latest.plays
+            ts["likes"] += latest.likes
+            ts["favorites"] += latest.favorites
+            ts["comments"] += latest.comments
+        for plat in platforms or ["未定"]:
+            ps = platform_stats.setdefault(plat, {"videos": 0, "plays": 0, "likes": 0})
+            ps["videos"] += 1
+            ps["plays"] += latest.plays
+            ps["likes"] += latest.likes
     per_video.sort(key=lambda x: x["plays"], reverse=True)
     return {
         "per_video": per_video,

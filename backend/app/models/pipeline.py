@@ -1,4 +1,7 @@
 """每日流水线运行记录（幂等依据）。"""
+
+from __future__ import annotations
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String, Text

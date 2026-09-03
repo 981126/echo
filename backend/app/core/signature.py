@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 """纯逻辑（无第三方依赖）：阿里云 REST 签名构造（HMAC-SHA1）。
 
@@ -8,6 +7,9 @@ from __future__ import annotations
                  + CanonicalizedHeaders + CanonicalizedResource
   Signature = Base64( HMAC-SHA1( AccessKeySecret, StringToSign ) )
 """
+
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac

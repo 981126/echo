@@ -3,6 +3,9 @@
 语气一致性：人设档案（标签+红线）+ 风格样本（本地 TF-IDF 检索）。
 无密钥时输出确定性 mock 稿，保证开发/测试离线可跑。
 """
+
+from __future__ import annotations
+
 import json
 
 from sqlalchemy.orm import Session

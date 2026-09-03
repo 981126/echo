@@ -1,6 +1,8 @@
-from __future__ import annotations
 
 """纯逻辑（无第三方依赖）：TF-IDF 文本检索（风格样本召回）。"""
+
+from __future__ import annotations
+
 import math
 import re
 from collections import Counter

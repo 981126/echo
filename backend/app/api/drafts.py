@@ -1,4 +1,7 @@
 """脚本草稿接口：工作台创建/改写/保存 + 反馈 + 生成。"""
+
+from __future__ import annotations
+
 import json
 
 from fastapi import APIRouter, Depends, HTTPException

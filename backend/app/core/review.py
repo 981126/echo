@@ -1,7 +1,7 @@
-from __future__ import annotations
 
 """纯逻辑（无第三方依赖）：复盘启发式兜底。"""
 
+from __future__ import annotations
 
 def best_topic_by_engagement(topic_stats: list[dict]) -> dict | None:
     """从各赛道统计中选出互动率最高者。topic_stats: [{topic, engagement}]"""

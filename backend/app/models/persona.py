@@ -1,4 +1,7 @@
 """人设档案模型：标签+描述，版本化。"""
+
+from __future__ import annotations
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String, Text

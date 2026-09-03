@@ -1,7 +1,7 @@
-from __future__ import annotations
 
 """纯逻辑（无第三方依赖）：无 LLM 时的关键词兜底匹配打分。"""
 
+from __future__ import annotations
 
 def keyword_fallback_match(
     hot_items: list[dict],

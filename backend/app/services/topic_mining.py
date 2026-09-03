@@ -3,6 +3,9 @@
 真实抓取依赖公开/非官方接口，可能随平台改版失效；每个适配器独立 try/except，
 单个平台失败不影响其他平台（降级设计）。首次接入请在 NAS（有外网）上联调。
 """
+
+from __future__ import annotations
+
 from dataclasses import dataclass, asdict
 
 import httpx

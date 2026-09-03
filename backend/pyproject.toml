@@ -7,6 +7,10 @@ line-length = 100
 target-version = "py312"
 extend-exclude = ["alembic"]
 
+# 锁定经典默认规则集（E4/E7/E9/F），保证跨 ruff 版本门禁稳定
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true

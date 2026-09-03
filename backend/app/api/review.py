@@ -1,4 +1,7 @@
 """复盘接口：生成报告 / 查看最新 / 赛道雷达。"""
+
+from __future__ import annotations
+
 import datetime
 
 from fastapi import APIRouter, Depends

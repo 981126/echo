@@ -1,4 +1,7 @@
 """APScheduler 定时任务：每日流水线 / 每日指标与留存 / 每日备份。"""
+
+from __future__ import annotations
+
 import subprocess
 from pathlib import Path
 

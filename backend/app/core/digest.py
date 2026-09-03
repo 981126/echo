@@ -1,7 +1,7 @@
-from __future__ import annotations
 
 """纯逻辑（无第三方依赖）：每日邮件 HTML 构造。"""
 
+from __future__ import annotations
 
 def build_digest_html(items: list[dict], web_base_url: str = "") -> str:
     """构造每日选题邮件 HTML。

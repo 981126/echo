@@ -2,6 +2,9 @@
 
 系统提示词强制：写操作（生成/修改/删除）一律引导到网页工作台，不直接执行。
 """
+
+from __future__ import annotations
+
 import json
 
 from sqlalchemy.orm import Session
@@ -24,13 +27,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_videos",
-            "description": "按条件搜索素材库视频（可组合平台/状态/主赛道/是否广告）",
+            "description": "按条件搜索素材库视频；平台/赛道为多选，命中任一即可（可组合平台/状态/赛道）",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "platform": {"type": "string", "description": "douyin/bilibili/xiaohongshu"},
+                    "platform": {"type": "string", "description": "douyin/bilibili/xiaohongshu（匹配视频任一平台）"},
                     "status": {"type": "string", "description": "planned/published"},
-                    "main_topic": {"type": "string", "description": "求职/面试/赚钱/知识/其他"},
+                    "main_topic": {"type": "string", "description": "求职/面试/赚钱/知识/其他（匹配视频任一赛道）"},
                     "limit": {"type": "integer"},
                 },
             },
@@ -122,29 +125,44 @@ TOOLS = [
 ]
 
 
+def _vlist(raw) -> list:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return [str(x) for x in data] if isinstance(data, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def _vbrief(v: Video) -> dict:
+    platforms = _vlist(v.platforms)
+    main_topics = _vlist(v.main_topics)
+    return {
+        "id": v.id,
+        "filename": v.filename,
+        "platforms": platforms,
+        "platform": "、".join(platforms),
+        "status": v.status,
+        "main_topics": main_topics,
+        "main_topic": "、".join(main_topics),
+        "is_ad": v.is_ad,
+        "tags_confirmed": v.tags_confirmed,
+        "created_at": str(v.created_at),
+    }
+
+
 def _search_videos(db: Session, args: dict) -> list[dict]:
     q = db.query(Video)
     if args.get("platform"):
-        q = q.filter(Video.platform == args["platform"])
+        q = q.filter(Video.platforms.like(f'%"{args["platform"]}"%'))
     if args.get("status"):
         q = q.filter(Video.status == args["status"])
     if args.get("main_topic"):
-        q = q.filter(Video.main_topic == args["main_topic"])
+        q = q.filter(Video.main_topics.like(f'%"{args["main_topic"]}"%'))
     limit = min(int(args.get("limit") or 10), 50)
     items = q.order_by(Video.created_at.desc()).limit(limit).all()
-    return [
-        {
-            "id": v.id,
-            "filename": v.filename,
-            "platform": v.platform,
-            "status": v.status,
-            "main_topic": v.main_topic,
-            "is_ad": v.is_ad,
-            "tags_confirmed": v.tags_confirmed,
-            "created_at": str(v.created_at),
-        }
-        for v in items
-    ]
+    return [_vbrief(v) for v in items]
 
 
 def _get_video_detail(db: Session, args: dict) -> dict:
@@ -154,16 +172,9 @@ def _get_video_detail(db: Session, args: dict) -> dict:
     transcript = ""
     if video.transcript:
         transcript = video.transcript.corrected_text or video.transcript.transcript_text
-    return {
-        "id": video.id,
-        "filename": video.filename,
-        "platform": video.platform,
-        "status": video.status,
-        "main_topic": video.main_topic,
-        "is_ad": video.is_ad,
-        "tags_confirmed": video.tags_confirmed,
-        "transcript": transcript[:2000],
-    }
+    brief = _vbrief(video)
+    brief["transcript"] = transcript[:2000]
+    return brief
 
 
 def _get_persona(db: Session) -> dict:
@@ -212,7 +223,8 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
                     "likes": v["likes"],
                     "favorites": v["favorites"],
                     "comments": v["comments"],
-                    "main_topic": v["main_topic"],
+                    "main_topics": v.get("main_topics") or [],
+                    "platforms": v.get("platforms") or [],
                 }
                 for v in data["per_video"][:10]
             ],
@@ -295,6 +307,8 @@ class ChatService:
                 message = self.llm.chat_completion(messages, temperature=0.5, tools=TOOLS)
             except LLMError:
                 return "（当前未配置 DeepSeek 密钥，暂无法回答。请先在 .env 配置 ECHO_DEEPSEEK_API_KEY。）"
+            except Exception as exc:  # noqa: BLE001 外部服务失败统一降级，不让对话页报裸错
+                return f"（AI 服务暂时不可用：{exc}）"
             tool_calls = message.get("tool_calls")
             if not tool_calls:
                 return (message.get("content") or "").strip()

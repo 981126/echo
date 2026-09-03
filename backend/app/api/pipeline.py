@@ -1,4 +1,7 @@
 """每日流水线接口：手动触发 + 状态查看。"""
+
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session

@@ -1,4 +1,7 @@
 """每日流水线：抓热点 → 匹配 → 生成 → 发邮件（幂等 + 失败告警）。"""
+
+from __future__ import annotations
+
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -119,7 +122,6 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
         db.commit()
     except Exception as exc:  # noqa: BLE001
         db.rollback()
-        run = db.query(PipelineRun).filter(PipelineRun.run_date == key).first()
         run.status = "failed"
         run.error = str(exc)[:2000]
         db.commit()

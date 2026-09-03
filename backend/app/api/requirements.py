@@ -1,4 +1,7 @@
 """需求管理接口：查看/创建/状态变更（写回 requirements/ 文件）。"""
+
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException
 
 from ..schemas.requirement import RequirementCreate, RequirementOut, RequirementUpdate

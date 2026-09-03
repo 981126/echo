@@ -1,4 +1,7 @@
 """纯逻辑（无第三方依赖）：指标规范化、互动率、留存日期。"""
+
+from __future__ import annotations
+
 import datetime
 
 METRIC_FIELDS = ["plays", "likes", "favorites", "comments", "followers_gained"]

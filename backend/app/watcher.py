@@ -1,4 +1,7 @@
 """data/inbox 文件夹监听：拖入视频自动入库并触发导入流水线。"""
+
+from __future__ import annotations
+
 import threading
 import time
 import uuid
