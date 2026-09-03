@@ -150,11 +150,10 @@ async function loadHot() {
 async function genFromHot(h) {
   generatingTitle.value = h.title
   try {
-    const d = await api('/api/drafts/generate', { method: 'POST', body: JSON.stringify({ topic: h.title }) })
-    message.success('已按人设生成整套文案')
-    location.hash = `#/drafts?id=${d.id}`
+    const r = await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic: h.title }) })
+    message.success('已提交后台生成，完成后右上角通知你')
   } catch (e) {
-    message.error('生成失败：' + e.message)
+    message.error('提交失败：' + e.message)
   } finally {
     generatingTitle.value = null
   }

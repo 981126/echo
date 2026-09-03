@@ -326,3 +326,23 @@ details.fold { margin-top: 8px; }
   .chat-main > .panel:first-of-type { flex: none; display: block; }
   .chat-main > .panel:first-of-type .chat-box { max-height: 55vh; }
 }
+
+/* ---------- 通知铃铛（R-019） ---------- */
+.notif-wrap { position: fixed; top: 14px; right: 18px; z-index: 90; }
+.notif-btn { font-size: 15px; }
+.notif-panel {
+  position: absolute; top: 34px; right: 0; width: 360px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(43,40,35,.12); overflow: hidden;
+}
+.notif-list { max-height: 420px; overflow-y: auto; padding: 4px; }
+.notif-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; }
+.notif-item:hover { background: var(--accent-soft); }
+.notif-item.unread { background: #fdf7f1; }
+.notif-item .notif-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.drop-enter-active, .drop-leave-active { transition: opacity .16s ease, transform .16s ease; }
+.drop-enter-from, .drop-leave-to { opacity: 0; transform: translateY(-6px); }
+@media (max-width: 860px) {
+  .notif-wrap { top: 8px; right: 58px; }
+  .notif-panel { width: min(360px, calc(100vw - 24px)); right: -42px; }
+}

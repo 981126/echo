@@ -22,6 +22,8 @@
             </main>
           </div>
 
+          <NotificationBell v-if="!isLogin" />
+
           <transition name="sheet">
             <div v-if="menuOpen" class="sheet-scrim" @click="menuOpen = false">
               <div class="sheet" @click.stop>
@@ -46,6 +48,7 @@
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { zhCN, dateZhCN } from 'naive-ui'
+import NotificationBell from './components/NotificationBell.vue'
 
 const route = useRoute()
 const menuOpen = ref(false)

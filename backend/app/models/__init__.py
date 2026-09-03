@@ -7,6 +7,7 @@ from .hot_topic import HotTopic, TopicCandidate
 from .metrics import MetricsSnapshot, ReviewReport
 from .persona import PersonaTag
 from .pipeline import PipelineRun
+from .notification import Notification
 from .task import BackgroundTask
 from .video import Transcript, Video
 
@@ -15,6 +16,7 @@ __all__ = [
     "Transcript",
     "PersonaTag",
     "BackgroundTask",
+    "Notification",
     "Draft",
     "ChatMessage",
     "HotTopic",

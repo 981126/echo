@@ -41,6 +41,23 @@ def generate(payload: GenerateIn, db: Session = Depends(get_db)):
     return generate_draft(db, payload.topic)
 
 
+def _generate_task(db: Session, payload: dict) -> dict:
+    from ..services.generation import generate_draft
+
+    draft = generate_draft(db, str(payload.get("topic", "")).strip())
+    return {"draft_id": draft.id, "title": draft.title}
+
+
+@router.post("/generate-async", response_model=dict)
+def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
+    """后台生成草稿：完成后右上角通知并跳转草稿（R-019）。"""
+    topic = (payload.topic or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="选题不能为空")
+    task_id = start_task("generate_draft", {"topic": topic}, _generate_task)
+    return {"task_id": task_id}
+
+
 @router.post("/{draft_id}/feedback", response_model=dict)
 def feedback(draft_id: int, payload: FeedbackIn, db: Session = Depends(get_db)):
     if db.get(Draft, draft_id) is None:
