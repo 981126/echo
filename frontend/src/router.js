@@ -3,10 +3,9 @@ import { getToken } from './api'
 
 const routes = [
   { path: '/login', component: () => import('./views/LoginView.vue') },
-  { path: '/', redirect: '/videos' },
+  { path: '/', redirect: '/home' },
+  { path: '/home', component: () => import('./views/HomeView.vue'), meta: { title: '主页' } },
   { path: '/videos', component: () => import('./views/VideosView.vue'), meta: { title: '素材库' } },
-  { path: '/topics', component: () => import('./views/TopicsView.vue'), meta: { title: '每日选题' } },
-  { path: '/timeline', component: () => import('./views/TimelineView.vue'), meta: { title: '时间线' } },
   { path: '/drafts', component: () => import('./views/DraftsView.vue'), meta: { title: '脚本工作台' } },
   { path: '/chat', component: () => import('./views/ChatView.vue'), meta: { title: 'AI 对话' } },
   { path: '/persona', component: () => import('./views/PersonaView.vue'), meta: { title: '人设档案' } },

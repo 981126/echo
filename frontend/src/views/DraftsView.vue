@@ -1,51 +1,104 @@
 <template>
-  <div>
+  <div class="page">
     <h1 class="page-title">脚本工作台</h1>
-    <div class="card row">
-      <button @click="createDraft">新建草稿</button>
-      <span class="muted grow">在这里直接改写 AI 生成的脚本并保存（AI 原稿会留底，改稿差异会进入人设学习）</span>
+
+    <div class="toolbar">
+      <n-button type="primary" @click="createDraft">新建草稿</n-button>
     </div>
-    <div v-if="msg" class="msg" :class="msgType">{{ msg }}</div>
+
+    <div v-if="!drafts.length" class="panel empty">暂无草稿</div>
     <div class="grid">
-      <div v-for="d in drafts" :key="d.id" class="card" :class="{ 'msg ok': editing && editing.id === d.id }">
-        <strong>{{ d.title || '（无标题）' }}</strong>
-        <p class="muted">来源：{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · 更新：{{ fmt(d.updated_at) }} · 状态：{{ d.status }}</p>
-        <div class="row">
-          <button class="sm" @click="open(d)">编辑</button>
-          <button class="sm secondary" @click="like(d, true)">👍 采用</button>
-          <button class="sm secondary" @click="like(d, false)">👎 不用</button>
+      <div v-for="d in drafts" :key="d.id" class="card-tile">
+        <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
+        <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }} · {{ statusName(d.status) }}</p>
+        <div class="tile-actions">
+          <n-button size="small" type="primary" ghost @click="open(d)">编辑</n-button>
+          <n-button size="small" secondary @click="like(d, true)">👍 采用</n-button>
+          <n-button size="small" secondary @click="like(d, false)">👎 不用</n-button>
         </div>
       </div>
     </div>
 
-    <div v-if="editing" class="card">
-      <div class="row">
-        <label class="field grow">标题<input v-model="editing.title" placeholder="视频标题" /></label>
-        <label class="field">封面字<input v-model="editing.cover_text" placeholder="与标题不同，3-8 字" /></label>
+    <div v-if="editing" class="panel" style="margin-top: 22px">
+      <div class="row" style="justify-content: space-between; margin-bottom: 14px">
+        <span class="section-title" style="margin: 0">编辑草稿 #{{ editing.id }}</span>
+        <n-button size="small" secondary @click="editing = null">关闭</n-button>
       </div>
-      <label class="field">口播脚本
-        <textarea v-model="editing.script" placeholder="在这里撰写/改写脚本"></textarea>
-      </label>
+      <div class="form-grid">
+        <div class="form-item">
+          <label class="form-label">标题</label>
+          <n-input v-model:value="editing.title" placeholder="视频标题" />
+        </div>
+        <div class="form-item">
+          <label class="form-label">封面字</label>
+          <n-input v-model:value="editing.cover_text" placeholder="与标题不同，3-8 字" />
+        </div>
+      </div>
+
+      <div class="form-item">
+        <label class="form-label">口播脚本（Markdown，可插图）</label>
+        <div class="md-toolbar">
+          <n-button size="tiny" secondary @click="wrap('**', '**', '加粗文字')"><b>B</b></n-button>
+          <n-button size="tiny" secondary @click="wrap('*', '*', '斜体文字')"><i>I</i></n-button>
+          <n-button size="tiny" secondary @click="linePrefix('## ')">H2</n-button>
+          <n-button size="tiny" secondary @click="linePrefix('> ')">引用</n-button>
+          <n-button size="tiny" secondary @click="linePrefix('- ')">列表</n-button>
+          <n-button size="tiny" secondary @click="insertHr">分隔线</n-button>
+          <n-button size="tiny" secondary @click="insertLink">链接</n-button>
+          <n-button size="tiny" secondary @click="imgInput && imgInput.click()">🖼 插图</n-button>
+          <input ref="imgInput" type="file" accept="image/*" class="file-hidden" @change="onImage" />
+          <span class="grow" />
+          <n-button size="tiny" :type="preview ? 'primary' : 'default'" @click="preview = !preview">
+            {{ preview ? '返回编辑' : '预览' }}
+          </n-button>
+        </div>
+        <n-input
+          v-if="!preview"
+          ref="scriptInput"
+          v-model:value="editing.script"
+          type="textarea"
+          :rows="16"
+          placeholder="在这里撰写 / 改写脚本"
+        />
+        <div v-else class="prose md-preview" v-html="renderMd(editing.script)" />
+      </div>
       <div class="row">
-        <button @click="save">保存</button>
-        <button class="secondary" @click="editing = null">取消</button>
+        <n-button type="primary" @click="save">保存</n-button>
+        <n-button secondary @click="editing = null">取消</n-button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { api } from '../api'
+import { ref, nextTick, onMounted } from 'vue'
+import { useMessage } from 'naive-ui'
+import { api, uploadImage } from '../api'
+import { renderMd } from '../md'
 
 const drafts = ref([])
 const editing = ref(null)
-const msg = ref('')
-const msgType = ref('ok')
+const preview = ref(false)
+const scriptInput = ref(null)
+const imgInput = ref(null)
+const message = useMessage()
 
-function fmt(v) { return v ? v.replace('T', ' ').slice(0, 16) : '' }
+const STATUS_NAMES = { draft: '草稿', used: '已采用', archived: '已归档' }
+const statusName = (s) => STATUS_NAMES[s] || s
 
-async function load() { drafts.value = await api('/api/drafts?limit=100') }
+function fmt(v) {
+  return v ? v.replace('T', ' ').slice(0, 16) : ''
+}
+
+function textarea() {
+  const inp = scriptInput.value
+  if (!inp) return null
+  return inp.textareaEl || (inp.$el && inp.$el.querySelector('textarea'))
+}
+
+async function load() {
+  drafts.value = await api('/api/drafts?limit=100')
+}
 
 async function createDraft() {
   const d = await api('/api/drafts', { method: 'POST', body: JSON.stringify({ title: '', cover_text: '', script: '' }) })
@@ -54,24 +107,91 @@ async function createDraft() {
 
 function open(d) {
   editing.value = { ...d }
+  preview.value = false
   if (editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
 }
 
+function wrap(prefix, suffix, placeholder) {
+  const el = textarea()
+  if (!el) return
+  const value = editing.value.script
+  const s = el.selectionStart
+  const e = el.selectionEnd
+  const sel = value.slice(s, e) || placeholder
+  editing.value.script = value.slice(0, s) + prefix + sel + suffix + value.slice(e)
+  nextTick(() => {
+    el.focus()
+    el.setSelectionRange(s + prefix.length, s + prefix.length + sel.length)
+  })
+}
+
+function linePrefix(prefix) {
+  const el = textarea()
+  if (!el) return
+  const value = editing.value.script
+  const s = el.selectionStart
+  const lineStart = value.lastIndexOf('\n', s - 1) + 1
+  editing.value.script = value.slice(0, lineStart) + prefix + value.slice(lineStart)
+  nextTick(() => {
+    el.focus()
+    el.setSelectionRange(lineStart + prefix.length, lineStart + prefix.length)
+  })
+}
+
+function insertHr() {
+  const el = textarea()
+  if (!el) return
+  const value = editing.value.script
+  const s = el.selectionStart
+  editing.value.script = value.slice(0, s) + '\n---\n' + value.slice(s)
+  nextTick(() => el.focus())
+}
+
+function insertLink() {
+  wrap('[', '](https://)', '链接文字')
+}
+
+async function onImage(e) {
+  const f = e.target.files[0]
+  if (!f) return
+  try {
+    const r = await uploadImage(f)
+    // 在光标处插入图片语法
+    const el = textarea()
+    if (el) {
+      const value = editing.value.script
+      const s = el.selectionStart
+      const ins = `\n![图片](${r.url})\n`
+      editing.value.script = value.slice(0, s) + ins + value.slice(s)
+      nextTick(() => el.focus())
+    } else {
+      editing.value.script += `\n![图片](${r.url})\n`
+    }
+    message.success('图片已插入')
+  } catch (err) {
+    message.error(err.message)
+  } finally {
+    if (imgInput.value) imgInput.value.value = ''
+  }
+}
+
 async function save() {
-  const body = { title: editing.value.title, cover_text: editing.value.cover_text, script: editing.value.script }
+  const body = {
+    title: editing.value.title,
+    cover_text: editing.value.cover_text,
+    script: editing.value.script
+  }
   await api(`/api/drafts/${editing.value.id}`, { method: 'PATCH', body: JSON.stringify(body) })
-  show('已保存（若为 AI 原稿改写，差异已进入人设学习）', 'ok')
+  message.success('已保存（AI 原稿改写差异已进入人设学习）')
   editing.value = null
   load()
 }
 
 async function like(d, liked) {
   await api(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ liked }) })
-  show(liked ? '已标记采用' : '已标记不用', 'ok')
+  message.success(liked ? '已标记采用' : '已标记不用')
   load()
 }
-
-function show(text, type) { msg.value = text; msgType.value = type }
 
 onMounted(async () => {
   await load()

@@ -1,53 +1,72 @@
 <template>
-  <div>
+  <div class="page">
     <h1 class="page-title">需求管理</h1>
-    <div class="card">
-      <h3>提交新需求</h3>
-      <div class="row">
-        <label class="field grow">标题<input v-model="form.title" placeholder="一句话标题" /></label>
-        <label class="field grow">描述<input v-model="form.summary" placeholder="原始需求（原样记录）" /></label>
-        <button @click="create">登记</button>
+
+    <div class="panel">
+      <div class="section-title" style="margin-top: 0">提交新需求</div>
+      <div class="form-grid">
+        <div class="form-item">
+          <label class="form-label">标题</label>
+          <n-input v-model:value="form.title" placeholder="一句话标题" />
+        </div>
+        <div class="form-item">
+          <label class="form-label">描述</label>
+          <n-input v-model:value="form.summary" placeholder="原始需求（原样记录）" />
+        </div>
       </div>
-      <p class="muted">登记后生成 R-xxx 编号并归档；后续 agent 会按反问清单与你确认细节。</p>
+      <div class="row">
+        <n-button type="primary" @click="create">登记归档</n-button>
+      </div>
     </div>
-    <div v-if="msg" class="msg" :class="msgType">{{ msg }}</div>
-    <div class="card">
-      <table style="width: 100%; border-collapse: collapse">
-        <thead><tr class="muted"><th style="text-align:left">编号</th><th style="text-align:left">标题</th><th style="text-align:left">状态</th><th style="text-align:left">摘要</th></tr></thead>
+
+    <div class="panel">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>编号</th>
+            <th>标题</th>
+            <th>状态</th>
+            <th>摘要</th>
+          </tr>
+        </thead>
         <tbody>
-          <tr v-for="r in items" :key="r.id" style="border-top: 1px solid var(--border)">
-            <td style="padding: 6px 0">{{ r.id }}</td>
-            <td>{{ r.title }}</td>
-            <td>
-              <select :value="r.status" @change="changeStatus(r, $event.target.value)">
-                <option v-for="s in statuses" :key="s" :value="s">{{ s }}</option>
-              </select>
+          <tr v-for="r in items" :key="r.id">
+            <td style="font-family: var(--mono); font-size: 12.5px">{{ r.id }}</td>
+            <td style="min-width: 180px">{{ r.title }}</td>
+            <td style="min-width: 130px">
+              <n-select size="small" :value="r.status" :options="statusOptions" @update:value="(v) => changeStatus(r, v)" />
             </td>
             <td class="muted">{{ r.summary }}</td>
           </tr>
         </tbody>
       </table>
+      <div v-if="!items.length" class="empty">暂无需求记录</div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useMessage } from 'naive-ui'
 import { api } from '../api'
 
 const items = ref([])
+const message = useMessage()
 const form = ref({ title: '', summary: '' })
-const msg = ref('')
-const msgType = ref('ok')
-const statuses = ['已登记', '澄清中', '已确认', '实施中', '已完成', '已搁置', '已拒绝']
+const statusOptions = ['已登记', '澄清中', '已确认', '实施中', '已完成', '已搁置', '已拒绝'].map(s => ({ label: s, value: s }))
 
-async function load() { items.value = await api('/api/requirements') }
+async function load() {
+  items.value = await api('/api/requirements')
+}
 
 async function create() {
-  if (!form.value.title.trim()) { show('请填写标题', 'err'); return }
+  if (!form.value.title.trim()) {
+    message.warning('请填写标题')
+    return
+  }
   await api('/api/requirements', { method: 'POST', body: JSON.stringify(form.value) })
   form.value = { title: '', summary: '' }
-  show('已登记归档', 'ok')
+  message.success('已登记归档')
   load()
 }
 
@@ -55,8 +74,6 @@ async function changeStatus(r, status) {
   await api(`/api/requirements/${r.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
   load()
 }
-
-function show(text, type) { msg.value = text; msgType.value = type }
 
 onMounted(load)
 </script>

@@ -1,26 +1,78 @@
 <template>
-  <div class="app-shell">
-    <nav v-if="!isLogin" class="sidebar">
-      <div class="logo">echo · 回声</div>
-      <RouterLink to="/videos">素材库</RouterLink>
-      <RouterLink to="/topics">每日选题</RouterLink>
-      <RouterLink to="/timeline">时间线</RouterLink>
-      <RouterLink to="/drafts">脚本工作台</RouterLink>
-      <RouterLink to="/chat">AI 对话</RouterLink>
-      <RouterLink to="/persona">人设档案</RouterLink>
-      <RouterLink to="/requirements">需求管理</RouterLink>
-      <RouterLink to="/dashboard">看板</RouterLink>
-    </nav>
-    <main class="main">
-      <RouterView />
-    </main>
-  </div>
+  <n-config-provider :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
+    <n-message-provider>
+      <n-dialog-provider>
+        <div class="app-shell">
+          <aside v-if="!isLogin" class="sidebar">
+            <div class="side-brand">ECHO</div>
+            <nav class="side-nav">
+              <RouterLink v-for="item in navs" :key="item.to" :to="item.to" @click="menuOpen = false">
+                {{ item.label }}
+              </RouterLink>
+            </nav>
+          </aside>
+
+          <div class="workspace">
+            <header v-if="!isLogin" class="topbar">
+              <RouterLink to="/home" class="top-brand">ECHO</RouterLink>
+              <button class="menu-btn" aria-label="菜单" @click="menuOpen = !menuOpen">☰</button>
+            </header>
+            <main class="main">
+              <RouterView />
+            </main>
+          </div>
+
+          <transition name="sheet">
+            <div v-if="menuOpen" class="sheet-scrim" @click="menuOpen = false">
+              <div class="sheet" @click.stop>
+                <RouterLink
+                  v-for="item in navs"
+                  :key="item.to"
+                  :to="item.to"
+                  @click="menuOpen = false"
+                >
+                  {{ item.label }}
+                </RouterLink>
+              </div>
+            </div>
+          </transition>
+        </div>
+      </n-dialog-provider>
+    </n-message-provider>
+  </n-config-provider>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { zhCN, dateZhCN } from 'naive-ui'
 
 const route = useRoute()
+const menuOpen = ref(false)
 const isLogin = computed(() => route.path === '/login')
+
+const navs = [
+  { to: '/home', label: '主页' },
+  { to: '/videos', label: '素材库' },
+  { to: '/drafts', label: '脚本工作台' },
+  { to: '/chat', label: 'AI 对话' },
+  { to: '/persona', label: '人设档案' },
+  { to: '/dashboard', label: '数据看板' },
+  { to: '/requirements', label: '需求管理' }
+]
+
+const themeOverrides = {
+  common: {
+    primaryColor: '#a34f2c',
+    primaryColorHover: '#b7603a',
+    primaryColorPressed: '#8a3f1f',
+    primaryColorSuppl: '#a34f2c',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
+    textColorBase: '#2b2823'
+  },
+  Button: { fontWeight: '500' },
+  Card: { borderRadius: '10px' }
+}
 </script>

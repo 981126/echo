@@ -1,14 +1,22 @@
 <template>
-  <div style="max-width: 380px; margin: 12vh auto; padding: 0 16px">
-    <div class="card">
-      <h1 style="margin: 0 0 4px">echo · 回声</h1>
-      <p class="muted" style="margin-bottom: 16px">输入访问令牌进入系统</p>
-      <label class="field">
-        访问令牌
-        <input v-model="token" type="password" placeholder="X-Access-Token" @keyup.enter="login" />
-      </label>
-      <div v-if="err" class="msg err">{{ err }}</div>
-      <button style="width: 100%" :disabled="!token" @click="login">进入</button>
+  <div class="login-wrap">
+    <div class="login-panel">
+      <div class="login-brand">回声<span>ECHO STUDIO</span></div>
+      <h1 class="login-title">进入工作台</h1>
+      <p class="muted login-hint">输入访问令牌以继续</p>
+      <n-input
+        v-model:value="token"
+        type="password"
+        show-password-on="click"
+        placeholder="访问令牌"
+        size="large"
+        @keyup.enter="login"
+      />
+      <div style="margin-top: 16px">
+        <n-button type="primary" size="large" block :disabled="!token.trim()" :loading="loading" @click="login">
+          进入
+        </n-button>
+      </div>
     </div>
   </div>
 </template>
@@ -16,22 +24,26 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useMessage } from 'naive-ui'
 import { setToken } from '../api'
 
 const token = ref('')
-const err = ref('')
+const loading = ref(false)
 const router = useRouter()
+const message = useMessage()
 
 async function login() {
-  err.value = ''
+  loading.value = true
   setToken(token.value.trim())
   try {
     const resp = await fetch('/health')
     if (!resp.ok) throw new Error('无法连接后端')
     router.push('/videos')
-  } catch (e) {
+  } catch {
     setToken('')
-    err.value = '无法连接后端服务，请确认已启动 uvicorn'
+    message.error('无法连接后端服务，请确认已启动 uvicorn')
+  } finally {
+    loading.value = false
   }
 }
 </script>
