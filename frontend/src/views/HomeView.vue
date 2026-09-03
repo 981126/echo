@@ -26,8 +26,9 @@
             :title="e.fullTitle + ' · ' + e.date"
             @click="goVideo(e.id)"
           >
+            <img v-if="e.coverUrl" class="tl-cover" :src="e.coverUrl" loading="lazy" alt="" @click.stop="goVideo(e.id)" />
+            <span v-else class="tl-cover empty">ECHO</span>
             <span class="dot" />
-            <span class="dt">{{ e.date.slice(5) }}</span>
             <span class="nm">{{ e.title }}</span>
           </div>
         </div>
@@ -96,8 +97,9 @@ const model = computed(() => {
       id: v.id,
       date,
       status: v.published_at ? 'published' : 'planned',
-      title: ((v.main_topics && v.main_topics[0]) || v.filename).slice(0, 8),
-      fullTitle: v.filename
+      title: ((v.main_topics && v.main_topics[0]) || v.filename).slice(0, 10),
+      fullTitle: v.filename,
+      coverUrl: v.cover_url || ''
     })
   }
   raw.sort((a, b) => (a.date < b.date ? -1 : 1))

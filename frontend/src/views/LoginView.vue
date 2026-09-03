@@ -1,7 +1,7 @@
 <template>
   <div class="login-wrap">
     <div class="login-panel">
-      <div class="login-brand">回声<span>ECHO STUDIO</span></div>
+      <div class="login-brand">ECHO STUDIO</div>
       <h1 class="login-title">进入工作台</h1>
       <p class="muted login-hint">输入访问令牌以继续</p>
       <n-input

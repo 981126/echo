@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,13 +42,29 @@ class Settings(BaseSettings):
     # 热点源
     hot_source_mode: str = "mock"  # mock | real
 
-    # 路径
+    # 路径：未显式配置时由 data_dir 统一派生（env 可用 ECHO_DB_PATH / ECHO_*_DIR 覆盖）
+    _UNSET = Path("@unset@")
     data_dir: Path = Path("./data")
-    db_path: Path = Path("./data/echo.db")
-    inbox_dir: Path = Path("./data/inbox")
-    videos_dir: Path = Path("./data/videos")
-    covers_dir: Path = Path("./data/covers")   # 素材封面（作者上传，jpg/png）
-    uploads_dir: Path = Path("./data/uploads")  # 编辑器插入的图片等附件
+    db_path: Path = _UNSET
+    inbox_dir: Path = _UNSET
+    videos_dir: Path = _UNSET
+    covers_dir: Path = _UNSET
+    uploads_dir: Path = _UNSET
+
+    @model_validator(mode="after")
+    def _resolve_paths(self) -> "Settings":
+        base = self.data_dir
+        if self.db_path == self._UNSET:
+            self.db_path = base / "echo.db"
+        if self.inbox_dir == self._UNSET:
+            self.inbox_dir = base / "inbox"
+        if self.videos_dir == self._UNSET:
+            self.videos_dir = base / "videos"
+        if self.covers_dir == self._UNSET:
+            self.covers_dir = base / "covers"
+        if self.uploads_dir == self._UNSET:
+            self.uploads_dir = base / "uploads"
+        return self
 
     @property
     def sqlalchemy_url(self) -> str:

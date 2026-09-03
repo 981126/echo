@@ -176,7 +176,9 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(135deg, var(--accent-soft), #efe9dd);
   display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 12px; letter-spacing: .2em; font-family: var(--serif);
+  cursor: pointer;
 }
+.tile-cover:hover { box-shadow: 0 3px 10px rgba(43,40,35,.12); }
 .tile-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* ---------- 文件选择 ---------- */
@@ -218,18 +220,36 @@ details.fold { margin-top: 8px; }
 }
 
 
-/* ---------- 主页：横向时间线 ---------- */
+/* ---------- 主页：横向时间线（封面 + 圆点 + 标题） ---------- */
 .tl-wrap { overflow-x: auto; padding: 4px 0 2px; }
-.tl { position: relative; height: 196px; min-width: 100%; }
-.tl-axis { position: absolute; left: 0; right: 0; top: 68px; height: 2px; background: var(--line-strong); }
-.tl-month { position: absolute; top: 154px; transform: translateX(-50%); font-size: 11px; color: var(--muted); white-space: nowrap; }
-.tl-today { position: absolute; top: 4px; bottom: 46px; width: 1px; background: var(--line-strong); }
+.tl { position: relative; height: 236px; min-width: 100%; }
+.tl-axis { position: absolute; left: 0; right: 0; top: 96px; height: 2px; background: var(--line-strong); }
+.tl-month { position: absolute; top: 196px; transform: translateX(-50%); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.tl-today { position: absolute; top: 10px; bottom: 66px; width: 1px; background: var(--line-strong); }
 .tl-today-label { position: absolute; top: -2px; left: 5px; font-size: 10px; color: var(--muted); white-space: nowrap; }
-.tl-ev { position: absolute; top: 56px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; cursor: pointer; }
-.tl-ev .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); box-shadow: 0 0 0 1.5px var(--accent); }
+.tl-ev {
+  position: absolute; top: 0; transform: translateX(-50%);
+  width: 96px; display: flex; flex-direction: column; align-items: center;
+  cursor: pointer;
+}
+.tl-ev .tl-cover {
+  width: 84px; height: 56px; object-fit: cover; border-radius: 6px;
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+  background: linear-gradient(135deg, var(--accent-soft), #efe9dd);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 9px; letter-spacing: .2em; font-family: var(--serif);
+}
+.tl-ev .tl-cover.empty { height: 56px; }
+.tl-ev .dot {
+  position: absolute; top: 90px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--surface); box-shadow: 0 0 0 1.5px var(--accent);
+}
 .tl-ev.published .dot { background: var(--ok); box-shadow: 0 0 0 1.5px var(--ok); }
-.tl-ev .dt { margin-top: 8px; font-size: 10px; color: var(--muted); line-height: 1; }
-.tl-ev .nm { margin-top: 3px; font-size: 12px; color: var(--ink-soft); max-width: 108px; text-align: center; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+.tl-ev .nm {
+  position: absolute; top: 110px; width: 100%; text-align: center;
+  font-size: 12px; color: var(--ink-soft); line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .tl-ev:hover .nm { color: var(--accent-ink); }
 
 /* ---------- 主页：热点 tag ---------- */

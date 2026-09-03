@@ -23,11 +23,11 @@
     <div v-else-if="!videos.length" class="panel empty">暂无视频</div>
     <div v-else class="grid">
       <div v-for="v in videos" :key="v.id" class="card-tile">
-        <div class="tile-cover" :class="{ 'has': v.cover_url }">
+        <div class="tile-cover" :class="{ has: v.cover_url }" @click="openEdit(v)">
           <img v-if="v.cover_url" :src="v.cover_url" alt="封面" />
-          <span v-else>回声 · 素材</span>
+          <span v-else>ECHO</span>
         </div>
-        <h3 class="tile-title" style="word-break: break-all">{{ v.filename }}</h3>
+        <h3 class="tile-title" style="word-break: break-all" @click="openEdit(v)">{{ v.filename }}</h3>
         <div class="row" style="gap: 6px">
           <n-tag v-if="v.is_ad" size="small" :bordered="false" round type="error">广告</n-tag>
           <n-tag v-for="p in v.platforms" :key="p" size="small" :bordered="false" round>{{ platformName(p) }}</n-tag>
@@ -49,78 +49,82 @@
       </div>
     </div>
 
-    <div v-if="editing" class="panel" style="margin-top: 24px">
-      <div class="row" style="justify-content: space-between; margin-bottom: 14px">
-        <span class="section-title" style="margin: 0">编辑：{{ editing.filename }}</span>
-        <n-button size="small" secondary @click="closeEdit">取消</n-button>
-      </div>
-
-      <div class="row" style="gap: 18px; align-items: flex-start; margin-bottom: 6px">
-        <div class="cover-edit" @click="coverInput && coverInput.click()">
-          <img v-if="editing.coverUrl" :src="editing.coverUrl" alt="封面" />
-          <span v-else>上传封面</span>
-        </div>
-        <input ref="coverInput" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onCover" />
-        <div class="grow muted" style="font-size: 12px">
-          <div style="margin-top: 4px">jpg / png，点击图片上传或替换</div>
-          <n-button v-if="editing.coverUrl" size="tiny" quaternary type="error" style="margin-top: 8px" @click="removeCover">
-            移除封面
-          </n-button>
-        </div>
-      </div>
-
-      <div class="form-grid">
-        <div class="form-item">
-          <label class="form-label">平台（可多选）</label>
-          <n-select v-model:value="editing.platforms" multiple :options="platformOptions" placeholder="选择平台" />
-        </div>
-        <div class="form-item">
-          <label class="form-label">赛道（可多选）</label>
-          <n-select v-model:value="editing.main_topics" multiple :options="topicOptions" placeholder="选择赛道" />
-        </div>
-        <div class="form-item">
-          <label class="form-label">状态</label>
-          <n-select v-model:value="editing.status" :options="statusOptions" />
-        </div>
-        <div class="form-item">
-          <label class="form-label">商务广告</label>
-          <n-checkbox v-model:checked="editing.is_ad">广告（不参与人设学习）</n-checkbox>
-        </div>
-        <div class="form-item">
-          <label class="form-label">计划发布时间</label>
-          <n-date-picker v-model:value="editing.plannedTs" type="datetime" clearable style="width: 100%" />
-        </div>
-        <div class="form-item">
-          <label class="form-label">实际发布时间</label>
-          <n-date-picker v-model:value="editing.publishedTs" type="datetime" clearable style="width: 100%" />
-        </div>
-        <div class="form-item full">
-          <label class="form-label">标签（逗号分隔）</label>
-          <n-input v-model:value="tagsText" placeholder="干货, 反常识, 口播" />
-        </div>
-        <div class="form-item full">
-          <label class="form-label">原始文案（可选）</label>
-          <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
-        </div>
-        <div class="form-item full" v-if="editing.correctedText !== null || editing.transcriptText">
-          <label class="form-label">转写 / 校对稿</label>
-          <div v-if="editing.transcriptText" class="prose panel" style="margin-bottom: 8px; background: var(--bg)">
-            <strong class="muted">ASR 转写（只读）</strong>
-            <p style="white-space: pre-wrap">{{ editing.transcriptText }}</p>
+    <n-modal
+      v-model:show="showEdit"
+      preset="card"
+      :title="editing ? '编辑：' + editing.filename : '编辑视频'"
+      style="width: min(760px, 94vw)"
+      :mask-closable="false"
+      @close="closeEdit"
+    >
+      <div v-if="editing" style="max-height: 72vh; overflow-y: auto; padding-right: 6px">
+        <div class="row" style="gap: 18px; align-items: flex-start; margin-bottom: 14px">
+          <div class="cover-edit" @click="coverInput && coverInput.click()">
+            <img v-if="editing.coverUrl" :src="editing.coverUrl" alt="封面" />
+            <span v-else>上传封面</span>
           </div>
-          <n-input
-            v-model:value="editing.correctedText"
-            type="textarea"
-            :rows="6"
-            placeholder="AI 校对稿，可直接修改（分析以此为准）"
-          />
+          <input ref="coverInput" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onCover" />
+          <div class="grow muted" style="font-size: 12px">
+            <div style="margin-top: 4px">jpg / png，点击图片上传或替换</div>
+            <n-button v-if="editing.coverUrl" size="tiny" quaternary type="error" style="margin-top: 8px" @click="removeCover">
+              移除封面
+            </n-button>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-item">
+            <label class="form-label">平台（可多选）</label>
+            <n-select v-model:value="editing.platforms" multiple :options="platformOptions" placeholder="选择平台" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">赛道（可多选）</label>
+            <n-select v-model:value="editing.main_topics" multiple :options="topicOptions" placeholder="选择赛道" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">状态</label>
+            <n-select v-model:value="editing.status" :options="statusOptions" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">商务广告</label>
+            <n-checkbox v-model:checked="editing.is_ad">广告（不参与人设学习）</n-checkbox>
+          </div>
+          <div class="form-item">
+            <label class="form-label">计划发布时间</label>
+            <n-date-picker v-model:value="editing.plannedTs" type="datetime" clearable style="width: 100%" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">实际发布时间</label>
+            <n-date-picker v-model:value="editing.publishedTs" type="datetime" clearable style="width: 100%" />
+          </div>
+          <div class="form-item full">
+            <label class="form-label">标签（逗号分隔）</label>
+            <n-input v-model:value="tagsText" placeholder="干货, 反常识, 口播" />
+          </div>
+          <div class="form-item full">
+            <label class="form-label">原始文案（可选）</label>
+            <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
+          </div>
+          <div class="form-item full" v-if="editing.correctedText !== null || editing.transcriptText">
+            <label class="form-label">转写 / 校对稿</label>
+            <div v-if="editing.transcriptText" class="prose panel" style="margin-bottom: 8px; background: var(--bg)">
+              <strong class="muted">ASR 转写（只读）</strong>
+              <p style="white-space: pre-wrap">{{ editing.transcriptText }}</p>
+            </div>
+            <n-input
+              v-model:value="editing.correctedText"
+              type="textarea"
+              :rows="6"
+              placeholder="AI 校对稿，可直接修改（分析以此为准）"
+            />
+          </div>
+        </div>
+        <div class="row">
+          <n-button type="primary" @click="saveEdit">保存</n-button>
+          <n-button secondary @click="closeEdit">取消</n-button>
         </div>
       </div>
-      <div class="row">
-        <n-button type="primary" @click="saveEdit">保存</n-button>
-        <n-button secondary @click="closeEdit">取消</n-button>
-      </div>
-    </div>
+    </n-modal>
   </div>
 </template>
 
@@ -140,6 +144,7 @@ const fileInput = ref(null)
 const coverInput = ref(null)
 const editing = ref(null)
 const orig = ref(null)
+const showEdit = ref(false)
 const tagsText = ref('')
 
 const platformOptions = [
@@ -273,9 +278,11 @@ async function openEdit(v) {
     sourceText: editing.value.sourceText,
     correctedText: editing.value.correctedText
   }
+  showEdit.value = true
 }
 
 function closeEdit() {
+  showEdit.value = false
   editing.value = null
   orig.value = null
 }
