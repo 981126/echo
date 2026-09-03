@@ -112,7 +112,7 @@ echo/
 - 测试：`cd backend && pytest`（全部 mock，离线可跑）
 - 质量门禁：`scripts/verify.sh`
 ### 部署（NAS，Docker）
-- 配置 `.env`（见 `.env.example`）
+- 配置 `.env`（见 `.env`）
 - `docker compose up -d --build`
 - 更新：`scripts/update.sh`（git pull + 重建 + 健康检查）
 - 备份：`data/` 热备份 + `docs/` + `requirements/` 快照

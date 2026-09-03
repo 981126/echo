@@ -54,3 +54,10 @@
 ## [M0] 2026-09-01 — 项目脚手架 + 自描述体系 + 需求归档
 - AGENTS.md / docs（PRD、ARCHITECTURE、WORKFLOW、DECISIONS、milestones）/ requirements（R-001~R-014）
 - scripts/verify.sh 质量门禁；Dockerfile / docker-compose / .env.example / README / update.sh
+
+## [M6] 2026-09-03 — 体验升级：视觉重构 + 素材库多选/封面 + AI 对话会话化 + Markdown 写作（R-015~R-018）
+- R-015 全站视觉重构：Naive UI（按需自动导入）+ 纸感文艺设计系统；主页=时间线+热点选题；ECHO 置于菜单栏左上；移动端底部菜单；精简页面说明文案
+- R-016 素材库：封面上传/移除（data/covers + /covers 静态）；platform/main_topic 单值 → platforms/main_topics 多选（JSON，轻量迁移回填并删旧列，statistics/review/chat/ingest 全链路适配）；编辑全量回显 + 增量保存（不误伤字段）；转写稿/校对稿可改（ASR 原始只读，导入任务兼容半成品稿）
+- R-017 AI 对话 ChatGPT 化：会话 CRUD + 存量消息归默认会话 + 会话内历史；SSE 流式接口（打字机式下发）；Markdown 渲染 + 复制；AI 服务失败统一降级为可读文案
+- R-018 Markdown 写作：工作台工具栏（加粗/斜体/H2/引用/列表/分隔线/链接）+ 插图上传（data/uploads + /uploads 静态）+ 预览；chat/草稿共用 markdown-it
+- 门禁修复：锁定 ruff 规则集 E4/E7/E9/F（ruff 新版默认集漂移导致 HEAD 亦报错）；mypy/pytest 修复
