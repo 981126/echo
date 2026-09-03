@@ -29,3 +29,9 @@ class PersonaTagCreate(BaseModel):
 
 class PersonaDecision(BaseModel):
     status: str = Field(pattern="^(confirmed|rejected)$")
+
+
+class PersonaTagUpdate(BaseModel):
+    label: str = Field(default="", min_length=1, max_length=100)
+    description: str = ""
+    category: str = Field(default="style", pattern="^(style|topic|redline)$")

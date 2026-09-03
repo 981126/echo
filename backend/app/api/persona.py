@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models.persona import PersonaTag
-from ..schemas.persona import PersonaDecision, PersonaTagCreate, PersonaTagOut
+from ..schemas.persona import PersonaDecision, PersonaTagCreate, PersonaTagOut, PersonaTagUpdate
 from ..services.ingest import persona_init_task
 from ..tasks import start_task
 
@@ -24,7 +24,8 @@ def list_persona(status: str = "", db: Session = Depends(get_db)):
 
 @router.post("/tags", response_model=PersonaTagOut)
 def add_manual_tag(payload: PersonaTagCreate, db: Session = Depends(get_db)):
-    tag = PersonaTag(**payload.model_dump(), source="manual", status="confirmed")
+    data = {k: v for k, v in payload.model_dump().items() if k != "source"}
+    tag = PersonaTag(**data, source="manual", status="confirmed")
     db.add(tag)
     db.commit()
     db.refresh(tag)
@@ -40,6 +41,32 @@ def decide_tag(tag_id: int, payload: PersonaDecision, db: Session = Depends(get_
     db.commit()
     db.refresh(tag)
     return tag
+
+
+@router.patch("/tags/{tag_id}", response_model=PersonaTagOut)
+def update_tag(tag_id: int, payload: PersonaTagUpdate, db: Session = Depends(get_db)):
+    """编辑人设标签（标签/描述/类别）。"""
+    tag = db.get(PersonaTag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    if payload.label.strip():
+        tag.label = payload.label.strip()
+    tag.description = payload.description
+    tag.category = payload.category
+    db.commit()
+    db.refresh(tag)
+    return tag
+
+
+@router.delete("/tags/{tag_id}", response_model=dict)
+def delete_tag(tag_id: int, db: Session = Depends(get_db)):
+    """删除人设标签。"""
+    tag = db.get(PersonaTag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    db.delete(tag)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/init")
