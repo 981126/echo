@@ -103,7 +103,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
 def _maybe_optimize_prompt(db, payload: dict) -> None:
     """每次导入新视频后，基于当前启用的生成提示词自动产出候选新版（不启用）+ 通知。"""
     from .models.video import Video
-    from .prompt_service import optimize
+    from .prompt_service import auto_optimize_generation
 
     try:
         video = db.get(Video, int(payload.get("video_id") or 0))
@@ -112,7 +112,8 @@ def _maybe_optimize_prompt(db, payload: dict) -> None:
         text = video.transcript.corrected_text or video.transcript.transcript_text
         if not text:
             return
-        candidate = optimize(db, "generation", material=text[:3000])
+        # R-022：每累计 3 条新素材才产一个候选（防过拟合单条）
+        candidate = auto_optimize_generation(db, material=text[:3000])
         if candidate is None:
             return
         db.add(

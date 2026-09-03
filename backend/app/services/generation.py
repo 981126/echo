@@ -85,6 +85,25 @@ def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
         seen.add(key)
         docs.append(text)
         weights.append(round(_weight(db, v), 6))
+    # R-022：作者认可的高分/采用稿 = 黄金样本，更高权重
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+
+    approved = (
+        db.query(Feedback.draft_id)
+        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
+        .distinct()
+        .all()
+    )
+    draft_ids = [r[0] for r in approved][:5]
+    if draft_ids:
+        for d in db.query(Draft).filter(Draft.id.in_(draft_ids), Draft.script != "").all():
+            key = (d.script or "").strip()[:200]
+            if key in seen:
+                continue
+            seen.add(key)
+            docs.append(d.script)
+            weights.append(6.0)
     index = TfidfIndex().build(docs, weights)
     return [hit["text"] for hit in index.search(topic, top_k=k)]
 

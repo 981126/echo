@@ -33,7 +33,11 @@
             <n-button size="small" type="primary" @click="enable(item, candidate(item).version)">启用此版本</n-button>
           </div>
           <p class="muted" style="margin: 0 0 8px">{{ candidate(item).note }}</p>
-          <pre class="prompt-pre">{{ candidate(item).content }}</pre>
+          <pre class="prompt-pre dview"><span
+            v-for="(l, i) in diffOf(item)"
+            :key="i"
+            :class="'d-' + l.type"
+          >{{ prefix(l.type) + l.text }}</span></pre>
         </div>
 
         <div class="panel">
@@ -64,6 +68,7 @@
 import { ref, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
+import { diffLines } from '../diff'
 
 const ORDER = ['generation', 'persona_init', 'video_tags', 'persona_updates', 'review', 'diff', 'chat', 'correct']
 const items = ref([])
@@ -82,6 +87,18 @@ function versions(item) {
 
 function candidate(item) {
   return (item.versions || []).find(v => v.status === 'candidate')
+}
+
+function diffOf(item) {
+  const c = candidate(item)
+  if (!c) return []
+  return diffLines(item.content || '', c.content || '')
+}
+
+function prefix(type) {
+  if (type === 'add') return '+ '
+  if (type === 'del') return '- '
+  return '  '
 }
 
 async function load() {

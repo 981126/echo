@@ -7,8 +7,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..models.notification import Notification
 from ..models.prompt import AiPrompt
 from ..services import prompt_service
+from ..tasks import start_task
 
 router = APIRouter()
 
@@ -76,11 +78,62 @@ def list_versions(key: str, db: Session = Depends(get_db)):
     return [_out(r) for r in rows]
 
 
+def _selfcheck_task(db: Session, payload: dict) -> None:
+    """启用新版生成提示词后，用金样本选题自动生成一轮供作者打分（R-022）。"""
+    from ..models.feedback import Feedback
+    from ..models.hot_topic import TopicCandidate
+    from ..services.generation import generate_draft
+
+    version = payload.get("version", 0)
+    try:
+        ids = [
+            r[0]
+            for r in db.query(Feedback.draft_id)
+            .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
+            .distinct()
+            .limit(5)
+            .all()
+        ]
+        topics = []
+        if ids:
+            topics = [
+                r.title
+                for r in db.query(TopicCandidate)
+                .filter(TopicCandidate.draft_id.in_(ids))
+                .order_by(TopicCandidate.id.desc())
+                .limit(3)
+                .all()
+            ]
+        if not topics:
+            return  # 暂无金样本，跳过自测
+        made = 0
+        for tp in topics:
+            try:
+                generate_draft(db, tp)
+                made += 1
+            except Exception:  # noqa: BLE001 单条失败不影响其余
+                db.rollback()
+        db.add(
+            Notification(
+                kind="prompt_selfcheck",
+                status="done",
+                title=f"提示词 v{version} 已启用 · 自测完成",
+                message=f"已按金样本选题生成 {made} 篇，请到脚本工作台打分",
+                target="/drafts",
+            )
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
+
 @router.post("/{key}/save", response_model=dict)
 def save_prompt(key: str, payload: PromptSaveIn, db: Session = Depends(get_db)):
     if key not in prompt_service.PROMPT_META:
         raise HTTPException(status_code=404, detail="未知提示词类别")
     row = prompt_service.save_new_version(db, key, payload.content)
+    if key == "generation":
+        start_task("prompt_selfcheck", {"version": row.version}, _selfcheck_task)
     return _out(row)
 
 
@@ -89,6 +142,8 @@ def enable_prompt(key: str, payload: PromptEnableIn, db: Session = Depends(get_d
     row = prompt_service.enable_version(db, key, payload.version)
     if row is None:
         raise HTTPException(status_code=404, detail="版本不存在")
+    if key == "generation":
+        start_task("prompt_selfcheck", {"version": row.version}, _selfcheck_task)
     return _out(row)
 
 

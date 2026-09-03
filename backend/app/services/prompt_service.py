@@ -125,13 +125,51 @@ def enable_version(db: Session, key: str, version: int) -> AiPrompt | None:
     return row
 
 
+def feedback_context(db: Session) -> str:
+    """把作者的高分/低分反馈摘要带进优化输入（R-022 回流 C）。"""
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+
+    lines = []
+    lows = (
+        db.query(Feedback, Draft)
+        .join(Draft, Feedback.draft_id == Draft.id)
+        .filter(Feedback.rating <= 2)
+        .order_by(Feedback.id.desc())
+        .limit(3)
+        .all()
+    )
+    highs = (
+        db.query(Feedback, Draft)
+        .join(Draft, Feedback.draft_id == Draft.id)
+        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
+        .order_by(Feedback.id.desc())
+        .limit(3)
+        .all()
+    )
+    if highs:
+        lines.append("作者认可（4-5 分/采用）的稿子节选——保持这种腔调：")
+        for _fb, d in highs:
+            if d and d.script:
+                lines.append(f"- {d.script[:200]}")
+    if lows:
+        lines.append("作者不满意（1-2 分）的稿子节选——避免这种腔调：")
+        for _fb, d in lows:
+            if d and d.script:
+                lines.append(f"- {d.script[:200]}")
+    return "\n".join(lines)
+
+
 def optimize(db: Session, key: str, material: str = "") -> AiPrompt | None:
-    """基于当前启用版 + 素材/反馈，产出候选新版（不启用）；失败返回 None。"""
+    """基于当前启用版 + 素材 + 打分反馈，产出候选新版（不启用）；失败返回 None。"""
     current = get_prompt(key, db)
     if not current:
         return None
+    ctx = feedback_context(db)
+    parts = [material or "", ctx]
+    user_material = "\n".join(x for x in parts if x.strip()) or "（无）"
     llm = DeepSeekClient()
-    user = f"当前提示词：\n{current}\n\n作者新增素材（用于校准语气）：\n{material or '（无）'}"
+    user = f"当前提示词：\n{current}\n\n作者新增素材/反馈（用于校准语气）：\n{user_material}"
     try:
         content = llm.chat(
             [{"role": "system", "content": OPT_SYSTEM}, {"role": "user", "content": user}],
@@ -142,4 +180,26 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt | None:
         return None
     if not content or len(content) < 20:
         return None
-    return create_candidate(db, key, content, note="上传新素材后 AI 自动优化（待启用）")
+    return create_candidate(db, key, content, note="AI 自动优化（待启用）")
+
+
+def auto_optimize_generation(db: Session, material: str, threshold: int = 3) -> AiPrompt | None:
+    """每累计 threshold 条新素材才产出一次候选（R-022 节流，防过拟合单条）。"""
+    from ..models.kv import Kv
+
+    row = db.get(Kv, "generation_import_count")
+    if row is None:
+        row = Kv(key="generation_import_count", value="0")
+        db.add(row)
+    cur = int(row.value or "0") + 1
+    if cur < threshold:
+        row.value = str(cur)
+        db.commit()
+        return None
+    cand = optimize(db, "generation", material)
+    if cand is not None:
+        row.value = "0"
+    else:
+        row.value = str(threshold - 1)  # 失败则下一次导入再试
+    db.commit()
+    return cand
