@@ -347,3 +347,9 @@ details.fold { margin-top: 8px; }
   .notif-wrap { top: 8px; right: 58px; }
   .notif-panel { width: min(360px, calc(100vw - 24px)); right: -42px; }
 }
+
+/* 草稿 1-5 分打分 */
+.tile-rate { display: flex; align-items: center; gap: 2px; margin-top: 8px; }
+.tile-rate .muted { margin-right: 2px; }
+.rate-star { border: 0; background: transparent; cursor: pointer; color: var(--line-strong); font-size: 15px; padding: 0 2px; line-height: 1; }
+.rate-star.on { color: #c98a1b; }

@@ -16,6 +16,18 @@
           <n-button size="small" secondary @click="like(d, true)">👍 采用</n-button>
           <n-button size="small" secondary @click="like(d, false)">👎 不用</n-button>
         </div>
+        <div class="tile-rate" @click.stop>
+          <span class="muted">打分</span>
+          <button
+            v-for="i in 5"
+            :key="i"
+            class="rate-star"
+            :class="{ on: (ratings[d.id] || 0) >= i }"
+            :title="i + ' 分'"
+            @click="rate(d, i)"
+          >{{ (ratings[d.id] || 0) >= i ? '★' : '☆' }}</button>
+          <span v-if="ratings[d.id]" class="muted" style="font-size: 11px">{{ ratings[d.id] }} 分</span>
+        </div>
       </div>
     </div>
 
@@ -82,6 +94,7 @@ import { api, uploadImage } from '../api'
 import { renderMd } from '../md'
 
 const drafts = ref([])
+const ratings = ref({})
 const editing = ref(null)
 const showEdit = ref(false)
 const preview = ref(false)
@@ -202,6 +215,12 @@ async function like(d, liked) {
   await api(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ liked }) })
   message.success(liked ? '已标记采用' : '已标记不用')
   load()
+}
+
+async function rate(d, i) {
+  await api(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ liked: null, rating: i }) })
+  ratings.value = { ...ratings.value, [d.id]: i }
+  message.success(`已打 ${i} 分（进入人设/选题学习）`)
 }
 
 onMounted(async () => {

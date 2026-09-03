@@ -30,11 +30,17 @@ class TfidfIndex:
 
     def __init__(self) -> None:
         self.docs: list[str] = []
+        self._weights: list[float] = []
         self._tfidf: list[dict[str, float]] = []
         self._idf: dict[str, float] = {}
 
-    def build(self, docs: list[str]) -> "TfidfIndex":
+    def build(self, docs: list[str], weights: list[float] | None = None) -> "TfidfIndex":
         self.docs = [d or "" for d in docs]
+        self._weights = (
+            [float(w) for w in weights] if weights else [1.0] * len(self.docs)
+        )
+        if len(self._weights) != len(self.docs):
+            self._weights = [1.0] * len(self.docs)
         doc_tokens = [tokenize(d) for d in self.docs]
         df: Counter[str] = Counter()
         for tokens in doc_tokens:
@@ -58,7 +64,10 @@ class TfidfIndex:
         q_vec = {term: (count / max(sum(q_tf.values()), 1)) * self._idf.get(term, 0.0) for term, count in q_tf.items()}
         scored = []
         for i, vec in enumerate(self._tfidf):
-            score = sum(q_vec.get(term, 0.0) * weight for term, weight in vec.items())
+            score = (
+                sum(q_vec.get(term, 0.0) * weight for term, weight in vec.items())
+                * self._weights[i]
+            )
             if score > 0:
                 scored.append((score, i))
         scored.sort(key=lambda x: x[0], reverse=True)
