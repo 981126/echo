@@ -6,6 +6,7 @@
 - **状态**: ✅ 已完成
 - **排期**: M11
 - **关联**: PRD §3.4/§5（已更新）
+- **追问补充2（2026-09-04）**：联调发现 Kimi-k2.6 大上下文响应慢/偶发失败会被静默降级 → 已加“单次调用失败自动重试 + 失败原因以系统说明写入讨论留痕”；用 Kimi 生成组复测通过（r0 Kimi 初稿 / DeepSeek 评审 / Kimi 修订完整留痕）
 - **追问补充（2026-09-04）**：
   - 讨论轮次改为页面可配（1-10，默认 5，持久化 app_kv；GET/PUT /api/settings/debate-rounds）
   - Kimi 官方已联调 kimi-k3：推理模型只接受 temperature=1（客户端不传 temperature）；JSON 解析增加"提取 JSON 块"兜底；讨论/初稿 max_tokens 上调以容纳推理 token

@@ -140,11 +140,12 @@ function fmt(v) {
 function actorName(m) {
   if (m.actor === 'kimi') return 'Kimi'
   if (m.actor === 'deepseek') return 'DeepSeek'
+  if (m.actor === 'system') return '系统'
   return m.actor
 }
 
 function kindName(k) {
-  return { draft: '初稿', critique: '评审', revise: '修订' }[k] || k
+  return { draft: '初稿', critique: '评审', revise: '修订', note: '说明' }[k] || k
 }
 
 function textarea() {
