@@ -103,10 +103,17 @@ def feedback(draft_id: int, payload: FeedbackIn, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[DraftOut])
-def list_drafts(status: str = "", limit: int = 100, db: Session = Depends(get_db)):
+def list_drafts(
+    status: str = "",
+    video_id: int | None = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
     q = db.query(Draft)
     if status:
         q = q.filter(Draft.status == status)
+    if video_id is not None:
+        q = q.filter(Draft.video_id == video_id)
     return q.order_by(Draft.updated_at.desc()).limit(limit).all()
 
 

@@ -76,6 +76,19 @@
           </div>
         </div>
 
+        <div v-if="linkedDrafts.length" class="form-item">
+          <label class="form-label">已关联脚本（点击打开）</label>
+          <div class="row" style="gap: 6px">
+            <n-button
+              v-for="d in linkedDrafts"
+              :key="d.id"
+              size="tiny"
+              secondary
+              @click="goDraft(d.id)"
+            >#{{ d.id }} {{ d.title || '（无标题）' }}</n-button>
+          </div>
+        </div>
+
         <div class="form-grid">
           <div class="form-item">
             <label class="form-label">平台（可多选）</label>
@@ -140,6 +153,7 @@ const file = ref(null)
 const fileInput = ref(null)
 const coverInput = ref(null)
 const editing = ref(null)
+const linkedDrafts = ref([])
 const orig = ref(null)
 const showEdit = ref(false)
 const tagsText = ref('')
@@ -244,12 +258,23 @@ async function removeCover() {
   }
 }
 
+function goDraft(id) {
+  showEdit.value = false
+  editing.value = null
+  location.hash = `#/drafts?id=${id}`
+}
+
 async function openEdit(v) {
   let detail = v
   try {
     detail = await api('/api/videos/' + v.id)
   } catch {
     /* 列表数据已够用 */
+  }
+  try {
+    linkedDrafts.value = await api(`/api/drafts?video_id=${v.id}&limit=20`)
+  } catch {
+    linkedDrafts.value = []
   }
   const tr = detail.transcript
   editing.value = {
@@ -281,6 +306,7 @@ function closeEdit() {
   showEdit.value = false
   editing.value = null
   orig.value = null
+  linkedDrafts.value = []
 }
 
 async function saveEdit() {

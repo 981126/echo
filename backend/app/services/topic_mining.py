@@ -39,13 +39,37 @@ class MockHotSource(BaseHotSource):
     name = "mock"
 
     def fetch(self) -> list[HotItem]:
-        return [
-            HotItem("douyin", "2026 年最难求职季，应届生怎么办"),
-            HotItem("bilibili", "面试官最反感的 5 个回答，别再踩坑"),
-            HotItem("xiaohongshu", "普通人如何靠副业月入过万？"),
-            HotItem("douyin", "AI 正在取代哪些岗位？",
-                    "热", "https://example.com/ai-jobs"),
+        pool = [
+            ("douyin", "大厂秋招缩编，应届生该先就业还是再等等"),
+            ("douyin", "月薪 8 千和 1 万五的 offer 怎么选"),
+            ("douyin", "裸辞一年后我后悔了吗"),
+            ("douyin", "35 岁转行还来得及吗"),
+            ("douyin", "面试被问离职原因，怎么答不扣分"),
+            ("douyin", "简历上哪些词一写就废"),
+            ("douyin", "HR 筛简历 10 秒看什么"),
+            ("douyin", "谈薪时说这句话，直接少拿两千"),
+            ("bilibili", "程序员 35 岁危机是伪命题吗"),
+            ("bilibili", "副业月入过万的真实成本"),
+            ("bilibili", "知识博主日更 30 天的变化"),
+            ("bilibili", "转行程序员一年后我后悔了吗"),
+            ("bilibili", "为什么你面试总挂在同一轮"),
+            ("bilibili", "普通人 3 个月学会一项能赚钱的技能"),
+            ("bilibili", "上班摸鱼搞副业，被发现了怎么办"),
+            ("bilibili", "用 AI 写脚本前，先搞懂这 3 件事"),
+            ("xiaohongshu", "应届生第一份工作：大厂还是小厂"),
+            ("xiaohongshu", "谈薪时最不该说的一句话"),
+            ("xiaohongshu", "面试被问职业规划怎么答不扣分"),
+            ("xiaohongshu", "下班副业从哪开始：先做这 3 件事"),
+            ("xiaohongshu", "简历别造假，但要学会'会写'"),
+            ("xiaohongshu", "文科生能转的 6 个高薪方向"),
+            ("xiaohongshu", "打工人时间管理：下班后 2 小时怎么用"),
+            ("xiaohongshu", "搞副业先别辞职，除非你算清这笔账"),
+            ("douyin", "AI 正在取代哪些岗位，别慌先看这个"),
+            ("douyin", "为什么你的内容没人看：选题在作祟"),
+            ("bilibili", "口播脚本怎么写得像说话，而不是像作文"),
+            ("xiaohongshu", "普通人做自媒体的第一个月怎么熬"),
         ]
+        return [HotItem(plat, title, "热", "https://example.com/hot") for plat, title in pool]
 
 
 class BilibiliHotSource(BaseHotSource):

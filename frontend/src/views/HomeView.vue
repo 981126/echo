@@ -37,13 +37,16 @@
 
     <div class="toolbar" style="margin-top: 24px">
       <span class="section-title" style="margin: 0">热点选题</span>
-      <n-button size="small" secondary :loading="refreshing" @click="refreshHot">刷新</n-button>
+      <n-select v-model:value="platFilter" :options="platOptions" placeholder="全部平台" clearable style="width: 140px" @update:value="shuffle" />
+      <n-button size="small" secondary @click="shuffle">换一批</n-button>
+      <n-button size="small" secondary :loading="refreshing" @click="refreshHot">抓取更新</n-button>
+      <span class="muted">共 {{ shownHot.length }} 条</span>
     </div>
     <div class="panel">
-      <div v-if="!hotItems.length" class="empty">暂无热点，点「刷新」抓取</div>
+      <div v-if="!shownHot.length" class="empty">暂无热点，点「抓取更新」</div>
       <div v-else class="hot-tags">
         <button
-          v-for="h in hotItems"
+          v-for="h in shownHot"
           :key="h.id"
           class="hot-tag"
           :disabled="generatingTitle !== null"
@@ -64,8 +67,30 @@ import { api } from '../api'
 
 const videos = ref([])
 const hotItems = ref([])
+const platFilter = ref(null)
+const batch = ref(0)
+const platOptions = [
+  { label: '抖音', value: 'douyin' },
+  { label: 'B站', value: 'bilibili' },
+  { label: '小红书', value: 'xiaohongshu' }
+]
 const refreshing = ref(false)
 const generatingTitle = ref(null)
+
+const shownHot = computed(() => {
+  let list = hotItems.value
+  if (platFilter.value) list = list.filter(h => h.platform === platFilter.value)
+  const arr = [...list]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr.slice(0, 15)
+})
+
+function shuffle() {
+  batch.value++
+}
 const message = useMessage()
 
 const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
