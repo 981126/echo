@@ -90,3 +90,10 @@
 ## [M10 补充] 2026-09-03 — 人设档案可编辑/删除（R-002 增强）
 - 已确认人设标签支持编辑（标签/描述/类别）与删除（弹框 + 二次确认）
 - 修复手动添加人设标签 500（schema 默认 source 与 kwargs 重复）
+
+## [M11] 2026-09-04 — 双模型讨论生成（R-023）
+- 接入 Kimi（Moonshot，OpenAI 兼容）：ECHO_KIMI_API_KEY/BASE_URL/MODEL 可配任意模型；DeepSeek 模型名同样 env 可配
+- 生成流程升级：初稿（生成方）→ 评审方按人设/素材挑刺 → 生成方修订，共 5 轮 → 定稿
+- 讨论逐条入库 draft_discussions 留痕；草稿弹框新增「讨论」tab，聊天式查看每轮初稿/评审/修订
+- 生成模型策略可切换：固定 DeepSeek / 固定 Kimi / 随机 / 轮流（页面选择器 + ECHO_GENERATION_MODEL）
+- 任一方失败自动降级单模型并完成；未配 Kimi 时自动用 DeepSeek
