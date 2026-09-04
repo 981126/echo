@@ -43,7 +43,7 @@ class DraftCreate(BaseModel):
     cover_text: str = ""
     script: str = ""
     platform_shells: dict = {}
-    status: str = Field(default="draft", pattern="^(draft|used|archived)$")
+    status: str = Field(default="draft", pattern="^(draft|used|archived|deleted)$")
 
 
 class DraftUpdate(BaseModel):
@@ -52,4 +52,4 @@ class DraftUpdate(BaseModel):
     cover_text: Optional[str] = None
     script: Optional[str] = None
     platform_shells: Optional[dict] = None
-    status: Optional[str] = Field(default=None, pattern="^(draft|used|archived)$")
+    status: Optional[str] = Field(default=None, pattern="^(draft|used|archived|deleted)$")

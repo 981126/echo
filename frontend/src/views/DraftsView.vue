@@ -14,10 +14,9 @@
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
             <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }}</p>
             <div class="tile-actions" @click.stop>
-              <n-button size="small" type="primary" ghost @click="open(d)">编辑</n-button>
-              <n-button v-if="discussionCount(d.id)" size="small" secondary @click="openDiscussion(d)">讨论</n-button>
               <n-button size="small" secondary @click="markUsed(d)">✅ 采用</n-button>
-              <n-button size="small" secondary type="error" @click="markArchived(d)">不采用</n-button>
+              <n-button size="small" secondary @click="markArchived(d)">不采用</n-button>
+              <n-button size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
             </div>
             <div class="tile-rate" @click.stop>
               <span class="muted">打分</span>
@@ -35,24 +34,23 @@
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
             <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }}</p>
             <div class="tile-actions" @click.stop>
-              <n-button size="small" type="primary" ghost @click="open(d)">编辑</n-button>
-              <n-button v-if="discussionCount(d.id)" size="small" secondary @click="openDiscussion(d)">讨论</n-button>
               <n-button size="small" secondary @click="markArchived(d)">移入废稿</n-button>
+              <n-button size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
             </div>
           </div>
         </div>
       </n-tab-pane>
 
-      <n-tab-pane name="archived" :tab="`废稿 (${list('archived').length})`">
+      <n-tab-pane name="archived" :tab="`废稿/已删除 (${list('archived').length})`">
         <div v-if="!list('archived').length" class="panel empty">废稿箱是空的</div>
         <div class="grid">
           <div v-for="d in list('archived')" :key="d.id" class="card-tile" @click="open(d)">
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
             <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }}</p>
             <div class="tile-actions" @click.stop>
-              <n-button size="small" type="primary" ghost @click="open(d)">查看</n-button>
-              <n-button v-if="discussionCount(d.id)" size="small" secondary @click="openDiscussion(d)">讨论</n-button>
+              <n-tag v-if="d.status === 'deleted'" size="small" :bordered="false" round type="error">已删除</n-tag>
               <n-button size="small" secondary @click="restore(d)">恢复为草稿</n-button>
+              <n-button v-if="d.status !== 'deleted'" size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
             </div>
           </div>
         </div>
@@ -166,6 +164,9 @@ let pollTimer = null
 const isPending = computed(() => (editing.value?.script || '').includes('双模型讨论生成中'))
 
 function list(status) {
+  if (status === 'archived') {
+    return drafts.value.filter(d => d.status === 'archived' || d.status === 'deleted')
+  }
   return drafts.value.filter(d => d.status === status)
 }
 function discussionCount(id) {
@@ -265,6 +266,12 @@ async function markArchived(d) {
 async function restore(d) {
   await setStatus(d.id, 'draft')
   message.success('已恢复为草稿')
+  load()
+}
+
+async function softDelete(d) {
+  await setStatus(d.id, 'deleted')
+  message.success('已删除（逻辑删除，可在废稿/已删除中恢复）')
   load()
 }
 
