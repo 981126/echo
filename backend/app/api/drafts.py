@@ -61,6 +61,15 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
     return {"task_id": task_id, "draft_id": draft.id}
 
 
+@router.get("/{draft_id}/debate-status", response_model=dict)
+def debate_status(draft_id: int, db: Session = Depends(get_db)):
+    """当前双模型讨论进行到哪一步（思考中提示）。"""
+    from ..models.kv import Kv
+
+    row = db.get(Kv, f"debate:{draft_id}")
+    return {"status": row.value if row else None}
+
+
 @router.get("/{draft_id}/discussions", response_model=list[dict])
 def list_discussions(draft_id: int, db: Session = Depends(get_db)):
     """脚本讨论留痕（R-023）：按轮次返回聊天式消息。"""

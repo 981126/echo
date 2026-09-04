@@ -60,6 +60,49 @@ def _add(db: Session, draft_id: int, round_no: int, actor: str, kind: str, conte
     db.commit()
 
 
+def _note(db: Session, draft_id: int, round_no: int, text: str) -> None:
+    _add(db, draft_id, round_no, "system", "note", text)
+
+
+def _status(db: Session, draft_id: int, text: str) -> None:
+    """把"当前正在做什么"写入 Kv，供前端讨论页显示思考中状态。"""
+    key = f"debate:{draft_id}"
+    row = db.get(Kv, key)
+    if row is None:
+        db.add(Kv(key=key, value=text))
+    else:
+        row.value = text
+    db.commit()
+
+
+def _clear_status(db: Session, draft_id: int) -> None:
+    row = db.get(Kv, f"debate:{draft_id}")
+    if row is not None:
+        db.delete(row)
+        db.commit()
+
+
+def _chat_once(llm, system: str, user: str, temperature: float, max_tokens: int) -> str:
+    """单次调用 + 一次瞬时失败重试；仍失败抛 LLMError。"""
+    from .llm import LLMError
+
+    last: Exception | None = None
+    for _ in range(2):
+        try:
+            out = llm.chat(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if out and out.strip():
+                return out.strip()
+        except LLMError as e:
+            last = e
+        except Exception as e:  # noqa: BLE001
+            last = e
+    raise LLMError(str(last) or "调用失败/返回为空")
+
+
 def run_debate_draft(db: Session, payload: dict) -> dict:
     """后台任务体：payload {draft_id, topic}。"""
     draft = db.get(Draft, int(payload.get("draft_id") or 0))
@@ -78,20 +121,20 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
     gen_llm = get_llm(gen, settings)
     critic_llm = get_llm(critic, settings)
 
-    # 1) 初稿：优先生成方，失败换评审方（降级）
+    # 1) 初稿：优先生成方，失败换评审方（降级，且失败留痕）
     initial = None
+    initial_system = get_prompt("generation", db)
+    initial_user = (
+        f"选题：{topic}\n\n作者人设：\n{persona_text}\n\n"
+        f"红线（不要违反）：\n{red_text}\n\n作者语言习惯（必须模仿）：\n{style_note}"
+    )
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
+        _status(db, draft.id, f"{name.upper()} 正在起草初稿…（生成方 {gen.upper()}）")
         try:
             data = llm.chat_json(
                 [
-                    {"role": "system", "content": get_prompt("generation", db)},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"选题：{topic}\n\n作者人设：\n{persona_text}\n\n"
-                            f"红线（不要违反）：\n{red_text}\n\n作者语言习惯（必须模仿）：\n{style_note}"
-                        ),
-                    },
+                    {"role": "system", "content": initial_system},
+                    {"role": "user", "content": initial_user},
                 ],
                 temperature=0.8,
                 max_tokens=3200,
@@ -103,8 +146,8 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
                 "script": str(data.get("script", "")).strip(),
             }
             break
-        except Exception:
-            continue
+        except Exception as exc:  # noqa: BLE001
+            _note(db, draft.id, 0, f"{name} 初稿失败：{str(exc)[:200]}；切换下一位")
     if not initial:
         raise LLMError("DeepSeek 与 Kimi 初稿生成均失败")
 
@@ -133,40 +176,29 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
     rounds = max(1, min(int(rounds), 10))
     latest = draft.script
     for r in range(1, rounds + 1):
+        _status(db, draft.id, f"{critic.upper()} 正在评审第 {r}/{rounds} 轮…")
         try:
-            critique = critic_llm.chat(
-                [
-                    {"role": "system", "content": critic_system},
-                    {"role": "user", "content": f"当前脚本：\n{latest}"},
-                ],
-                temperature=0.4,
-                max_tokens=3000,
-            )
-        except Exception:
-            break  # 评审方不可用：以当前稿定稿
-        if not critique.strip():
-            _add(db, draft.id, r, "system", "critique", "（评审返回为空，跳过本轮）")
+            critique = _chat_once(critic_llm, critic_system, f"当前脚本：\n{latest}", 0.4, 3000)
+        except Exception as exc:  # noqa: BLE001
+            _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
             break
-        _add(db, draft.id, r, critic, "critique", critique.strip())
+        _add(db, draft.id, r, critic, "critique", critique)
+        _status(db, draft.id, f"{gen.upper()} 正在按评审修订第 {r}/{rounds} 轮…")
         try:
-            revised = gen_llm.chat(
-                [
-                    {"role": "system", "content": revise_system},
-                    {
-                        "role": "user",
-                        "content": f"评审意见：\n{critique}\n\n当前脚本：\n{latest}",
-                    },
-                ],
-                temperature=0.7,
-                max_tokens=4200,
+            revised = _chat_once(
+                gen_llm,
+                revise_system,
+                f"评审意见：\n{critique}\n\n当前脚本：\n{latest}",
+                0.7,
+                4200,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")
             break
-        if not revised.strip():
-            break
-        latest = revised.strip()
+        latest = revised
         draft.script = latest
         db.commit()
         _add(db, draft.id, r, gen, "revise", latest)
 
+    _clear_status(db, draft.id)
     return {"draft_id": draft.id, "title": draft.title}

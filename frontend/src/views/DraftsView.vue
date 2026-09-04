@@ -93,7 +93,8 @@
                 </div>
                 <div class="discuss-body" style="white-space: pre-wrap">{{ m.content }}</div>
               </div>
-              <div v-if="isPending" class="empty" style="padding: 12px 0">模型讨论中，正在留痕…</div>
+              <div v-if="debateStatus" class="empty" style="padding: 12px 0; color: var(--warn)">⏳ {{ debateStatus }}</div>
+              <div v-else-if="isPending" class="empty" style="padding: 12px 0">模型讨论中，正在留痕…</div>
             </div>
           </n-tab-pane>
         </n-tabs>
@@ -114,6 +115,7 @@ const showEdit = ref(false)
 const editTab = ref('edit')
 const discussions = ref([])
 const discussionsMap = ref({})
+const debateStatus = ref('')
 const preview = ref(false)
 const scriptInput = ref(null)
 const imgInput = ref(null)
@@ -169,6 +171,16 @@ async function loadDiscussions(id) {
   const rows = await api(`/api/drafts/${id}/discussions`)
   discussions.value = rows
   discussionsMap.value = { ...discussionsMap.value, [id]: rows }
+  await fetchStatus(id)
+}
+
+async function fetchStatus(id) {
+  try {
+    const r = await api(`/api/drafts/${id}/debate-status`)
+    debateStatus.value = r.status || ''
+  } catch {
+    debateStatus.value = ''
+  }
 }
 
 async function createDraft() {
@@ -196,6 +208,7 @@ function openDiscussion(d) {
 function closeEdit() {
   showEdit.value = false
   editing.value = null
+  debateStatus.value = ''
 }
 
 function wrap(prefix, suffix, placeholder) {
@@ -292,6 +305,7 @@ async function poll() {
     const rows = await api(`/api/drafts/${id}/discussions`)
     discussionsMap.value = { ...discussionsMap.value, [id]: rows }
     if (editTab.value === 'discuss') discussions.value = rows
+    await fetchStatus(id)
   } catch {
     /* 忽略轮询错误 */
   }
