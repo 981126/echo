@@ -370,3 +370,11 @@ details.fold { margin-top: 8px; }
 .dview span { display: block; white-space: pre-wrap; }
 .dview .d-add { background: var(--ok-soft); color: var(--ok); }
 .dview .d-del { background: var(--danger-soft); color: var(--danger); text-decoration: line-through; }
+
+/* 双模型讨论（R-023） */
+.discuss-box { max-height: 54vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px; }
+.discuss-msg { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
+.discuss-msg.kimi { border-left-color: #7c5cbf; }
+.discuss-msg.deepseek { border-left-color: var(--accent); }
+.discuss-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.discuss-body { font-size: 13px; line-height: 1.7; color: var(--ink-soft); }

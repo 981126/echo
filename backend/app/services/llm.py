@@ -1,4 +1,8 @@
-"""DeepSeek LLM 适配器（OpenAI 兼容接口）。"""
+"""LLM 适配器（OpenAI 兼容接口）：DeepSeek / Kimi 可插拔（R-023）。
+
+DeepSeek 与 Kimi 均为 OpenAI 兼容 API；统一实现，
+密钥/地址/模型名全部走 .env（ECHO_DEEPSEEK_* / ECHO_KIMI_*）。
+"""
 
 from __future__ import annotations
 
@@ -13,17 +17,21 @@ class LLMError(RuntimeError):
     pass
 
 
-class DeepSeekClient:
-    def __init__(self, settings=None):
-        self.settings = settings or get_settings()
+class OpenAIClient:
+    """OpenAI 兼容客户端（chat completions）。"""
+
+    def __init__(self, base_url: str, api_key: str, model: str):
+        self.base_url = (base_url or "").rstrip("/")
+        self.api_key = api_key or ""
+        self.model = model or ""
 
     def _post(self, payload: dict) -> dict:
-        if not self.settings.deepseek_api_key:
-            raise LLMError("未配置 ECHO_DEEPSEEK_API_KEY")
-        with httpx.Client(timeout=120) as client:
+        if not self.api_key:
+            raise LLMError("未配置 API Key")
+        with httpx.Client(timeout=180) as client:
             resp = client.post(
-                f"{self.settings.deepseek_base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {self.settings.deepseek_api_key}"},
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
                 json=payload,
             )
             resp.raise_for_status()
@@ -37,9 +45,8 @@ class DeepSeekClient:
         max_tokens: int = 2000,
         tools: list[dict] | None = None,
     ) -> dict:
-        """返回 choices[0].message（可能含 tool_calls）。"""
         payload = {
-            "model": self.settings.deepseek_model,
+            "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -63,7 +70,7 @@ class DeepSeekClient:
 
     def _chat_json(self, messages: list[dict], temperature: float, max_tokens: int) -> dict:
         payload = {
-            "model": self.settings.deepseek_model,
+            "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -86,3 +93,23 @@ class DeepSeekClient:
         if not isinstance(result, dict):
             raise LLMError("模型返回非对象 JSON")
         return result
+
+
+class DeepSeekClient(OpenAIClient):
+    def __init__(self, settings=None):
+        s = settings or get_settings()
+        super().__init__(s.deepseek_base_url, s.deepseek_api_key, s.deepseek_model)
+
+
+class KimiClient(OpenAIClient):
+    def __init__(self, settings=None):
+        s = settings or get_settings()
+        super().__init__(s.kimi_base_url, s.kimi_api_key, s.kimi_model)
+
+
+def get_llm(name: str, settings=None):
+    """按名字取客户端：deepseek | kimi。"""
+    name = (name or "").lower()
+    if name == "kimi":
+        return KimiClient(settings)
+    return DeepSeekClient(settings)

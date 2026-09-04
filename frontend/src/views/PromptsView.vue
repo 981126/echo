@@ -3,6 +3,11 @@
     <h1 class="page-title">AI 提示词</h1>
     <p class="page-sub">查看/编辑各功能提示词；上传新视频会自动产出候选版（不直接启用）</p>
 
+    <div class="toolbar">
+      <span class="muted">生成模型策略：</span>
+      <n-select v-model:value="genMode" :options="modeOptions" style="width: 200px" @update:value="saveMode" />
+    </div>
+
     <n-tabs v-model:value="activeKey" type="line" animated>
       <n-tab-pane v-for="item in items" :key="item.key" :name="item.key" :tab="item.label">
         <div class="panel">
@@ -76,6 +81,13 @@ const activeKey = ref('generation')
 const editing = ref({})
 const optimizingKey = ref(null)
 const message = useMessage()
+const genMode = ref('deepseek')
+const modeOptions = [
+  { label: 'DeepSeek（Kimi 评审）', value: 'deepseek' },
+  { label: 'Kimi（DeepSeek 评审）', value: 'kimi' },
+  { label: '随机生成方', value: 'random' },
+  { label: '轮流生成方', value: 'alternate' }
+]
 
 function fmt(v) {
   return v ? v.replace('T', ' ').slice(0, 16) : ''
@@ -99,6 +111,24 @@ function prefix(type) {
   if (type === 'add') return '+ '
   if (type === 'del') return '- '
   return '  '
+}
+
+async function loadMode() {
+  try {
+    const r = await api('/api/settings/generation-model')
+    genMode.value = r.mode
+  } catch {
+    /* ignore */
+  }
+}
+
+async function saveMode(mode) {
+  try {
+    await api('/api/settings/generation-model', { method: 'PUT', body: JSON.stringify({ mode }) })
+    message.success('已切换生成模型策略')
+  } catch (e) {
+    message.error(e.message)
+  }
 }
 
 async function load() {
@@ -140,5 +170,5 @@ async function enable(item, version) {
   await load()
 }
 
-onMounted(load)
+onMounted(() => { load(); loadMode() })
 </script>

@@ -41,21 +41,48 @@ def generate(payload: GenerateIn, db: Session = Depends(get_db)):
     return generate_draft(db, payload.topic)
 
 
-def _generate_task(db: Session, payload: dict) -> dict:
-    from ..services.generation import generate_draft
-
-    draft = generate_draft(db, str(payload.get("topic", "")).strip())
-    return {"draft_id": draft.id, "title": draft.title}
-
-
 @router.post("/generate-async", response_model=dict)
 def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
-    """后台生成草稿：完成后右上角通知并跳转草稿（R-019）。"""
+    """双模型讨论生成（R-023）：先建占位草稿，后台 初稿→5轮讨论→定稿；完成后通知跳转草稿。"""
+    from ..services.debate import run_debate_draft
+
     topic = (payload.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="选题不能为空")
-    task_id = start_task("generate_draft", {"topic": topic}, _generate_task)
-    return {"task_id": task_id}
+    draft = Draft(title=topic, cover_text="", script="（双模型讨论生成中…）", source="ai")
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    task_id = start_task(
+        "generate_draft",
+        {"draft_id": draft.id, "topic": topic},
+        run_debate_draft,
+    )
+    return {"task_id": task_id, "draft_id": draft.id}
+
+
+@router.get("/{draft_id}/discussions", response_model=list[dict])
+def list_discussions(draft_id: int, db: Session = Depends(get_db)):
+    """脚本讨论留痕（R-023）：按轮次返回聊天式消息。"""
+    from ..models.discussion import DraftDiscussion
+
+    rows = (
+        db.query(DraftDiscussion)
+        .filter(DraftDiscussion.draft_id == draft_id)
+        .order_by(DraftDiscussion.id)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "round": r.round,
+            "actor": r.actor,
+            "kind": r.kind,
+            "content": r.content,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
 
 
 @router.post("/{draft_id}/feedback", response_model=dict)

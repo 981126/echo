@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .chat import ChatMessage
+from .discussion import DraftDiscussion
 from .draft import Draft
 from .feedback import Feedback
 from .hot_topic import HotTopic, TopicCandidate
@@ -21,6 +22,7 @@ __all__ = [
     "Notification",
     "AiPrompt",
     "Draft",
+    "DraftDiscussion",
     "ChatMessage",
     "HotTopic",
     "Kv",

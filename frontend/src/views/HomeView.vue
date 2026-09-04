@@ -161,7 +161,7 @@ async function genFromHot(h) {
   generatingTitle.value = h.title
   try {
     const r = await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic: h.title }) })
-    message.success('已提交后台生成，完成后右上角通知你')
+    message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你')
   } catch (e) {
     message.error('提交失败：' + e.message)
   } finally {
