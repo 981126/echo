@@ -13,6 +13,27 @@ import httpx
 from ..config import get_settings
 
 
+
+
+def _parse_json(raw: str):
+    """解析 JSON：先整体解析，失败则提取首尾大括号块（兼容推理模型前后缀）。"""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
 class LLMError(RuntimeError):
     pass
 
@@ -20,10 +41,12 @@ class LLMError(RuntimeError):
 class OpenAIClient:
     """OpenAI 兼容客户端（chat completions）。"""
 
-    def __init__(self, base_url: str, api_key: str, model: str):
+    def __init__(self, base_url: str, api_key: str, model: str, supports_temperature: bool = True):
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = api_key or ""
         self.model = model or ""
+        # 推理模型（如 kimi-k3）只允许 temperature=1 → 不传该参数
+        self.supports_temperature = supports_temperature
 
     def _post(self, payload: dict) -> dict:
         if not self.api_key:
@@ -45,12 +68,9 @@ class OpenAIClient:
         max_tokens: int = 2000,
         tools: list[dict] | None = None,
     ) -> dict:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
+        payload = {"model": self.model, "messages": messages, "max_tokens": max_tokens}
+        if self.supports_temperature:
+            payload["temperature"] = temperature
         if tools:
             payload["tools"] = tools
         return self._post(payload)
@@ -69,13 +89,10 @@ class OpenAIClient:
         return (message.get("content") or "").strip()
 
     def _chat_json(self, messages: list[dict], temperature: float, max_tokens: int) -> dict:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
-        }
+        payload = {"model": self.model, "messages": messages, "max_tokens": max_tokens}
+        if self.supports_temperature:
+            payload["temperature"] = temperature
+            payload["response_format"] = {"type": "json_object"}
         return self._post(payload)
 
     def chat_json(
@@ -86,12 +103,9 @@ class OpenAIClient:
     ) -> dict:
         message = self._chat_json(messages, temperature, max_tokens)
         raw = (message.get("content") or "").strip()
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise LLMError("模型未返回合法 JSON") from exc
+        result = _parse_json(raw)
         if not isinstance(result, dict):
-            raise LLMError("模型返回非对象 JSON")
+            raise LLMError("模型未返回合法 JSON")
         return result
 
 
@@ -104,7 +118,8 @@ class DeepSeekClient(OpenAIClient):
 class KimiClient(OpenAIClient):
     def __init__(self, settings=None):
         s = settings or get_settings()
-        super().__init__(s.kimi_base_url, s.kimi_api_key, s.kimi_model)
+        # kimi 推理模型只接受 temperature=1 → 不传 temperature
+        super().__init__(s.kimi_base_url, s.kimi_api_key, s.kimi_model, supports_temperature=False)
 
 
 def get_llm(name: str, settings=None):

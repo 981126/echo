@@ -6,6 +6,10 @@
 - **状态**: ✅ 已完成
 - **排期**: M11
 - **关联**: PRD §3.4/§5（已更新）
+- **追问补充（2026-09-04）**：
+  - 讨论轮次改为页面可配（1-10，默认 5，持久化 app_kv；GET/PUT /api/settings/debate-rounds）
+  - Kimi 官方已联调 kimi-k3：推理模型只接受 temperature=1（客户端不传 temperature）；JSON 解析增加"提取 JSON 块"兜底；讨论/初稿 max_tokens 上调以容纳推理 token
+  - 已验证：Kimi 普通对话/JSON/双模型留痕均正常；任一方失败自动降级
 - **反问与确认**:
   - Kimi 官方 Moonshot 接口，模型名任意可配（ECHO_KIMI_*）；DeepSeek 亦可用 ECHO_DEEPSEEK_MODEL 配任意模型
   - 生成方：固定 DeepSeek / 固定 Kimi / 随机 / 轮流（页面可切）

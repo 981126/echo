@@ -94,7 +94,7 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
                     },
                 ],
                 temperature=0.8,
-                max_tokens=2500,
+                max_tokens=3200,
             )
             initial = {
                 "model": name,
@@ -126,7 +126,11 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
         f"作者语言习惯（必须模仿）：\n{style_note}"
     )
 
-    rounds = max(int(getattr(settings, "debate_rounds", 5) or 0), 1)
+    kv_rounds = db.get(Kv, "debate_rounds")
+    rounds = int(kv_rounds.value) if kv_rounds and str(kv_rounds.value).isdigit() else int(
+        getattr(settings, "debate_rounds", 5) or 5
+    )
+    rounds = max(1, min(int(rounds), 10))
     latest = draft.script
     for r in range(1, rounds + 1):
         try:
@@ -136,11 +140,12 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
                     {"role": "user", "content": f"当前脚本：\n{latest}"},
                 ],
                 temperature=0.4,
-                max_tokens=1200,
+                max_tokens=3000,
             )
         except Exception:
             break  # 评审方不可用：以当前稿定稿
         if not critique.strip():
+            _add(db, draft.id, r, "system", "critique", "（评审返回为空，跳过本轮）")
             break
         _add(db, draft.id, r, critic, "critique", critique.strip())
         try:
@@ -153,7 +158,7 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
                     },
                 ],
                 temperature=0.7,
-                max_tokens=3000,
+                max_tokens=4200,
             )
         except Exception:
             break

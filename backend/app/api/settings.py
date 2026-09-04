@@ -19,6 +19,10 @@ class ModeIn(BaseModel):
     mode: str = Field(pattern="^(deepseek|kimi|random|alternate)$")
 
 
+class RoundsIn(BaseModel):
+    rounds: int = Field(default=5, ge=1, le=10)
+
+
 @router.get("/generation-model", response_model=dict)
 def get_mode(db: Session = Depends(get_db)):
     row = db.get(Kv, "generation_model")
@@ -36,3 +40,24 @@ def set_mode(payload: ModeIn, db: Session = Depends(get_db)):
         row.value = payload.mode
     db.commit()
     return {"mode": payload.mode}
+
+
+@router.get("/debate-rounds", response_model=dict)
+def get_rounds(db: Session = Depends(get_db)):
+    row = db.get(Kv, "debate_rounds")
+    rounds = int(row.value) if row and str(row.value).isdigit() else int(
+        get_settings().debate_rounds or 5
+    )
+    return {"rounds": max(1, min(rounds, 10)), "min": 1, "max": 10}
+
+
+@router.put("/debate-rounds", response_model=dict)
+def set_rounds(payload: RoundsIn, db: Session = Depends(get_db)):
+    row = db.get(Kv, "debate_rounds")
+    if row is None:
+        row = Kv(key="debate_rounds", value=str(payload.rounds))
+        db.add(row)
+    else:
+        row.value = str(payload.rounds)
+    db.commit()
+    return {"rounds": payload.rounds}

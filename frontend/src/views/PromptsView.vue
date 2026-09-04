@@ -6,6 +6,8 @@
     <div class="toolbar">
       <span class="muted">生成模型策略：</span>
       <n-select v-model:value="genMode" :options="modeOptions" style="width: 200px" @update:value="saveMode" />
+      <span class="muted">讨论轮次：</span>
+      <n-input-number v-model:value="debateRounds" :min="1" :max="10" style="width: 90px" @update:value="saveRounds" />
     </div>
 
     <n-tabs v-model:value="activeKey" type="line" animated>
@@ -82,6 +84,7 @@ const editing = ref({})
 const optimizingKey = ref(null)
 const message = useMessage()
 const genMode = ref('deepseek')
+const debateRounds = ref(5)
 const modeOptions = [
   { label: 'DeepSeek（Kimi 评审）', value: 'deepseek' },
   { label: 'Kimi（DeepSeek 评审）', value: 'kimi' },
@@ -119,6 +122,24 @@ async function loadMode() {
     genMode.value = r.mode
   } catch {
     /* ignore */
+  }
+}
+
+async function loadRounds() {
+  try {
+    const r = await api('/api/settings/debate-rounds')
+    debateRounds.value = r.rounds
+  } catch {
+    /* ignore */
+  }
+}
+
+async function saveRounds(n) {
+  try {
+    await api('/api/settings/debate-rounds', { method: 'PUT', body: JSON.stringify({ rounds: n }) })
+    message.success('已更新讨论轮次')
+  } catch (e) {
+    message.error(e.message)
   }
 }
 
@@ -170,5 +191,5 @@ async function enable(item, version) {
   await load()
 }
 
-onMounted(() => { load(); loadMode() })
+onMounted(() => { load(); loadMode(); loadRounds() })
 </script>
