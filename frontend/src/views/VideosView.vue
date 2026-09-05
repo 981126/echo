@@ -113,16 +113,7 @@
             :transcribing="transcribing"
             @start="startTranscribe"
           />
-          <div class="form-item full" v-if="editing.transcriptText">
-            <label class="form-label">ASR 转写（只读）</label>
-            <div class="prose panel" style="margin-bottom: 0; background: var(--bg)">
-              <p style="white-space: pre-wrap">{{ editing.transcriptText }}</p>
-            </div>
-          </div>
-          <div class="form-item full">
-            <label class="form-label">原始文案（可选）</label>
-            <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
-          </div>
+          <TranscriptEditor :transcript-text="editing.transcriptText" :source-text="editing.sourceText" @update:sourceText="v => (editing.sourceText = v)" />
         </div>
         <EditActions :syncing="syncingEdit" @sync="syncEditLinks" @save="saveEdit" @cancel="closeEdit" />
           </n-tab-pane>
@@ -195,6 +186,7 @@ import CoverEditor from '../components/CoverEditor.vue'
 import TranscribeSection from '../components/TranscribeSection.vue'
 import PlatformLinksInput from '../components/PlatformLinksInput.vue'
 import EditActions from '../components/EditActions.vue'
+import TranscriptEditor from '../components/TranscriptEditor.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
