@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..services.creator_service import current_creator_id
 from ..models.draft import Draft
 from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
 from ..services.diff_analysis import apply_diff_suggestions
@@ -110,6 +111,9 @@ def list_drafts(
     db: Session = Depends(get_db),
 ):
     q = db.query(Draft)
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(Draft.creator_id == cid)
     if status:
         q = q.filter(Draft.status == status)
     if video_id is not None:
@@ -121,6 +125,7 @@ def list_drafts(
 def create_draft(payload: DraftCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
     data["platform_shells"] = json.dumps(data.get("platform_shells") or {}, ensure_ascii=False)
+    data["creator_id"] = current_creator_id(db)
     draft = Draft(**data)
     db.add(draft)
     db.commit()

@@ -33,6 +33,20 @@ def _daily_metrics_job() -> None:
         db.close()
 
 
+def _platform_sync_job() -> None:
+    """每日两轮平台数据同步（07:30/18:00，配置 ECHO_PLATFORM_SYNC_TIMES）。"""
+    from .tasks import start_task
+    from .services.platform_sync import run_sync
+
+    def fn(db, payload):
+        return run_sync(db, scope="daily")
+
+    try:
+        start_task("platform_sync", {"scope": "daily", "source": "scheduler"}, fn)
+    except Exception:  # noqa: BLE001  定时失败不拖垮进程（预算/无账号时静默）
+        pass
+
+
 def _backup_job() -> None:
     script = Path(__file__).resolve().parents[2] / "scripts" / "backup.sh"
     if script.exists():
@@ -49,6 +63,22 @@ def setup_scheduler() -> None:
     settings = get_settings()
     hour, minute = (int(x) for x in settings.daily_push_time.split(":"))
     _scheduler = BackgroundScheduler(timezone=settings.tz)
+    # M13（R-027）：每日平台数据同步两轮（默认 07:30/18:00）
+    for time_str in (settings.platform_sync_times or "07:30,18:00").split(","):
+        time_str = time_str.strip()
+        if ":" not in time_str:
+            continue
+        try:
+            sh, sm = (int(x) for x in time_str.split(":"))
+        except ValueError:
+            continue
+        _scheduler.add_job(
+            _platform_sync_job,
+            CronTrigger(hour=sh, minute=sm, timezone=settings.tz),
+            id=f"platform_sync_{time_str}",
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
     _scheduler.add_job(
         _daily_pipeline_job,
         CronTrigger(hour=hour, minute=minute, timezone=settings.tz),

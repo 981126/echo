@@ -15,6 +15,8 @@ KIND_LABELS = {
     "daily_pipeline": "每日流水线",
     "diff_analysis": "草稿差异分析",
     "generate_draft": "AI 文案生成",
+    "platform_sync": "平台数据同步",
+    "platform_sync_single": "素材数据同步",
 }
 
 
@@ -31,6 +33,8 @@ def _target(kind: str, payload: dict, result) -> str:
         if isinstance(result, dict) and result.get("draft_id"):
             return f"/drafts?id={result['draft_id']}"
         return "/drafts"
+    if kind in ("platform_sync", "platform_sync_single"):
+        return "/creators"
     return "/home"
 
 

@@ -1,0 +1,178 @@
+"""博主管理接口（M13，R-029）：主博主/对标 CRUD、切换（确认在页面）、账号配置。"""
+
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from ..db import get_db
+from ..models.platform import Creator, CreatorAccount
+from ..schemas.platform import AccountIn, AccountOut, CreatorIn, CreatorOut
+from ..services.creator_service import (
+    current_creator_id,
+    delete_creator,
+    ensure_only_one_owner_current,
+    list_creators_with_meta,
+    switch_current,
+)
+from ..services.platform.tikhub import parse_link
+
+router = APIRouter()
+
+
+@router.get("", response_model=list[dict])
+def list_creators(db: Session = Depends(get_db)):
+    return list_creators_with_meta(db)
+
+
+@router.get("/current", response_model=dict)
+def get_current(db: Session = Depends(get_db)):
+    cid = current_creator_id(db)
+    if cid is None:
+        return {"id": None, "name": ""}
+    c = db.get(Creator, cid)
+    if c is None:
+        return {"id": None, "name": ""}
+    return {"id": c.id, "name": c.name, "kind": c.kind}
+
+
+@router.post("", response_model=CreatorOut)
+def create_creator(payload: CreatorIn, db: Session = Depends(get_db)):
+    if payload.kind == "owner":
+        # 一个主博主只能有一个父级为空的 owner 自身（同平台多号 = 多个 owner）
+        if not payload.name.strip():
+            raise HTTPException(status_code=400, detail="主博主名称不能为空")
+    elif payload.kind == "benchmark":
+        if not payload.parent_id:
+            raise HTTPException(status_code=400, detail="对标博主必须挂在一个主博主下")
+        parent = db.get(Creator, payload.parent_id)
+        if parent is None or parent.kind != "owner":
+            raise HTTPException(status_code=400, detail="对标博主的主博主不存在")
+    else:
+        raise HTTPException(status_code=400, detail="kind 仅支持 owner/benchmark")
+    c = Creator(
+        kind=payload.kind,
+        parent_id=payload.parent_id if payload.kind == "benchmark" else None,
+        name=payload.name.strip() or "未命名",
+        note=payload.note.strip(),
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    ensure_only_one_owner_current(db)
+    return c
+
+
+@router.patch("/{creator_id}", response_model=CreatorOut)
+def update_creator(creator_id: int, payload: CreatorIn, db: Session = Depends(get_db)):
+    c = db.get(Creator, creator_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="博主不存在")
+    if payload.name is not None:
+        c.name = payload.name.strip() or c.name
+    if payload.note is not None:
+        c.note = payload.note.strip()
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.post("/{creator_id}/activate", response_model=CreatorOut)
+def activate_creator(creator_id: int, db: Session = Depends(get_db)):
+    """切换当前主博主（前端弹框确认后调用）。"""
+    return switch_current(db, creator_id)
+
+
+@router.delete("/{creator_id}", response_model=dict)
+def remove_creator(creator_id: int, db: Session = Depends(get_db)):
+    delete_creator(db, creator_id)
+    return {"ok": True}
+
+
+# ---------- 账号配置 ----------
+@router.get("/{creator_id}/accounts", response_model=list[AccountOut])
+def list_accounts(creator_id: int, db: Session = Depends(get_db)):
+    if db.get(Creator, creator_id) is None:
+        raise HTTPException(status_code=404, detail="博主不存在")
+    return (
+        db.query(CreatorAccount)
+        .filter(CreatorAccount.creator_id == creator_id)
+        .order_by(CreatorAccount.id)
+        .all()
+    )
+
+
+@router.post("/{creator_id}/accounts", response_model=AccountOut)
+def create_account(creator_id: int, payload: AccountIn, db: Session = Depends(get_db)):
+    if db.get(Creator, creator_id) is None:
+        raise HTTPException(status_code=404, detail="博主不存在")
+    dup = (
+        db.query(CreatorAccount)
+        .filter(CreatorAccount.creator_id == creator_id, CreatorAccount.platform == payload.platform)
+        .first()
+    )
+    if dup:
+        raise HTTPException(status_code=400, detail=f"该博主已配置 {payload.platform} 账号")
+    user_id = payload.platform_user_id
+    if payload.home_link and not user_id:
+        user_id = parse_link(payload.platform, payload.home_link)
+    a = CreatorAccount(
+        creator_id=creator_id,
+        platform=payload.platform,
+        nickname=payload.nickname.strip(),
+        home_link=payload.home_link.strip(),
+        platform_user_id=user_id,
+        extra_config=json.dumps(payload.extra_config or {}, ensure_ascii=False),
+        enabled=payload.enabled,
+        sync_frequency=payload.sync_frequency,
+    )
+    db.add(a)
+    db.commit()
+    db.refresh(a)
+    return a
+
+
+@router.patch("/accounts/{account_id}", response_model=AccountOut)
+def update_account(account_id: int, payload: AccountIn, db: Session = Depends(get_db)):
+    a = db.get(CreatorAccount, account_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    user_id = payload.platform_user_id
+    if payload.home_link and payload.home_link != a.home_link and not user_id:
+        user_id = parse_link(payload.platform or a.platform, payload.home_link)
+    a.nickname = payload.nickname.strip()
+    a.home_link = payload.home_link.strip()
+    if user_id:
+        a.platform_user_id = user_id
+    a.extra_config = json.dumps(payload.extra_config or {}, ensure_ascii=False)
+    a.enabled = payload.enabled
+    a.sync_frequency = payload.sync_frequency
+    db.commit()
+    db.refresh(a)
+    return a
+
+
+@router.delete("/accounts/{account_id}", response_model=dict)
+def remove_account(account_id: int, db: Session = Depends(get_db)):
+    a = db.get(CreatorAccount, account_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    db.delete(a)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/parse-link", response_model=dict)
+def parse_account_link(payload: dict, db: Session = Depends(get_db)):
+    platform = (payload.get("platform") or "").strip()
+    link = (payload.get("home_link") or "").strip()
+    if platform not in ("douyin", "xiaohongshu", "bilibili"):
+        raise HTTPException(status_code=400, detail="platform 仅支持 douyin/xiaohongshu/bilibili")
+    if not link:
+        raise HTTPException(status_code=400, detail="请填写主页分享链接")
+    uid = parse_link(platform, link)
+    if not uid:
+        raise HTTPException(status_code=400, detail="未能从链接解析出账号 ID（请直接粘贴主页分享链接，或手动填写平台用户 ID）")
+    return {"platform": platform, "platform_user_id": uid}

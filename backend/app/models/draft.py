@@ -15,6 +15,7 @@ class Draft(Base):
     __tablename__ = "drafts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    creator_id: Mapped[int | None] = mapped_column(ForeignKey("creators.id"), nullable=True, index=True)  # 归属主博主（M13，R-029）
     video_id: Mapped[int | None] = mapped_column(ForeignKey("videos.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="")
     cover_text: Mapped[str] = mapped_column(String(100), default="")

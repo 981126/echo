@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..services.creator_service import current_creator_id
 from ..models.persona import PersonaTag
 from ..schemas.persona import PersonaDecision, PersonaTagCreate, PersonaTagOut, PersonaTagUpdate
 from ..services.ingest import persona_init_task
@@ -17,6 +18,9 @@ router = APIRouter()
 @router.get("", response_model=list[PersonaTagOut])
 def list_persona(status: str = "", db: Session = Depends(get_db)):
     q = db.query(PersonaTag)
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
     if status:
         q = q.filter(PersonaTag.status == status)
     return q.order_by(PersonaTag.category, PersonaTag.id).all()
@@ -25,7 +29,7 @@ def list_persona(status: str = "", db: Session = Depends(get_db)):
 @router.post("/tags", response_model=PersonaTagOut)
 def add_manual_tag(payload: PersonaTagCreate, db: Session = Depends(get_db)):
     data = {k: v for k, v in payload.model_dump().items() if k != "source"}
-    tag = PersonaTag(**data, source="manual", status="confirmed")
+    tag = PersonaTag(**data, source="manual", status="confirmed", creator_id=current_creator_id(db))
     db.add(tag)
     db.commit()
     db.refresh(tag)
@@ -72,5 +76,5 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
 @router.post("/init")
 def init_persona(db: Session = Depends(get_db)):
     """用全部历史转写稿初始化/刷新人设档案（后台任务，建议非广告视频转写完成后调用）。"""
-    task_id = start_task("persona_init", {}, persona_init_task)
+    task_id = start_task("persona_init", {"creator_id": current_creator_id(db)}, persona_init_task)
     return {"task_id": task_id}

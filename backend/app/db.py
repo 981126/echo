@@ -59,6 +59,11 @@ def _migrate_videos() -> None:
             adds.append("main_topics TEXT NOT NULL DEFAULT '[]'")
         if "cover_path" not in cols:
             adds.append("cover_path VARCHAR(255) NOT NULL DEFAULT ''")
+        # M13（R-027/R-029）：素材归属主博主 + 绑定云端作品
+        if "creator_id" not in cols:
+            adds.append("creator_id INTEGER REFERENCES creators(id)")
+        if "platform_post_id" not in cols:
+            adds.append("platform_post_id VARCHAR(200) NOT NULL DEFAULT ''")
         for ddl in adds:
             conn.exec_driver_sql(f"ALTER TABLE videos ADD COLUMN {ddl}")
 
@@ -78,6 +83,17 @@ def _migrate_videos() -> None:
             except Exception:
                 # SQLite 版本过低无法删列时保留旧列（新列已生效，无碍使用）
                 pass
+
+
+def _migrate_creator_scope() -> None:
+    """M13（R-029）：drafts / persona_tags 增加 creator_id（素材 creator_id 已在 _migrate_videos）。"""
+    with engine.begin() as conn:
+        for table in ("drafts", "persona_tags"):
+            cols = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()}
+            if "creator_id" not in cols:
+                conn.exec_driver_sql(
+                    f"ALTER TABLE {table} ADD COLUMN creator_id INTEGER REFERENCES creators(id)"
+                )
 
 
 def _migrate_chat() -> None:
@@ -108,6 +124,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _migrate_videos()
+    _migrate_creator_scope()
     _migrate_chat()
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults

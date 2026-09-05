@@ -36,3 +36,21 @@ class TopicCandidate(Base):
     reason: Mapped[str] = mapped_column(Text, default="")
     draft_id: Mapped[int | None] = mapped_column(ForeignKey("drafts.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TopicIdea(Base):
+    """选题池灵感（M13，R-028）：来自各平台热点或作品评论区，人工挑选，不自动推送。"""
+
+    __tablename__ = "topic_ideas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(20), default="hot")  # hot | comment
+    platform: Mapped[str] = mapped_column(String(20), index=True, default="")
+    title: Mapped[str] = mapped_column(String(255))
+    detail: Mapped[str] = mapped_column(Text, default="")  # 评论原文/热度说明
+    post_id: Mapped[int | None] = mapped_column(ForeignKey("platform_posts.id"), nullable=True)
+    post_title: Mapped[str] = mapped_column(String(500), default="")
+    creator_id: Mapped[int | None] = mapped_column(ForeignKey("creators.id"), nullable=True, index=True)
+    snapshot_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    used: Mapped[bool] = mapped_column(default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

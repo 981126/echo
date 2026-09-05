@@ -15,6 +15,7 @@ from ..core.topics import normalize_platforms, normalize_topics
 from ..db import get_db
 from ..models.video import Transcript, Video
 from ..schemas.video import TagConfirmIn, VideoDetailOut, VideoListOut, VideoOut, VideoUpdate
+from ..services.creator_service import current_creator_id
 from ..services.ingest import import_video_task
 from ..tasks import start_task
 
@@ -35,7 +36,7 @@ def upload_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
     dest = settings.videos_dir / new_name
     with dest.open("wb") as out:
         shutil.copyfileobj(file.file, out)
-    video = Video(filename=new_name)
+    video = Video(filename=new_name, creator_id=current_creator_id(db))
     db.add(video)
     db.commit()
     db.refresh(video)
@@ -53,6 +54,9 @@ def list_videos(
     db: Session = Depends(get_db),
 ):
     q = db.query(Video)
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(Video.creator_id == cid)
     if platform:
         q = q.filter(Video.platforms.like(f'%"{platform}"%'))
     if status:

@@ -14,25 +14,33 @@ from .llm import LLMError
 from .persona import PersonaService
 from .prompt_service import get_prompt
 from .transcription import Transcriber
+from .creator_service import current_creator_id
 
 
 def suggest_persona_updates(db, video, transcript_text: str) -> None:
     """新视频（非广告）进入后，自动建议人设扩充（待作者确认）。"""
     if video.is_ad or not transcript_text:
         return
-    current = db.query(PersonaTag).filter(PersonaTag.status == "confirmed").all()
+    cid = video.creator_id or current_creator_id(db)
+    current_q = db.query(PersonaTag).filter(PersonaTag.status == "confirmed")
+    if cid:
+        current_q = current_q.filter(PersonaTag.creator_id == cid)
+    current = current_q.all()
     result = PersonaService().suggest_updates(transcript_text, current)
     if not result["suggestions"]:
         return
-    latest = db.query(PersonaTag).order_by(PersonaTag.version.desc()).first()
+    latest_q = db.query(PersonaTag).order_by(PersonaTag.version.desc())
+    if cid:
+        latest_q = latest_q.filter(PersonaTag.creator_id == cid)
+    latest = latest_q.first()
     version = latest.version if latest else 1
     for item in result["suggestions"]:
-        dup = (
-            db.query(PersonaTag)
-            .filter(PersonaTag.label == item["label"], PersonaTag.status.in_(["suggested", "confirmed"]))
-            .first()
+        dup_q = db.query(PersonaTag).filter(
+            PersonaTag.label == item["label"], PersonaTag.status.in_(["suggested", "confirmed"])
         )
-        if dup:
+        if cid:
+            dup_q = dup_q.filter(PersonaTag.creator_id == cid)
+        if dup_q.first():
             continue
         description = item.get("description", "")
         reason = item.get("reason", "")
@@ -40,6 +48,7 @@ def suggest_persona_updates(db, video, transcript_text: str) -> None:
             description = f"{description}（依据：{reason}）"
         db.add(
             PersonaTag(
+                creator_id=cid,
                 label=item["label"],
                 description=description,
                 category="style",
@@ -129,8 +138,12 @@ def import_video_task(db, payload: dict) -> None:
 
 
 def persona_init_task(db, payload: dict) -> None:
-    """后台任务：用全部历史转写稿初始化/刷新人设档案（新版本）。"""
-    videos = db.query(Video).filter(Video.is_ad.is_(False)).all()
+    """后台任务：用当前主博主历史转写稿初始化/刷新人设档案（新版本）。"""
+    cid = payload.get("creator_id") or current_creator_id(db)
+    vq = db.query(Video).filter(Video.is_ad.is_(False))
+    if cid:
+        vq = vq.filter(Video.creator_id == cid)
+    videos = vq.all()
     transcripts = []
     for v in videos:
         if v.transcript and (v.transcript.corrected_text or v.transcript.transcript_text):
@@ -138,11 +151,15 @@ def persona_init_task(db, payload: dict) -> None:
     if not transcripts:
         return
     result = PersonaService().analyze_initial(transcripts)
-    current_version = db.query(func.max(PersonaTag.version)).scalar() or 0
+    ver_q = db.query(func.max(PersonaTag.version))
+    if cid:
+        ver_q = ver_q.filter(PersonaTag.creator_id == cid)
+    current_version = ver_q.scalar() or 0
     version = int(current_version) + 1
     for item in result["tags"]:
         db.add(
             PersonaTag(
+                creator_id=cid,
                 label=item["label"],
                 description=item["description"],
                 category="style",
@@ -154,6 +171,7 @@ def persona_init_task(db, payload: dict) -> None:
     for redline in result["redlines"]:
         db.add(
             PersonaTag(
+                creator_id=cid,
                 label=redline,
                 description="",
                 category="redline",

@@ -31,13 +31,20 @@ GENERATION_SYSTEM = (
 )
 
 
+def _creator_filter(db: Session):
+    """归属过滤：存在当前主博主时只学习该博主数据（多主博主隔离，D-028）。"""
+    from .creator_service import get_current_creator
+
+    creator = get_current_creator(db)
+    return creator.id if creator else None
+
+
 def _persona_context(db: Session) -> dict:
-    tags = (
-        db.query(PersonaTag)
-        .filter(PersonaTag.status == "confirmed")
-        .order_by(PersonaTag.category, PersonaTag.id)
-        .all()
-    )
+    q = db.query(PersonaTag).filter(PersonaTag.status == "confirmed")
+    cid = _creator_filter(db)
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
+    tags = q.order_by(PersonaTag.category, PersonaTag.id).all()
     return {
         "tags": [f"{t.label}: {t.description}" for t in tags if t.category != "redline"],
         "redlines": [t.label for t in tags if t.category == "redline"],
@@ -47,7 +54,11 @@ def _persona_context(db: Session) -> dict:
 def _all_texts(db: Session) -> list[tuple[Video, str]]:
     """全部非广告素材的可用文案（corrected 优先），保证全量参与学习。"""
     rows = []
-    for v in db.query(Video).filter(Video.is_ad.is_(False)).all():
+    q = db.query(Video).filter(Video.is_ad.is_(False))
+    cid = _creator_filter(db)
+    if cid:
+        q = q.filter(Video.creator_id == cid)
+    for v in q.all():
         if v.transcript and (v.transcript.corrected_text or v.transcript.transcript_text):
             rows.append((v, v.transcript.corrected_text or v.transcript.transcript_text))
     return rows
@@ -97,7 +108,11 @@ def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
     )
     draft_ids = [r[0] for r in approved][:5]
     if draft_ids:
-        for d in db.query(Draft).filter(Draft.id.in_(draft_ids), Draft.script != "").all():
+        dq = db.query(Draft).filter(Draft.id.in_(draft_ids), Draft.script != "")
+        cid = _creator_filter(db)
+        if cid:
+            dq = dq.filter(Draft.creator_id == cid)
+        for d in dq.all():
             key = (d.script or "").strip()[:200]
             if key in seen:
                 continue
@@ -166,6 +181,7 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
         }
 
     draft = Draft(
+        creator_id=_creator_filter(db),
         title=title or topic,
         cover_text=cover,
         script=script or topic,
