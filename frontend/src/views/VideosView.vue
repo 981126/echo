@@ -89,8 +89,7 @@
           <div class="row-actions" @click.stop>
             <n-button size="small" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
             <n-button v-if="it.merged >= 2" size="small" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
-            <n-button v-if="it.local_video_id" size="small" secondary @click="goLocal(it.local_video_id)">语音转文字</n-button>
-            <n-button size="small" quaternary type="error" @click="delCloud(it)">删除</n-button>
+                        <n-button size="small" quaternary type="error" @click="delCloud(it)">删除</n-button>
           </div>
         </template>
       </div>
@@ -237,7 +236,7 @@
         <n-tabs v-model:value="cloudTab" type="line" animated @update:value="onCloudTab">
           <n-tab-pane name="local" tab="转本地素材">
             <div class="form-item">
-              <label class="form-label">上传视频（可选，转写需到编辑页手动触发）</label>
+              <label class="form-label">上传视频（可选；选后可一键「保存并语音转文字」）</label>
               <div class="row" style="gap: 8px">
                 <input ref="cloudFileInput" type="file" accept="video/*" class="file-hidden" @change="onCloudFile" />
                 <n-button secondary @click="cloudFileInput && cloudFileInput.click()">选择视频文件</n-button>
@@ -259,9 +258,10 @@
             <p class="muted" style="font-size: 12px">
               保存后此作品会出现在素材库（云端标识去掉），可继续编辑平台/赛道/发布时间。
             </p>
-            <div class="row">
+            <div class="row" style="gap: 8px">
               <n-button secondary :loading="cloudMetaSaving" @click="saveCloudMeta">仅保存广告设置</n-button>
-              <n-button type="primary" :loading="cloudSaving" @click="saveCloudLocal">保存为本地素材</n-button>
+              <n-button secondary :loading="cloudSaving" @click="saveCloudLocal(false)">保存为本地素材</n-button>
+              <n-button type="primary" :disabled="!cloudFile" :loading="cloudSaving" @click="saveCloudLocal(true)">保存并语音转文字</n-button>
               <n-button secondary @click="showCloud = false">取消</n-button>
             </div>
           </n-tab-pane>
@@ -859,8 +859,12 @@ async function goLocal(id) {
   }
 }
 
-async function saveCloudLocal() {
+async function saveCloudLocal(transcribe = false) {
   if (!cloudItem.value) return
+  if (transcribe && !cloudFile.value) {
+    message.warning('请先选择视频文件，再「保存并语音转文字」')
+    return
+  }
   cloudSaving.value = true
   try {
     const fd = new FormData()
@@ -885,7 +889,10 @@ async function saveCloudLocal() {
     await loadWorksQuiet()
     if (r.video_id) {
       const v = videos.value.find(x => x.id === r.video_id)
-      if (v) openEdit(v)
+      if (v) {
+        await openEdit(v)
+        if (transcribe) await startTranscribe()
+      }
     }
   } catch (e) {
     message.error(e.message)
