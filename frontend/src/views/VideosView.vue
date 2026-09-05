@@ -142,12 +142,15 @@
             <p class="muted" style="font-size: 12px">
               保存后此作品会出现在素材库（云端标识去掉），可继续编辑平台/赛道/发布时间。
             </p>
-            <div class="row" style="gap: 8px">
-              <n-button secondary :loading="cloudMetaSaving" @click="saveCloudMeta">仅保存广告设置</n-button>
-              <n-button secondary :loading="cloudSaving" @click="saveCloudLocal(false)">保存为本地素材</n-button>
-              <n-button type="primary" :disabled="!cloudFile" :loading="cloudSaving" @click="saveCloudLocal(true)">保存并语音转文字</n-button>
-              <n-button secondary @click="showCloud = false">取消</n-button>
-            </div>
+            <CloudActions
+              :meta-saving="cloudMetaSaving"
+              :saving="cloudSaving"
+              :can-transcribe="!!cloudFile"
+              @meta="saveCloudMeta"
+              @save="saveCloudLocal(false)"
+              @transcribe="saveCloudLocal(true)"
+              @cancel="showCloud = false"
+            />
           </n-tab-pane>
           <n-tab-pane name="comments" tab="评论数据">
             <div v-if="!(cloudItem.cloudPosts || []).length" class="empty">暂无平台记录</div>
@@ -176,6 +179,7 @@ import TranscriptEditor from '../components/TranscriptEditor.vue'
 import TagsInput from '../components/TagsInput.vue'
 import MetaFields from '../components/MetaFields.vue'
 import CloudVideoPicker from '../components/CloudVideoPicker.vue'
+import CloudActions from '../components/CloudActions.vue'
 import { adOptions, platformOptions, statusOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
