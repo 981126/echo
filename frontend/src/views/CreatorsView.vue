@@ -332,11 +332,17 @@ function parseExtra(text) {
 async function load() {
   loading.value = true
   try {
-    creators.value = await api('/api/creators')
-    current.value = await api('/api/creators/current')
-    budget.value = await api('/api/platform/budget')
-    budgetLimit.value = budget.value.limit
-    summary.value = await api('/api/platform/creator-summary')
+    const [cs, cur, bud, sum] = await Promise.all([
+      api('/api/creators'),
+      api('/api/creators/current'),
+      api('/api/platform/budget'),
+      api('/api/platform/creator-summary')
+    ])
+    creators.value = cs
+    current.value = cur
+    budget.value = bud
+    budgetLimit.value = bud.limit
+    summary.value = sum
     accountsBy.value = {}
     await Promise.all(creators.value.map(async (c) => {
       accountsBy.value[c.id] = await api(`/api/creators/${c.id}/accounts`)

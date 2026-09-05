@@ -447,12 +447,16 @@ def list_jobs(limit: int = 30, db: Session = Depends(get_db)):
 
 # ---------- 预算 / 余额 ----------
 @router.get("/budget", response_model=dict)
-def budget(db: Session = Depends(get_db)):
+def budget(db: Session = Depends(get_db), refresh_balance: bool = False):
+    """预算额度（本地 Kv，毫秒级）；余额查询第三方较慢，默认不阻塞页面，
+    需要时显式 ?refresh_balance=true 再拉取。"""
     b = get_budget(db)
-    try:
-        bal = make_client().get_balance()
-    except Exception:  # noqa: BLE001
-        bal = {"mode": "unknown"}
+    bal = None
+    if refresh_balance:
+        try:
+            bal = make_client().get_balance()
+        except Exception:  # noqa: BLE001
+            bal = {"mode": "unknown"}
     return {**b, "balance": bal}
 
 
