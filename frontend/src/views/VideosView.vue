@@ -102,11 +102,7 @@
             <label class="form-label">实际发布时间</label>
             <n-date-picker v-model:value="editing.publishedTs" type="datetime" clearable style="width: 100%" />
           </div>
-          <div class="form-item full">
-            <label class="form-label">标签（逗号分隔，自由填写）</label>
-            <n-input v-model:value="tagsText" placeholder="干货, 反常识, 口播, 面试, 赚钱" />
-            <span class="muted" style="font-size: 12px">命中 求职/面试/赚钱/知识/其他 的词会同时进入数据统计（复盘/缺口用）</span>
-          </div>
+          <TagsInput :model-value="tagsText" @update:modelValue="v => (tagsText = v)" />
           <TranscribeSection
             v-if="editing.filename"
             :transcript-text="editing.transcriptText"
@@ -187,6 +183,7 @@ import TranscribeSection from '../components/TranscribeSection.vue'
 import PlatformLinksInput from '../components/PlatformLinksInput.vue'
 import EditActions from '../components/EditActions.vue'
 import TranscriptEditor from '../components/TranscriptEditor.vue'
+import TagsInput from '../components/TagsInput.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
