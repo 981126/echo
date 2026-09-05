@@ -81,7 +81,7 @@
         </template>
 
         <template v-else>
-          <div class="row tag-row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap; overflow: hidden">
+          <div class="row tag-row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
             <template v-for="t in it.tags.slice(0, 5)" :key="t">
               <n-tag size="tiny" :bordered="false" round>{{ t }}</n-tag>
             </template>
@@ -1303,9 +1303,7 @@ onMounted(async () => {
   min-height: 24px;
 }
 .tag-row {
-  min-height: 22px;
-  max-height: 52px;
-  overflow: hidden;
+  min-height: 0;
 }
 
 </style>
