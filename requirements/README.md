@@ -67,3 +67,4 @@
 | R-059 | 2026-09-05 | 文档体系：产品/架构/开发设计文档（含流程图，非常详细） | ✅ 已完成 | M41 | docs/PRODUCT·ARCHITECTURE·DESIGN |
 | R-060 | 2026-09-05 | 文档体系 v2：API/表结构/QUICKSTART/术语/FAQ | ✅ 已完成 | M42 | docs/API·DATABASE·QUICKSTART |
 | R-061 | 2026-09-05 | 代码/表结构体检优化（批次 A 完成；B/C/D 待实施） | 实施中 | M43 | PRD §工程标准 |
+| R-062 | 2026-09-05 | 数据源适配器：TikHub 仅默认，可整体/按平台替换（make_source 注册中心） | ✅ 已完成 | M44 | PRD §3.10、R-027 |

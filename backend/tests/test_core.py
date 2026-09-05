@@ -183,6 +183,23 @@ def test_default_avoid_words():
     assert len(set(words)) == len(words)
 
 
+def test_platform_source_registry():
+    from app.services.platform import base as pb
+
+    calls = []
+
+    def fake():
+        calls.append(1)
+        return object()
+
+    pb.clear_platform_sources()
+    pb.register_platform_source("bilibili", fake)
+    assert pb.make_source("bilibili") is not None
+    assert len(calls) == 1
+    pb.clear_platform_sources()
+    assert not pb._OVERRIDES
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

@@ -21,7 +21,7 @@ from ..models.platform import (
 from ..models.video import Video
 from ..schemas.platform import SyncRequest
 from ..services.creator_service import current_creator_id
-from ..services.platform.tikhub import make_client
+from ..services.platform.base import make_source
 from ..services.platform_sync import (
     get_budget,
     run_sync,
@@ -209,7 +209,7 @@ def refresh_post_comments(post_id: int, limit: int = 30, db: Session = Depends(g
         raw = _json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
     except _json.JSONDecodeError:
         raw = {}
-    client = make_client()
+    client = make_source(post.platform)
     try:
         texts = client.fetch_comments(post.platform, post.platform_post_id, max(1, min(limit, 50)), acc, raw=raw)
     except Exception:  # noqa: BLE001
@@ -256,7 +256,7 @@ def post_comments(post_id: int, limit: int = 50, refresh: int = 0, db: Session =
         except _json.JSONDecodeError:
             raw = {}
         try:
-            client = make_client()
+            client = make_source(post.platform)
             texts = client.fetch_comments(post.platform, post.platform_post_id, 50, acc, raw=raw)
         except Exception:  # noqa: BLE001 拉取失败不阻断
             texts = []
@@ -412,7 +412,7 @@ def budget(db: Session = Depends(get_db), refresh_balance: bool = False):
     bal = None
     if refresh_balance:
         try:
-            bal = make_client().get_balance()
+            bal = make_source().get_balance()
         except Exception:  # noqa: BLE001
             bal = {"mode": "unknown"}
     return {**b, "balance": bal}

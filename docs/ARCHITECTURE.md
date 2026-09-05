@@ -78,7 +78,7 @@ echo/
 | 外部 | 用途 | 模式 | 关键配置 |
 |---|---|---|---|
 | DeepSeek/Kimi | 生成/校对/复盘/对话/讨论 | `llm.py` 客户端，模型名可配 | `ECHO_DEEPSEEK_API_KEY/MODEL`、`ECHO_KIMI_API_KEY/MODEL` |
-| TikHub | 平台数据 | `tikhub.py`，`mock/real` 可切 | `ECHO_TIKHUB_API_KEY/MODE/BASE_URL/DAILY_BUDGET` |
+| 平台数据源 | 可插拔（R-062）：`services/platform/base.py` 定义 DataSource；默认实现 TikHub（`tikhub.py`），支持整体/单平台注册替换 | `ECHO_TIKHUB_API_KEY/MODE/BASE_URL/DAILY_BUDGET` |
 | 阿里云 OSS | ASR 文件中转 | `aliyun_oss.py` | `ECHO_ALIYUN_ASR_ACCESS_KEY_ID/SECRET`、`ECHO_ALIYUN_OSS_BUCKET/REGION` |
 | 阿里云 FileTrans | 录音文件识别 | `aliyun_filetrans.py` | `ECHO_ALIYUN_ASR_APP_KEY`、`ECHO_ASR_MODE` |
 | QQ SMTP | 邮件推送 | `notify.py` | `ECHO_SMTP_*` |

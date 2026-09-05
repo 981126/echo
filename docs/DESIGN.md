@@ -148,6 +148,11 @@ flowchart TD
   - 只读：指标汇总、今日选题、复盘报告、赛道雷达、搜草稿
   - 写操作（生成草稿等）：先明确询问作者同意再执行
 
+## 9.5 平台数据源适配器（R-062）
+- `base.py`：`DataSource` Protocol（fetch_profile / fetch_user_posts / fetch_post_stats / fetch_comments / get_balance）+ `PostData/ProfileData` 契约
+- `make_source(platform)`：override（`register_platform_source`，支持 default 整体替换或 douyin/bilibili/xiaohongshu 单平台替换）优先，缺省回落 TikHub
+- 业务层（同步/评论/余额）一律走 `make_source`，不再直依赖 TikHub
+
 ## 10. 工程护栏与测试
 - 五维：简单/易读/可靠/扩展/性能；适配器模式；分层依赖方向
 - 质量门禁 `scripts/verify.sh`：compileall → test_core(离线纯逻辑) → ruff → mypy → pytest → 前端 lint/build

@@ -27,7 +27,7 @@ from ..models.platform import (
 )
 from .platform_assets import _cover_path_for, _ensure_account_avatar
 from .creator_service import get_current_creator
-from .platform.tikhub import TikHubClient, make_client
+from .platform.base import DataSource, make_source
 
 BUDGET_KEY = "tikhub_budget_limit"
 
@@ -75,7 +75,7 @@ def _charge(db: Session, count: int = 1) -> None:
     db.commit()
 
 
-def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: TikHubClient) -> None:
+def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: DataSource) -> None:
     if not account.platform_user_id:
         return
     profile = client.fetch_profile(account.platform, account.platform_user_id, account)
@@ -113,7 +113,7 @@ def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: TikHu
     db.commit()
 
 
-def _ensure_post(db: Session, account: CreatorAccount, post, client: TikHubClient) -> PlatformPost:
+def _ensure_post(db: Session, account: CreatorAccount, post, client: DataSource) -> PlatformPost:
     row = (
         db.query(PlatformPost)
         .filter(
@@ -189,7 +189,7 @@ def _write_stat(db: Session, post: PlatformPost, stats: dict) -> None:
     db.commit()
 
 
-def _collect_comments(db: Session, account: CreatorAccount, client: TikHubClient, posts: list[PlatformPost], per_post: int = 20) -> int:
+def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, posts: list[PlatformPost], per_post: int = 20) -> int:
     """抓取评论区进选题池（R-028）。"""
     added = 0
     date_key = today_key()
@@ -273,7 +273,7 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
         return {"account_id": account.id, "skipped": "disabled"}
     if not account.platform_user_id:
         raise ValueError(f"账号 {account.nickname or account.id} 未配置平台用户 ID（先解析主页链接）")
-    client = make_client()
+    client = make_source(account.platform)
     account.sync_status = "running"
     db.commit()
     stats: dict = {"posts": 0, "comments": 0}
@@ -314,7 +314,7 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
     return stats
 
 
-def _backfill_bili_stats(db: Session, account: CreatorAccount, client: TikHubClient, limit: int = 150) -> int:
+def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSource, limit: int = 150) -> int:
     """B站：给“最新指标里 likes=0”的作品拉单条详情补全赞/藏/评（每轮限量，重复同步会补完）。"""
     from ..models.platform import PlatformPostStat
 
@@ -463,7 +463,7 @@ def sync_single_post(db: Session, post_id: int) -> dict:
     account = db.get(CreatorAccount, post.account_id)
     job = _log_job(db, "single", "post", creator_id=account.creator_id if account else None, account_id=post.account_id, post_id=post.id)
     try:
-        client = make_client()
+        client = make_source(post.platform)
         stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
         _charge(db)
         _write_stat(db, post, stats)
@@ -534,10 +534,10 @@ def sync_local_video_metrics(db: Session, video) -> dict:
     posts = _bound_platform_posts(db, video)
     if not posts:
         raise ValueError("该素材未绑定平台作品（请先在编辑页填写平台链接并保存）")
-    client = make_client()
     totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0, "shares": 0}
     synced: list[str] = []
     for post in posts:
+        client = make_source(post.platform)
         try:
             stats = client.fetch_post_stats(post.platform, post.platform_post_id)
             _charge(db)

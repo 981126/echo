@@ -14,13 +14,12 @@ from __future__ import annotations
 import hashlib
 import math
 import random
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any
 
 import httpx
 
 from ...config import get_settings
+from .base import PostData, ProfileData  # noqa: E402,F401
 from .link_utils import parse_link, parse_post_id  # noqa: F401  re-export：保持旧导入路径
 
 PLATFORMS = ["douyin", "xiaohongshu", "bilibili"]
@@ -121,30 +120,6 @@ def _seed_id(user_id: str, salt: str = "") -> int:
 
 class TikHubError(RuntimeError):
     pass
-
-
-@dataclass
-class PostData:
-    platform_post_id: str
-    title: str = ""
-    desc: str = ""
-    tags: list[str] = field(default_factory=list)
-    cover_url: str = ""
-    video_url: str = ""
-    publish_time: datetime | None = None
-    stats: dict[str, Any] = field(default_factory=dict)  # plays/likes/favorites/shares/comments/extra
-    raw: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ProfileData:
-    nickname: str = ""
-    avatar_url: str = ""
-    followers: int = 0
-    likes_total: int = 0
-    posts_total: int = 0
-    following: int = 0
-    raw: dict[str, Any] = field(default_factory=dict)
 
 
 class TikHubClient:

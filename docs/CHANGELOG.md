@@ -288,3 +288,8 @@
 - tikhub.py 拆出 services/platform/link_utils.py（链接解析纯逻辑，旧导入 re-export 兼容）
 - platform_sync.py 拆出 services/platform_assets.py（图片识别/HEIC 转换/封面头像下载命名）
 - 纯搬移，行为不变；46 测试通过
+
+## [M44 / R-062] 2026-09-05 — 数据源适配器
+- 新增 services/platform/base.py：DataSource 统一接口 + PostData/ProfileData 契约 + make_source/register_platform_source
+- platform_sync 与 platform API 全部改走 make_source(platform)：默认 TikHub，可按整体或单平台注册替换
+- 契约测试（test_core 19 项 / pytest 47 项通过）
