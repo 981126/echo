@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -80,6 +81,10 @@ def _persona_context(db: Session) -> dict:
         "anchors": [t.label for t in tags if t.category == "phrase"],
         "redlines": [t.label for t in tags if t.category == "redline"],
     }
+
+
+_PROFILE_CACHE: dict[tuple, str] = {}
+_PROFILE_LOCK = threading.Lock()
 
 
 def _all_texts(db: Session) -> list[tuple[Video, str]]:
@@ -185,9 +190,19 @@ def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
 
 
 def _style_profile_lines(db: Session) -> str:
+    """风格画像文本（进程内缓存：素材数量/字数变化才重算；结果与原来完全一致）。"""
     rows = _all_texts(db)
     texts = [text for _, text in rows]
-    return format_style_profile(build_style_profile(texts))
+    cid = _creator_filter(db) or 0
+    key = (cid, len(texts), sum(len(t) for t in texts))
+    with _PROFILE_LOCK:
+        if key in _PROFILE_CACHE:
+            return _PROFILE_CACHE[key]
+        out = format_style_profile(build_style_profile(texts))
+        if len(_PROFILE_CACHE) > 20:
+            _PROFILE_CACHE.clear()
+        _PROFILE_CACHE[key] = out
+        return out
 
 
 def generate_draft(db: Session, topic: str, settings=None) -> Draft:

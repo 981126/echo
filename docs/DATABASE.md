@@ -562,3 +562,11 @@ ASR 转写/校对/原始文案
 **索引**：`ix_works_creator_id`
 
 **外键**：`creator_id` → `creators.id`
+
+## 附录：运行时补充索引（R-061，启动时幂等创建，不在模型 index=True）
+| 表 | 索引 | 目的 |
+|---|---|---|
+| platform_posts | ix_platform_posts_local_video_id | 素材绑定查询 |
+| platform_posts | ix_platform_posts_publish_time | 云端列表按时间排序 |
+| videos | ix_videos_platform_post_id | 平台绑定查询 |
+| notifications | ix_notifications_created_at | 清理/按时间检索 |

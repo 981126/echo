@@ -28,6 +28,21 @@ def normalize_work_title(title: str) -> str:
     return t.strip().lower()
 
 
+def latest_stats_map(db: Session, post_ids: list[int]) -> dict[int, PlatformPostStat]:
+    """批量取每条作品的最新统计（stat_date 升序覆盖 → 保留最新），消除 N+1。"""
+    out: dict[int, PlatformPostStat] = {}
+    if not post_ids:
+        return out
+    for row in (
+        db.query(PlatformPostStat)
+        .filter(PlatformPostStat.post_id.in_(post_ids))
+        .order_by(PlatformPostStat.stat_date)
+        .all()
+    ):
+        out[row.post_id] = row
+    return out
+
+
 def _latest_stat(db: Session, post_id: int):
     return (
         db.query(PlatformPostStat)
@@ -183,15 +198,7 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
         w.id: w for w in db.query(Work).filter(Work.id.in_(work_map.keys())).all()
     }
     post_ids = [p.id for p in posts]
-    stat_map: dict[int, PlatformPostStat] = {}
-    if post_ids:
-        for row in (
-            db.query(PlatformPostStat)
-            .filter(PlatformPostStat.post_id.in_(post_ids))
-            .order_by(PlatformPostStat.stat_date)
-            .all()
-        ):
-            stat_map[row.post_id] = row
+    stat_map = latest_stats_map(db, post_ids)
 
     out: list[dict] = []
     for wid, members in work_map.items():

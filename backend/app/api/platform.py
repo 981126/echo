@@ -103,15 +103,9 @@ def list_posts(
     account_map = {
         a.id: a for a in db.query(CreatorAccount).filter(CreatorAccount.id.in_({p.account_id for p in items})).all()
     }
-    stat_map: dict[int, PlatformPostStat] = {}
-    if ids:
-        for row in (
-            db.query(PlatformPostStat)
-            .filter(PlatformPostStat.post_id.in_(ids))
-            .order_by(PlatformPostStat.stat_date)
-            .all()
-        ):
-            stat_map[row.post_id] = row
+    from ..services.works_service import latest_stats_map
+
+    stat_map = latest_stats_map(db, ids)
     return {
         "total": total,
         "items": [_post_item(db, p, account_map.get(p.account_id), stat_map.get(p.id)) for p in items],

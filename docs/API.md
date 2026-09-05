@@ -15,7 +15,7 @@
 | 分组 | 数量 | 作用 |
 |---|---|---|
 | videos | 9 | 素材库与转写 |
-| platform | 18 | 平台数据/同步/预算/灵感池 |
+| platform | 17 | 平台数据/同步/预算/灵感池 |
 | works | 8 | 作品合并/转本地 |
 | creators | 11 | 博主与账号 |
 | persona | 9 | 人设/金句/风格 |
@@ -450,17 +450,6 @@ Generate From Idea
 | 参数 | 位置 | 必填 | 类型 | 说明 |
 |---|---|---|---|---|
 | `idea_id` | path | 是 | integer |  |
-| `x-access-token` | header | 否 | string |  |
-
-**返回 200**：`object`
-
-### POST /api/platform/videos/{video_id}/bind-link
-
-Bind Video Link
-
-| 参数 | 位置 | 必填 | 类型 | 说明 |
-|---|---|---|---|---|
-| `video_id` | path | 是 | integer |  |
 | `x-access-token` | header | 否 | string |  |
 
 **返回 200**：`object`

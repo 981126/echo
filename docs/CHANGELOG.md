@@ -272,3 +272,8 @@
 - 幂等补索引：platform_posts(local_video_id/publish_time)、videos(platform_post_id)、notifications(created_at)
 - 新增每日 04:00 清理：通知90天/后台任务30天/同步记录60天/平台统计400天
 - 逻辑与 UI 零变化；46 测试通过
+
+## [M43 / R-061 批次 B 一期] 2026-09-05 — 性能与收敛
+- 生成风格画像文本加入进程内缓存（素材数量/字数变化才重算，输出一致）
+- 作品最新统计预取收敛为 works_service.latest_stats_map（works 列表与 platform 帖子列表复用，消除重复实现）
+- 文档同步：重新生成 API.md（旧 bind-link 已下线）；ARCHITECTURE/DESIGN 定时任务补 04:00 清理；DATABASE 补运行时索引附录
