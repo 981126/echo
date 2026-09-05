@@ -189,6 +189,8 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
             setattr(video, field, data[field])
     if "ad_price" in data:
         video.ad_price = int(data["ad_price"]) if data["ad_price"] is not None else None
+        if video.ad_price and video.ad_price > 0 and "is_ad" not in data:
+            video.is_ad = True  # 有价格即广告
     db.commit()
     if ("title" in data or "platforms" in data) and (video.title or "").strip():
         _rename_by_title(db, video)
