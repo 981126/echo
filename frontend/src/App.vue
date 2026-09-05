@@ -56,14 +56,14 @@ const isLogin = computed(() => route.path === '/login')
 
 const navs = [
   { to: '/home', label: '主页' },
-  { to: '/creators', label: '博主' },
   { to: '/videos', label: '素材库' },
   { to: '/drafts', label: '脚本工作台' },
   { to: '/chat', label: 'AI 对话' },
   { to: '/persona', label: '人设档案' },
   { to: '/dashboard', label: '数据看板' },
   { to: '/requirements', label: '需求管理' },
-  { to: '/prompts', label: 'AI 提示词' }
+  { to: '/prompts', label: 'AI 提示词' },
+  { to: '/creators', label: '博主' }
 ]
 
 const themeOverrides = {
