@@ -899,7 +899,7 @@ onMounted(async () => {
 }
 .work-cover img { width: 100%; height: 100%; object-fit: cover; }
 .work-sel { position: absolute; top: 6px; left: 6px; }
-.work-body { padding: 8px 10px 10px; min-width: 0; }
+.work-body { padding: 6px 6px 8px; min-width: 0; }
 .work-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -909,12 +909,12 @@ onMounted(async () => {
 }
 .plat-line {
   display: grid;
-  grid-template-columns: 28px 62px 44px 44px 44px;
+  grid-template-columns: 24px 54px 38px 36px 36px;
   gap: 0;
   align-items: baseline;
   white-space: nowrap;
-  margin-top: 4px;
-  font-size: 9px;
+  margin-top: 3px;
+  font-size: 8px;
   color: #6f675c;
 }
 .plat-line b { color: #a34f2c; font-weight: 600; }
