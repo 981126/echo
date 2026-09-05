@@ -257,7 +257,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, getToken } from '../api'
 import { fmt, fmtNum, platformName } from '../lib/format'
-import { platformOptions } from '../lib/options'
+import { freqOptions, platformOptions } from '../lib/options'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -275,11 +275,6 @@ const syncingAcct = ref(0)
 const syncingPost = ref(0)
 const summary = ref({ items: [] })
 
-const freqOptions = [
-  { label: '每日自动（主博主）', value: 'daily' },
-  { label: '每周（对标）', value: 'weekly' },
-  { label: '手动', value: 'manual' }
-]
 const freqName = (f) => ({ daily: '每日', weekly: '每周', manual: '手动' }[f] || f)
 
 const owners = computed(() => creators.value.filter(c => c.kind === 'owner'))

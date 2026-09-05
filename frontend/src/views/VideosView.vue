@@ -179,7 +179,7 @@ import EditActions from '../components/EditActions.vue'
 import TranscriptEditor from '../components/TranscriptEditor.vue'
 import TagsInput from '../components/TagsInput.vue'
 import MetaFields from '../components/MetaFields.vue'
-import { platformOptions, statusOptions } from '../lib/options'
+import { adOptions, platformOptions, statusOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
@@ -189,10 +189,6 @@ const topics = ['求职', '面试', '赚钱', '知识', '其他']
 const videos = ref([])
 const filter = ref({ status: null })
 const adFilter = ref(null)
-const adOptions = [
-  { label: '广告', value: 'ad' },
-  { label: '非广告', value: 'no' }
-]
 const platformSel = ref([])
 const tagSel = ref([])
 const loading = ref(false)
