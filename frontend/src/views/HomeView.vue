@@ -239,27 +239,14 @@ const model = computed(() => {
     months.push({ key: `${d.getUTCFullYear()}-${d.getUTCMonth()}`, label: `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月`, left })
   }
 
-  // 同一天多条：以当天为中心水平错开（间距 = minSep）
-  const byDate = {}
-  raw.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r) })
-  const items = []
-  Object.keys(byDate).sort().forEach((date) => {
-    const list = byDate[date]
-    const n = list.length
-    const baseLeft = (end - dayNum(date)) * step + step / 2
-    list.forEach((r, i) => {
-      const off = n > 1 ? (i - (n - 1) / 2) * minSep : 0
-      items.push({ ...r, left0: baseLeft + off })
-    })
-  })
-  items.sort((a, b) => a.left0 - b.left0)
-
-  // 局部弹性：只有“相邻太近”的才就地向右推开（级联），长空档不放大、不用滑很久
+  // 严格按“最新→最旧”从左到右顺序排布：
+  // 同一天多条按序排开（不再以天为中心左右错开 ±94px，避免相邻日期的卡片被挤到更早一侧、顺序看起来乱）
   let prev = -Infinity
-  const events = items.map((it) => {
-    const left = Math.max(it.left0, prev + minSep)
+  const events = raw.map((r) => {
+    const base = (end - dayNum(r.date)) * step + step / 2
+    const left = Math.max(base, prev + minSep)
     prev = left
-    return { ...it, left }
+    return { ...r, left }
   })
 
   const today = dayNum(fmtDate(new Date()))
