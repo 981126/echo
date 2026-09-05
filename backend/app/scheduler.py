@@ -8,6 +8,8 @@ from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from sqlalchemy import text
+
 from .config import get_settings
 from .db import SessionLocal
 from .services.metrics import apply_retention, fetch_daily
@@ -45,6 +47,25 @@ def _platform_sync_job() -> None:
         start_task("platform_sync", {"scope": "daily", "source": "scheduler"}, fn)
     except Exception:  # noqa: BLE001  定时失败不拖垮进程（预算/无账号时静默）
         pass
+
+
+def _housekeep_job() -> None:
+    """每日清理（R-061）：通知/任务/同步记录/平台统计按保留期删除，防库无限膨胀。"""
+    db = SessionLocal()
+    try:
+        rules = [
+            ("DELETE FROM notifications WHERE created_at < datetime('now','-90 days')",),
+            ("DELETE FROM background_tasks WHERE created_at < datetime('now','-30 days')",),
+            ("DELETE FROM sync_jobs WHERE started_at IS NOT NULL AND started_at < datetime('now','-60 days')",),
+            ("DELETE FROM platform_post_stats WHERE stat_date < date('now','-400 days')",),
+        ]
+        for (sql,) in rules:
+            db.execute(text(sql))
+        db.commit()
+    except Exception:  # noqa: BLE001  清理失败不拖垮主服务
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _weekly_style_job() -> None:
@@ -133,6 +154,14 @@ def setup_scheduler() -> None:
         _backup_job,
         CronTrigger(hour=2, minute=30, timezone=settings.tz),
         id="daily_backup",
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # R-061：每日清理 04:00
+    _scheduler.add_job(
+        _housekeep_job,
+        CronTrigger(hour=4, minute=0, timezone=settings.tz),
+        id="daily_housekeep",
         misfire_grace_time=3600,
         coalesce=True,
     )

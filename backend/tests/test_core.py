@@ -15,13 +15,6 @@ from app.core.matching import keyword_fallback_match  # noqa: E402
 from app.core.pipeline import can_run, today_key  # noqa: E402
 from app.core.requirement_file import next_requirement_id, parse_requirement_file  # noqa: E402
 from app.core.retrieval import TfidfIndex  # noqa: E402
-from app.core.signature import (  # noqa: E402
-    build_canonicalized_query,
-    build_string_to_sign,
-    content_md5,
-    hmac_sha1_sign,
-    utcnow_rfc1123,
-)
 from app.core.topics import is_valid_platform, normalize_main_topic  # noqa: E402
 from app.core.platform_links import build_platform_page_url, extract_raw_field  # noqa: E402
 from app.core.transcript import (  # noqa: E402
@@ -64,16 +57,6 @@ def test_split_sentences():
     assert len(parts) == 3
     assert parts[0] == "第一句。"
 
-
-def test_signature_helpers():
-    assert content_md5(b"") == ""
-    q = build_canonicalized_query({"b": "2", "a": "1"})
-    assert q == "a=1&b=2"
-    signed = hmac_sha1_sign("secret", "hello")
-    assert isinstance(signed, str) and len(signed) > 10
-    assert "GMT" in utcnow_rfc1123()
-    sts = build_string_to_sign("POST", "application/json", b"{}", "application/json", "date", "", "/api?x=1")
-    assert sts.startswith("POST\napplication/json")
 
 
 def test_parse_requirement_file():

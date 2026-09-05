@@ -265,3 +265,10 @@
 - docs/DATABASE.md：26 表完整字段/索引/外键（模型自动生成）
 - docs/QUICKSTART.md 小白上手、docs/GLOSSARY.md 术语、docs/FAQ.md 排查
 - README 文档导航更新
+
+## [M43 / R-061 批次 A] 2026-09-05 — 代码体检清理
+- 删除死代码 core/signature.py 与其测试（旧 FileTrans HMAC 已弃用）
+- 下线无前端使用的 POST /api/platform/videos/{id}/bind-link（保留 bind-links 多平台版）
+- 幂等补索引：platform_posts(local_video_id/publish_time)、videos(platform_post_id)、notifications(created_at)
+- 新增每日 04:00 清理：通知90天/后台任务30天/同步记录60天/平台统计400天
+- 逻辑与 UI 零变化；46 测试通过

@@ -159,10 +159,39 @@ def _migrate_chat() -> None:
             )
 
 
+def _ensure_indexes() -> None:
+    """补常见查询缺的索引（幂等：已存在跳过）。"""
+    wanted = {
+        "platform_posts": {
+            "ix_platform_posts_local_video_id": "local_video_id",
+            "ix_platform_posts_publish_time": "publish_time",
+        },
+        "videos": {"ix_videos_platform_post_id": "platform_post_id"},
+        "notifications": {"ix_notifications_created_at": "created_at"},
+    }
+    with engine.begin() as conn:
+        for table, idxs in wanted.items():
+            try:
+                existing = {
+                    row[1] for row in conn.exec_driver_sql(f"PRAGMA index_list({table})").fetchall()
+                }
+            except Exception:  # noqa: BLE001  表可能不存在（新库 create_all 已建）
+                continue
+            for name, col in idxs.items():
+                if name not in existing:
+                    try:
+                        conn.exec_driver_sql(
+                            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({col})"
+                        )
+                    except Exception:  # noqa: BLE001  单索引失败不阻断启动
+                        pass
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  确保模型已注册
 
     Base.metadata.create_all(bind=engine)
+    _ensure_indexes()
     _migrate_videos()
     _migrate_creator_scope()
     _migrate_account_avatars()

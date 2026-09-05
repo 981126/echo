@@ -118,29 +118,6 @@ def list_posts(
     }
 
 
-@router.post("/videos/{video_id}/bind-link", response_model=dict)
-def bind_video_link(video_id: int, payload: dict, db: Session = Depends(get_db)):
-    """素材编辑"发布链接"：解析平台作品 ID 绑定到本地素材，供"同步数据"按钮使用。"""
-    video = db.get(Video, video_id)
-    if video is None:
-        raise HTTPException(status_code=404, detail="素材不存在")
-    link = (payload.get("link") or "").strip()
-    from ..services.platform.tikhub import parse_post_id
-
-    platform, ext = parse_post_id(link)
-    if not platform or not ext:
-        raise HTTPException(status_code=400, detail="未能解析该链接（支持抖音 /video/、B站 /video/BV、小红书 /explore/ 或 /discovery/item/）")
-    from datetime import datetime
-
-    video.platform_post_id = f"{platform}:{ext}"
-    # 存在真实平台链接 => 已发布
-    video.status = "published"
-    if not video.published_at:
-        video.published_at = datetime.utcnow()
-    db.commit()
-    return {"ok": True, "platform": platform, "platform_post_id": video.platform_post_id}
-
-
 @router.post("/videos/{video_id}/bind-links", response_model=dict)
 def bind_video_links(video_id: int, payload: dict, db: Session = Depends(get_db)):
     """R-036：编辑页按平台填写链接 → 解析并绑定各平台作品（支持三平台）。
