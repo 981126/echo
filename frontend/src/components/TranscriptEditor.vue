@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div style="display: contents">
     <div v-if="transcriptText" class="form-item full">
       <label class="form-label">ASR 转写（只读）</label>
       <div class="prose panel" style="margin-bottom: 0; background: var(--bg)">
