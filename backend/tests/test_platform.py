@@ -109,8 +109,10 @@ def test_daily_sync_creates_posts_and_ideas(db):
 def test_budget_guard(db):
     _seed_owner(db)
     set_budget(db, 3)
-    with pytest.raises(Exception):
-        run_sync(db, scope="daily")
+    result = run_sync(db, scope="daily")  # 单平台失败被隔离，整批不抛错
+    assert result["accounts"]
+    acc = result["accounts"][0]
+    assert "error" in acc or "skipped" in acc
     budget = get_budget(db)
     assert budget["used"] <= budget["limit"]
 

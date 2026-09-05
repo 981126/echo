@@ -266,7 +266,7 @@ class TikHubClient:
                 f"{self.base_url}{path}",
                 params=params,
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=20,
+                timeout=12,
             )
             resp.raise_for_status()
             return resp.json()
@@ -369,7 +369,10 @@ class TikHubClient:
                 params: dict = {"sec_user_id": user_id, "count": 30}
                 if cursor:
                     params["max_cursor"] = cursor
-                data = self._get("/douyin/app/v3/fetch_user_post_videos", params)
+                try:
+                    data = self._get("/douyin/app/v3/fetch_user_post_videos", params)
+                except TikHubError:
+                    break  # 单页失败跳过，不让整批失败
                 d = data.get("data") or {}
                 aweme_list = d.get("aweme_list") or []
                 for aw in aweme_list:
@@ -400,7 +403,10 @@ class TikHubClient:
         elif platform == "xiaohongshu":
             cursor = ""
             while len(out) < max_posts:
-                data = self._get("/xiaohongshu/app_v2/get_user_posted_notes", {"user_id": user_id, "cursor": cursor or ""})
+                try:
+                    data = self._get("/xiaohongshu/app_v2/get_user_posted_notes", {"user_id": user_id, "cursor": cursor or ""})
+                except TikHubError:
+                    break
                 inner = (((data.get("data") or {}).get("data")) or {})
                 notes = inner.get("notes") or []
                 for n in notes:
@@ -434,21 +440,30 @@ class TikHubClient:
                 cursor = str(inner.get("cursor") or "")
         else:  # bilibili
             page = 1
+            seen_aids: set[str] = set()
             while len(out) < max_posts and page <= 50:
-                data = self._get("/bilibili/web/fetch_user_post_videos_v2", {"uid": user_id, "page_num": page, "page_size": 30})
+                try:
+                    data = self._get("/bilibili/web/fetch_user_post_videos_v2", {"uid": user_id, "page_num": page, "page_size": 30})
+                except TikHubError:
+                    break
                 vlist = ((((data.get("data") or {}).get("data")) or {}).get("archives")) or []
+                new_count = 0
                 for v in vlist:
+                    aid = str(v.get("aid") or "")
+                    if aid in seen_aids:
+                        continue
+                    seen_aids.add(aid)
+                    new_count += 1
                     stat = v.get("stat") or {}
-                    stats = {}
-                    if "like" in stat:
-                        stats = {
-                            "plays": int(stat.get("view") or 0),
-                            "likes": int(stat.get("like") or 0),
-                            "favorites": int(stat.get("favorite") or 0),
-                            "shares": int(stat.get("share") or 0),
-                            "comments": int(stat.get("reply") or 0),
-                            "extra": {"danmaku": int(stat.get("danmaku") or 0), "coin": int(stat.get("coin") or 0)},
-                        }
+                    # 全量：只存列表自带的 view（避免上百次详情请求拖慢）；赞藏评由“同步前10条”补全
+                    stats = {
+                        "plays": int(stat.get("view") or 0),
+                        "likes": int(stat.get("like") or 0),
+                        "favorites": int(stat.get("favorite") or 0),
+                        "shares": int(stat.get("share") or 0),
+                        "comments": int(stat.get("reply") or 0),
+                        "extra": {"danmaku": int(stat.get("danmaku") or 0), "coin": int(stat.get("coin") or 0)},
+                    }
                     out.append(
                         PostData(
                             platform_post_id=f"aid:{v.get('aid') or ''}",
@@ -462,7 +477,7 @@ class TikHubClient:
                             raw=v,
                         )
                     )
-                if len(vlist) < 30:
+                if new_count == 0 or len(vlist) < 30:
                     break
                 page += 1
         return out

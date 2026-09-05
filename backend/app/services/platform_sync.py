@@ -143,7 +143,7 @@ def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: st
     dest: Path
     if cover_url:
         try:
-            resp = httpx.get(cover_url, timeout=15, headers=_cdn_headers(platform))
+            resp = httpx.get(cover_url, timeout=8, headers=_cdn_headers(platform))
             if resp.status_code == 200 and resp.content:
                 img = _ensure_web_image(resp.content)
                 if img:
@@ -176,7 +176,7 @@ def _ensure_account_avatar(db: Session, account: CreatorAccount, profile) -> Non
     settings.covers_dir.mkdir(parents=True, exist_ok=True)
     name = f"avatar_{uuid.uuid4().hex[:12]}"
     try:
-        resp = httpx.get(profile.avatar_url, timeout=12, headers=_cdn_headers(account.platform))
+        resp = httpx.get(profile.avatar_url, timeout=8, headers=_cdn_headers(account.platform))
         if resp.status_code == 200 and resp.content:
             img = _ensure_web_image(resp.content)
             if img:
@@ -438,11 +438,14 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
             owner = get_current_creator(db)
         if owner is None:
             raise ValueError("请先创建并切换到一个主博主")
-        accounts = (
+        accounts = list(
             db.query(CreatorAccount)
             .filter(CreatorAccount.creator_id == owner.id, CreatorAccount.enabled.is_(True))
             .all()
         )
+        # 小红书优先（快），再抖音，最后 B站（量大/易受限）
+        _order = {"xiaohongshu": 0, "douyin": 1, "bilibili": 2}
+        accounts.sort(key=lambda a: _order.get(a.platform, 9))
         job = _log_job(db, "initial" if scope == "initial" else "daily", scope, creator_id=owner.id)
 
     try:
@@ -455,10 +458,23 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
             limit = per_owner  # initial=0 → 全量作品（分页拉到底）
             if scope == "weekly":
                 limit = 3  # 对标每周 top3（评论选题够用且控额度）
-            st = sync_account(db, acc, scope=scope, top_n=limit, with_comments=scope in ("daily", "weekly"))
-            results.append({"account_id": acc.id, "platform": acc.platform, **st})
-            total_posts += int(st.get("posts") or 0)
-            total_comments += int(st.get("comments") or 0)
+            try:
+                st = sync_account(db, acc, scope=scope, top_n=limit, with_comments=scope in ("daily", "weekly"))
+                results.append({"account_id": acc.id, "platform": acc.platform, **st})
+                total_posts += int(st.get("posts") or 0)
+                total_comments += int(st.get("comments") or 0)
+            except Exception as exc:  # noqa: BLE001 单平台失败不影响其它平台
+                db.rollback()
+                acc.sync_status = "failed"
+                acc.sync_message = str(exc)[:200]
+                db.commit()
+                results.append({"account_id": acc.id, "platform": acc.platform, "error": str(exc)[:200]})
+        # 收尾：账号状态归位
+        for acc in accounts:
+            if acc.sync_status == "running":
+                acc.sync_status = "done"
+                acc.last_sync_at = datetime.utcnow()
+        db.commit()
         # 跨平台同作品自动合并（同创作者 + 规范化标题相同）
         from .works_service import auto_merge_creator
 
