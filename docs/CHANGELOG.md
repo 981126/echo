@@ -277,3 +277,9 @@
 - 生成风格画像文本加入进程内缓存（素材数量/字数变化才重算，输出一致）
 - 作品最新统计预取收敛为 works_service.latest_stats_map（works 列表与 platform 帖子列表复用，消除重复实现）
 - 文档同步：重新生成 API.md（旧 bind-link 已下线）；ARCHITECTURE/DESIGN 定时任务补 04:00 清理；DATABASE 补运行时索引附录
+
+## [M43 / R-061 批次 B 二期] 2026-09-05 — 检索缓存与收敛
+- TF-IDF 风格样本检索索引进程内缓存（素材/指标/反馈/草稿版本变化才重建，结果一致）
+- _post_item/post_item 合并为统一序列化 works_service.post_item（works 列表与 platform 帖子列表共用，返回为字段并集，既有前端不受影响）
+- 未启用的 cookie 指标抓取不再每日空跑（仅保留留存清理）
+- 新增 tasks.push_notification 统一通知写入（每周重建等改用它）

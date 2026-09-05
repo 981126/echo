@@ -36,44 +36,11 @@ router = APIRouter()
 
 # ---------- 云端作品 ----------
 def _post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
-    if account is None:
-        account = db.get(CreatorAccount, p.account_id)
-    if stat is None:
-        stat = (
-            db.query(PlatformPostStat)
-            .filter(PlatformPostStat.post_id == p.id)
-            .order_by(PlatformPostStat.stat_date.desc())
-            .first()
-        )
-    acc = account
-    creator = db.get(Creator, acc.creator_id) if acc else None
-    return {
-        "id": p.id,
-        "account_id": p.account_id,
-        "creator_id": acc.creator_id if acc else None,
-        "creator_name": (creator.name if creator else (acc.nickname if acc else "")),
-        "creator_kind": creator.kind if creator else "owner",
-        "platform": p.platform,
-        "platform_post_id": p.platform_post_id,
-        "title": p.title,
-        "desc": p.desc,
-        "cover": p.cover_url_local,
-        "video_url": p.video_url,
-        "publish_time": p.publish_time.isoformat() if p.publish_time else None,
-        "local_video_id": p.local_video_id,
-        "latest_stat": {
-            "date": stat.stat_date,
-            "plays": stat.plays,
-            "likes": stat.likes,
-            "favorites": stat.favorites,
-            "shares": stat.shares,
-            "comments": stat.comments,
-            "extra": stat.extra,
-        }
-        if stat
-        else None,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
-    }
+    """平台作品统一序列化（复用 works_service.post_item，R-061 收敛）。"""
+    from ..services.works_service import post_item as _post_item_full
+
+    return _post_item_full(db, p, account, stat)
+
 
 
 @router.get("/posts")

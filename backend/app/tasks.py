@@ -60,6 +60,12 @@ def _notify(db, *, kind: str, payload: dict, status: str, result=None, error: st
     db.commit()
 
 
+def push_notification(db, *, kind: str, status: str, title: str, message: str, target: str = "") -> None:
+    """统一通知写入（R-061 B 二期：避免各处手拼 Notification）。"""
+    db.add(Notification(kind=kind, status=status, title=title, message=message, target=target))
+    db.commit()
+
+
 def start_task(kind: str, payload: dict, fn) -> int:
     db = SessionLocal()
     try:

@@ -12,7 +12,7 @@ import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from ..models.platform import CreatorAccount, PlatformPost, PlatformPostStat
+from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.work import Work
 
 _SPACE_RE = re.compile(r"\\s+")
@@ -53,11 +53,16 @@ def _latest_stat(db: Session, post_id: int):
 
 
 def post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
+    """平台作品统一序列化（works/platform 共用，R-061 收敛）。
+
+    返回字段为两类消费方字段的并集；多返回的字段不影响既有前端。
+    """
     if account is None:
         account = db.get(CreatorAccount, p.account_id)
     if stat is None:
         stat = _latest_stat(db, p.id)
     acc = account
+    creator = db.get(Creator, acc.creator_id) if acc else None
     tags = []
     try:
         tags = json.loads(p.tags or "[]") if isinstance(p.tags, str) else (p.tags or [])
@@ -65,13 +70,19 @@ def post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
         tags = []
     return {
         "id": p.id,
+        "account_id": p.account_id,
+        "creator_id": acc.creator_id if acc else None,
+        "creator_name": (creator.name if creator else (acc.nickname if acc else "")),
+        "creator_kind": creator.kind if creator else "owner",
         "platform": p.platform,
         "tags": tags,
         "is_ad": p.is_ad,
         "ad_price": p.ad_price,
         "platform_post_id": p.platform_post_id,
         "title": p.title,
+        "desc": p.desc,
         "cover": p.cover_url_local,
+        "video_url": p.video_url,
         "publish_time": p.publish_time.isoformat() if p.publish_time else None,
         "local_video_id": p.local_video_id,
         "account_nickname": acc.nickname if acc else "",
@@ -82,9 +93,11 @@ def post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
             "favorites": stat.favorites,
             "shares": stat.shares,
             "comments": stat.comments,
+            "extra": getattr(stat, "extra", None),
         }
         if stat
         else None,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
     }
 
 

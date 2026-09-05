@@ -150,10 +150,40 @@ def _best_practice_lines(db: Session) -> str:
     return "\n".join(f"- {x}" for x in lines)
 
 
-def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
+_INDEX_CACHE: dict[tuple, "TfidfIndex"] = {}
+_INDEX_LOCK = threading.Lock()
+
+
+def _material_version(db: Session) -> tuple:
+    """轻量版本号：转写素材/指标/反馈/草稿变化时检索索引自动失效。"""
+    from ..models.video import Transcript
+
+    cid = _creator_filter(db) or 0
+    q = (
+        db.query(Transcript.id)
+        .join(Video, Video.id == Transcript.video_id)
+        .filter(Video.is_ad.is_(False))
+    )
+    if cid:
+        q = q.filter(Video.creator_id == cid)
+    ids = [r[0] for r in q.all()]
+    t_max = max(ids) if ids else 0
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+
+    return (
+        cid,
+        len(ids),
+        t_max,
+        db.query(MetricsSnapshot).count(),
+        db.query(Feedback).count(),
+        db.query(Draft).filter(Draft.script != "").count(),
+    )
+
+
+def _build_style_index(db: Session) -> "TfidfIndex":
+    """构建过程与旧 _style_samples 完全一致（文档+权重+黄金样本），仅移入缓存。"""
     rows = _all_texts(db)
-    if not rows:
-        return []
     docs, weights, seen = [], [], set()
     for v, text in rows:
         key = text.strip()[:200]
@@ -185,8 +215,24 @@ def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
             seen.add(key)
             docs.append(d.script)
             weights.append(6.0)
-    index = TfidfIndex().build(docs, weights)
-    return [hit["text"] for hit in index.search(topic, top_k=k)]
+    return TfidfIndex().build(docs, weights)
+
+
+def _style_index(db: Session) -> "TfidfIndex":
+    """进程内缓存 TF-IDF 检索索引（素材版本变化才重建，结果与原来一致）。"""
+    version = _material_version(db)
+    with _INDEX_LOCK:
+        if version in _INDEX_CACHE:
+            return _INDEX_CACHE[version]
+        index = _build_style_index(db)
+        if len(_INDEX_CACHE) > 10:
+            _INDEX_CACHE.clear()
+        _INDEX_CACHE[version] = index
+        return index
+
+
+def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
+    return [hit["text"] for hit in _style_index(db).search(topic, top_k=k)]
 
 
 def _style_profile_lines(db: Session) -> str:

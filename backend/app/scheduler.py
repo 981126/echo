@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from .config import get_settings
 from .db import SessionLocal
-from .services.metrics import apply_retention, fetch_daily
+from .services.metrics import apply_retention
 from .services.pipeline import run_daily_pipeline
 
 _scheduler: BackgroundScheduler | None = None
@@ -29,7 +29,7 @@ def _daily_pipeline_job() -> None:
 def _daily_metrics_job() -> None:
     db = SessionLocal()
     try:
-        fetch_daily(db)  # cookie 抓取 best-effort（mock 模式 no-op）
+        # cookie 指标抓取为占位通道（需 NAS 联调），未启用前不执行，避免误导；只做留存清理
         apply_retention(db, hot_days=30)
     finally:
         db.close()
@@ -74,7 +74,6 @@ def _weekly_style_job() -> None:
     db = SessionLocal()
     try:
         from .core.style_profile import build_style_profile, format_style_profile
-        from .models.notification import Notification
         from .services.generation import _all_texts, _weight
         from .services.prompt_service import optimize
 
@@ -88,16 +87,16 @@ def _weekly_style_job() -> None:
         material = f"{profile}\n\n表现最好的素材节选（学习腔调）：\n{snippets}"
         candidate = optimize(db, "generation", material)
         if candidate is not None:
-            db.add(
-                Notification(
-                    kind="prompt_candidate",
-                    status="done",
-                    title="每周风格重建：生成提示词新候选",
-                    message=f"基于全部素材风格画像与高分节选自动优化了 v{candidate.version}，待你启用",
-                    target="/prompts?key=generation",
-                )
+            from .tasks import push_notification
+
+            push_notification(
+                db,
+                kind="prompt_candidate",
+                status="done",
+                title="每周风格重建：生成提示词新候选",
+                message=f"基于全部素材风格画像与高分节选自动优化了 v{candidate.version}，待你启用",
+                target="/prompts?key=generation",
             )
-            db.commit()
     except Exception:  # noqa: BLE001 周任务失败不影响主服务
         db.rollback()
     finally:
