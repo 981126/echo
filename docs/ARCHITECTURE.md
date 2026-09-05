@@ -1,123 +1,159 @@
-# 架构总览（ARCHITECTURE）
+# echo 系统架构文档
 
-> 给任何 agent 的"快速上下文包"：读完本文件即可理解系统如何运转、目录如何组织、如何运行与测试。
+> 面向“新开发者/新设备部署”的完整架构说明：技术选型、进程、分层、模块、数据、
+> 外部依赖、配置、部署。设计决策见 `DECISIONS.md`，实现细节见 `DESIGN.md`。
 
-## 1. 系统形态
-单用户、轻量低内存的**单进程单体**应用，部署在 NAS（Intel N150 / 4C12G）的 Docker 中，开发在笔记本。
-所有重活（LLM / ASR）走云端 API，本地只跑 Web 服务 + 数据库 + 定时任务。
+## 1. 技术栈
 
-```
-┌────────────────────────── NAS（Docker Compose）──────────────────────────┐
-│                                                                          │
-│  ┌──────────────┐   ┌──────────────────────────────────────────────┐    │
-│  │ Vue3 SPA     │   │ FastAPI（单进程）+ APScheduler               │    │
-│  │ (响应式静态)  │──▶│  ├─ api/      路由层（薄）                   │    │
-│  └──────────────┘   │  ├─ services/ 业务层（厚，适配器都在此）       │    │
-│                     │  ├─ models/   SQLAlchemy 模型                 │    │
-│                     │  ├─ scheduler.py  每日流水线                  │    │
-│                     │  └─ tasks.py      DB 任务表 + 后台线程         │    │
-│                     │                                              │    │
-│                     │   SQLite（data/echo.db）+ 文件（视频/转写/归档）│    │
-│                     └──────────────────────────────────────────────┘    │
-│                              ▲          ▲          ▲                    │
-└──────────────────────────────┼──────────┼──────────┼────────────────────┘
-                    阿里云 ASR   DeepSeek   QQ SMTP   热点源/指标源(适配器)
-```
+| 层 | 选型 | 说明 |
+|---|---|---|
+| 后端 | Python 3.12+ / FastAPI / Uvicorn | 单进程单体，路由薄、业务厚 |
+| 前端 | Vue 3 + Vite + Naive UI | SPA，桌面/移动响应式，构建产物可被后端托管 |
+| 数据库 | SQLite + SQLAlchemy 2.x | 单用户零运维；轻量幂等迁移兜底（Alembic 为 tech-debt） |
+| 定时任务 | APScheduler（进程内） | 每日流水线/同步/备份/每周风格重建 |
+| 后台任务 | DB 任务表 + daemon 线程 | 长任务状态入库，完成写通知（不引入队列） |
+| 文件监听 | 自研线程轮询 `data/inbox` | 拖入视频自动入库 |
+| LLM | DeepSeek + Kimi（适配器） | 可配任意模型；双模型讨论生成 |
+| ASR | 阿里云录音文件识别（FileTrans 4.0） | ffmpeg 抽音轨 + OSS 中转 |
+| 平台数据 | TikHub（第三方聚合） | 抖音/B站/小红书主页/作品/统计/评论 |
+| 邮件 | QQ SMTP | 每日推送可配置开关 |
+| 部署 | Docker Compose（NAS）/ 本地开发 | 数据目录挂载 |
 
-## 2. 分层与依赖方向（强制）
-```
-api（路由，薄） → services（业务，厚） → models（数据模型）
-                      ↕ 不反向
-                adapters（LLM/ASR/热点/指标/推送，可插拔）
-```
-- api 只做参数校验与转发（Pydantic schema）
-- services 承载业务逻辑；所有外部依赖收敛在 services 的适配器内
-- models 只描述数据结构，不包含业务逻辑
-- 禁止反向依赖、禁止跨层跳跃
-
-## 3. 模块清单（backend/app）
-| 模块 | 职责 |
-|---|---|
-| `api/videos.py` | 素材库：上传/列表/标签/状态 |
-| `api/persona.py` | 人设档案查看/编辑/确认建议 |
-| `api/topics.py` | 每日选题列表、匹配、手动触发流水线 |
-| `api/drafts.py` | 脚本草稿：生成/改写/保存/版本 |
-| `api/metrics.py` | 指标查询与增长曲线 |
-| `api/review.py` | 复盘报告（ABCD）与赛道雷达 |
-| `api/requirements.py` | 需求归档的展示与状态 |
-| `api/chat.py` | AI 对话（DeepSeek 函数调用，只读直接答/写操作需确认） |
-| `services/transcription.py` | ASR 适配器（阿里云） |
-| `services/persona.py` | 人设分析/增量建议/红线边界/改稿差异分析 |
-| `services/topic_mining.py` | 热点抓取适配器（抖音/B站/小红书）与匹配打分 |
-| `services/generation.py` | DeepSeek 生成（标题/封面字/脚本/平台外壳）+ 风格样本本地检索 |
-| `services/metrics.py` | 指标三通道（cookie/导出/手动）与归一化 |
-| `services/review.py` | 复盘与赛道雷达（按主赛道聚合，按发布天数归一化） |
-| `services/notify.py` | QQ SMTP 邮件推送 |
-| `services/requirements.py` | 需求编号归档（R-xxx 写入 requirements/） |
-
-## 4. 关键数据流
-### 每日选题流水线（早间，APScheduler 触发）
-```
-抓三平台热点 → 人设×热点匹配打分(DeepSeek) → 生成3+选题与脚本 → 入库 → QQ邮件推送(带工作台链接)
-```
-幂等：同一天重复运行不生成重复内容、不重复发邮件；中断可续跑；Web 可手动触发。
-### 每日指标流水线
-```
-三通道取数(cookie/导出/手动) → 指标快照入库 → 更新看板与增长曲线
-```
-新老视频对比按"发布天数"归一化。
-### 人设学习闭环
-```
-新视频发布 → 导入（Web 上传 / data/inbox 监听）→ 阿里云ASR转写 → AI校对
-→ 增量分析(DeepSeek，表现加权) → AI建议扩人设 → 作者确认 → 档案更新(版本化)
-→ 改稿差异分析：作者在 Web 改写脚本的差异是强纠偏信号
+```mermaid
+graph LR
+    subgraph 前端 SPA
+      V[Views/Router]
+    end
+    subgraph 后端单体 FastAPI
+      API[API 层]
+      SVC[服务层 services]
+      CORE[核心算法 core]
+      MOD[(SQLite)]
+      SCH[APScheduler + 后台线程]
+      W[inbox 监听线程]
+    end
+    V -->|REST/JSON + Token| API
+    API --> SVC
+    SVC --> CORE
+    SVC --> MOD
+    SVC -->|适配器| EXT
+    SCH --> SVC
+    W --> SVC
+    EXT[DeepSeek/Kimi / TikHub / 阿里云OSS+ASR / QQ SMTP]
 ```
 
-## 5. 数据模型（概要）
-- `videos`（视频、平台、状态：计划中/已发布、计划发布时间、实际发布时间、广告标记、主赛道、标签）
-- `transcripts`（转写稿、原始文案、校对状态）
-- `persona_tags`（标签+描述、红线边界、来源：AI建议/手动、版本、确认状态）
-- `hot_topics`（每日热点快照，保留 30 天）
-- `drafts`（标题/封面字/脚本、平台外壳、作者改写记录、版本）
-- `metrics_snapshots`（每日指标快照，全留）
-- `feedback`（打分、采用标记）
-- `review_reports`（复盘报告）
-- `requirements`（需求编号、原文、状态、渠道、关联）
-- `chat_messages`（AI 对话历史）
+## 2. 目录与分层
 
-## 6. 目录结构
 ```
 echo/
-├── AGENTS.md / README.md
-├── docs/                    # PRD / ARCHITECTURE / WORKFLOW / DECISIONS / milestones
-├── requirements/            # 需求归档（事实源）
+├── AGENTS.md            # 运行手册（强制流程/规范）
+├── docs/                # PRD/PRODUCT/ARCHITECTURE/DESIGN/DECISIONS/milestones/WORKFLOW/CHANGELOG
+├── requirements/        # 需求事实源 R-xxx + README 索引
 ├── backend/
-│   ├── app/                 # main.py / config.py / db.py / api/ / services/ / models/ / schemas/ / scheduler.py / tasks.py
-│   ├── alembic/             # 数据库迁移
-│   ├── tests/               # pytest（mock API，离线可跑）
-│   └── scripts/
-├── frontend/
-│   ├── src/                 # views/ components/ api/ router/（响应式）
-│   ├── package.json
-│   └── vite.config.ts
-├── scripts/verify.sh        # 质量门禁
-└── data/                    # 运行时（gitignore，NAS 卷）
-    ├── echo.db / videos/ / transcripts/ / inbox/ / exports/ / backups/
+│   ├── app/
+│   │   ├── main.py      # FastAPI 组装：路由/静态托管/令牌校验
+│   │   ├── config.py    # 环境配置（ECHO_ 前缀，pydantic-settings）
+│   │   ├── db.py        # engine/SessionLocal/轻量迁移
+│   │   ├── api/         # 路由层（薄）：videos/persona/drafts/chat/topics/metrics/review/…
+│   │   ├── services/    # 业务层：generation/ingest/persona/platform_sync/works_service/chat_service/…
+│   │   ├── services/platform/tikhub.py  # 平台客户端（mock/real 适配器）
+│   │   ├── core/        # 纯逻辑算法：retrieval/style_profile/transcript/signature/topics/…
+│   │   ├── models/      # SQLAlchemy 模型（表见 §6）
+│   │   ├── schemas/     # Pydantic 契约
+│   │   ├── scheduler.py # APScheduler 任务注册
+│   │   ├── tasks.py     # 后台任务运行器 + 通知
+│   │   └── watcher.py   # inbox 监听
+│   ├── tests/           # 纯逻辑测试 + 服务测试（离线 mock）
+│   └── .venv/
+├── frontend/src/        # views/api/router/components
+└── scripts/             # verify.sh（质量门禁）/ backup.sh
 ```
 
-## 7. 运行与测试
-### 开发（笔记本）
-- 后端：`cd backend && pip install -e . && uvicorn app.main:app --reload`
-- 前端：`cd frontend && npm install && npm run dev`
-- 测试：`cd backend && pytest`（全部 mock，离线可跑）
-- 质量门禁：`scripts/verify.sh`
-### 部署（NAS，Docker）
-- 配置 `.env`（见 `.env`）
-- `docker compose up -d --build`
-- 更新：`scripts/update.sh`（git pull + 重建 + 健康检查）
-- 备份：`data/` 热备份 + `docs/` + `requirements/` 快照
+依赖方向：`api → services → models`、`api → core`、`services → core`，禁止反向；适配器模式隔离外部服务。
 
-## 8. 时区与约定
-- 容器时区强制 `Asia/Shanghai`；每日任务按北京时间
-- 流水线失败必须发出"失败"邮件告警，不允许静默失败
-- 全部秘密走 `.env`，不硬编码
+## 3. 外部服务与适配器
+
+| 外部 | 用途 | 模式 | 关键配置 |
+|---|---|---|---|
+| DeepSeek/Kimi | 生成/校对/复盘/对话/讨论 | `llm.py` 客户端，模型名可配 | `ECHO_DEEPSEEK_API_KEY/MODEL`、`ECHO_KIMI_API_KEY/MODEL` |
+| TikHub | 平台数据 | `tikhub.py`，`mock/real` 可切 | `ECHO_TIKHUB_API_KEY/MODE/BASE_URL/DAILY_BUDGET` |
+| 阿里云 OSS | ASR 文件中转 | `aliyun_oss.py` | `ECHO_ALIYUN_ASR_ACCESS_KEY_ID/SECRET`、`ECHO_ALIYUN_OSS_BUCKET/REGION` |
+| 阿里云 FileTrans | 录音文件识别 | `aliyun_filetrans.py` | `ECHO_ALIYUN_ASR_APP_KEY`、`ECHO_ASR_MODE` |
+| QQ SMTP | 邮件推送 | `notify.py` | `ECHO_SMTP_*` |
+
+## 4. 运行形态（进程）
+
+```mermaid
+graph TD
+    P[uvicorn :8000] -->|import 时| S[setup_scheduler 启动 APScheduler]
+    P --> W[inbox watcher 线程]
+    P --> A[API 路由]
+    S --> J1[每日流水线 07:00]
+    S --> J2[每日指标 08:00]
+    S --> J3[平台同步 07:30/18:00]
+    S --> J4[每日备份 02:30]
+    S --> J5[每周风格重建 周日03:20]
+    W -->|新文件| V[Video 入库（不自动转写）]
+    A --> T[background_tasks + 线程]
+    T --> N[Notification]
+```
+
+开发运行：
+- 后端：`cd backend && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- 前端：`cd frontend && npm run dev`（5173，dev 反向代理 8000）
+
+## 5. 数据存储位置（由 .env 决定）
+
+| 配置 | 默认示例（当前本机） | 内容 |
+|---|---|---|
+| `ECHO_DATA_DIR` | `/Users/yeah/document/echo_resource` | 数据根目录 |
+| `ECHO_DB_PATH` | `…/echo.db` | SQLite 数据库 |
+| videos/covers/uploads/inbox | `…/videos|covers|uploads|inbox` | 视频/封面/图片/待入库 |
+
+仓库 `backend/data/` 仅为代码默认残留（未使用，env 已覆盖指向 echo_resource）。
+
+## 6. 数据库（表清单与关系）
+
+```mermaid
+erDiagram
+    CREATOR ||--o{ CREATOR_ACCOUNT : owns
+    CREATOR_ACCOUNT ||--o{ PLATFORM_POST : posts
+    CREATOR_ACCOUNT ||--o{ CREATOR_ACCOUNT_SNAPSHOT : daily
+    PLATFORM_POST }o--o| WORK : merged
+    PLATFORM_POST ||--o{ PLATFORM_POST_STAT : stats
+    PLATFORM_POST ||--o{ PLATFORM_POST_COMMENT : comments
+    PLATFORM_POST }o--o| VIDEO : local_bound
+    VIDEO ||--o| TRANSCRIPT : has
+    VIDEO ||--o{ METRICS_SNAPSHOT : daily
+    VIDEO ||--o{ DRAFT : related
+    DRAFT ||--o{ FEEDBACK : rated
+    DRAFT ||--o{ DRAFT_DISCUSSION : debate
+    PERSONA_TAG }o--|| CREATOR : style
+```
+
+主要表（models/*.py）：
+- **内容**：`videos`（本地素材）、`transcripts`（ASR 转写/校对/原始文案）、`works`（跨平台同作品）、`platform_posts`（平台作品）、`platform_post_stats`（每日统计）、`platform_post_comments`（评论）、`drafts`（脚本草稿）、`draft_discussions`（双模型讨论留痕）。
+- **人设/学习**：`persona_tags`（风格/赛道/红线/金句锚点）、`ai_prompts`（提示词版本）、`feedback`（1-5 分/采用）、`app_kv`（KV：风格禁词、预算、计数等）。
+- **平台/博主**：`creators`（主/对标）、`creator_accounts`、`creator_account_snapshots`（粉丝/作品数快照）、`sync_jobs`（同步记录）。
+- **分析**：`metrics_snapshots`、`review_reports`、`hot_topics`、`topic_candidates`、`topic_ideas`（灵感池）、`pipeline_runs`。
+- **系统**：`background_tasks`、`notifications`、`chat_conversations`、`chat_messages`、`requirements` 相关（页面数据来自文件）。
+
+## 7. 关键数据流（摘要，详见 DESIGN）
+
+1. **导入学习闭环**：上传 → 手动转写(ASR) → 校对 → 预打标/人设建议 →（确认后）进入语料。
+2. **平台同步**：博主 → 账号 → 拉取作品/统计/评论 → 平台表 → 自动合并 work →（可选）转本地。
+3. **每日选题/生成**：热点/灵感 → 人设+风格检索 →（可选双模型讨论）→ 脚本 → 反馈回流。
+4. **复盘**：平台统计/本地指标 → 看板 → 周报 ABCD。
+
+## 8. 配置速查（.env，均带 ECHO_ 前缀）
+访问令牌、DeepSeek、Kimi、阿里云 ASR+OSS、SMTP、数据/DB 路径、每日推送时间、热点源模式、TikHub（key/mode/base/budget/同步时刻）、生成策略与讨论轮数等；完整清单见 `backend/app/config.py`。
+
+## 9. 安全与备份
+- Web 入口校验 `X-Access-Token`（.env `ECHO_ACCESS_TOKEN`）。
+- 密钥只放 .env（gitignore）；需求文档等一律打码。
+- 每日 02:30 自动备份（SQLite 官方热备份 + requirements/docs 快照，保留 10 份），`scripts/backup.sh`。
+- 交付门禁 `scripts/verify.sh`：lint(ruff) + mypy + pytest + 前端 lint/build。
+
+## 10. 部署（Docker/NAS）
+数据目录（echo_resource）挂载进容器；端口 8000 暴露；环境变量由宿主 .env 注入；
+后端容器内 `uvicorn` 启动即注册定时任务与 watcher；前端可用 `npm run build` 产物由 FastAPI 静态托管，也可单独 nginx。
