@@ -408,8 +408,13 @@ class TikHubClient:
                 cover = ""
                 imgs = n.get("images_list") or []
                 if imgs and isinstance(imgs[0], dict):
-                    urls = imgs[0].get("url_list") or []
-                    cover = urls[0] if urls else ""
+                    img0 = imgs[0]
+                    cover = (
+                        (img0.get("url_list") or [""])[0]
+                        or img0.get("url")
+                        or img0.get("url_size_large")
+                        or ""
+                    )
                 out.append(
                     PostData(
                         platform_post_id=str(n.get("id") or n.get("note_id") or ""),

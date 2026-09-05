@@ -44,12 +44,14 @@
       <span class="muted">共 {{ shownHot.length }} 条</span>
     </div>
     <div class="section-title" style="margin-top: 28px">
-      评论灵感池 <span class="muted" style="font-size: 13px">来自评论区 · 人工挑选，不自动推送</span>
+      灵感池 <span class="muted" style="font-size: 13px">来自评论/热点 · 人工挑选，不自动推送</span>
+      <div class="grow" />
+      <n-button v-if="ideas.length" size="tiny" secondary @click="rotateIdeas">换一批</n-button>
     </div>
     <div class="panel">
-      <div v-if="!ideas.length" class="empty">暂无评论灵感（每日同步后自动抓取主/对标评论区）</div>
+      <div v-if="!ideas.length" class="empty">暂无灵感（每日同步后自动抓取主/对标评论与热点）</div>
       <div v-else class="idea-list">
-        <div v-for="it in ideas" :key="it.id" class="idea-row">
+        <div v-for="it in shownIdeas" :key="it.id" class="idea-row">
           <span class="src">{{ platformName(it.platform) }}</span>
           <span class="grow">{{ it.title }}</span>
           <n-button size="tiny" type="primary" secondary :loading="generatingIdea === it.id" @click="pickAngle(it.title)">生成文案</n-button>
@@ -130,6 +132,7 @@ const platOptions = [
 const refreshing = ref(false)
 const generatingTitle = ref(null)
 const ideas = ref([])
+const ideaBatch = ref(0)
 const generatingIdea = ref(0)
 const cloudPosts = ref([])
 const gaps = ref([])
@@ -148,6 +151,18 @@ const shownHot = computed(() => {
   }
   return arr.slice(0, 15)
 })
+
+const shownIdeas = computed(() => {
+  if (!ideas.value.length) return []
+  const n = Math.min(8, ideas.value.length)
+  const start = (ideaBatch.value * n) % ideas.value.length
+  const arr = [...ideas.value]
+  return [...arr.slice(start), ...arr.slice(0, start)].slice(0, n)
+})
+
+function rotateIdeas() {
+  ideaBatch.value++
+}
 
 function shuffle() {
   batch.value++
@@ -212,7 +227,17 @@ const model = computed(() => {
   const start = Math.min(...dates) - 7
   const end = Math.max(...dates, dayNum(fmtDate(new Date()))) + 10
   const span = Math.max(30, end - start)
-  const step = pickStep(span)
+  const baseStep = pickStep(span)
+  // 密集自适应：最近的“不同日期”间距尽量拉开到不叠字/图（颗粒度自动放大）
+  const uniqDays = [...new Set(dates)].sort((a, b) => a - b)
+  let minGap = Infinity
+  for (let i = 1; i < uniqDays.length; i++) {
+    const g = uniqDays[i] - uniqDays[i - 1]
+    if (g > 0 && g < minGap) minGap = g
+  }
+  const need = Number.isFinite(minGap) && minGap > 0 ? Math.ceil(100 / Math.min(minGap, 30)) : baseStep
+  const capBySpan = Math.max(12, Math.floor(30000 / span))  // 总宽封顶，避免长跨度被撑到离谱
+  const step = Math.min(Math.max(baseStep, need), capBySpan)
   const width = span * step
 
   const months = []
@@ -223,10 +248,20 @@ const model = computed(() => {
     months.push({ key: `${d.getUTCFullYear()}-${d.getUTCMonth()}`, label: `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月`, left })
   }
 
-  const events = raw.map(r => ({
-    ...r,
-    left: (dayNum(r.date) - start) * step + step / 2
-  }))
+  // 同一天多条：以当天为中心向两侧错开，避免完全叠在一起
+  const byDate = {}
+  raw.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r) })
+  const events = []
+  Object.keys(byDate).sort().forEach((date) => {
+    const list = byDate[date]
+    const n = list.length
+    const baseLeft = (dayNum(date) - start) * step + step / 2
+    const gap = Math.min(step * 1.15, 112)
+    list.forEach((r, i) => {
+      const off = n > 1 ? (i - (n - 1) / 2) * Math.max(gap, 40) : 0
+      events.push({ ...r, left: baseLeft + off })
+    })
+  })
 
   const today = dayNum(fmtDate(new Date()))
   const todayLeft = today >= start && today <= end ? (today - start) * step + step / 2 : null
@@ -335,6 +370,7 @@ async function loadGaps() {
 
 async function loadIdeas() {
   try {
+    ideaBatch.value = 0
     const data = await api('/api/platform/topic-pool')
     ideas.value = data.items || []
   } catch (e) {
