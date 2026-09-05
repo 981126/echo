@@ -123,11 +123,7 @@
           <n-tab-pane name="local" tab="转本地素材">
             <div class="form-item">
               <label class="form-label">上传视频（可选；选后可一键「保存并语音转文字」）</label>
-              <div class="row" style="gap: 8px">
-                <input ref="cloudFileInput" type="file" accept="video/*" class="file-hidden" @change="onCloudFile" />
-                <n-button secondary @click="cloudFileInput && cloudFileInput.click()">选择视频文件</n-button>
-                <span v-if="cloudFile" class="muted grow">{{ cloudFile.name }}</span>
-              </div>
+              <CloudVideoPicker :file-name="cloudFile ? cloudFile.name : ''" @file="onCloudFile" />
             </div>
             <div class="form-item">
               <label class="form-label">文案 / 原始文字（可选）</label>
@@ -179,6 +175,7 @@ import EditActions from '../components/EditActions.vue'
 import TranscriptEditor from '../components/TranscriptEditor.vue'
 import TagsInput from '../components/TagsInput.vue'
 import MetaFields from '../components/MetaFields.vue'
+import CloudVideoPicker from '../components/CloudVideoPicker.vue'
 import { adOptions, platformOptions, statusOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
@@ -206,7 +203,6 @@ const cloudItem = ref(null)
 const cloudFile = ref(null)
 const cloudText = ref('')
 const cloudSaving = ref(false)
-const cloudFileInput = ref(null)
 const cloudAd = ref(false)
 const cloudPrice = ref(null)
 const cloudMetaSaving = ref(false)
@@ -668,8 +664,8 @@ async function saveCloudMeta() {
   }
 }
 
-function onCloudFile(e) {
-  cloudFile.value = e.target.files[0] || null
+function onCloudFile(f) {
+  cloudFile.value = f || null
 }
 
 async function goLocal(id) {
@@ -727,7 +723,6 @@ async function saveCloudLocal(transcribe = false) {
     message.error(e.message)
   } finally {
     cloudSaving.value = false
-    if (cloudFileInput.value) cloudFileInput.value.value = ''
   }
 }
 
