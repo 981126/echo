@@ -10,3 +10,7 @@ python-multipart>=0.0.9
 pytest>=8.0
 ruff>=0.5
 mypy>=1.10
+
+# 阿里云 ASR 真实接入（R-032）：OSS 上传 + FileTrans RPC POP 泛化调用
+oss2>=2.19
+aliyun-python-sdk-core>=2.16

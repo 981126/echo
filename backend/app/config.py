@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     aliyun_asr_access_key_secret: str = ""
     aliyun_asr_app_key: str = ""
     asr_mode: str = "mock"  # mock | aliyun
+    aliyun_asr_region: str = "cn-shanghai"  # FileTrans 服务地域（域名前缀，如 cn-shanghai）
+    asr_poll_interval: int = 15  # FileTrans 结果轮询间隔（秒）
+    asr_poll_timeout: int = 3600  # 单任务最长等待（秒），超时任务标记失败可重试
+    # 阿里云 OSS（R-032：FileTrans 要求公网 URL，视频临时上传 OSS 再删除）
+    aliyun_oss_bucket: str = ""
+    aliyun_oss_region: str = "oss-cn-shanghai"  # 形如 oss-cn-shanghai
+    aliyun_oss_url_expire: int = 7 * 24 * 3600  # 预签名 URL 有效期（覆盖最长排队，秒）
 
     # QQ 邮箱 SMTP
     smtp_host: str = "smtp.qq.com"

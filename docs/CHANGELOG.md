@@ -133,3 +133,10 @@
 - R-031 作品合并：works 表 + platform_posts/videos.work_id；同步后同创作者同标题自动合并；素材库「云端作品」面板（自动合并展示各平台播放/赞/藏/评 + 手动合并/拆分 + 分平台同步）；转素材自动继承 work
 - R-030④：生成时注入"近期表现最好草稿的共性（标题/开头/结尾引导）"
 - R-030⑥：话题缺口 /api/topics/gaps（近 28 天发布话题覆盖 + 评论区在问数），主页展示补位建议
+
+## [M14 / R-032] 2026-09-05 — 阿里云 ASR 真实接入
+- FileTrans 4.0 改用官方推荐 `aliyun-python-sdk-core` CommonRequest RPC POP（SubmitTask/GetTaskResult），替换原占位手写 HMAC REST 客户端；真实调用通过（官方示例音频返回「北京的天气。」）
+- 新增 `services/aliyun_oss.py`：视频临时上传 OSS（bucket `981126981126` / oss-cn-shanghai）→ 预签名 URL → 识别完成后删除临时对象
+- config 新增 `ECHO_ALIYUN_OSS_BUCKET/REGION`、`ECHO_ALIYUN_ASR_REGION`、轮询间隔/超时；`.env` 配 `ECHO_ASR_MODE=aliyun` 启用真实转写（开发/测试默认 mock）
+- 测试：新增 5 项 R-032 编排单测（当前共 43 项通过）；ruff/mypy/前端构建全绿
+- 阻塞：该 AccessKey 对 OSS bucket 无权限（`AccessDenied: The bucket you access does not belong to you`），待作者授权后完成 E2E 冒烟
