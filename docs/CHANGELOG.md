@@ -140,3 +140,4 @@
 - config 新增 `ECHO_ALIYUN_OSS_BUCKET/REGION`、`ECHO_ALIYUN_ASR_REGION`、轮询间隔/超时；`.env` 配 `ECHO_ASR_MODE=aliyun` 启用真实转写（开发/测试默认 mock）
 - 测试：新增 5 项 R-032 编排单测（当前共 43 项通过）；ruff/mypy/前端构建全绿
 - 阻塞：该 AccessKey 对 OSS bucket 无权限（`AccessDenied: The bucket you access does not belong to you`），待作者授权后完成 E2E 冒烟
+- **完成（同日）**：作者授予 OSS 权限后 E2E 实调通过（上传→转写回填「北京的天气。」→ 自动删除临时对象，复查无残留）；R-032 标记 ✅ 已完成
