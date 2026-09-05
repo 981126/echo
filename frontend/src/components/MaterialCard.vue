@@ -76,7 +76,18 @@ defineProps({
 </script>
 
 <style scoped>
-.card-tile { display: flex; flex-direction: column; height: 100%; }
+.card-tile { display: flex; flex-direction: column; height: 100%; position: relative; }
+.card-tile.picking { cursor: pointer; }
+.tile-cover { position: relative; }
+.pick-box {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  padding: 2px;
+}
 .row-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 8px; min-height: 24px; }
 .tag-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .tile-meta { margin: 6px 0 0; font-size: 8px; line-height: 1.4; color: #6f675c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
