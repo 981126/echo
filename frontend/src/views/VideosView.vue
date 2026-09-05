@@ -2,15 +2,7 @@
   <div class="page">
     <h1 class="page-title">素材库</h1>
 
-    <div class="panel row">
-      <input ref="fileInput" type="file" accept="video/*" class="file-hidden" @change="onFile" />
-      <n-button secondary @click="fileInput && fileInput.click()">选择视频文件</n-button>
-      <span v-if="file" class="muted grow">{{ file.name }}</span>
-      <span v-else class="muted grow">或拖入 data/inbox 自动入库</span>
-      <n-button type="primary" :disabled="!file" :loading="uploading" @click="doUpload">
-        {{ uploading ? '上传中…' : '上传' }}
-      </n-button>
-    </div>
+    <UploadVideoBar :uploading="uploading" @upload="doUpload" />
 
     <div class="toolbar">
       <n-select multiple filterable v-model:value="platformSel" :options="platformOptions" placeholder="平台（可多选/输入过滤）" clearable style="width: 210px" />
@@ -267,6 +259,7 @@ import { useMessage, useDialog } from 'naive-ui'
 import { api, uploadVideo, uploadCover, getToken } from '../api'
 import MediaComments from '../components/MediaComments.vue'
 import PlatformStats from '../components/PlatformStats.vue'
+import UploadVideoBar from '../components/UploadVideoBar.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
@@ -284,8 +277,6 @@ const platformSel = ref([])
 const tagSel = ref([])
 const loading = ref(false)
 const uploading = ref(false)
-const file = ref(null)
-const fileInput = ref(null)
 const coverInput = ref(null)
 const editing = ref(null)
 const linkedDrafts = ref([])
@@ -352,21 +343,15 @@ async function loadWorksQuiet() {
   }
 }
 
-function onFile(e) {
-  file.value = e.target.files[0] || null
-}
-
-async function doUpload() {
-  if (!file.value) {
+async function doUpload(f) {
+  if (!f) {
     message.warning('请先选择视频文件')
     return
   }
   uploading.value = true
   try {
-    const r = await uploadVideo(file.value)
+    const r = await uploadVideo(f)
     message.success('上传成功')
-    file.value = null
-    if (fileInput.value) fileInput.value.value = ''
     await loadQuiet()
     if (r && r.id) {
       let v = videos.value.find(x => x.id === r.id)
