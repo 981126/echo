@@ -36,58 +36,26 @@
       </div>
     </div>
 
-    <div class="toolbar" style="margin-top: 24px">
-      <span class="section-title" style="margin: 0">热点选题</span>
-      <n-select v-model:value="platFilter" :options="platOptions" placeholder="全部平台" clearable style="width: 140px" @update:value="shuffle" />
-      <n-button size="small" secondary @click="shuffle">换一批</n-button>
-      <n-button size="small" secondary :loading="refreshing" @click="refreshHot">抓取更新</n-button>
-      <span class="muted">共 {{ shownHot.length }} 条</span>
-    </div>
     <div class="section-title" style="margin-top: 28px">
-      灵感池 <span class="muted" style="font-size: 13px">来自评论/热点 · 人工挑选，不自动推送</span>
+      灵感池
+      <span class="muted" style="font-size: 13px">各平台热榜 + 评论均衡混排 · 人工挑选，不自动推送</span>
       <div class="grow" />
-      <n-button v-if="ideas.length" size="tiny" secondary @click="rotateIdeas">换一批</n-button>
+      <n-button v-if="totalIdeas" size="tiny" secondary @click="rotateIdeas">换一批</n-button>
+      <n-button size="tiny" secondary :loading="refreshing" @click="refreshIdeas">抓取更新</n-button>
     </div>
     <div class="panel">
-      <div v-if="!ideas.length" class="empty">暂无灵感（每日同步后自动抓取主/对标评论与热点）</div>
+      <div v-if="!totalIdeas" class="empty">暂无灵感（点「抓取更新」或等每日自动同步）</div>
       <div v-else class="idea-list">
         <div v-for="it in shownIdeas" :key="it.id" class="idea-row">
           <span class="src">{{ platformName(it.platform) }}</span>
-          <span class="grow">{{ it.title }}</span>
+          <span class="kind">{{ it.source === 'hot' ? '热榜' : '评论' }}</span>
+          <span class="grow ellipsis" style="min-width: 0">{{ it.title }}</span>
           <n-button size="tiny" type="primary" secondary :loading="generatingIdea === it.id" @click="pickAngle(it.title)">生成文案</n-button>
         </div>
       </div>
     </div>
 
-    <div v-if="gaps.length" class="section-title" style="margin-top: 28px">
-      话题缺口 <span class="muted" style="font-size: 13px">最近发得少、但评论区在问的赛道</span>
-    </div>
-    <div v-if="gaps.length" class="panel">
-      <div class="row wrap" style="gap: 10px">
-        <div v-for="g in gaps" :key="g.topic" class="gap-tag" :class="{ low: g.published === 0 }">
-          <b>{{ g.topic }}</b>
-          <span class="muted">近 28 天发 {{ g.published }} 条</span>
-          <span v-if="g.asking_comments" class="ask">评论区 {{ g.asking_comments }} 条在问</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div v-if="!shownHot.length" class="empty">暂无热点，点「抓取更新」</div>
-      <div v-else class="hot-tags">
-        <button
-          v-for="h in shownHot"
-          :key="h.id"
-          class="hot-tag"
-          :disabled="generatingTitle !== null"
-          @click="genFromHot(h)"
-        >
-          <span class="src">{{ platformName(h.platform) }}</span>
-          <span>{{ generatingTitle === h.title ? '生成中…' : h.title }}</span>
-        </button>
-      </div>
-    </div>
-  <n-modal v-model:show="angleShow" preset="card" title="选一个切入角度" style="width: min(680px, 94vw)">
+<n-modal v-model:show="angleShow" preset="card" title="选一个切入角度" style="width: min(680px, 94vw)">
     <div v-if="angleLoading" class="panel empty">正在想 3 个角度…</div>
     <div v-else-if="!angles.length" class="panel empty">暂时没想出来，直接按原话题生成</div>
     <div v-else class="angle-list">
@@ -152,13 +120,43 @@ const shownHot = computed(() => {
   return arr.slice(0, 15)
 })
 
-const shownIdeas = computed(() => {
-  if (!ideas.value.length) return []
-  const n = Math.min(8, ideas.value.length)
-  const start = (ideaBatch.value * n) % ideas.value.length
-  const arr = [...ideas.value]
-  return [...arr.slice(start), ...arr.slice(0, start)].slice(0, n)
-})
+const totalIdeas = computed(() => hotItems.value.length + ideas.value.length)
+
+function unifiedIdeas() {
+  const hot = hotItems.value.map(h => ({
+    id: 'hot-' + (h.platform || '') + '-' + h.title,
+    platform: h.platform || 'hot',
+    title: h.title,
+    source: 'hot'
+  }))
+  const comments = ideas.value.map(it => ({ ...it, source: 'comment' }))
+  const all = [...hot, ...comments]
+  const groups = {}
+  all.forEach(it => { (groups[it.platform] = groups[it.platform] || []).push(it) })
+  // 平台多的排前，保证混排时每个平台都能轮流出现
+  const plats = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length)
+  const per = 8
+  const out = []
+  const cursor = {}
+  plats.forEach((pl, pi) => {
+    cursor[pl] = (ideaBatch.value * Math.max(1, Math.ceil(per / Math.max(plats.length, 1))) + pi) % groups[pl].length
+  })
+  while (out.length < per) {
+    let moved = false
+    for (const pl of plats) {
+      const g = groups[pl]
+      if (cursor[pl] >= g.length) continue
+      out.push(g[cursor[pl]])
+      cursor[pl] += 1
+      moved = true
+      if (out.length >= per) break
+    }
+    if (!moved) break
+  }
+  return out
+}
+
+const shownIdeas = computed(() => unifiedIdeas())
 
 function rotateIdeas() {
   ideaBatch.value++
@@ -285,13 +283,18 @@ async function refreshHot() {
   refreshing.value = true
   try {
     const r = await api('/api/topics/refresh', { method: 'POST', body: '{}' })
-    message.success(`热点已刷新（${r.fetched || 0} 条）`)
+    message.success(`已抓取最新热点（${r.fetched || 0} 条）`)
     await loadHot()
+    await loadIdeas()
   } catch (e) {
     message.error('刷新失败：' + e.message)
   } finally {
     refreshing.value = false
   }
+}
+
+function refreshIdeas() {
+  refreshHot()
 }
 
 async function pickAngle(topic) {
