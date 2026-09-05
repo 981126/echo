@@ -422,7 +422,47 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
         targets = (new_posts or synced)[:10] if new_posts else synced[:3]
         if targets:
             stats["comments"] = _collect_comments(db, account, client, targets)
+    if account.platform == "bilibili":
+        # B站列表不含赞/藏/评，全量时逐条详情太重；这里每轮补全最多 BACKFILL 条
+        stats["backfilled"] = _backfill_bili_stats(db, account, client)
     return stats
+
+
+def _backfill_bili_stats(db: Session, account: CreatorAccount, client: TikHubClient, limit: int = 150) -> int:
+    """B站：给“最新指标里 likes=0”的作品拉单条详情补全赞/藏/评（每轮限量，重复同步会补完）。"""
+    from ..models.platform import PlatformPostStat
+
+    posts = (
+        db.query(PlatformPost)
+        .filter(PlatformPost.account_id == account.id, PlatformPost.platform == "bilibili")
+        .order_by(PlatformPost.id.desc())
+        .all()
+    )
+    missing = []
+    for post in posts:
+        st = (
+            db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id == post.id)
+            .order_by(PlatformPostStat.stat_date.desc())
+            .first()
+        )
+        if st is None or st.likes == 0:
+            missing.append(post)
+        if len(missing) >= limit:
+            break
+    done = 0
+    for post in missing:
+        try:
+            stats = client.fetch_post_stats("bilibili", post.platform_post_id)
+            _charge(db)
+            _write_stat(db, post, stats)
+            done += 1
+        except BudgetExceeded:
+            raise
+        except Exception:  # noqa: BLE001
+            db.rollback()
+    db.commit()
+    return done
 
 
 def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None, creator_id: int | None = None, top_n: int | None = None) -> dict:

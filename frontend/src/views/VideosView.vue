@@ -78,7 +78,7 @@
           <div v-for="pst in it.cloudPosts.slice(0, 3)" :key="pst.id" class="plat-line">
             <b>{{ platformName(pst.platform) }}</b>
             <template v-if="pst.latest_stat">
-              <span>播放 {{ fmtNum(pst.latest_stat.plays) }}</span>
+              <span>播放 {{ pst.latest_stat.plays ? fmtNum(pst.latest_stat.plays) : '—' }}</span>
               <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
               <span v-if="pst.latest_stat.comments">评 {{ fmtNum(pst.latest_stat.comments) }}</span>
             </template>
