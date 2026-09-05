@@ -459,7 +459,7 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
     try:
         per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 10)))
         assert owner is not None
-        with_comments = scope in ("daily", "weekly")
+        with_comments = True  # 前10条/每周/全量都会按新增作品把评论入库（本地查询）
 
         def _limit_for(acc) -> int:
             if scope == "weekly":
