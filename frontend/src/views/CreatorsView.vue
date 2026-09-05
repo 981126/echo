@@ -13,16 +13,6 @@
         </span>
         <n-tag v-else type="warning" round :bordered="false">未创建</n-tag>
         <n-button size="small" secondary @click="openOwnerModal()">+ 新建主博主</n-button>
-        <n-button
-          size="small"
-          type="primary"
-          :disabled="!current || !current.id"
-          :loading="syncing"
-          @click="runSync('daily')"
-        >同步前10条</n-button>
-        <n-button size="small" secondary :disabled="!current || !current.id" @click="openSyncInit">
-          全量同步
-        </n-button>
         <div class="grow"></div>
         <span class="muted" style="font-size: 12px">
           预算 {{ budget.used }}/{{ budget.limit }}
@@ -54,6 +44,8 @@
         <n-tag v-if="c.is_current" type="primary" size="small" round :bordered="false">当前</n-tag>
         <span v-if="c.kind === 'owner'" class="muted fans" style="font-size: 12px">全网粉丝 {{ fmtNum(c.followers_total) }}</span>
         <span class="muted grow" style="font-size: 12px">{{ c.note || '（无备注）' }}</span>
+        <n-button size="small" secondary :loading="syncingOwner === c.id" @click="syncCreator(c, 'daily')">同步前10条</n-button>
+        <n-button size="small" secondary :disabled="syncingOwner === c.id" @click="syncCreator(c, 'initial')">全量同步</n-button>
         <n-button v-if="!c.is_current" size="tiny" secondary @click="askSwitch(c)">切换到此博主</n-button>
         <n-button size="tiny" secondary @click="openOwnerModal(c)">编辑</n-button>
         <n-button size="tiny" quaternary type="error" @click="delCreator(c)">删除</n-button>
@@ -98,6 +90,8 @@
           <n-tag size="small" type="info" :bordered="false" round>对标</n-tag>
           <b>{{ bm.name }}</b>
           <span class="muted grow" style="font-size: 12px">{{ bm.note || '' }}</span>
+          <n-button size="small" secondary :loading="syncingOwner === bm.id" @click="syncCreator(bm, 'daily')">同步前10条</n-button>
+          <n-button size="small" secondary :disabled="syncingOwner === bm.id" @click="syncCreator(bm, 'initial')">全量同步</n-button>
           <n-button size="tiny" secondary @click="openOwnerModal(bm)">编辑</n-button>
           <n-button size="tiny" secondary @click="openAccountModal(bm)">+ 账号</n-button>
           <n-button size="tiny" quaternary type="error" @click="delCreator(bm)">删除</n-button>
@@ -274,6 +268,7 @@ const budget = ref({ limit: 2000, used: 0 })
 const budgetLimit = ref(2000)
 const showBudget = ref(false)
 const syncing = ref(false)
+const syncingOwner = ref(0)
 const syncingAcct = ref(0)
 const syncingPost = ref(0)
 const summary = ref({ items: [] })
@@ -498,6 +493,33 @@ function delAccount(a) {
       }
     }
   })
+}
+
+async function syncCreator(c, scope) {
+  if (scope === 'initial') {
+    dialog.info({
+      title: '全量同步',
+      content: `同步「${c.name}」三个平台主页数据 + 全部作品数据（视频不下载）。确认开始？`,
+      positiveText: '开始',
+      negativeText: '取消',
+      onPositiveClick: () => startCreatorSync(c, scope)
+    })
+  } else {
+    startCreatorSync(c, scope)
+  }
+}
+
+async function startCreatorSync(c, scope) {
+  syncingOwner.value = c.id
+  try {
+    await api('/api/platform/sync', { method: 'POST', body: JSON.stringify({ scope, creator_id: c.id }) })
+    message.success('已开始同步「' + c.name + '」，完成后右上角通知')
+    load()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    syncingOwner.value = 0
+  }
 }
 
 async function runSync(scope, accountId) {
