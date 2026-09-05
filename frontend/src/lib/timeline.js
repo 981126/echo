@@ -20,12 +20,15 @@ function pickStep(spanDays) {
   return 5
 }
 
-export function buildTimelineModel(videos, cloudPosts) {
+export function buildTimelineModel(videos, cloudPosts, opts = {}) {
   const raw = []
   const todayS = fmtDate(new Date())
+  const boundIds = opts.boundLocalIds  // 已绑定云端作品/合并作品的本地素材 id（避免本地+云端重复展示）
   for (const v of videos) {
     const date = v.published_at ? v.published_at.slice(0, 10) : v.planned_publish_at ? v.planned_publish_at.slice(0, 10) : ''
     if (!date || date > todayS) continue  // R-044：只显示今天及以前，未来计划不提前出现
+    if (boundIds && boundIds.has(v.id)) continue  // 已被云端作品/合并覆盖，避免重复
+    if (v.platform_post_id || v.work_id) continue
     raw.push({
       id: v.id,
       key: 'v' + v.id,
@@ -50,7 +53,7 @@ export function buildTimelineModel(videos, cloudPosts) {
       title: (p.title || '').slice(0, 14) || '云端作品',
       fullTitle: p.title || '云端作品',
       coverUrl: p.cover || '',
-      srcLabel: p.creator_kind === 'benchmark' ? platformName(p.platform) + '·对标' : platformName(p.platform),
+      srcLabel: p.srcLabel || (p.creator_kind === 'benchmark' ? platformName(p.platform) + '·对标' : platformName(p.platform)),
       local_video_id: p.local_video_id
     })
   }

@@ -87,7 +87,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
-import { fetchVideos } from '../composables/media'
+import { fetchVideos, fetchWorks } from '../composables/media'
 import { buildTimelineModel } from '../lib/timeline'
 import { platformName } from '../lib/format'
 
@@ -99,6 +99,7 @@ const ideas = ref([])
 const ideaBatch = ref(0)
 const generatingIdea = ref(0)
 const cloudPosts = ref([])
+const boundLocalIds = ref(null)
 const gaps = ref([])
 const angleShow = ref(false)
 const angleLoading = ref(false)
@@ -148,7 +149,7 @@ function rotateIdeas() {
 }
 const message = useMessage()
 
-const model = computed(() => buildTimelineModel(videos.value, cloudPosts.value))
+const model = computed(() => buildTimelineModel(videos.value, cloudPosts.value, { boundLocalIds: boundLocalIds.value }))
 
 async function loadVideos() {
   videos.value = await fetchVideos()
@@ -237,10 +238,41 @@ function goEvent(e) {
   goVideo(e.id)
 }
 
+function worksToTimelinePosts(works) {
+  const label = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
+  const one = (p) => label[p.platform] || p.platform || ''
+  const out = []
+  for (const w of works || []) {
+    const posts = w.posts || []
+    if (!posts.length) continue
+    // 合并作品取“最先发布”的平台时间作为时间线日期（跨平台同作品只展示一条）
+    const timed = posts.filter(x => x.publish_time).sort((a, b) => (a.publish_time < b.publish_time ? -1 : 1))
+    const first = timed[0] || posts[0]
+    const bound = posts.find(x => x.local_video_id)
+    const plats = w.platforms && w.platforms.length ? w.platforms : posts.map(x => x.platform)
+    const isBench = posts.some(x => x.creator_kind === 'benchmark')
+    out.push({
+      id: first.id,               // 数字平台帖 id → 素材库 post= 深链
+      key: (w.type === 'work' ? 'w' : 'p') + w.id,
+      platform: plats[0] || '',
+      creator_kind: isBench ? 'benchmark' : 'owner',
+      title: w.title || '',
+      cover: w.cover || first.cover || '',
+      publish_time: first.publish_time || '',
+      local_video_id: bound ? bound.local_video_id : null,
+      srcLabel: isBench ? (one(first) + '·对标') : plats.map(one).filter(Boolean).join('/')
+    })
+  }
+  return out
+}
+
 async function loadCloud() {
   try {
-    const data = await api('/api/platform/posts?limit=2000')  // 时间线全量（不再滑到后面没内容）
-    cloudPosts.value = data.items || []
+    const data = await fetchWorks()  // 用“合并后作品”，时间线不重复
+    const ids = new Set()
+    for (const w of data) for (const p of w.posts || []) if (p.local_video_id) ids.add(p.local_video_id)
+    boundLocalIds.value = ids
+    cloudPosts.value = worksToTimelinePosts(data)
   } catch (e) {
     /* 静默 */
   }
