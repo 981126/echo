@@ -398,7 +398,6 @@ onMounted(() => {
   padding: 1px 6px;
   border-radius: 8px;
 }
-</style>
 
 .angle-list {
   display: flex;
@@ -457,3 +456,4 @@ onMounted(() => {
   color: #a34f2c;
   font-size: 12px;
 }
+</style>

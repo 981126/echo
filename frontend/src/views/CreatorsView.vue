@@ -647,7 +647,6 @@ onMounted(load)
 .wrap {
   flex-wrap: wrap;
 }
-</style>
 
 .current-pill {
   display: inline-flex;
@@ -709,3 +708,4 @@ onMounted(load)
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+</style>

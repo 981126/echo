@@ -233,6 +233,7 @@ async function generate() {
 onMounted(load)
 </script>
 
+<style scoped>
 .cmp-grid {
   display: flex;
   gap: 12px;
@@ -275,3 +276,4 @@ onMounted(load)
   border-radius: 6px;
   padding: 4px 8px;
 }
+</style>
