@@ -44,7 +44,6 @@
         :del-local="delLocal"
         :del-cloud="delCloud"
         :split="splitWork"
-        :upload-video="onCardClick"
       />
     </div>
 

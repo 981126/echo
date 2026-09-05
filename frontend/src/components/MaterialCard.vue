@@ -29,7 +29,6 @@
         <template v-if="item.published_at"> · 发布 {{ fmt(item.published_at) }}</template>
       </p>
       <div class="row-actions" @click.stop>
-        <n-button v-if="!item.hasVideo" size="tiny" secondary @click.stop="uploadVideo(item)">上传视频</n-button>
         <n-tag v-if="item.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
         <n-button v-if="item.platform_post_id" size="tiny" secondary :loading="syncingId === item.id" @click="syncLocal(item)">同步数据</n-button>
         <n-button v-if="!item.tags_confirmed" size="tiny" secondary @click="confirm(item)">确认标签</n-button>
@@ -47,7 +46,6 @@
       <PlatformStats :posts="item.cloudPosts || []" />
       <p v-if="item.pub" class="tile-meta">发布时间 {{ item.pub }}</p>
       <div class="row-actions" @click.stop>
-        <n-button v-if="!item.hasVideo" size="tiny" secondary @click.stop="uploadVideo(item)">上传视频</n-button>
         <n-button size="tiny" secondary :loading="syncingPostId === item.cloudPosts[0].id" @click="syncPost(item.cloudPosts[0])">同步数据</n-button>
         <n-button v-if="item.merged >= 2" size="tiny" quaternary type="warning" @click="split(item)">拆分</n-button>
         <n-button size="tiny" quaternary type="error" @click="delCloud(item)">删除</n-button>
@@ -73,8 +71,7 @@ defineProps({
   confirm: { type: Function, required: true },
   delLocal: { type: Function, required: true },
   delCloud: { type: Function, required: true },
-  split: { type: Function, required: true },
-  uploadVideo: { type: Function, default: () => {} }
+  split: { type: Function, required: true }
 })
 </script>
 
