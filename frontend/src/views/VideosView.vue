@@ -664,6 +664,26 @@ function fmtNum(n) {
   return String(n)
 }
 
+async function initLoad() {
+  // 首屏：本地素材 + 云端作品并行拉取，全部到齐后再渲染一次（避免先显示一两条再补齐）
+  loading.value = true
+  worksLoading.value = true
+  try {
+    const [vs, ws] = await Promise.all([
+      api('/api/videos?limit=500'),
+      api('/api/works')
+    ])
+    videos.value = vs.items || []
+    works.value = ws.items || []
+    buildCards()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    loading.value = false
+    worksLoading.value = false
+  }
+}
+
 async function loadWorks() {
   worksLoading.value = true
   try {
@@ -1050,8 +1070,7 @@ function delCloud(it) {
 }
 
 onMounted(async () => {
-  await load()
-  await loadWorks()
+  await initLoad()
   const m = location.hash.match(/edit=(\d+)/)
   if (m) {
     const v = videos.value.find(x => x.id === Number(m[1]))
