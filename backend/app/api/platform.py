@@ -110,7 +110,13 @@ def bind_video_link(video_id: int, payload: dict, db: Session = Depends(get_db))
     platform, ext = parse_post_id(link)
     if not platform or not ext:
         raise HTTPException(status_code=400, detail="未能解析该链接（支持抖音 /video/、B站 /video/BV、小红书 /explore/ 或 /discovery/item/）")
+    from datetime import datetime
+
     video.platform_post_id = f"{platform}:{ext}"
+    # 存在真实平台链接 => 已发布
+    video.status = "published"
+    if not video.published_at:
+        video.published_at = datetime.utcnow()
     db.commit()
     return {"ok": True, "platform": platform, "platform_post_id": video.platform_post_id}
 

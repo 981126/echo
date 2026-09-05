@@ -38,6 +38,7 @@
         </div>
         <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
           <n-tag v-if="it.kind === 'cloud'" size="small" type="info" :bordered="false" round>云端</n-tag>
+          <n-tag v-if="it.kind === 'cloud'" size="small" type="success" :bordered="false" round>已发布</n-tag>
           <n-tag v-if="it.kind === 'cloud' && it.merged" size="tiny" type="success" :bordered="false" round>合并×{{ it.merged }}</n-tag>
           <n-tag v-if="it.is_ad" size="small" :bordered="false" round type="error">广告</n-tag>
           <n-tag v-for="t in it.main_topics || []" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
@@ -536,6 +537,7 @@ function buildCards() {
       platforms: w.platforms || [],
       main_topics: [],
       is_ad: false,
+      status: 'published',
       merged: w.type === 'work' ? (w.posts || []).length : 0,
       cloudPosts: w.posts || [],
       local_video_id: anyLocal ? anyLocal.local_video_id : null,

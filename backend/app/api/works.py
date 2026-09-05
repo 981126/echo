@@ -89,7 +89,8 @@ def cloud_to_local(
         platform_post_id=f"{first.platform}:{first.platform_post_id}",
         work_id=posts[0].work_id,
         cover_path=first.cover_path or "",
-        status="planned",
+        status="published",  # 云端有真实发布链接/时间 => 已发布
+        published_at=first.publish_time,
     )
     db.add(video)
     db.commit()
