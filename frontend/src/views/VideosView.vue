@@ -38,7 +38,6 @@
           <n-tag v-if="it.kind === 'cloud'" size="small" type="info" :bordered="false" round>云端</n-tag>
           <n-tag v-if="it.kind === 'cloud' && it.merged" size="tiny" type="success" :bordered="false" round>合并×{{ it.merged }}</n-tag>
           <n-tag v-if="it.is_ad" size="small" :bordered="false" round type="error">广告</n-tag>
-          <n-tag v-for="p in it.platforms" :key="p" size="small" :bordered="false" round>{{ platformName(p) }}</n-tag>
           <n-tag v-for="t in it.main_topics || []" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
         </div>
         <h3 class="tile-title" :title="it.title" @click="openItem(it)">{{ it.title }}</h3>
