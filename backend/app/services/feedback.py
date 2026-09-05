@@ -48,13 +48,3 @@ def add_feedback(
     return row
 
 
-def recent_liked_topics(db: Session, limit: int = 5) -> list[str]:
-    rows = (
-        db.query(Feedback, Draft)
-        .join(Draft, Feedback.draft_id == Draft.id)
-        .filter((Feedback.liked == True) | (Feedback.rating >= 4))  # noqa: E712
-        .order_by(Feedback.id.desc())
-        .limit(limit)
-        .all()
-    )
-    return [d.title for _, d in rows if d and d.title]

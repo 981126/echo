@@ -22,13 +22,6 @@ def current_creator_id(db: Session) -> int | None:
     return c.id if c else None
 
 
-def require_current_creator(db: Session) -> Creator:
-    c = get_current_creator(db)
-    if c is None:
-        raise HTTPException(status_code=400, detail="请先创建并切换到一个主博主")
-    return c
-
-
 def switch_current(db: Session, creator_id: int) -> Creator:
     target = db.get(Creator, creator_id)
     if target is None:

@@ -453,10 +453,6 @@ def sync_single_post(db: Session, post_id: int) -> dict:
         raise
 
 
-def daily_top_sync_job(db: Session) -> dict:
-    """定时任务：每日两轮同步当前主博主 top10 + 评论选题采集（R-027/R-028）。"""
-    return run_sync(db, scope="daily")
-
 
 def _bound_platform_posts(db: Session, video) -> list[PlatformPost]:
     """本地素材绑定的平台作品：local_video_id / work 聚合 / platform_post_id 三路汇总去重。"""
