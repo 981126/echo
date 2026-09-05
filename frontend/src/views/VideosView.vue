@@ -18,7 +18,7 @@
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
     </div>
-    <div v-if="mergeMode" class="row" style="gap: 8px; margin: 8px 0">
+    <div v-if="mergeMode" class="merge-bar row" style="gap: 8px">
       <span class="muted">勾选 2 个以上云端素材，合并为同一作品</span>
       <div class="grow" />
       <n-button size="tiny" type="primary" :disabled="selected.size < 2" @click="doMergeCloud">合并所选（{{ selected.size }}）</n-button>
@@ -1009,4 +1009,17 @@ onMounted(async () => {
 .grid-videos {
   align-items: stretch;
 }
+
+.merge-bar {
+  position: sticky;
+  bottom: 14px;
+  z-index: 30;
+  margin: 8px 0 2px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(43, 40, 35, 0.10);
+}
+
 </style>
