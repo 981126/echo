@@ -192,6 +192,14 @@ def test_build_platform_page_url():
     assert extract_raw_field('{"data":{"bvid":"BV1yy"}}', "bvid") == "BV1yy"
 
 
+def test_default_avoid_words():
+    from app.core.style_profile import default_avoid_words
+
+    words = default_avoid_words()
+    assert len(words) > 5
+    assert len(set(words)) == len(words)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

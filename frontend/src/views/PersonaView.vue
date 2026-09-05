@@ -22,6 +22,27 @@
       <n-button size="tiny" type="primary" @click="adoptPhrase(ph)">收为锚点</n-button>
     </div>
 
+    <div class="section-title">
+      表达风格（自动统计）
+      <n-button size="tiny" secondary style="margin-left: 10px" :loading="!styleInfo" @click="loadStyle">刷新</n-button>
+    </div>
+    <div v-if="!styleInfo" class="panel empty">暂无统计（需先有素材转写稿）</div>
+    <div v-else class="panel">
+      <p style="margin: 0 0 6px; white-space: pre-wrap; font-size: 13px">{{ styleInfo.profile }}</p>
+      <div class="row" style="gap: 6px; flex-wrap: wrap; align-items: center">
+        <span class="muted" style="font-size: 12px">AI 腔禁用/少用词：</span>
+        <n-tag v-for="w in avoidList" :key="w" size="small" closable @close="removeAvoid(w)">{{ w }}</n-tag>
+      </div>
+      <div class="row" style="gap: 8px; margin-top: 8px; flex-wrap: wrap">
+        <n-input v-model:value="avoidText" placeholder="添加（逗号分隔）" clearable style="max-width: 320px" />
+        <n-button size="small" secondary @click="addAvoidWords">添加</n-button>
+        <n-button size="small" type="primary" :loading="savingStyle" @click="saveStyle">保存</n-button>
+      </div>
+      <p class="muted" style="font-size: 12px; margin: 6px 0 0">
+        禁用词会注入生成提示词；每周日凌晨自动做一次风格重建并产出提示词新候选（右上角通知，可回滚）
+      </p>
+    </div>
+
     <div class="section-title">待确认建议</div>
     <div v-if="!suggested.length" class="panel empty">暂无待确认建议</div>
     <div v-for="t in suggested" :key="t.id" class="panel row" style="align-items: flex-start">
@@ -117,6 +138,10 @@ const showEdit = ref(false)
 const editForm = ref({ id: null, label: '', description: '', category: 'style' })
 const phrases = ref([])
 const phraseLoading = ref(false)
+const styleInfo = ref(null)
+const avoidList = ref([])
+const avoidText = ref('')
+const savingStyle = ref(false)
 
 const categoryOptions = [
   { label: '风格', value: 'style' },
@@ -134,6 +159,40 @@ async function load() {
   ])
   suggested.value = s
   confirmed.value = c
+}
+
+async function loadStyle() {
+  try {
+    const r = await api('/api/persona/style')
+    styleInfo.value = r
+    avoidList.value = [...(r.avoid_words || [])]
+  } catch (e) {
+    /* 静默 */
+  }
+}
+
+function removeAvoid(w) {
+  avoidList.value = avoidList.value.filter(x => x !== w)
+}
+
+function addAvoidWords() {
+  const parts = avoidText.value.split(/[,，]/).map(x => x.trim()).filter(Boolean)
+  parts.forEach(x => { if (!avoidList.value.includes(x)) avoidList.value.push(x) })
+  avoidText.value = ''
+}
+
+async function saveStyle() {
+  savingStyle.value = true
+  try {
+    const r = await api('/api/persona/style', { method: 'PUT', body: JSON.stringify({ avoid_words: avoidList.value }) })
+    avoidList.value = [...(r.avoid_words || [])]
+    if (styleInfo.value) styleInfo.value = { ...styleInfo.value, avoid_words: avoidList.value }
+    message.success('已保存')
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    savingStyle.value = false
+  }
 }
 
 async function initPersona() {
@@ -218,5 +277,5 @@ async function adoptPhrase(ph) {
   load()
 }
 
-onMounted(load)
+onMounted(() => { load(); loadStyle() })
 </script>

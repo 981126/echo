@@ -47,6 +47,42 @@ def _platform_sync_job() -> None:
         pass
 
 
+def _weekly_style_job() -> None:
+    """每周日 03:20 风格重建（R-057）：基于全部素材画像 + 表现最好样本，
+    自动产出一版新的生成提示词候选（不启用）并通知作者。"""
+    db = SessionLocal()
+    try:
+        from .core.style_profile import build_style_profile, format_style_profile
+        from .models.notification import Notification
+        from .services.generation import _all_texts, _weight
+        from .services.prompt_service import optimize
+
+        rows = _all_texts(db)
+        if len(rows) < 5:
+            return  # 语料太少不值得每周重建
+        texts = [t for _, t in rows]
+        profile = format_style_profile(build_style_profile(texts))
+        top = sorted(rows, key=lambda vt: _weight(db, vt[0]), reverse=True)[:3]
+        snippets = "\n".join(f"- {text[:300]}" for _, text in top)
+        material = f"{profile}\n\n表现最好的素材节选（学习腔调）：\n{snippets}"
+        candidate = optimize(db, "generation", material)
+        if candidate is not None:
+            db.add(
+                Notification(
+                    kind="prompt_candidate",
+                    status="done",
+                    title="每周风格重建：生成提示词新候选",
+                    message=f"基于全部素材风格画像与高分节选自动优化了 v{candidate.version}，待你启用",
+                    target="/prompts?key=generation",
+                )
+            )
+            db.commit()
+    except Exception:  # noqa: BLE001 周任务失败不影响主服务
+        db.rollback()
+    finally:
+        db.close()
+
+
 def _backup_job() -> None:
     script = Path(__file__).resolve().parents[2] / "scripts" / "backup.sh"
     if script.exists():
@@ -97,6 +133,14 @@ def setup_scheduler() -> None:
         _backup_job,
         CronTrigger(hour=2, minute=30, timezone=settings.tz),
         id="daily_backup",
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # R-057：每周风格重建（周日 03:20）
+    _scheduler.add_job(
+        _weekly_style_job,
+        CronTrigger(day_of_week="sun", hour=3, minute=20, timezone=settings.tz),
+        id="weekly_style_rebuild",
         misfire_grace_time=3600,
         coalesce=True,
     )

@@ -13,7 +13,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from ..core.retrieval import TfidfIndex
-from ..core.style_profile import build_style_profile, format_style_profile
+from ..core.style_profile import build_style_profile, default_avoid_words, format_style_profile
 from .prompt_service import get_prompt
 from ..models.draft import Draft
 from ..models.metrics import MetricsSnapshot
@@ -53,6 +53,20 @@ def benchmark_context_lines(db: Session) -> str:
         .all()
     )
     return "\n".join(f"- 对标「{c.name}」：{c.note}" for c in rows)
+
+
+def _avoid_words(db: Session) -> list[str]:
+    """AI 腔禁用/少用词：默认内置清单，Persona 风格接口可覆盖（存 [] 表示关闭）。"""
+    from ..models.kv import Kv
+
+    row = db.get(Kv, "ai_no_words")
+    if row is None:
+        return default_avoid_words()
+    try:
+        val = json.loads(row.value or "[]")
+        return [str(x).strip() for x in val if str(x).strip()]
+    except (TypeError, ValueError):
+        return default_avoid_words()
 
 
 def _persona_context(db: Session) -> dict:
@@ -195,6 +209,7 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
             *([] if not ctx.get("anchors") else ["", "作者金句锚点（用它的短句语气，不要整句照搬）：", *[f"- {a}" for a in ctx["anchors"]]]),
             "作者语言习惯（从全部素材统计，必须模仿）：",
             profile,
+            *([] if not _avoid_words(db) else ["", "这些表达尽量别用（AI 腔/套话，用了会不像真人）：", "、".join(_avoid_words(db)[:20])]),
             "",
             "风格样本（模仿语气的原文节选）：",
             *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],

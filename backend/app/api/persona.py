@@ -87,3 +87,56 @@ def init_persona(db: Session = Depends(get_db)):
     """用全部历史转写稿初始化/刷新人设档案（后台任务，建议非广告视频转写完成后调用）。"""
     task_id = start_task("persona_init", {"creator_id": current_creator_id(db)}, persona_init_task)
     return {"task_id": task_id}
+
+
+# ---------- 表达风格（R-057）：画像查看 + AI 腔禁用词编辑 ----------
+@router.get("/style", response_model=dict)
+def style_overview(db: Session = Depends(get_db)):
+    """返回自动统计的作者语言习惯 + 当前 AI 腔禁用词清单 + 表现最好的素材节选。"""
+    import json
+
+    from ..core.style_profile import build_style_profile, default_avoid_words, format_style_profile
+    from ..services.generation import _all_texts, _weight
+    from ..models.kv import Kv
+
+    rows = _all_texts(db)
+    texts = [t for _, t in rows]
+    profile = build_style_profile(texts)
+    row = db.get(Kv, "ai_no_words")
+    avoid = []
+    if row is not None:
+        try:
+            avoid = [str(x).strip() for x in json.loads(row.value or "[]") if str(x).strip()]
+        except (TypeError, ValueError):
+            avoid = []
+    weighted = sorted(rows, key=lambda vt: _weight(db, vt[0]), reverse=True)[:3]
+    return {
+        "count": len(texts),
+        "profile": format_style_profile(profile),
+        "avoid_words": avoid or default_avoid_words(),
+        "top_weighted": [
+            {"title": v.title or "", "text": text[:300]} for v, text in weighted
+        ],
+    }
+
+
+@router.put("/style", response_model=dict)
+def save_style_words(payload: dict, db: Session = Depends(get_db)):
+    """保存 AI 腔禁用/少用词（存 [] 表示关闭内置清单）。"""
+    import json
+
+    from ..models.kv import Kv
+
+    words = payload.get("avoid_words")
+    if not isinstance(words, list):
+        raise HTTPException(status_code=400, detail="avoid_words 必须是数组")
+    cleaned = [str(x).strip() for x in words if str(x).strip()]
+    row = db.get(Kv, "ai_no_words")
+    if row is None:
+        row = Kv(key="ai_no_words", value=json.dumps(cleaned, ensure_ascii=False))
+        db.add(row)
+    else:
+        row.value = json.dumps(cleaned, ensure_ascii=False)
+    db.commit()
+    return {"ok": True, "avoid_words": cleaned}
+

@@ -24,6 +24,18 @@ STOP_PHRASES = {
 
 STYLE_WORDS = ["其实", "真的", "我觉得", "说白了", "反正", "确实", "说实话", "讲真"]
 
+# 默认 AI 腔/套话禁用清单（可在 Persona 风格接口里编辑，注入生成提示）
+AI_NOISE_WORDS = [
+    "首先", "其次", "最后", "综上所述", "总而言之", "由此可见",
+    "值得注意的是", "众所周知", "不难发现", "让我们一起",
+    "赋能", "底层逻辑", "闭环", "颗粒度", "抓手", "方法论",
+]
+
+
+def default_avoid_words() -> list[str]:
+    return list(AI_NOISE_WORDS)
+
+
 
 def _phrase_counts(texts: list[str], n: int = 2, min_count: int = 3) -> list[tuple[str, int]]:
     counter: Counter[str] = Counter()
