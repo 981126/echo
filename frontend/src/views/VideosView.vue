@@ -47,10 +47,10 @@
 
         <template v-if="it.kind === 'local'">
           <div class="tag-row">
-            <template v-for="t in it.tags.slice(0, 4)" :key="t">
+            <template v-for="t in it.tags.slice(0, 5)" :key="t">
               <n-tag size="small" :bordered="false">{{ t }}</n-tag>
             </template>
-            <n-tag v-if="it.tags.length > 4" size="small" :bordered="false" round>… +{{ it.tags.length - 4 }}</n-tag>
+            <n-tag v-if="it.tags.length > 5" size="small" :bordered="false" round>… +{{ it.tags.length - 5 }}</n-tag>
             <span v-if="!it.tags.length" class="muted">无标签</span>
           </div>
           <p class="tile-meta">
@@ -68,10 +68,10 @@
 
         <template v-else>
           <div class="row tag-row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap; overflow: hidden">
-            <template v-for="t in it.tags.slice(0, 4)" :key="t">
+            <template v-for="t in it.tags.slice(0, 5)" :key="t">
               <n-tag size="tiny" :bordered="false" round>{{ t }}</n-tag>
             </template>
-            <n-tag v-if="it.tags.length > 4" size="tiny" :bordered="false" round>… +{{ it.tags.length - 4 }}</n-tag>
+            <n-tag v-if="it.tags.length > 5" size="tiny" :bordered="false" round>… +{{ it.tags.length - 5 }}</n-tag>
           </div>
           <div v-for="pst in it.cloudPosts.slice(0, 3)" :key="pst.id" class="plat-line">
             <b>{{ platformName(pst.platform) }}</b>
