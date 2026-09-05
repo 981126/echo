@@ -93,24 +93,16 @@
     </div>
 
     <!-- 新建/编辑 主博主 or 对标 -->
-    <n-modal v-model:show="showCreatorModal" preset="card" :title="creatorForm.id ? '编辑博主' : creatorForm.kind === 'benchmark' ? '添加对标博主' : '新建主博主'" style="width: min(480px, 92vw)">
-      <div class="form-item">
-        <label class="form-label">名称</label>
-        <n-input v-model:value="creatorForm.name" placeholder="如：我的主号 / 对标博主名" />
-      </div>
-      <div v-if="creatorForm.kind === 'benchmark'" class="form-item">
-        <label class="form-label">所属主博主</label>
-        <n-select v-model:value="creatorForm.parent_id" :options="ownerOptions" />
-      </div>
-      <div class="form-item">
-        <label class="form-label">备注 / 风格参考（对标风格卡可写在这里，1-3 句）</label>
-        <n-input v-model:value="creatorForm.note" type="textarea" :rows="3" placeholder="可选" />
-      </div>
-      <div class="row">
-        <n-button type="primary" @click="saveCreator">保存</n-button>
-        <n-button secondary @click="showCreatorModal = false">取消</n-button>
-      </div>
-    </n-modal>
+    <CreatorFormModal
+      :show="showCreatorModal"
+      :form="creatorForm"
+      :owner-options="ownerOptions"
+      @update:show="v => (showCreatorModal = v)"
+      @update:name="v => (creatorForm.name = v)"
+      @update:parentId="v => (creatorForm.parent_id = v)"
+      @update:note="v => (creatorForm.note = v)"
+      @save="saveCreator"
+    />
 
     <!-- 账号配置 -->
     <n-modal v-model:show="showAccountModal" preset="card" :title="acctForm.id ? '编辑账号' : '配置 ' + platformName(acctForm.platform) + ' 账号'" style="width: min(560px, 94vw)">
