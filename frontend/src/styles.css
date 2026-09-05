@@ -307,8 +307,9 @@ details.fold { margin-top: 8px; }
 .md-preview { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-height: 220px; background: var(--bg); }
 
 /* 素材库一行 4 个 */
-.grid-videos { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (max-width: 980px) { .grid-videos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.grid-videos { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1200px) { .grid-videos { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .grid-videos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .grid-videos { grid-template-columns: 1fr; } }
 .card-tile .tile-actions { display: flex; gap: 6px; margin-top: 12px; }
 
