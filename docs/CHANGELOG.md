@@ -340,3 +340,7 @@
 - 状态更新：A/B/C/D-1 完成；D-2（tags 表）/D-3（raw 归档）评估后暂缓
 - DATABASE 附录：ux_platform_posts_local_platform 唯一部分索引 + __cloud__ 占位命名约定
 - DESIGN/PRD/milestones/需求索引同步
+
+## [fix] 2026-09-05 — 平台发布时间时区修复（时间线与发布时间对不上）
+- 根因：平台时间戳用 utcfromtimestamp 存成 UTC，界面按北京时间展示导致凌晨发布差一天
+- 修复：tikhub._ts 改为 fromtimestamp(Asia/Shanghai) 存储；存量一次性 +8h 迁移（platform_posts.publish_time + 平台转本地的 videos.published_at，已备份 echo_pre_tzfix_*.db）

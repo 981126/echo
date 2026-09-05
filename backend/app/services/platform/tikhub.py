@@ -15,6 +15,7 @@ import hashlib
 import math
 import random
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -580,10 +581,11 @@ class TikHubClient:
 
 
 def _ts(value) -> datetime | None:
+    """平台时间戳(epoch秒, UTC) → 北京时间 naive datetime（前端按 Asia/Shanghai 展示）。"""
     if not value:
         return None
     try:
-        return datetime.utcfromtimestamp(int(value))
+        return datetime.fromtimestamp(int(value), tz=ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
     except (TypeError, ValueError, OverflowError):
         return None
 

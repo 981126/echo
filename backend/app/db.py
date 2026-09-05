@@ -228,6 +228,37 @@ def _ensure_binding_integrity() -> None:
             pass
 
 
+def _fix_platform_timezone() -> None:
+    """一次性迁移：历史 platform 时间按 UTC 存储，改为北京时间(+8)。
+
+    迁移范围：platform_posts.publish_time，以及由平台转本地产生
+    （有 platform_post_id/work_id）的 videos.published_at；用户手动填的本地时间不受影响。
+    """
+    from .models.kv import Kv
+
+    session = SessionLocal()
+    try:
+        row = session.get(Kv, "platform_tz_migrated_v1")
+        if row is not None and row.value == "1":
+            return
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
+                "UPDATE platform_posts SET publish_time = datetime(publish_time, '+8 hours') "
+                "WHERE publish_time IS NOT NULL"
+            )
+            conn.exec_driver_sql(
+                "UPDATE videos SET published_at = datetime(published_at, '+8 hours') "
+                "WHERE (platform_post_id != '' OR work_id IS NOT NULL) AND published_at IS NOT NULL"
+            )
+        if row is None:
+            session.add(Kv(key="platform_tz_migrated_v1", value="1"))
+        else:
+            row.value = "1"
+        session.commit()
+    finally:
+        session.close()
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  确保模型已注册
 
@@ -247,3 +278,4 @@ def init_db() -> None:
         ensure_defaults(session)
     finally:
         session.close()
+    _fix_platform_timezone()
