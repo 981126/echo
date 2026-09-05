@@ -315,3 +315,6 @@
 
 ## [M43 / R-061 C 继续] 2026-09-05 — composables 覆盖 Home/Dashboard/Drafts
 - HomeView/DashboardView/DraftsView 素材拉取改走 fetchVideos（消除重复）
+
+## [M43 / R-061 C 继续] 2026-09-05 — 时间线模型抽 lib/timeline.js
+- HomeView 时间线计算整体抽为纯函数 buildTimelineModel（lib/timeline.js），HomeView 仅一行调用
