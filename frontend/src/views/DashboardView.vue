@@ -113,14 +113,17 @@
       <div class="section-title" style="margin-top: 0">视频指标明细（最新快照）</div>
       <table class="table">
         <thead>
-          <tr><th>视频</th><th class="num">播放</th><th class="num">赞</th><th class="num">藏</th><th class="num">评</th><th class="num">日期</th></tr>
+          <tr><th>素材（标题）</th><th>平台</th><th class="num">播放</th><th class="num">赞</th><th class="num">藏</th><th class="num">评</th><th class="num">日期</th></tr>
         </thead>
         <tbody>
-          <tr v-for="v in summary.per_video" :key="v.video_id">
-            <td>{{ v.filename }}</td>
-            <td class="num">{{ v.plays }}</td><td class="num">{{ v.likes }}</td>
-            <td class="num">{{ v.favorites }}</td><td class="num">{{ v.comments }}</td>
-            <td class="num muted">{{ v.snapshot_date }}</td>
+          <tr v-for="row in detailRows" :key="row.key">
+            <td>{{ row.title }}</td>
+            <td>{{ platformName(row.platform) }}</td>
+            <td class="num">{{ row.plays == null ? '—' : fmtNum(row.plays) }}</td>
+            <td class="num">{{ row.likes == null ? '—' : fmtNum(row.likes) }}</td>
+            <td class="num">{{ row.favorites == null ? '—' : fmtNum(row.favorites) }}</td>
+            <td class="num">{{ row.comments == null ? '—' : fmtNum(row.comments) }}</td>
+            <td class="num muted">{{ row.date }}</td>
           </tr>
         </tbody>
       </table>
@@ -145,6 +148,29 @@ const importText = ref('')
 const compare = ref([])
 const message = useMessage()
 const m = ref({ video_id: null, dateTs: Date.now(), plays: 0, likes: 0, favorites: 0, comments: 0 })
+
+const detailRows = computed(() => {
+  const order = ['douyin', 'bilibili', 'xiaohongshu']
+  const rows = []
+  ;(summary.value.per_video || []).forEach((v) => {
+    const bd = (v.platform_breakdown && v.platform_breakdown.length)
+      ? v.platform_breakdown
+      : order.map(p => ({ platform: p, plays: null, likes: null, favorites: null, comments: null }))
+    bd.forEach((r, i) => {
+      rows.push({
+        key: v.video_id + '-' + r.platform,
+        title: i === 0 ? (v.title || v.filename) : '',
+        platform: r.platform,
+        plays: r.plays,
+        likes: r.likes,
+        favorites: r.favorites,
+        comments: r.comments,
+        date: i === 0 ? v.snapshot_date : ''
+      })
+    })
+  })
+  return rows
+})
 
 const videoOptions = computed(() =>
   videos.value.map(v => ({ label: v.filename, value: v.id }))

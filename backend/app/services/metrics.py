@@ -110,6 +110,49 @@ def series_for_video(db: Session, video_id: int) -> list[dict]:
     ]
 
 
+def _platform_breakdown(db, v) -> list[dict[str, Any]]:
+    """素材三个平台（抖音/B站/小红书）各自的最新互动数据（无则 None）。"""
+    from ..models.platform import PlatformPost, PlatformPostStat
+
+    order = ["douyin", "bilibili", "xiaohongshu"]
+    seen: dict[int, PlatformPost] = {}
+    for p in db.query(PlatformPost).filter(PlatformPost.local_video_id == v.id).all():
+        seen[p.id] = p
+    if v.work_id:
+        for p in db.query(PlatformPost).filter(PlatformPost.work_id == v.work_id).all():
+            seen[p.id] = p
+    if v.platform_post_id and ":" in v.platform_post_id:
+        platform, ext = v.platform_post_id.split(":", 1)
+        p = db.query(PlatformPost).filter(PlatformPost.platform == platform, PlatformPost.platform_post_id == ext).first()
+        if p is not None:
+            seen[p.id] = p
+    by_platform: dict[str, PlatformPost] = {}
+    for p in seen.values():
+        if p.platform not in by_platform:
+            by_platform[p.platform] = p
+    out = []
+    for platform in order:
+        p = by_platform.get(platform)
+        stat = None
+        if p is not None:
+            stat = (
+                db.query(PlatformPostStat)
+                .filter(PlatformPostStat.post_id == p.id)
+                .order_by(PlatformPostStat.stat_date.desc())
+                .first()
+            )
+        out.append(
+            {
+                "platform": platform,
+                "plays": stat.plays if stat else None,
+                "likes": stat.likes if stat else None,
+                "favorites": stat.favorites if stat else None,
+                "comments": stat.comments if stat else None,
+            }
+        )
+    return out
+
+
 def summary(db: Session) -> dict:
     """按视频的最新快照汇总 + 按赛道/平台聚合。"""
     videos = db.query(Video).all()
@@ -130,6 +173,7 @@ def summary(db: Session) -> dict:
         item: dict[str, Any] = {
             "video_id": v.id,
             "filename": v.filename,
+            "title": v.title or v.filename,
             "platforms": platforms,
             "main_topics": main_topics,
             "published_at": str(v.published_at or ""),
@@ -139,6 +183,7 @@ def summary(db: Session) -> dict:
             "comments": latest.comments,
             "followers_gained": latest.followers_gained,
             "snapshot_date": latest.snapshot_date,
+            "platform_breakdown": _platform_breakdown(db, v),
         }
         per_video.append(item)
         for topic in main_topics or ["未标"]:
