@@ -124,6 +124,19 @@
               />
               <div v-else class="prose md-preview" v-html="renderMd(editing.script)" />
             </div>
+            <div v-if="checkInfo && editing.id" class="panel check-panel" style="margin-bottom: 10px">
+              <div class="row" style="gap: 8px; align-items: center">
+                <span class="section-title" style="margin: 0">脚本体检</span>
+                <n-tag v-if="checkInfo.ok" size="small" type="success" :bordered="false" round>通过</n-tag>
+                <n-tag v-else size="small" type="warning" :bordered="false" round>建议回炉</n-tag>
+                <div class="grow" />
+                <n-button v-if="!checkInfo.ok && editing.id" size="tiny" type="primary" secondary :loading="reworking" @click="rework(editing.id)">一键回炉重写</n-button>
+                <n-button size="tiny" secondary @click="runCheck(editing.id)">重新体检</n-button>
+              </div>
+              <ul v-if="checkInfo.issues.length" style="margin: 6px 0 0; padding-left: 1.2em; color: var(--warn)">
+                <li v-for="(iss, i) in checkInfo.issues" :key="i">{{ iss }}</li>
+              </ul>
+            </div>
             <div class="row">
               <n-button type="primary" @click="save">保存</n-button>
               <n-button secondary @click="closeEdit">取消</n-button>
@@ -164,6 +177,8 @@ const videoOptions = computed(() => videos.value.map(v => ({ label: v.title || v
 const listTab = ref('draft')
 const editing = ref(null)
 const showEdit = ref(false)
+const checkInfo = ref(null)
+const reworking = ref(false)
 const editTab = ref('edit')
 const discussions = ref([])
 const discussionsMap = ref({})
@@ -258,6 +273,7 @@ function open(d, isNew = false) {
   showEdit.value = true
   discussions.value = discussionsMap.value[d.id] || []
   if (!isNew && editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
+  if (editing.value.id) runCheck(editing.value.id)
 }
 
 function openDiscussion(d) {
@@ -268,10 +284,33 @@ function openDiscussion(d) {
   loadDiscussions(d.id)
 }
 
+async function runCheck(id) {
+  if (!id) return
+  try {
+    checkInfo.value = await api(`/api/drafts/${id}/check`)
+  } catch (e) {
+    checkInfo.value = null
+  }
+}
+
+async function rework(id) {
+  if (!id) return
+  reworking.value = true
+  try {
+    const r = await api(`/api/drafts/${id}/rework`, { method: 'POST', body: '{}' })
+    message.success('已提交回炉生成，完成后右上角通知（将替换本稿）')
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    reworking.value = false
+  }
+}
+
 function closeEdit() {
   showEdit.value = false
   editing.value = null
   debateStatus.value = ''
+  checkInfo.value = null
 }
 
 async function setStatus(id, status) {

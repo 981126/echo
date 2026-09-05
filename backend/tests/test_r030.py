@@ -20,6 +20,7 @@ from app.models.video import Transcript, Video
 from app.services.feedback import add_feedback
 from app.services.generation import benchmark_context_lines
 from app.services.persona import suggest_phrase_candidates
+from app.core.draft_check import check_script
 
 
 @pytest.fixture()
@@ -57,6 +58,23 @@ def test_feedback_dim_scores(db):
     assert row.pace_score == 3
     assert row.ending_score == 1
     assert row.style_score == 4
+
+
+def test_draft_check_flags():
+    good_text = (
+        "为什么你总在面试翻车？先想清楚这三件事。第一，别背模板；第二，讲具体的事；"
+        "第三，把每句话落到你能证明的结果上。很多人不是能力不行，是表达顺序错了。"
+        "把逻辑理顺，把例子讲细，对方自然会记住你。还有一个小技巧，答完每个问题用一句总结收住，"
+        "显得你条理清楚。别怕冷场，停顿一下再开口，往往更有分量。"
+        "把上面这些用在自己下一场面试里，回来告诉我结果。想看更多面试干货，评论区聊聊你的问题。"
+    )
+    good = check_script(good_text, redlines=["不碰政zhi"])
+    assert good["ok"] is True
+    bad = check_script("大家好今天讲一下面试技巧然后就没有了", redlines=["借钱"])
+    assert bad["ok"] is False
+    assert any(("钩子" in i) or ("结尾" in i) or ("篇幅" in i) for i in bad["issues"])
+    red = check_script("想赚钱就来找我借钱刷课", redlines=["借钱"])
+    assert any("红线" in i for i in red["issues"])
 
 
 def test_phrase_candidates_from_transcript(db):

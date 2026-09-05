@@ -46,6 +46,26 @@ def _diff_task(db: Session, payload: dict) -> None:
         apply_diff_suggestions(db, draft)
 
 
+def _rework_task(db: Session, payload: dict) -> dict:
+    """一键回炉（R-030⑦）：按原选题重新生成，并把内容替换回原草稿（保留 id/反馈/讨论记录）。"""
+    from .generation import generate_draft
+
+    draft = db.get(Draft, int(payload.get("draft_id") or 0))
+    if draft is None:
+        return {"draft_id": 0}
+    topic = (payload.get("topic") or draft.title or "").strip() or "重新生成一条口播脚本"
+    fresh = generate_draft(db, topic)
+    draft.title = fresh.title or draft.title
+    draft.cover_text = fresh.cover_text or draft.cover_text
+    draft.script = fresh.script or draft.script
+    draft.platform_shells = fresh.platform_shells or draft.platform_shells
+    draft.original_script = fresh.original_script or draft.original_script
+    draft.source = "ai"
+    db.delete(fresh)
+    db.commit()
+    return {"draft_id": draft.id, "title": draft.title}
+
+
 @router.post("/generate", response_model=DraftOut)
 def generate(payload: GenerateIn, db: Session = Depends(get_db)):
     """根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。"""
@@ -120,7 +140,40 @@ def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/{draft_id}/debate-status", response_model=dict)
+@router.get("/{draft_id}/check", response_model=dict)
+def draft_check(draft_id: int, db: Session = Depends(get_db)):
+    """脚本体检（R-030⑦）：红线/钩子/结尾引导/篇幅。"""
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    from ..core.draft_check import check_script
+    from ..models.persona import PersonaTag
+    from ..services.creator_service import current_creator_id
+
+    q = db.query(PersonaTag).filter(PersonaTag.category == "redline", PersonaTag.status == "confirmed")
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
+    redlines = [t.label for t in q.all()]
+    result = check_script(draft.script, redlines, draft.title)
+    return {"draft_id": draft_id, **result}
+
+
+@router.post("/{draft_id}/rework", response_model=dict)
+def draft_rework(draft_id: int, db: Session = Depends(get_db)):
+    """一键回炉（R-030⑦）：按原选题重新异步生成一轮，完成后替换草稿。"""
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    task_id = start_task(
+        "generate_draft",
+        {"draft_id": draft.id, "topic": draft.title or ""},
+        _rework_task,
+    )
+    return {"task_id": task_id, "message": "已提交回炉生成，完成后右上角通知"}
+
+
+
 def debate_status(draft_id: int, db: Session = Depends(get_db)):
     """当前双模型讨论进行到哪一步（思考中提示）。"""
     from ..models.kv import Kv
