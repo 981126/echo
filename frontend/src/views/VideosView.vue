@@ -79,7 +79,7 @@
             <n-tag v-if="it.tags.length > 5" size="tiny" :bordered="false" round>… +{{ it.tags.length - 5 }}</n-tag>
           </div>
           <div class="plat-zone">
-            <div v-for="p in platOrder" :key="p" class="plat-line" :class="{ empty: !platOf(it, p) }">
+            <div v-for="p in platOrder" :key="p" class="plat-line" :class="{ missing: !platOf(it, p) }">
               <template v-if="platOf(it, p)">
                 <b>{{ platformName(p) }}</b>
                 <template v-if="platOf(it, p).latest_stat">
@@ -89,6 +89,9 @@
                   <span>评 {{ fmtNum(platOf(it, p).latest_stat.comments) }}</span>
                 </template>
                 <span v-else class="muted">暂无指标</span>
+              </template>
+              <template v-else>
+                <b>{{ platformName(p) }}</b><span class="muted">—</span>
               </template>
             </div>
           </div>
@@ -1251,8 +1254,8 @@ onMounted(async () => {
 .plat-zone {
   margin-top: 4px;
 }
-.plat-line.empty {
-  visibility: hidden;
+.plat-line.missing {
+  color: #bdb4a8;
 }
 .plat-line {
   min-height: 12px;
