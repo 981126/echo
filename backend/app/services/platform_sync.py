@@ -336,19 +336,33 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
     posts_data = client.fetch_user_posts(account.platform, account.platform_user_id, top_n, account=account)
     _charge(db)
     synced: list[PlatformPost] = []
+    new_posts: list[PlatformPost] = []
     for pd in posts_data:
         if not pd.platform_post_id:
             continue
+        existed = (
+            db.query(PlatformPost)
+            .filter(
+                PlatformPost.platform == account.platform,
+                PlatformPost.platform_post_id == pd.platform_post_id,
+            )
+            .first()
+        )
         try:
             post = _ensure_post(db, account, pd, client)
             synced.append(post)
+            if existed is None:
+                new_posts.append(post)
             stats["posts"] += 1
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001
             db.rollback()
-    if with_comments and synced:
-        stats["comments"] = _collect_comments(db, account, client, synced[:10])
+    if with_comments:
+        # 增量：评论只抓新增作品；无新增时刷新最新 3 条（省额度）
+        targets = (new_posts or synced)[:10] if new_posts else synced[:3]
+        if targets:
+            stats["comments"] = _collect_comments(db, account, client, targets)
     return stats
 
 

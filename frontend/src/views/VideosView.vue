@@ -163,35 +163,32 @@
     <div class="panel">
       <div v-if="worksLoading" class="empty">加载中…</div>
       <div v-else-if="!works.length" class="empty">暂无云端作品（先在「博主」页同步平台数据）</div>
-      <div v-else class="work-list">
-        <div v-for="w in works" :key="(w.type === 'work' ? 'w' : 'p') + w.id" class="work-row" :class="{ sel: selected.has(w.id) }">
-          <n-checkbox v-if="mergeMode && w.type === 'post'" :checked="selected.has(w.id)" @update:checked="toggleSel(w)" />
+      <div v-else class="work-grid">
+        <div v-for="w in works" :key="(w.type === 'work' ? 'w' : 'p') + w.id" class="work-card" :class="{ sel: selected.has(w.id) }">
           <div class="work-cover" @click="openWorkDetail(w)">
             <img v-if="w.cover" :src="w.cover" alt="" />
             <span v-else>ECHO</span>
+            <n-checkbox v-if="mergeMode && w.type === 'post'" class="work-sel" :checked="selected.has(w.id)" @update:checked="toggleSel(w)" />
           </div>
-          <div class="grow" style="min-width: 0">
-            <div class="row" style="gap: 6px; align-items: center; flex-wrap: wrap">
-              <b style="word-break: break-all">{{ w.title }}</b>
-              <n-tag v-for="pl in w.platforms" :key="pl" size="small" :bordered="false" round>{{ platformName(pl) }}</n-tag>
-              <n-tag v-if="w.type === 'work'" size="tiny" type="info" :bordered="false">已合并 {{ w.posts.length }} 平台</n-tag>
+          <div class="work-body">
+            <div class="work-title" :title="w.title">{{ w.title }}</div>
+            <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
+              <n-tag v-for="pl in w.platforms" :key="pl" size="tiny" :bordered="false" round>{{ platformName(pl) }}</n-tag>
+              <n-tag v-if="w.type === 'work'" size="tiny" type="info" :bordered="false">合并×{{ w.posts.length }}</n-tag>
             </div>
-            <div class="row wrap" style="gap: 8px; margin-top: 6px">
-              <div v-for="pst in w.posts" :key="pst.id" class="plat-stat">
-                <b>{{ platformName(pst.platform) }}</b>
-                <template v-if="pst.latest_stat">
-                  <span>播放 {{ fmtNum(pst.latest_stat.plays) }}</span>
-                  <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
-                  <span v-if="pst.latest_stat.favorites">藏 {{ fmtNum(pst.latest_stat.favorites) }}</span>
-                  <span v-if="pst.latest_stat.comments">评 {{ fmtNum(pst.latest_stat.comments) }}</span>
-                </template>
-                <span v-else class="muted">暂无指标</span>
-              </div>
+            <div v-for="pst in w.posts" :key="pst.id" class="plat-line">
+              <b>{{ platformName(pst.platform) }}</b>
+              <template v-if="pst.latest_stat">
+                <span>播放 {{ fmtNum(pst.latest_stat.plays) }}</span>
+                <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
+                <span v-if="pst.latest_stat.comments">评 {{ fmtNum(pst.latest_stat.comments) }}</span>
+              </template>
+              <span v-else class="muted">暂无指标</span>
             </div>
-          </div>
-          <div class="row" style="gap: 6px; flex-wrap: wrap">
-            <n-button v-for="pst in w.posts" :key="'s' + pst.id" size="tiny" secondary :loading="syncingPost === pst.id" @click="syncCloudPost(pst)">同步{{ platformName(pst.platform) }}</n-button>
-            <n-button v-if="w.type === 'work'" size="tiny" quaternary type="error" @click="splitWork(w)">拆分</n-button>
+            <div class="row" style="gap: 5px; flex-wrap: wrap; margin-top: 8px">
+              <n-button v-for="pst in w.posts" :key="'s' + pst.id" size="tiny" secondary :loading="syncingPost === pst.id" @click="syncCloudPost(pst)">同步{{ platformName(pst.platform) }}</n-button>
+              <n-button v-if="w.type === 'work'" size="tiny" quaternary type="error" @click="splitWork(w)">拆分</n-button>
+            </div>
           </div>
         </div>
       </div>
@@ -514,53 +511,56 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.work-list {
+.work-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 1100px) { .work-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 820px) { .work-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .work-grid { grid-template-columns: 1fr; } }
+.work-card {
+  background: #fffdfa;
+  border: 1px solid #eee5d8;
+  border-radius: 12px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
-.work-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  background: #faf7f2;
-  border: 1px solid #eee5d8;
-  border-radius: 10px;
-}
-.work-row.sel {
-  border-color: #a34f2c88;
-  background: #fdf6ef;
-}
+.work-card.sel { border-color: #a34f2c88; }
 .work-cover {
-  width: 110px;
-  height: 62px;
-  border-radius: 6px;
-  overflow: hidden;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
   background: #efe6d9;
   color: #a34f2c;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  flex: none;
+  font-size: 13px;
   cursor: pointer;
+  overflow: hidden;
 }
-.work-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.work-cover img { width: 100%; height: 100%; object-fit: cover; }
+.work-sel { position: absolute; top: 6px; left: 6px; }
+.work-body { padding: 8px 10px 10px; min-width: 0; }
+.work-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 14px;
 }
-.plat-stat {
+.plat-line {
   display: flex;
-  gap: 8px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11px;
   color: #6f675c;
-  background: #fff;
-  border-radius: 6px;
-  padding: 3px 8px;
+  margin-top: 4px;
   flex-wrap: wrap;
+  overflow: hidden;
 }
+.plat-line b { color: #a34f2c; }
 .plat-stat b {
   color: #a34f2c;
 }

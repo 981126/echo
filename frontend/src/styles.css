@@ -378,3 +378,13 @@ details.fold { margin-top: 8px; }
 .discuss-msg.deepseek { border-left-color: var(--accent); }
 .discuss-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .discuss-body { font-size: 13px; line-height: 1.7; color: var(--ink-soft); }
+
+/* 标题/长文本省略（全站） */
+.tile-title,
+.work-title,
+.ellipsis {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
