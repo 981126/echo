@@ -75,7 +75,6 @@
           </div>
           <p v-if="it.pub" class="tile-meta">发布时间 {{ it.pub }}</p>
           <div class="row-actions">
-            <n-button size="small" type="primary" secondary @click="openCloud(it)">上传视频/文案</n-button>
             <n-button size="small" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
             <n-button v-if="it.merged >= 2" size="small" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
             <n-button v-if="it.local_video_id" size="small" secondary @click="goLocal(it.local_video_id)">打开本地</n-button>
