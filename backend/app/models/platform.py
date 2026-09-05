@@ -143,6 +143,19 @@ class PlatformPostStat(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class PlatformPostComment(Base):
+    """平台作品评论（入库，本地查询；同步/同步数据时写入）。"""
+
+    __tablename__ = "platform_post_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("platform_posts.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(20), default="")
+    text: Mapped[str] = mapped_column(Text, default="")
+    user_nick: Mapped[str] = mapped_column(String(100), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class SyncJob(Base):
     """同步任务留痕。"""
 

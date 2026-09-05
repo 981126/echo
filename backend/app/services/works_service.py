@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from fastapi import HTTPException
@@ -39,9 +40,15 @@ def _latest_stat(db: Session, post_id: int):
 def post_item(db: Session, p: PlatformPost) -> dict:
     stat = _latest_stat(db, p.id)
     acc = db.get(CreatorAccount, p.account_id)
+    tags = []
+    try:
+        tags = json.loads(p.tags or "[]") if isinstance(p.tags, str) else (p.tags or [])
+    except json.JSONDecodeError:
+        tags = []
     return {
         "id": p.id,
         "platform": p.platform,
+        "tags": tags,
         "platform_post_id": p.platform_post_id,
         "title": p.title,
         "cover": p.cover_url_local,

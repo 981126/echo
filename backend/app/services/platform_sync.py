@@ -25,6 +25,7 @@ from ..models.platform import (
     CreatorAccount,
     CreatorAccountSnapshot,
     PlatformPost,
+    PlatformPostComment,
     PlatformPostStat,
     SyncJob,
 )
@@ -323,6 +324,13 @@ def _collect_comments(db: Session, account: CreatorAccount, client: TikHubClient
             text = (text or "").strip()
             if not text or len(text) < 4:
                 continue
+            dup_c = (
+                db.query(PlatformPostComment)
+                .filter(PlatformPostComment.post_id == post.id, PlatformPostComment.text == text)
+                .first()
+            )
+            if dup_c is None:
+                db.add(PlatformPostComment(post_id=post.id, platform=account.platform, text=text))
             exists = (
                 db.query(TopicIdea)
                 .filter(
@@ -533,8 +541,32 @@ def sync_single_post(db: Session, post_id: int) -> dict:
         stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
         _charge(db)
         _write_stat(db, post, stats)
-        _finish_job(db, job, "单条同步完成", {"post_id": post.id, "stats": stats})
-        return {"job_id": job.id, "message": "单条同步完成", "stats": stats}
+        # 同步数据同时把评论入库（本地查询）
+        added_comments = 0
+        try:
+            raw = {}
+            try:
+                raw = json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
+            except json.JSONDecodeError:
+                raw = {}
+            texts = client.fetch_comments(post.platform, post.platform_post_id, 20, account, raw=raw)
+            for c in texts:
+                c = (c or "").strip()
+                if not c:
+                    continue
+                dup = (
+                    db.query(PlatformPostComment)
+                    .filter(PlatformPostComment.post_id == post.id, PlatformPostComment.text == c)
+                    .first()
+                )
+                if dup is None:
+                    db.add(PlatformPostComment(post_id=post.id, platform=post.platform, text=c))
+                    added_comments += 1
+            db.commit()
+        except Exception:  # noqa: BLE001 评论失败不影响主同步
+            db.rollback()
+        _finish_job(db, job, f"单条同步完成（新增评论 {added_comments}）", {"post_id": post.id, "stats": stats, "comments_added": added_comments})
+        return {"job_id": job.id, "message": "单条同步完成", "stats": stats, "comments_added": added_comments}
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         _finish_job(db, job, str(exc), failed=True)

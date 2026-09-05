@@ -15,6 +15,8 @@
     <div class="toolbar">
       <n-select v-model:value="filter.platform" :options="platformOptions" placeholder="平台" clearable style="width: 130px" />
       <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 130px" />
+      <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 160px" />
+      <n-select v-model:value="tagFilter" :options="allTags" placeholder="按标签筛选" clearable style="width: 150px" />
       <n-button secondary @click="load">查询</n-button>
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
@@ -27,9 +29,9 @@
     </div>
 
     <div v-if="loading" class="panel empty">加载中…</div>
-    <div v-else-if="!cards.length" class="panel empty">暂无素材（可上传本地视频，或在「博主」页同步云端作品）</div>
+    <div v-else-if="!filteredCards.length" class="panel empty">没有匹配的素材（换个关键词/标签，或去「博主」页同步）</div>
     <div v-else class="grid grid-videos">
-      <div v-for="it in cards" :key="it.key" class="card-tile" :class="{ picking: mergeMode && it.kind === 'cloud' }" @click="onCardClick(it)">
+      <div v-for="it in filteredCards" :key="it.key" class="card-tile" :class="{ picking: mergeMode && it.kind === 'cloud' }" @click="onCardClick(it)">
         <div class="tile-cover" :class="{ has: it.cover_url }" @click.stop="onCardClick(it)">
           <n-checkbox v-if="mergeMode && it.kind === 'cloud'" class="pick-box" :checked="selected.has(it.key)" @click.stop @update:checked="toggleSel(it)" />
           <img v-if="it.cover_url" :src="it.cover_url" alt="封面" />
@@ -62,9 +64,9 @@
         </template>
 
         <template v-else>
-          <p class="tile-meta" style="margin-top: 6px">
-            {{ it.cloudPosts.map(x => platformName(x.platform)).join(' / ') }}
-          </p>
+          <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
+            <n-tag v-for="t in it.tags" :key="t" size="tiny" :bordered="false" round>{{ t }}</n-tag>
+          </div>
           <div v-for="pst in it.cloudPosts.slice(0, 3)" :key="pst.id" class="plat-line">
             <b>{{ platformName(pst.platform) }}</b>
             <template v-if="pst.latest_stat">
@@ -218,7 +220,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, uploadVideo, uploadCover, getToken } from '../api'
 
@@ -239,6 +241,8 @@ const syncing = ref(0)
 const works = ref([])
 const worksLoading = ref(false)
 const cards = ref([])
+const searchText = ref('')
+const tagFilter = ref(null)
 const showCloud = ref(false)
 const cloudItem = ref(null)
 const cloudFile = ref(null)
@@ -467,6 +471,22 @@ async function loadWorks() {
   }
 }
 
+const allTags = computed(() => {
+  const set = new Set()
+  cards.value.forEach(c => (c.tags || []).forEach(t => set.add(t)))
+  return [...set].sort().map(t => ({ label: t, value: t }))
+})
+
+const filteredCards = computed(() => {
+  const kw = (searchText.value || '').trim()
+  const tf = tagFilter.value
+  return cards.value.filter(c => {
+    if (kw && !(c.title || '').toLowerCase().includes(kw.toLowerCase())) return false
+    if (tf && !(c.tags || []).includes(tf)) return false
+    return true
+  })
+})
+
 function buildCards() {
   // 云端已绑定本地素材(转素材后)的记录不重复展示，避免合并后多个素材
   const linkedLocal = new Set()
@@ -495,6 +515,12 @@ function buildCards() {
   }))
   const cloud = (works.value || []).map(w => {
     const anyLocal = (w.posts || []).find(x => x.local_video_id)
+    const tags = []
+    const wPosts = w.posts || []
+    wPosts.forEach(x => {
+      const xTags = x.tags || []
+      xTags.forEach(t => { if (t && !tags.includes(t)) tags.push(t) })
+    })
     return {
       key: (w.type === 'work' ? 'w' : 'p') + w.id,
       kind: 'cloud',
@@ -502,10 +528,10 @@ function buildCards() {
       type: w.type,
       title: w.title || '（无标题）',
       cover_url: w.cover || '',
+      tags,
       platforms: w.platforms || [],
       main_topics: [],
       is_ad: false,
-      tags: [],
       merged: w.type === 'work' ? (w.posts || []).length : 0,
       cloudPosts: w.posts || [],
       local_video_id: anyLocal ? anyLocal.local_video_id : null,
@@ -543,8 +569,9 @@ function openCloud(it) {
 async function loadComments(pst) {
   commentsLoading.value = pst.id
   try {
-    const r = await api(`/api/platform/posts/${pst.id}/comments?count=30`)
+    const r = await api(`/api/platform/posts/${pst.id}/comments?limit=50`)
     commentsMap.value = { ...commentsMap.value, [pst.id]: r.items || [] }
+    if (!(r.items || []).length) message.info('本地暂无评论：点该作品卡片的「同步数据」后，评论会入库到这里')
   } catch (e) {
     message.error('评论拉取失败：' + e.message)
   } finally {

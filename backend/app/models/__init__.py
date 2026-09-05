@@ -15,6 +15,7 @@ from .platform import (
     CreatorAccount,
     CreatorAccountSnapshot,
     PlatformPost,
+    PlatformPostComment,
     PlatformPostStat,
     SyncJob,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "CreatorAccountSnapshot",
     "PlatformPost",
     "PlatformPostStat",
+    "PlatformPostComment",
     "SyncJob",
     "Work",
 ]
