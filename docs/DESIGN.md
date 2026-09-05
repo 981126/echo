@@ -155,6 +155,11 @@ flowchart TD
   真实链路用“真实素材+阿里云/TikHub 冒烟”在交付前人工跑
 - 交付前 AI 自测 + 改完保持前后端运行（见 AGENTS.md）
 
+## 10.5 大文件拆分（R-061-C 一期）
+- tikhub.py → 拆出 `link_utils.py`（链接解析纯逻辑+短链重定向，旧导入 re-export 兼容）
+- platform_sync.py → 拆出 `platform_assets.py`（图片识别/HEIC 转换/封面头像下载命名）
+- C 二期：前端大文件组件化（VideosView/CreatorsView）、platform_sync 编排进一步拆分
+
 ## 11. 扩展点（未来）
 - 分词升级 BM25/向量检索；批量历史文件按标题重命名脚本；多用户化（数据隔离层）；
 - 平台/LLM/ASR/推送全部可插拔适配器；Alembic 迁移落地。

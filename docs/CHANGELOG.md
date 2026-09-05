@@ -283,3 +283,8 @@
 - _post_item/post_item 合并为统一序列化 works_service.post_item（works 列表与 platform 帖子列表共用，返回为字段并集，既有前端不受影响）
 - 未启用的 cookie 指标抓取不再每日空跑（仅保留留存清理）
 - 新增 tasks.push_notification 统一通知写入（每周重建等改用它）
+
+## [M43 / R-061 批次 C 一期] 2026-09-05 — 后端大文件拆分
+- tikhub.py 拆出 services/platform/link_utils.py（链接解析纯逻辑，旧导入 re-export 兼容）
+- platform_sync.py 拆出 services/platform_assets.py（图片识别/HEIC 转换/封面头像下载命名）
+- 纯搬移，行为不变；46 测试通过
