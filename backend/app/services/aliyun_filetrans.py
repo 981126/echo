@@ -17,6 +17,7 @@ from aliyunsdkcore.request import CommonRequest
 
 from ..config import get_settings
 from .aliyun_oss import AliyunOss
+from .media_tools import extract_audio_to_wav, needs_audio_extraction
 from .transcription import TranscriptionError
 
 PRODUCT = "nls-filetrans"
@@ -94,18 +95,29 @@ class AliyunFileTrans:
         return self._call("GetTaskResult", "GET", query_params={"TaskId": task_id})
 
     def transcribe_file(self, video_path: Path | str) -> str:
-        """上传 OSS → 提交任务 → 轮询结果 → 返回文本（临时对象最终删除）。"""
+        """抽音轨(视频) → 上传 OSS → 提交任务 → 轮询结果 → 返回文本。
+
+        只把音频传上云：视频先用 ffmpeg 抽成 16k 单声道 wav（几 MB），
+        识别完成后删除 OSS 临时对象与本地临时 wav。
+        """
         path = Path(video_path)
         if not path.is_file():
             raise TranscriptionError(f"视频不存在: {path}")
+        extracted: Path | None = None
+        upload_path = path
+        if needs_audio_extraction(path):
+            extracted = extract_audio_to_wav(path)
+            upload_path = extracted
         oss = AliyunOss(settings=self.settings)
-        key = oss.upload_file(path)
+        key = oss.upload_file(upload_path)
         try:
             file_url = oss.sign_url(key)
             task_id = self.submit_task(file_url)
             return self._poll(task_id)
         finally:
             oss.delete_object(key)
+            if extracted is not None:
+                extracted.unlink(missing_ok=True)
 
     def _poll(self, task_id: str) -> str:
         settings = self.settings

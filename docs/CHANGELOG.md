@@ -141,3 +141,10 @@
 - 测试：新增 5 项 R-032 编排单测（当前共 43 项通过）；ruff/mypy/前端构建全绿
 - 阻塞：该 AccessKey 对 OSS bucket 无权限（`AccessDenied: The bucket you access does not belong to you`），待作者授权后完成 E2E 冒烟
 - **完成（同日）**：作者授予 OSS 权限后 E2E 实调通过（上传→转写回填「北京的天气。」→ 自动删除临时对象，复查无残留）；R-032 标记 ✅ 已完成
+
+## [M15 / R-033] 2026-09-05 — 抽音轨 + 手动触发转写（编辑页按钮）
+- 上传前用 ffmpeg（imageio-ffmpeg）把视频抽成 16k 单声道 wav 再传 OSS（纯音频直接传）；识别完删除 OSS 临时对象与本地临时 wav（上传体积 MB 级、规避 .mov 兼容风险）
+- 上传 / inbox 监听只入库，不再自动转写；新增 `POST /api/videos/{id}/transcribe` 手动触发（已转写会拒绝重复）
+- 素材编辑弹窗新增「语音转文字」按钮：点击启动后台任务并轮询，完成后自动展示只读转写稿，右上角通知可跳转
+- 修复存量 bug：`tasks.py::_maybe_optimize_prompt` 导入路径错误导致转写成功后任务被误标「失败」并弹失败通知
+- 测试：45 项通过；真实链路冒烟：3 秒 mp4 → 抽音轨 → 阿里云返回「北京的天气。」→ 任务 done、完成通知正常

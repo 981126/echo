@@ -170,6 +170,20 @@
             <n-input v-model:value="tagsText" placeholder="干货, 反常识, 口播, 面试, 赚钱" />
             <span class="muted" style="font-size: 12px">命中 求职/面试/赚钱/知识/其他 的词会同时进入数据统计（复盘/缺口用）</span>
           </div>
+          <div v-if="editing.filename" class="form-item full">
+            <label class="form-label">语音转文字（阿里云 ASR）</label>
+            <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
+              <n-button
+                v-if="!editing.transcriptText"
+                secondary
+                :loading="transcribing"
+                @click="startTranscribe"
+              >{{ transcribing ? '识别中…' : '开始转写' }}</n-button>
+              <n-tag v-if="editing.transcriptText" size="small" type="success" :bordered="false" round>已转写</n-tag>
+              <span v-if="transcribing" class="muted">后台识别中，完成后会提醒并自动展示在下方</span>
+              <span v-else-if="!editing.transcriptText" class="muted">上传视频不会自动转写，点按钮把语音转成文字</span>
+            </div>
+          </div>
           <div class="form-item full">
             <label class="form-label">原始文案（可选）</label>
             <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
@@ -193,7 +207,7 @@
         <n-tabs v-model:value="cloudTab" type="line" animated @update:value="onCloudTab">
           <n-tab-pane name="local" tab="转本地素材">
             <div class="form-item">
-              <label class="form-label">上传视频（可选，会触发转写）</label>
+              <label class="form-label">上传视频（可选，转写需到编辑页手动触发）</label>
               <div class="row" style="gap: 8px">
                 <input ref="cloudFileInput" type="file" accept="video/*" class="file-hidden" @change="onCloudFile" />
                 <n-button secondary @click="cloudFileInput && cloudFileInput.click()">选择视频文件</n-button>
@@ -349,7 +363,7 @@ async function doUpload() {
   uploading.value = true
   try {
     await uploadVideo(file.value)
-    message.success('上传成功，已触发转写')
+    message.success('上传成功（可点进素材，用「语音转文字」转写）')
     file.value = null
     if (fileInput.value) fileInput.value.value = ''
     load()
@@ -436,7 +450,60 @@ async function openEdit(v) {
   showEdit.value = true
 }
 
+const transcribing = ref(false)
+let transcribeTimer = null
+
+function clearTranscribePoll() {
+  if (transcribeTimer) {
+    clearInterval(transcribeTimer)
+    transcribeTimer = null
+  }
+}
+
+async function startTranscribe() {
+  if (!editing.value || transcribing.value) return
+  transcribing.value = true
+  try {
+    await api(`/api/videos/${editing.value.id}/transcribe`, { method: 'POST' })
+    message.success('已开始语音转文字')
+    pollTranscript()
+  } catch (e) {
+    transcribing.value = false
+    message.error(e.message)
+  }
+}
+
+function pollTranscript() {
+  clearTranscribePoll()
+  let tries = 0
+  transcribeTimer = setInterval(async () => {
+    tries += 1
+    try {
+      const d = await api('/api/videos/' + editing.value.id)
+      const t = d.transcript
+      if (t && t.transcript_text) {
+        editing.value.transcriptText = t.transcript_text
+        clearTranscribePoll()
+        transcribing.value = false
+        message.success('语音转文字完成')
+      } else if (t && t.asr_status === 'failed') {
+        clearTranscribePoll()
+        transcribing.value = false
+        message.error('语音转文字失败，请重试')
+      } else if (tries > 200) {
+        clearTranscribePoll()
+        transcribing.value = false
+        message.warning('仍在识别中，完成后右上角会提醒，可刷新查看')
+      }
+    } catch (e) {
+      /* 轮询期间网络抖动则继续 */
+    }
+  }, 5000)
+}
+
 function closeEdit() {
+  clearTranscribePoll()
+  transcribing.value = false
   showEdit.value = false
   editing.value = null
   orig.value = null
@@ -692,7 +759,7 @@ async function saveCloudLocal() {
       throw new Error(detail)
     }
     const r = await resp.json()
-    message.success(cloudFile.value ? '已保存并触发转写' : '已转为本地素材（可继续编辑）')
+    message.success(cloudFile.value ? '已转为本地素材（可到编辑页「语音转文字」）' : '已转为本地素材（可继续编辑）')
     showCloud.value = false
     await load()
     await loadWorks()

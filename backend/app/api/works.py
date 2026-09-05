@@ -30,14 +30,12 @@ def cloud_to_local(
     work_id: int | None = Form(default=None),
     post_id: int | None = Form(default=None),
 ):
-    """把云端作品转成本地素材：上传视频（可选，触发转写）+ 文案（可选）后变成本地素材。"""
+    """把云端作品转成本地素材：上传视频（可选，不自动转写）+ 文案（可选）后变成本地素材。"""
     from ..config import get_settings
     from ..core.pipeline import today_key
     from ..models.metrics import MetricsSnapshot
     from ..models.video import Transcript, Video
     from ..services.creator_service import current_creator_id
-    from ..services.ingest import import_video_task
-    from ..tasks import start_task
     from ..models.platform import PlatformPost
 
     cid = current_creator_id(db)
@@ -109,32 +107,29 @@ def cloud_to_local(
         post.local_video_id = video.id
     db.commit()
 
-    # 若文件上传则触发转写/预打标；否则仅保留文案
-    if filename:
-        start_task("import_video", {"video_id": video.id}, import_video_task)
-    else:
-        # 复制云端最新指标到本地（复盘可用）
-        from ..models.platform import PlatformPostStat
+    # 复制云端最新指标到本地（复盘可用）
+    from ..models.platform import PlatformPostStat
 
-        stat = (
-            db.query(PlatformPostStat)
-            .filter(PlatformPostStat.post_id == first.id)
-            .order_by(PlatformPostStat.stat_date.desc())
-            .first()
-        )
-        if stat:
-            db.add(
-                MetricsSnapshot(
-                    video_id=video.id,
-                    snapshot_date=today_key(),
-                    plays=stat.plays,
-                    likes=stat.likes,
-                    favorites=stat.favorites,
-                    comments=stat.comments,
-                    source="tikhub",
-                )
+    stat = (
+        db.query(PlatformPostStat)
+        .filter(PlatformPostStat.post_id == first.id)
+        .order_by(PlatformPostStat.stat_date.desc())
+        .first()
+    )
+    if stat:
+        db.add(
+            MetricsSnapshot(
+                video_id=video.id,
+                snapshot_date=today_key(),
+                plays=stat.plays,
+                likes=stat.likes,
+                favorites=stat.favorites,
+                comments=stat.comments,
+                source="tikhub",
             )
-            db.commit()
+        )
+        db.commit()
+    # R-033：转本地不自动转写，编辑页「语音转文字」手动触发
     return {"ok": True, "video_id": video.id, "filename": filename}
 
 

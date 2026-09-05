@@ -40,8 +40,24 @@ def upload_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
     db.add(video)
     db.commit()
     db.refresh(video)
-    start_task("import_video", {"video_id": video.id}, import_video_task)
-    return video
+    return video  # R-033：上传不自动转写，由编辑页「语音转文字」手动触发
+
+
+@router.post("/{video_id}/transcribe", response_model=dict)
+def transcribe_video(video_id: int, db: Session = Depends(get_db)):
+    """R-033：手动触发语音转文字（后台任务，完成后右上角提醒并可跳转）。"""
+    settings = get_settings()
+    video = db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    if not video.filename:
+        raise HTTPException(status_code=400, detail="该素材没有本地视频文件，请先在编辑页上传视频")
+    if not (settings.videos_dir / video.filename).is_file():
+        raise HTTPException(status_code=400, detail="本地视频文件缺失，请重新上传")
+    if video.transcript and video.transcript.transcript_text and video.transcript.asr_status == "done":
+        raise HTTPException(status_code=400, detail="该素材已转写完成，无需重复转写")
+    task_id = start_task("import_video", {"video_id": video.id}, import_video_task)
+    return {"ok": True, "task_id": task_id}
 
 
 @router.get("", response_model=VideoListOut)

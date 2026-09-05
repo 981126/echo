@@ -1,4 +1,4 @@
-"""阿里云 ASR 真实接入（R-032）：转写编排纯逻辑测试（离线 mock，不访问网络）。"""
+"""阿里云 ASR 真实接入（R-032/R-033）：转写编排纯逻辑测试（离线 mock，不访问网络）。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import pytest
 from app.services import aliyun_filetrans as ft_mod
 from app.services.aliyun_filetrans import AliyunFileTrans
 from app.services.aliyun_oss import AliyunOss
+from app.services.media_tools import needs_audio_extraction
 from app.services.transcription import TranscriptionError
 
 
@@ -36,9 +37,12 @@ def _settings(**overrides: object) -> MagicMock:
 class _FakeOss:
     def __init__(self, settings=None):
         self.settings = settings
+        self.uploaded: str = ""
+        self.deleted: str = ""
 
     def upload_file(self, path: Path | str) -> str:
-        return "asr/fake.mp4"
+        self.uploaded = str(path)
+        return "asr/fake.wav"
 
     def sign_url(self, key: str, expires_in: int | None = None) -> str:
         return f"https://signed/{key}"
@@ -52,30 +56,60 @@ def test_aliyun_oss_requires_config():
         AliyunOss(settings=_settings(aliyun_oss_bucket="", aliyun_asr_access_key_id=""))
 
 
-def test_transcribe_file_upload_submit_poll_cleanup(tmp_path, monkeypatch):
-    monkeypatch.setattr(ft_mod, "AliyunOss", _FakeOss)
+def test_needs_audio_extraction_rule():
+    assert needs_audio_extraction(Path("a.mp4")) is True
+    assert needs_audio_extraction(Path("a.mov")) is True
+    assert needs_audio_extraction(Path("a.wav")) is False
+    assert needs_audio_extraction(Path("a.mp3")) is False
+
+
+def test_transcribe_audio_skips_extraction(tmp_path, monkeypatch):
+    """纯音频（wav）直接上传，不做 ffmpeg 抽离，也不删除原文件。"""
     monkeypatch.setattr(ft_mod.time, "sleep", lambda _seconds: None)
-    path = tmp_path / "demo.mp4"
-    path.write_bytes(b"fake")
+    path = tmp_path / "demo.wav"
+    path.write_bytes(b"RIFF-fake")
     client = AliyunFileTrans(settings=_settings())
     fake_oss = _FakeOss()
     monkeypatch.setattr(ft_mod, "AliyunOss", lambda settings=None: fake_oss)
     client.submit_task = MagicMock(return_value="task-1")
     client.get_result = MagicMock(
-        side_effect=[
-            {"StatusText": "RUNNING", "TaskId": "task-1"},
-            {
-                "StatusText": "SUCCESS",
-                "TaskId": "task-1",
-                "Result": {"Sentences": [{"Text": "大家好。"}, {"Text": "今天聊聊求职。"}]},
-            },
-        ]
+        return_value={
+            "StatusText": "SUCCESS",
+            "TaskId": "task-1",
+            "Result": {"Sentences": [{"Text": "北京的天气。"}]},
+        }
     )
     text = client.transcribe_file(path)
-    assert text == "大家好。\n今天聊聊求职。"
-    assert client.submit_task.call_args[0][0].startswith("https://signed/")
-    assert client.get_result.call_count == 2
-    assert fake_oss.deleted == "asr/fake.mp4"
+    assert text == "北京的天气。"
+    assert fake_oss.uploaded == str(path)  # 直接传原文件
+    assert path.exists()  # 原文件未被删除
+    assert fake_oss.deleted == "asr/fake.wav"
+
+
+def test_transcribe_video_extracts_audio_then_cleanup(tmp_path, monkeypatch):
+    """视频（mp4）先抽音轨：上传的是抽出的 wav，且临时 wav 用完即删。"""
+    monkeypatch.setattr(ft_mod.time, "sleep", lambda _seconds: None)
+    video = tmp_path / "demo.mp4"
+    video.write_bytes(b"fake-video")
+    extracted = tmp_path / "extracted.wav"
+    monkeypatch.setattr(ft_mod, "extract_audio_to_wav", lambda p: extracted)
+
+    client = AliyunFileTrans(settings=_settings())
+    fake_oss = _FakeOss()
+    monkeypatch.setattr(ft_mod, "AliyunOss", lambda settings=None: fake_oss)
+    client.submit_task = MagicMock(return_value="task-1")
+    client.get_result = MagicMock(
+        return_value={
+            "StatusText": "SUCCESS",
+            "TaskId": "task-1",
+            "Result": {"Sentences": [{"Text": "大家好。"}]},
+        }
+    )
+    text = client.transcribe_file(video)
+    assert text == "大家好。"
+    assert fake_oss.uploaded == str(extracted)  # 上传的是抽出的音频
+    assert video.exists()  # 原视频不动
+    assert not extracted.exists()  # 临时音频已清理
 
 
 def test_poll_timeout(monkeypatch):

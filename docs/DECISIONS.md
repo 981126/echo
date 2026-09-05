@@ -24,6 +24,7 @@
 - **决策**：视频转写用阿里云 ASR API
 - **原因**：NAS 本地跑 Whisper 太慢（纯 CPU），云 API 一次性处理 50 条成本低
 - **替代**：faster-whisper 本地仅作应急
+- **转写交互（R-033 ✅）**：上传前 ffmpeg 抽音轨（16k 单声道 wav，imageio-ffmpeg 自带二进制）只传音频上云；上传/inbox 不自动转写，编辑页「语音转文字」手动触发（`POST /api/videos/{id}/transcribe`）
 - **接入方式（R-032 ✅）**：录音文件识别 FileTrans 4.0，官方推荐 `aliyun-python-sdk-core` CommonRequest RPC POP（SubmitTask/GetTaskResult，代码见 `services/aliyun_filetrans.py`）；文件公网 URL 用 OSS 中转（`services/aliyun_oss.py`，bucket 981126981126 / oss-cn-shanghai，预签名 URL，识别后删除）；E2E 实调 2026-09-05 通过
 
 ## D-005：长任务用 DB 任务表 + 后台线程，不用队列

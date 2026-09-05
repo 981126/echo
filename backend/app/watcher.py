@@ -10,8 +10,6 @@ from pathlib import Path
 from .config import get_settings
 from .db import SessionLocal
 from .models.video import Video
-from .services.ingest import import_video_task
-from .tasks import start_task
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v", ".ts"}
 
@@ -32,9 +30,7 @@ def _scan_once(settings) -> None:
             if db.query(Video).filter(Video.filename == new_name).first() is None:
                 video = Video(filename=new_name)
                 db.add(video)
-                db.commit()
-                db.refresh(video)
-                start_task("import_video", {"video_id": video.id}, import_video_task)
+                db.commit()  # R-033：只入库不自动转写，编辑页手动「语音转文字」
     finally:
         db.close()
 
