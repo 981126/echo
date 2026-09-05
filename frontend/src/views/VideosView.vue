@@ -77,32 +77,24 @@
           </div>
         </div>
 
-        <div class="form-grid">
-          <div class="form-item">
-            <label class="form-label">平台（可多选）</label>
-            <n-select v-model:value="editing.platforms" multiple :options="platformOptions" placeholder="选择平台" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">状态</label>
-            <n-select v-model:value="editing.status" :options="statusOptions" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">商务广告</label>
-            <n-checkbox v-model:checked="editing.is_ad">广告（不参与人设学习）</n-checkbox>
-          </div>
-          <div class="form-item">
-            <label class="form-label">广告价格（元）</label>
-            <n-input-number v-model:value="editing.adPrice" :min="0" placeholder="0" style="width: 100%" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">计划发布时间</label>
-            <n-date-picker v-model:value="editing.plannedTs" type="datetime" clearable style="width: 100%" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">实际发布时间</label>
-            <n-date-picker v-model:value="editing.publishedTs" type="datetime" clearable style="width: 100%" />
-          </div>
-          <TagsInput :model-value="tagsText" @update:modelValue="v => (tagsText = v)" />
+                <MetaFields
+          :platform-options="platformOptions"
+          :status-options="statusOptions"
+          :platforms="editing.platforms"
+          :status="editing.status"
+          :is-ad="editing.isAd"
+          :ad-price="editing.adPrice"
+          :planned-ts="editing.plannedTs"
+          :published-ts="editing.publishedTs"
+          @update:platforms="v => (editing.platforms = v)"
+          @update:status="v => (editing.status = v)"
+          @update:isAd="v => (editing.isAd = v)"
+          @update:adPrice="v => (editing.adPrice = v)"
+          @update:plannedTs="v => (editing.plannedTs = v)"
+          @update:publishedTs="v => (editing.publishedTs = v)"
+        />
+<div class="form-grid">
+<TagsInput :model-value="tagsText" @update:modelValue="v => (tagsText = v)" />
           <TranscribeSection
             v-if="editing.filename"
             :transcript-text="editing.transcriptText"
@@ -184,6 +176,7 @@ import PlatformLinksInput from '../components/PlatformLinksInput.vue'
 import EditActions from '../components/EditActions.vue'
 import TranscriptEditor from '../components/TranscriptEditor.vue'
 import TagsInput from '../components/TagsInput.vue'
+import MetaFields from '../components/MetaFields.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
