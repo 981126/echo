@@ -348,3 +348,7 @@
 ## [feat] 2026-09-05 — 素材视频文件管理
 - 新增接口：POST/DELETE /api/videos/{id}/video（给素材上传/替换/删除本地视频文件）
 - 编辑弹窗新增「本地视频文件」控制（上传/替换/删除）；卡片对“未上传视频”素材显示「上传视频」入口
+
+## [chore] 2026-09-05 — 历史封面批量改名「标题-封面」
+- 1169 个存量平台封面按作品标题改为 `标题-封面.{ext}`（清理 #话题等仅按标题截断），并同步更新 platform_posts/videos/works 的 cover_path 引用
+- 备份：backups/echo_pre_cover_rename_*.db
