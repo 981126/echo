@@ -77,6 +77,8 @@ def cloud_to_local(
     known5 = ["求职", "面试", "赚钱", "知识", "其他"]
     main_topics = [t for t in tag_cloud if t in known5]
     video_tags = [t for t in tag_cloud if t not in known5]
+    if not filename and first.id:
+        filename = f"__cloud__{first.id}"
     video = Video(
         filename=filename,
         title=first.title or "",

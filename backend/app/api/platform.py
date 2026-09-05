@@ -173,7 +173,7 @@ def post_to_material(post_id: int, db: Session = Depends(get_db)):
     if cid is None:
         raise HTTPException(status_code=400, detail="请先创建并切换到一个主博主")
     video = Video(
-        filename="",  # mock：无真实文件，后续可上传/下载
+        filename=f"__cloud__{post.id}",  # 无真实文件：占位名保证唯一（前端据此不显示转写）
         title=post.title,
         creator_id=cid,
         platform_post_id=f"{post.platform}:{post.platform_post_id}",

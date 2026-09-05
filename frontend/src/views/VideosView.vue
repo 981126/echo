@@ -49,7 +49,7 @@
     <n-modal
       v-model:show="showEdit"
       preset="card"
-      :title="editing ? '编辑：' + editing.filename : '编辑视频'"
+      :title="editing ? '编辑：' + (editing.title || (!isPlaceholderFile(editing.filename) ? editing.filename : '素材')) : '编辑视频'"
       style="width: min(760px, 94vw)"
       :mask-closable="false"
       @close="closeEdit"
@@ -96,7 +96,7 @@
 <div class="form-grid">
 <TagsInput :model-value="tagsText" @update:modelValue="v => (tagsText = v)" />
           <TranscribeSection
-            v-if="editing.filename"
+            v-if="editing.filename && !isPlaceholderFile(editing.filename)"
             :transcript-text="editing.transcriptText"
             :transcribing="transcribing"
             @start="startTranscribe"
@@ -350,6 +350,10 @@ async function openEdit(v) {
 const transcribing = ref(false)
 let transcribeTimer = null
 const linkPlatforms = ['douyin', 'bilibili', 'xiaohongshu']
+function isPlaceholderFile(name) {
+  return !!name && name.startsWith('__cloud__')
+}
+
 const editCommentPosts = computed(() => ((editing.value && editing.value.platformPosts) || []).map(x => ({ id: x.post_id, platform: x.platform })))
 const cloudCommentPosts = computed(() => ((cloudItem.value && cloudItem.value.cloudPosts) || []).map(x => ({ id: x.id, platform: x.platform })))
 const syncingEdit = ref(false)

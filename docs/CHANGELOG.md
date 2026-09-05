@@ -321,3 +321,7 @@
 
 ## [M43 / R-061 C 继续] 2026-09-05 — MaterialCard 子组件（模板抽出，事件由 props 传入）
 - 新增 MaterialCard.vue：素材卡片整块模板（本地/云端）抽出，点击/同步/确认/删除/拆分等事件由父页 props 注入
+
+## [fix] 2026-09-05 — 云端“转素材”500 修复
+- 原因：无文件本地素材 filename='' 撞 videos.filename 唯一约束
+- 修复：占位名改 `__cloud__{post_id}`（works.to-local 同规则）；前端按占位名不显示转写按钮、标题显示素材标题
