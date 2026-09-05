@@ -80,7 +80,8 @@
             <template v-if="pst.latest_stat">
               <span>播放 {{ pst.latest_stat.plays ? fmtNum(pst.latest_stat.plays) : '—' }}</span>
               <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
-              <span v-if="pst.latest_stat.comments">评 {{ fmtNum(pst.latest_stat.comments) }}</span>
+              <span>藏 {{ fmtNum(pst.latest_stat.favorites) }}</span>
+              <span>评 {{ fmtNum(pst.latest_stat.comments) }}</span>
             </template>
             <span v-else class="muted">暂无指标</span>
           </div>
@@ -907,15 +908,19 @@ onMounted(async () => {
   font-size: 14px;
 }
 .plat-line {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 44px 92px 62px 56px 56px;
+  gap: 2px;
+  align-items: baseline;
+  white-space: nowrap;
+  margin-top: 4px;
   font-size: 11px;
   color: #6f675c;
-  margin-top: 4px;
-  flex-wrap: wrap;
   overflow: hidden;
 }
-.plat-line b { color: #a34f2c; }
+.plat-line b { color: #a34f2c; font-weight: 600; }
+.plat-line span { overflow: hidden; text-overflow: ellipsis; }
+
 .plat-stat b {
   color: #a34f2c;
 }
