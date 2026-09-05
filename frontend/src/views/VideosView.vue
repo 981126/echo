@@ -58,6 +58,11 @@
             <n-tag v-if="it.tags.length > 5" size="small" :bordered="false" round>… +{{ it.tags.length - 5 }}</n-tag>
             <span v-if="!it.tags.length" class="muted">无标签</span>
           </div>
+          <div class="plat-zone">
+            <div v-for="p in platOrder" :key="p" class="plat-line missing">
+              <b>{{ platformName(p) }}</b><span class="muted">—</span>
+            </div>
+          </div>
           <p class="tile-meta">
             {{ it.status === 'published' ? '已发布' : '计划中' }}
             <template v-if="it.planned_publish_at"> · 计划 {{ fmt(it.planned_publish_at) }}</template>
