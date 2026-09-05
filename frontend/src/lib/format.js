@@ -1,6 +1,6 @@
 // 通用展示工具（R-061-C：跨页面复用，避免重复定义）
 export const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
-export const platformName = (p) => PLATFORM_NAMES[p] || p || ''
+export const platformName = (p, fallback = '') => PLATFORM_NAMES[p] || p || fallback
 
 export function fmtNum(n) {
   n = Number(n || 0)

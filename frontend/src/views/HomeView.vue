@@ -47,7 +47,7 @@
       <div v-if="!totalIdeas" class="empty">暂无灵感（点「抓取更新」或等每日自动同步）</div>
       <div v-else class="idea-list">
         <div v-for="it in shownIdeas" :key="it.id" class="idea-row">
-          <span class="src">{{ platformName(it.platform) }}</span>
+          <span class="src">{{ platformName(it.platform, '综合') }}</span>
           <span class="kind">{{ it.source === 'hot' ? '热榜' : '评论' }}</span>
           <span class="grow ellipsis" style="min-width: 0">{{ it.title }}</span>
           <n-button size="tiny" type="primary" secondary :loading="generatingIdea === it.id" @click="pickAngle(it.title)">生成文案</n-button>
@@ -89,6 +89,7 @@ import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { fetchVideos } from '../composables/media'
 import { buildTimelineModel } from '../lib/timeline'
+import { platformName } from '../lib/format'
 
 const videos = ref([])
 const hotItems = ref([])
@@ -169,8 +170,6 @@ function shuffle() {
 }
 const message = useMessage()
 
-const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
-const platformName = (p) => PLATFORM_NAMES[p] || p || '综合'
 const model = computed(() => buildTimelineModel(videos.value, cloudPosts.value))
 
 async function loadVideos() {
