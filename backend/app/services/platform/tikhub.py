@@ -301,27 +301,37 @@ class TikHubClient:
             )
         if platform == "xiaohongshu":
             data = self._get("/xiaohongshu/app_v2/get_user_info", {"user_id": user_id})
-            d = data.get("data") or {}
-            avatar = ((d.get("avatar") or {}).get("url") or "")
+            d = ((data.get("data") or {}).get("data")) or {}
+            posted = ((d.get("note_num_stat") or {}).get("posted")) or 0
             return ProfileData(
                 nickname=d.get("nickname", ""),
-                avatar_url=avatar or "",
-                followers=int(d.get("follower_count") or 0),
-                likes_total=int(d.get("likes_count") or 0),
-                posts_total=int(d.get("note_count") or 0),
-                following=int(d.get("following_count") or 0),
+                avatar_url="",  # 小红书该接口不返回头像，保持空圆框
+                followers=int(d.get("fans") or 0),
+                likes_total=int(d.get("liked") or 0),
+                posts_total=int(posted or 0),
+                following=0,
                 raw=data,
             )
-        # bilibili web：uid 直接取用户空间页公开信息（best-effort）
-        data = self._get("/bilibili/web/fetch_user_info", {"uid": user_id})
-        d = data.get("data") or {}
+        # bilibili：app 用户卡片（name/fans/face）
+        data = self._get("/bilibili/app/fetch_user_info", {"user_id": user_id})
+        inner = ((data.get("data") or {}).get("data")) or {}
+        card = inner.get("card") or {}
+        archive_count = ((inner.get("archive") or {}).get("count")) or 0
+        def _num(v):
+            if isinstance(v, dict):
+                v = v.get("count") or v.get("total") or 0
+            try:
+                return int(v or 0)
+            except (TypeError, ValueError):
+                return 0
+
         return ProfileData(
-            nickname=d.get("name", ""),
-            avatar_url=d.get("face") or "",
-            followers=int(d.get("follower") or 0),
-            likes_total=int(d.get("likes") or 0),
-            posts_total=int(d.get("video") or 0),
-            following=int(d.get("following") or 0),
+            nickname=card.get("name", ""),
+            avatar_url=card.get("face") or "",
+            followers=_num(card.get("fans")),
+            likes_total=_num(card.get("likes")),
+            posts_total=_num(card.get("videos")) or _num(archive_count),
+            following=_num(card.get("attention")),
             raw=data,
         )
 
@@ -393,50 +403,56 @@ class TikHubClient:
                 )
         elif platform == "xiaohongshu":
             data = self._get("/xiaohongshu/app_v2/get_user_posted_notes", {"user_id": user_id, "cursor": ""})
-            notes = (data.get("data") or {}).get("notes") or []
+            notes = (((data.get("data") or {}).get("data")) or {}).get("notes") or []
             for n in notes[:count]:
-                stat = n.get("interact_info") or {}
-                cover = (((n.get("image_list") or [{}])[0]).get("url") or "")
+                cover = ""
+                imgs = n.get("images_list") or []
+                if imgs and isinstance(imgs[0], dict):
+                    urls = imgs[0].get("url_list") or []
+                    cover = urls[0] if urls else ""
                 out.append(
                     PostData(
-                        platform_post_id=str(n.get("note_id") or ""),
-                        title=(n.get("title") or "")[:200],
+                        platform_post_id=str(n.get("id") or n.get("note_id") or ""),
+                        title=(n.get("title") or n.get("display_title") or "")[:200],
                         desc=n.get("desc") or "",
-                        cover_url=cover,
+                        cover_url=cover or "",
                         video_url="",
-                        publish_time=_ts(n.get("time")),
+                        publish_time=_ts(n.get("create_time") or n.get("time")),
                         stats={
-                            "plays": int(stat.get("viewed_count") or 0),
-                            "likes": int(stat.get("liked_count") or 0),
-                            "favorites": int(stat.get("collected_count") or 0),
-                            "shares": int(stat.get("share_count") or 0),
-                            "comments": int(stat.get("comment_count") or 0),
+                            "plays": int(n.get("view_count") or 0),
+                            "likes": int(n.get("likes") or 0),
+                            "favorites": int(n.get("collected_count") or 0),
+                            "shares": int(n.get("share_count") or 0),
+                            "comments": int(n.get("comments_count") or 0),
                             "extra": {},
                         },
                         raw=n,
                     )
                 )
-        else:  # bilibili
+        else:  # bilibili（web 列表只含 view，其余走单条详情）
             data = self._get("/bilibili/web/fetch_user_post_videos_v2", {"uid": user_id, "page_num": 1, "page_size": min(count, 30)})
-            vlist = (data.get("data") or {}).get("list") or (data.get("data") or {}).get("vlist") or []
+            vlist = ((((data.get("data") or {}).get("data")) or {}).get("archives")) or []
             for v in vlist[:count]:
                 stat = v.get("stat") or {}
+                stats = {}
+                if "like" in stat:
+                    stats = {
+                        "plays": int(stat.get("view") or 0),
+                        "likes": int(stat.get("like") or 0),
+                        "favorites": int(stat.get("favorite") or 0),
+                        "shares": int(stat.get("share") or 0),
+                        "comments": int(stat.get("reply") or 0),
+                        "extra": {"danmaku": int(stat.get("danmaku") or 0), "coin": int(stat.get("coin") or 0)},
+                    }
                 out.append(
                     PostData(
-                        platform_post_id=f"bvid:{v.get('bvid') or ''}",
+                        platform_post_id=f"aid:{v.get('aid') or ''}",
                         title=v.get("title") or "",
-                        desc=v.get("title") or "",
+                        desc=v.get("desc") or "",
                         cover_url=v.get("pic") or "",
                         video_url="",
-                        publish_time=_ts(v.get("created")),
-                        stats={
-                            "plays": int(stat.get("view") or 0),
-                            "likes": int(stat.get("like") or 0),
-                            "favorites": int(stat.get("favorite") or 0),
-                            "shares": int(stat.get("share") or 0),
-                            "comments": int(stat.get("reply") or 0),
-                            "extra": {"danmaku": int(stat.get("danmaku") or 0), "coin": int(stat.get("coin") or 0)},
-                        },
+                        publish_time=_ts(v.get("pubdate") or v.get("created")),
+                        stats=stats,
                         raw=v,
                     )
                 )
@@ -465,10 +481,11 @@ class TikHubClient:
         elif platform == "xiaohongshu":
             data = self._get("/xiaohongshu/app_v2/get_video_note_detail", {"note_id": post_id})
             stat = ((((data.get("data") or {}).get("note") or {}).get("interact_info")) or {})
-        else:
-            bvid = post_id.split(":", 1)[1] if post_id.startswith("bvid:") else post_id
-            data = self._get("/bilibili/web/fetch_video_info", {"bvid": bvid})
-            stat = ((data.get("data") or {}).get("stat")) or {}
+        else:  # bilibili 单条详情（View.stat 全量）
+            aid = post_id.split(":", 1)[1] if post_id.startswith("aid:") else post_id
+            data = self._get("/bilibili/web/fetch_video_detail", {"aid": aid})
+            view = ((((data.get("data") or {}).get("data")) or {}).get("View")) or {}
+            stat = view.get("stat") or {}
         return {
             "plays": int(stat.get("play_count") or stat.get("view") or 0),
             "likes": int(stat.get("digg_count") or stat.get("liked_count") or stat.get("like") or 0),
@@ -482,15 +499,15 @@ class TikHubClient:
         }
 
     # ---------- 评论（R-028 选题池） ----------
-    def fetch_comments(self, platform: str, post_id: str, count: int = 20, account=None) -> list[str]:
+    def fetch_comments(self, platform: str, post_id: str, count: int = 20, account=None, raw: dict | None = None) -> list[str]:
         if self.mode == "real":
-            return self._real_comments(platform, post_id)
+            return self._real_comments(platform, post_id, raw)
         rnd = random.Random(_seed_id(post_id, "comments"))
         pool = _COMMENT_POOL[:]
         rnd.shuffle(pool)
         return pool[: max(3, count)]
 
-    def _real_comments(self, platform: str, post_id: str) -> list[str]:
+    def _real_comments(self, platform: str, post_id: str, raw: dict | None = None) -> list[str]:
         texts: list[str] = []
         if platform == "douyin":
             data = self._get("/douyin/app/v3/fetch_video_comments", {"aweme_id": post_id, "count": 20})
@@ -500,17 +517,20 @@ class TikHubClient:
                     texts.append(txt)
         elif platform == "xiaohongshu":
             data = self._get("/xiaohongshu/app_v2/get_note_comments", {"note_id": post_id, "cursor": ""})
-            for c in ((data.get("data") or {}).get("comments") or []):
+            inner = ((data.get("data") or {}).get("data")) or {}
+            for c in (inner.get("comments") or []):
                 txt = (c.get("content") or "").strip()
                 if txt:
                     texts.append(txt)
         else:
-            bvid = post_id.split(":", 1)[1] if post_id.startswith("bvid:") else post_id
-            data = self._get("/bilibili/web/fetch_video_comments", {"bvid": bvid})
-            for c in ((data.get("data") or {}).get("replies") or []):
-                txt = (c.get("content") or {}).get("message", "").strip()
-                if txt:
-                    texts.append(txt)
+            bvid = (raw or {}).get("bvid") or (post_id.split(":", 1)[1] if post_id.startswith("bvid:") else "")
+            if bvid:
+                data = self._get("/bilibili/web/fetch_video_comments", {"bv_id": bvid})
+                inner = (data.get("data") or {}).get("data") or data.get("data") or {}
+                for c in (inner.get("replies") or []):
+                    txt = ((c.get("content") or {}).get("message")) or ""
+                    if txt and txt.strip():
+                        texts.append(txt.strip())
         return texts[:20]
 
 

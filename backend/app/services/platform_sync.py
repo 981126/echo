@@ -246,7 +246,12 @@ def _collect_comments(db: Session, account: CreatorAccount, client: TikHubClient
     date_key = today_key()
     for post in posts[:]:
         try:
-            comments = client.fetch_comments(account.platform, post.platform_post_id, per_post, account)
+            raw = {}
+            try:
+                raw = json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
+            except json.JSONDecodeError:
+                raw = {}
+            comments = client.fetch_comments(account.platform, post.platform_post_id, per_post, account, raw=raw)
             _charge(db)
         except BudgetExceeded:
             raise
