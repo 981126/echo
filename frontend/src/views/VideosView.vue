@@ -18,6 +18,10 @@
       <n-select v-model:value="adFilter" :options="adOptions" placeholder="广告" clearable style="width: 110px" />
       <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 150px" />
       <n-select multiple filterable v-model:value="tagSel" :options="allTags" placeholder="标签（可多选/输入过滤）" clearable style="width: 230px" />
+      <span class="muted" style="font-size: 12px">点赞</span>
+      <n-input-number v-model:value="likesMin" :min="0" placeholder="≥ 多少" clearable style="width: 108px" />
+      <n-input-number v-model:value="likesMax" :min="0" placeholder="≤ 多少" clearable style="width: 108px" />
+      <span class="muted" style="font-size: 12px">任一平台匹配即可</span>
       <n-button type="primary" @click="applyFilters">查询</n-button>
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
@@ -703,7 +707,9 @@ const allTags = computed(() => {
   return [...set].sort().map(t => ({ label: t, value: t }))
 })
 
-const applied = ref({ kw: '', plats: [], tags: [], ad: null, status: null })
+const applied = ref({ kw: '', plats: [], tags: [], ad: null, status: null, likesMin: null, likesMax: null })
+const likesMin = ref(null)
+const likesMax = ref(null)
 
 function applyFilters() {
   applied.value = {
@@ -711,7 +717,9 @@ function applyFilters() {
     plats: [...(platformSel.value || [])],
     tags: [...(tagSel.value || [])],
     ad: adFilter.value,
-    status: filter.value.status
+    status: filter.value.status,
+    likesMin: likesMin.value,
+    likesMax: likesMax.value
   }
 }
 
@@ -724,6 +732,15 @@ const filteredCards = computed(() => {
     if (a.ad === 'no' && c.is_ad) return false
     if (a.plats.length && !a.plats.some(x => (c.platforms || []).includes(x))) return false
     if (a.tags.length && !a.tags.every(x => (c.tags || []).includes(x))) return false
+    const likeLo = a.likesMin
+    const likeHi = a.likesMax
+    if (likeLo != null || likeHi != null) {
+      // 取该素材各平台最新点赞；任一平台落在区间内即命中
+      const likes = (c.cloudPosts || [])
+        .map(x => (x.latest_stat && x.latest_stat.likes != null) ? Number(x.latest_stat.likes) : null)
+        .filter(v => v != null)
+      if (!likes.some(v => (likeLo == null || v >= likeLo) && (likeHi == null || v <= likeHi))) return false
+    }
     return true
   })
 })
