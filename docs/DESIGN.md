@@ -165,6 +165,10 @@ flowchart TD
 - platform_sync.py → 拆出 `platform_assets.py`（图片识别/HEIC 转换/封面头像下载命名）
 - C 二期：前端大文件组件化（VideosView/CreatorsView）、platform_sync 编排进一步拆分
 
+## 10.6 R-061-D 收口结论
+- D-1 ✅：绑定关系单事实源（local_video_id）+ 唯一部分索引 + 反向补绑（已备份迁移）
+- D-2/D-3（tags 表、raw 归档）评估后暂缓：单用户量级过度设计 / 与 D-027 全存冲突
+
 ## 11. 扩展点（未来）
 - 分词升级 BM25/向量检索；批量历史文件按标题重命名脚本；多用户化（数据隔离层）；
 - 平台/LLM/ASR/推送全部可插拔适配器；Alembic 迁移落地。

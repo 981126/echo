@@ -335,3 +335,8 @@
 - 迁移前备份：backups/echo_pre_R061D_*.db
 - 去重同 (local_video_id, platform) 重复绑定；videos.platform_post_id 指向作品反向补绑
 - 新增唯一部分索引 ux_platform_posts_local_platform（防未来重复）
+
+## [M43 / R-061 收口] 2026-09-05 — 文档同步收口
+- 状态更新：A/B/C/D-1 完成；D-2（tags 表）/D-3（raw 归档）评估后暂缓
+- DATABASE 附录：ux_platform_posts_local_platform 唯一部分索引 + __cloud__ 占位命名约定
+- DESIGN/PRD/milestones/需求索引同步

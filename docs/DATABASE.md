@@ -570,3 +570,9 @@ ASR 转写/校对/原始文案
 | platform_posts | ix_platform_posts_publish_time | 云端列表按时间排序 |
 | videos | ix_videos_platform_post_id | 平台绑定查询 |
 | notifications | ix_notifications_created_at | 清理/按时间检索 |
+| platform_posts | ux_platform_posts_local_platform（唯一部分索引，R-061-D1） | 绑定单事实源：同一本地素材在单平台只绑一条 |
+
+## 附录 B：素材语义与命名约定（R-033/R-058/R-061）
+- 本地素材无真实文件时 filename 用占位名 `__cloud__{post_id}`（唯一约束友好；前端据此不显示“语音转文字”）
+- 有真实文件的命名：`标题-视频.{ext}` / `标题-封面.{ext}`（安全清洗 + 重名 -2/-3）
+- 平台作品↔本地素材绑定以 `platform_posts.local_video_id` 为单事实源（R-061-D1 已加唯一部分索引）
