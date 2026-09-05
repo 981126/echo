@@ -268,6 +268,7 @@ import { api, uploadVideo, uploadCover, getToken } from '../api'
 import MediaComments from '../components/MediaComments.vue'
 import PlatformStats from '../components/PlatformStats.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
+import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -321,30 +322,6 @@ const statusOptions = [
   { label: '已发布', value: 'published' }
 ]
 const topicOptions = topics.map(t => ({ label: t, value: t }))
-const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
-const platformName = (p) => PLATFORM_NAMES[p] || p || ''
-
-function fmt(v) {
-  return v ? v.replace('T', ' ').slice(0, 16) : ''
-}
-
-function parseTs(v) {
-  if (!v) return null
-  const d = new Date(String(v).replace(' ', 'T'))
-  return Number.isNaN(d.getTime()) ? null : d.getTime()
-}
-
-function tsLocal(ts) {
-  if (!ts) return null
-  const d = new Date(ts)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function arrKey(arr) {
-  return JSON.stringify([...(arr || [])].sort())
-}
-
 async function load() {
   loading.value = true
   try {
@@ -626,13 +603,6 @@ async function saveEdit() {
   } catch (e) {
     message.error(e.message)
   }
-}
-
-function fmtNum(n) {
-  n = Number(n || 0)
-  if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿'
-  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
-  return String(n)
 }
 
 async function initLoad() {

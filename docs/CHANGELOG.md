@@ -305,3 +305,7 @@
 ## [M43 / R-061 C 继续] 2026-09-05 — PlatformStats 子组件
 - 新增 PlatformStats.vue：平台指标三行（含灰字占位）统一组件
 - VideosView 本地/云端卡片平台区改用它，移除重复标记与 platOf/platOrder
+
+## [M43 / R-061 C 继续] 2026-09-05 — 通用格式化工具抽 lib/format.js
+- 新增 src/lib/format.js（platformName/fmtNum/fmt/parseTs/tsLocal/arrKey）
+- VideosView 删除本地重复实现改从共享模块导入（同名引用，行为不变）
