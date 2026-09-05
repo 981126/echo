@@ -187,11 +187,53 @@ def _ensure_indexes() -> None:
                         pass
 
 
+def _ensure_binding_integrity() -> None:
+    """R-061-D-1：平台作品↔本地素材绑定收敛为单事实源(local_video_id)。
+
+    - 去重：同一 (local_video_id, platform) 只保留最早一条绑定
+    - 反向补全：videos.platform_post_id 指向的作品若未绑定则补绑
+    - 唯一部分索引：防未来再次产生重复绑定
+    """
+    with engine.begin() as conn:
+        try:
+            dups = conn.exec_driver_sql(
+                "SELECT local_video_id, platform, MIN(id) FROM platform_posts "
+                "WHERE local_video_id IS NOT NULL GROUP BY local_video_id, platform HAVING COUNT(*)>1"
+            ).fetchall()
+            for local_video_id, platform, keep_id in dups:
+                conn.exec_driver_sql(
+                    "UPDATE platform_posts SET local_video_id=NULL WHERE local_video_id=? AND platform=? AND id<>?",
+                    (local_video_id, platform, keep_id),
+                )
+        except Exception:  # noqa: BLE001 表可能尚未创建
+            pass
+        try:
+            rows = conn.exec_driver_sql(
+                "SELECT id, platform_post_id FROM videos WHERE platform_post_id != '' AND platform_post_id LIKE '%:%'"
+            ).fetchall()
+            for video_id, key in rows:
+                platform, ext = key.split(":", 1)
+                conn.exec_driver_sql(
+                    "UPDATE platform_posts SET local_video_id=? WHERE platform=? AND platform_post_id=? AND local_video_id IS NULL",
+                    (video_id, platform, ext),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_platform_posts_local_platform "
+                "ON platform_posts(local_video_id, platform) WHERE local_video_id IS NOT NULL"
+            )
+        except Exception:  # noqa: BLE001 唯一冲突则在前面已去重；残余异常不阻断启动
+            pass
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  确保模型已注册
 
     Base.metadata.create_all(bind=engine)
     _ensure_indexes()
+    _ensure_binding_integrity()
     _migrate_videos()
     _migrate_creator_scope()
     _migrate_account_avatars()

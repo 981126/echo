@@ -330,3 +330,8 @@
 - VideosView 14 组件 + CreatorsView 6 组件 + composables/lib 覆盖；后端拆分与适配器已完成
 - 顺带修复：云端“转素材”500（空 filename 撞唯一约束 → __cloud__ 占位名）
 - 剩余：D（schema 收敛，需备份迁移）及零散清理
+
+## [M43 / R-061 D-1] 2026-09-05 — 绑定关系 schema 收敛（已备份迁移）
+- 迁移前备份：backups/echo_pre_R061D_*.db
+- 去重同 (local_video_id, platform) 重复绑定；videos.platform_post_id 指向作品反向补绑
+- 新增唯一部分索引 ux_platform_posts_local_platform（防未来重复）

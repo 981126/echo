@@ -3,7 +3,7 @@
 - **日期**: 2026-09-05
 - **提出渠道**: 对话
 - **原文摘要**: 1) 检查所有代码，优化点、冗余设计；2) 表结构规划评估与优化。
-- **状态**: 🔨 实施中（A ✅；B ✅；C 主要完成 ✅；D 待实施）
+- **状态**: 🔨 实施中（A ✅；B ✅；C ✅；D-1 ✅；D-2/D-3 待实施）
 - **排期**: M43（进行中）
 - **关联**: PRD §工程标准、ARCHITECTURE/DESIGN/DATABASE
 
@@ -14,4 +14,5 @@
 - **C（一期 ✅）**：后端大文件拆分——tikhub 拆 link_utils、platform_sync 拆 platform_assets 与 platform/budget、数据源适配器接线
 - **C（二期 ✅ 部分）**：前端新增 MediaComments 评论子组件并接入素材编辑页评论 Tab
 - **C（✅ 主要完成）**：VideosView 抽出 14 个组件/模块（MediaComments/PlatformStats/UploadVideoBar/MaterialCard/CoverEditor/TranscribeSection/PlatformLinksInput/EditActions/TranscriptEditor/TagsInput/MetaFields/CloudVideoPicker/CloudActions/CloudTextArea）；CreatorsView 抽出 CreatorAccountRow/CreatorHeaderRow/CloudPostTile/CloudPostDetail/CreatorFormModal/AccountFormModal；composables+lib 覆盖多页；转素材 500 修复
-- **D（待实施）**：schema 收敛——绑定关系单事实源(local_video_id)+唯一约束、tags 关联表、raw 归档策略（需备份迁移）
+- **D-1（✅）**：绑定关系收敛——去重 + 唯一部分索引 ux_platform_posts_local_platform + videos.platform_post_id 反向补绑（迁移前已备份）
+- **D-2/D-3（待实施）**：tags 关联表、raw 大字段归档
