@@ -13,11 +13,10 @@
     </div>
 
     <div class="toolbar">
-      <n-select v-model:value="filter.platform" :options="platformOptions" placeholder="平台" clearable style="width: 130px" />
-      <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 130px" />
-      <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 160px" />
-      <n-select v-model:value="tagFilter" :options="allTags" placeholder="按标签筛选" clearable style="width: 150px" />
-      <n-button secondary @click="load">查询</n-button>
+      <n-select multiple filterable v-model:value="platformSel" :options="platformOptions" placeholder="平台（可多选/输入过滤）" clearable style="width: 210px" />
+      <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 120px" />
+      <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 150px" />
+      <n-select multiple filterable v-model:value="tagSel" :options="allTags" placeholder="标签（可多选/输入过滤）" clearable style="width: 230px" />
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
     </div>
@@ -234,7 +233,9 @@ const message = useMessage()
 const dialog = useDialog()
 const topics = ['求职', '面试', '赚钱', '知识', '其他']
 const videos = ref([])
-const filter = ref({ platform: null, status: null, main_topic: null })
+const filter = ref({ status: null })
+const platformSel = ref([])
+const tagSel = ref([])
 const loading = ref(false)
 const uploading = ref(false)
 const file = ref(null)
@@ -248,7 +249,6 @@ const works = ref([])
 const worksLoading = ref(false)
 const cards = ref([])
 const searchText = ref('')
-const tagFilter = ref(null)
 const showCloud = ref(false)
 const cloudItem = ref(null)
 const cloudFile = ref(null)
@@ -302,12 +302,7 @@ function arrKey(arr) {
 async function load() {
   loading.value = true
   try {
-    const params = new URLSearchParams()
-    Object.entries(filter.value).forEach(([k, v]) => {
-      if (v) params.set(k, v)
-    })
-    params.set('limit', '500')
-    const data = await api('/api/videos?' + params.toString())
+    const data = await api('/api/videos?limit=500')
     videos.value = data.items
     buildCards()
   } catch (e) {
@@ -485,10 +480,13 @@ const allTags = computed(() => {
 
 const filteredCards = computed(() => {
   const kw = (searchText.value || '').trim()
-  const tf = tagFilter.value
+  const pls = platformSel.value || []
+  const tgs = tagSel.value || []
   return cards.value.filter(c => {
     if (kw && !(c.title || '').toLowerCase().includes(kw.toLowerCase())) return false
-    if (tf && !(c.tags || []).includes(tf)) return false
+    if (filter.value.status && c.status !== filter.value.status) return false
+    if (pls.length && !pls.some(x => (c.platforms || []).includes(x))) return false
+    if (tgs.length && !tgs.every(x => (c.tags || []).includes(x))) return false
     return true
   })
 })
