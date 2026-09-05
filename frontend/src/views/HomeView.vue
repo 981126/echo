@@ -218,12 +218,12 @@ const model = computed(() => {
       local_video_id: p.local_video_id
     })
   }
-  raw.sort((a, b) => (a.date < b.date ? -1 : 1))
+  raw.sort((a, b) => (a.date > b.date ? -1 : 1))  // R-042：倒叙，最新在前（左）
   if (!raw.length) return { events: [], months: [], width: 0, todayLeft: null }
 
   const dates = raw.map(r => dayNum(r.date))
-  const start = Math.min(...dates) - 7
-  const end = Math.max(...dates, dayNum(fmtDate(new Date()))) + 10
+  const start = Math.min(...dates) - 3
+  const end = Math.max(...dates, dayNum(fmtDate(new Date()))) + 6
   const span = Math.max(30, end - start)
   const step = pickStep(span)          // 基础步长：按整体跨度，空档不会被撑开
   const minSep = 94                   // 相邻作品最小像素间距（卡片不叠）
@@ -232,7 +232,7 @@ const model = computed(() => {
   const s0 = new Date(start * DAY)
   const e0 = new Date(end * DAY)
   for (let d = new Date(Date.UTC(s0.getUTCFullYear(), s0.getUTCMonth(), 1)); d <= e0; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
-    const left = (dayNum(fmtDate(d)) - start) * step
+    const left = (end - dayNum(fmtDate(d))) * step
     months.push({ key: `${d.getUTCFullYear()}-${d.getUTCMonth()}`, label: `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月`, left })
   }
 
@@ -243,7 +243,7 @@ const model = computed(() => {
   Object.keys(byDate).sort().forEach((date) => {
     const list = byDate[date]
     const n = list.length
-    const baseLeft = (dayNum(date) - start) * step + step / 2
+    const baseLeft = (end - dayNum(date)) * step + step / 2
     list.forEach((r, i) => {
       const off = n > 1 ? (i - (n - 1) / 2) * minSep : 0
       items.push({ ...r, left0: baseLeft + off })
@@ -260,7 +260,7 @@ const model = computed(() => {
   })
 
   const today = dayNum(fmtDate(new Date()))
-  const todayLeft = today >= start && today <= end ? (today - start) * step + step / 2 : null
+  const todayLeft = today >= start && today <= end ? (end - today) * step + step / 2 : null
   const width = Math.max(span * step, (events.length ? Math.max(...events.map(e => e.left)) : 0) + 140)
   return { events, months, width, todayLeft }
 })
