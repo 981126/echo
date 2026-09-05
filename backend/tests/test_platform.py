@@ -49,8 +49,13 @@ def _seed_owner(db):
 
 def test_parse_link():
     assert parse_link("douyin", "https://www.douyin.com/user/MS4wLjABAAAA_abc") == "MS4wLjABAAAA_abc"
+    assert parse_link("douyin", "https://www.douyin.com/user/MS4wLjABAAAA_abc?from_tab_name=main") == "MS4wLjABAAAA_abc"
     assert parse_link("xiaohongshu", "https://www.xiaohongshu.com/user/profile?userId=abc123&x=1") == "abc123"
+    assert parse_link("xiaohongshu", "https://www.xiaohongshu.com/user/profile/5f2c6a1b000000001203abcd") == "5f2c6a1b000000001203abcd"
     assert parse_link("bilibili", "https://space.bilibili.com/1234567?spm_id_from=333") == "1234567"
+    assert parse_link("bilibili", "https://space.bilibili.com/1234567/video") == "1234567"
+    # 无法识别的格式/短链在离线时不返回乱码尾巴（避免存错 ID）
+    assert parse_link("douyin", "https://example.com/whatever") == ""
     assert parse_link("douyin", "") == ""
 
 
@@ -98,7 +103,7 @@ def test_daily_sync_creates_posts_and_ideas(db):
     meta = creator_public_meta(db, owner)
     assert meta["accounts"][0]["followers"] > 0
     assert meta["followers_total"] == meta["accounts"][0]["followers"]
-    assert meta["avatar"] is not None  # mock 自动生成占位头像
+    assert meta["avatar"] is None  # 无真实头像时保持空（前端显示空圆框，不生成汉字占位）
 
 
 def test_budget_guard(db):

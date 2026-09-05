@@ -126,6 +126,8 @@ def create_account(creator_id: int, payload: AccountIn, db: Session = Depends(ge
     user_id = payload.platform_user_id
     if payload.home_link and not user_id:
         user_id = parse_link(payload.platform, payload.home_link)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="未能从主页链接解析出平台用户 ID（试试完整主页链接，或直接填写平台用户 ID）")
     a = CreatorAccount(
         creator_id=creator_id,
         platform=payload.platform,
@@ -150,6 +152,8 @@ def update_account(account_id: int, payload: AccountIn, db: Session = Depends(ge
     user_id = payload.platform_user_id
     if payload.home_link and payload.home_link != a.home_link and not user_id:
         user_id = parse_link(payload.platform or a.platform, payload.home_link)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="未能从主页链接解析出平台用户 ID（试试完整主页链接，或直接填写平台用户 ID）")
     a.nickname = payload.nickname.strip()
     a.home_link = payload.home_link.strip()
     if user_id:

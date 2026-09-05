@@ -7,7 +7,7 @@
         <span class="muted">当前主博主：</span>
         <span v-if="current && current.id" class="current-pill">
           <img v-if="current.avatar" class="av" :src="current.avatar" alt="" />
-          <span class="av av-empty" v-else>E</span>
+          <span class="av av-empty" v-else />
           <b>{{ current.name }}</b>
           <span class="muted fans">全网粉丝 {{ fmtNum(current.followers_total) }}</span>
         </span>
@@ -68,7 +68,7 @@
         <div class="row wrap" style="gap: 10px; align-items: center; flex-wrap: wrap">
           <div class="av-wrap" @click="pickAvatar(a)">
             <img v-if="a.avatar" class="av" :src="a.avatar" alt="头像" />
-            <span v-else class="av av-empty">{{ (a.nickname || platformName(a.platform))[0] }}</span>
+            <span v-else class="av av-empty" />
             <span class="av-edit">换</span>
           </div>
           <input :id="'av-' + a.id" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onAvatar(a, $event)" />
@@ -106,7 +106,7 @@
           <div class="row wrap" style="gap: 10px; align-items: center">
             <div class="av-wrap" @click="pickAvatar(a)">
               <img v-if="a.avatar" class="av" :src="a.avatar" alt="头像" />
-              <span v-else class="av av-empty">{{ (a.nickname || platformName(a.platform))[0] }}</span>
+              <span v-else class="av av-empty" />
               <span class="av-edit">换</span>
             </div>
             <input :id="'avb-' + a.id" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onAvatar(a, $event)" />
@@ -670,12 +670,10 @@ onMounted(load)
   height: 26px;
 }
 .av-empty {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #efe6d9;
-  color: #a34f2c;
-  font-weight: 600;
+  display: inline-block;
+  background: #fffdfa;
+  border: 1.5px dashed #cdbfae;
+  box-sizing: border-box;
 }
 .av-wrap {
   position: relative;
