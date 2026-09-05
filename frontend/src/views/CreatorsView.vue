@@ -175,19 +175,7 @@
     </n-modal>
 
     <n-modal v-model:show="showPostDetail" preset="card" style="width: min(720px, 94vw)">
-      <div v-if="detailPost">
-        <div class="row" style="gap: 12px; align-items: flex-start">
-          <img v-if="detailPost.cover" :src="detailPost.cover" alt="封面" style="width: 220px; border-radius: 8px; object-fit: cover" />
-          <div>
-            <h3 style="margin-top: 0">{{ detailPost.title }}</h3>
-            <p class="muted" style="font-size: 13px">{{ detailPost.desc }}</p>
-            <p v-if="detailPost.latest_stat" class="muted" style="font-size: 13px">
-              播放 {{ fmtNum(detailPost.latest_stat.plays) }} · 赞 {{ fmtNum(detailPost.latest_stat.likes) }} ·
-              藏 {{ fmtNum(detailPost.latest_stat.favorites) }} · 转 {{ fmtNum(detailPost.latest_stat.shares) }} · 评 {{ fmtNum(detailPost.latest_stat.comments) }}
-            </p>
-          </div>
-        </div>
-      </div>
+      <CloudPostDetail :post="detailPost" />
     </n-modal>
 
     <!-- 预算 -->
