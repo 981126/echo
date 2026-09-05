@@ -64,6 +64,8 @@ def _migrate_videos() -> None:
             adds.append("creator_id INTEGER REFERENCES creators(id)")
         if "platform_post_id" not in cols:
             adds.append("platform_post_id VARCHAR(200) NOT NULL DEFAULT ''")
+        if "ad_price" not in cols:
+            adds.append("ad_price INTEGER")
         if "work_id" not in cols:
             adds.append("work_id INTEGER REFERENCES works(id)")
         for ddl in adds:

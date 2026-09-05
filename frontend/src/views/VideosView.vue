@@ -15,6 +15,7 @@
     <div class="toolbar">
       <n-select multiple filterable v-model:value="platformSel" :options="platformOptions" placeholder="平台（可多选/输入过滤）" clearable style="width: 210px" />
       <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 120px" />
+      <n-select v-model:value="adFilter" :options="adOptions" placeholder="广告" clearable style="width: 110px" />
       <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 150px" />
       <n-select multiple filterable v-model:value="tagSel" :options="allTags" placeholder="标签（可多选/输入过滤）" clearable style="width: 230px" />
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
@@ -40,7 +41,7 @@
           <n-tag v-if="it.kind === 'cloud'" size="small" type="info" :bordered="false" round>云端</n-tag>
           <n-tag v-if="it.kind === 'cloud'" size="small" type="success" :bordered="false" round>已发布</n-tag>
           <n-tag v-if="it.kind === 'cloud' && it.merged" size="tiny" type="success" :bordered="false" round>合并×{{ it.merged }}</n-tag>
-          <n-tag v-if="it.is_ad" size="small" :bordered="false" round type="error">广告</n-tag>
+          <n-tag v-if="it.is_ad" size="small" :bordered="false" round type="error">广告{{ it.ad_price ? ' ¥' + it.ad_price : '' }}</n-tag>
           <n-tag v-for="t in it.main_topics || []" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
         </div>
         <h3 class="tile-title" :title="it.title" @click="openItem(it)">{{ it.title }}</h3>
@@ -151,6 +152,10 @@
             <n-checkbox v-model:checked="editing.is_ad">广告（不参与人设学习）</n-checkbox>
           </div>
           <div class="form-item">
+            <label class="form-label">广告价格（元）</label>
+            <n-input-number v-model:value="editing.adPrice" :min="0" placeholder="0" style="width: 100%" />
+          </div>
+          <div class="form-item">
             <label class="form-label">计划发布时间</label>
             <n-date-picker v-model:value="editing.plannedTs" type="datetime" clearable style="width: 100%" />
           </div>
@@ -235,6 +240,11 @@ const dialog = useDialog()
 const topics = ['求职', '面试', '赚钱', '知识', '其他']
 const videos = ref([])
 const filter = ref({ status: null })
+const adFilter = ref(null)
+const adOptions = [
+  { label: '广告', value: 'ad' },
+  { label: '非广告', value: 'no' }
+]
 const platformSel = ref([])
 const tagSel = ref([])
 const loading = ref(false)
@@ -387,6 +397,7 @@ async function openEdit(v) {
     main_topics: [...(v.main_topics || [])],
     coverUrl: v.cover_url || null,
     publishLink: v.platform_post_id || '',
+    adPrice: v.ad_price == null ? null : Number(v.ad_price),
     sourceText: tr?.source_text || '',
     transcriptText: tr?.transcript_text || '',
     plannedTs: parseTs(v.planned_publish_at),
@@ -405,7 +416,8 @@ async function openEdit(v) {
     publishedTs: editing.value.publishedTs,
     tagsText: tagsText.value,
     sourceText: editing.value.sourceText,
-    publishLink: editing.value.publishLink
+    publishLink: editing.value.publishLink,
+    adPrice: editing.value.adPrice
   }
   showEdit.value = true
 }
@@ -434,6 +446,7 @@ async function saveEdit() {
     body.tags = parts.filter(x => !known5.includes(x))
   }
   if (editing.value.sourceText !== o.sourceText) body.source_text = editing.value.sourceText || null
+  if ((editing.value.adPrice ?? null) !== (o.adPrice ?? null)) body.ad_price = editing.value.adPrice == null ? null : Number(editing.value.adPrice)
   const linkChanged = (editing.value.publishLink || '') !== (o.publishLink || '')
   try {
     await api('/api/videos/' + editing.value.id, { method: 'PATCH', body: JSON.stringify(body) })
@@ -486,6 +499,8 @@ const filteredCards = computed(() => {
   return cards.value.filter(c => {
     if (kw && !(c.title || '').toLowerCase().includes(kw.toLowerCase())) return false
     if (filter.value.status && c.status !== filter.value.status) return false
+    if (adFilter.value === 'ad' && !c.is_ad) return false
+    if (adFilter.value === 'no' && c.is_ad) return false
     if (pls.length && !pls.some(x => (c.platforms || []).includes(x))) return false
     if (tgs.length && !tgs.every(x => (c.tags || []).includes(x))) return false
     return true
@@ -509,6 +524,7 @@ function buildCards() {
     platforms: v.platforms || [],
     main_topics: v.main_topics || [],
     is_ad: v.is_ad,
+    ad_price: v.ad_price == null ? null : Number(v.ad_price),
     tags: v.tags || [],
     status: v.status,
     planned_publish_at: v.planned_publish_at,

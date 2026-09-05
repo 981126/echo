@@ -25,6 +25,7 @@ class Video(Base):
     planned_publish_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_ad: Mapped[bool] = mapped_column(Boolean, default=False)  # 商务广告（不参与人设学习）
+    ad_price: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 广告合作价格（元，可空）
     main_topics: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组 求职/面试/赚钱/知识/其他
     tags: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组（自定义标签）
     tags_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # AI 预打标签是否经作者确认

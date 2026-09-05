@@ -106,6 +106,8 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
     for field in ("status", "planned_publish_at", "published_at", "is_ad"):
         if field in data:
             setattr(video, field, data[field])
+    if "ad_price" in data:
+        video.ad_price = int(data["ad_price"]) if data["ad_price"] is not None else None
     db.commit()
     db.refresh(video)
     return video

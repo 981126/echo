@@ -31,6 +31,7 @@ class VideoOut(BaseModel):
     planned_publish_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
     is_ad: bool = False
+    ad_price: Optional[int] = None
     main_topics: list[str] = []
     tags: list[str] = []
     tags_confirmed: bool = False
@@ -63,6 +64,7 @@ class VideoUpdate(BaseModel):
     planned_publish_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
     is_ad: Optional[bool] = None
+    ad_price: Optional[int] = None
     main_topics: Optional[list[str]] = None
     tags: Optional[list[str]] = None
     source_text: Optional[str] = None
