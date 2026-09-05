@@ -19,7 +19,7 @@
           </div>
           <div
             v-for="e in model.events"
-            :key="e.id"
+            :key="e.key"
             class="tl-ev"
             :class="e.status"
             :style="{ left: e.left + 'px' }"
@@ -194,6 +194,7 @@ const model = computed(() => {
     if (!date) continue
     raw.push({
       id: v.id,
+      key: 'v' + v.id,
       kind: 'video',
       date,
       status: v.published_at ? 'published' : 'planned',
@@ -208,6 +209,7 @@ const model = computed(() => {
     if (!date) continue
     raw.push({
       id: p.id,
+      key: 'c' + p.id,
       kind: 'cloud',
       date,
       status: 'published',
@@ -354,7 +356,7 @@ function goEvent(e) {
 
 async function loadCloud() {
   try {
-    const data = await api('/api/platform/posts?limit=300')
+    const data = await api('/api/platform/posts?limit=2000')  // 时间线全量（不再滑到后面没内容）
     cloudPosts.value = data.items || []
   } catch (e) {
     /* 静默 */
