@@ -18,7 +18,7 @@ from ..models.video import Transcript, Video
 from ..schemas.video import PlatformLinkOut, TagConfirmIn, VideoDetailOut, VideoListOut, VideoOut, VideoUpdate
 from ..services.creator_service import current_creator_id
 from ..services.ingest import import_video_task
-from ..services.media_naming import clean_component, rename_to
+from ..services.media_naming import media_stem, rename_to
 from ..tasks import start_task
 
 router = APIRouter()
@@ -38,12 +38,12 @@ def upload_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
     dest = settings.videos_dir / new_name
     with dest.open("wb") as out:
         shutil.copyfileobj(file.file, out)
-    title = clean_component(Path(file.filename or "video").stem)
+    title = media_stem("", Path(file.filename or "video").stem, "视频")
     video = Video(filename=new_name, title=title, creator_id=current_creator_id(db))
     db.add(video)
     db.commit()
     try:  # R-058：落盘文件名改为「标题-视频」（重名自动 -2）
-        video.filename = rename_to(dest, f"{title}-视频")
+        video.filename = rename_to(dest, title)
         db.commit()
     except Exception:  # noqa: BLE001  改名失败不影响入库
         db.rollback()
@@ -200,12 +200,12 @@ def attach_video(video_id: int, file: UploadFile = File(...), db: Session = Depe
             (settings.videos_dir / video.filename).unlink(missing_ok=True)
         except OSError:
             pass
-    stem = clean_component(video.title or Path(file.filename or "video").stem)
+    stem = media_stem(_first_platform(video), video.title or Path(file.filename or "video").stem, "视频")
     raw_name = f"{uuid.uuid4().hex[:8]}_{Path(file.filename or 'video').name}"
     dest = settings.videos_dir / raw_name
     with dest.open("wb") as out:
         shutil.copyfileobj(file.file, out)
-    video.filename = rename_to(dest, f"{stem}-视频")
+    video.filename = rename_to(dest, stem)
     db.commit()
     db.refresh(video)
     return video
@@ -249,9 +249,9 @@ def upload_cover(video_id: int, file: UploadFile = File(...), db: Session = Depe
             (settings.covers_dir / video.cover_path).unlink(missing_ok=True)
         except OSError:
             pass
-    stem = clean_component(video.title or Path(file.filename or "cover").stem)
-    try:  # R-058：封面落盘名改为「标题-封面」
-        video.cover_path = rename_to(dest, f"{stem}-封面")
+    stem = media_stem(_first_platform(video), video.title or Path(file.filename or "cover").stem, "封面")
+    try:  # R-058：封面落盘名带平台前缀+主标题
+        video.cover_path = rename_to(dest, stem)
     except Exception:  # noqa: BLE001
         video.cover_path = new_name
     db.commit()
@@ -317,22 +317,33 @@ def confirm_tags(video_id: int, payload: TagConfirmIn, db: Session = Depends(get
     return video
 
 
+def _first_platform(video: Video) -> str:
+    """素材绑定的第一个平台（用于文件名平台前缀）。"""
+    try:
+        arr = json.loads(video.platforms or "[]") if isinstance(video.platforms, str) else (video.platforms or [])
+        return arr[0] if arr else ""
+    except (TypeError, ValueError):
+        return ""
+
+
 def _rename_by_title(db: Session, video: Video) -> None:
     """R-058：标题确定后，把本地视频文件与封面统一改名为「标题-视频 / 标题-封面」。"""
     settings = get_settings()
-    stem = clean_component(video.title)
+    plat = _first_platform(video)
+    stem_v = media_stem(plat, video.title, "视频")
+    stem_c = media_stem(plat, video.title, "封面")
     if video.filename:
         try:
             old = settings.videos_dir / video.filename
-            if old.name != f"{stem}-视频{old.suffix}":  # 已是目标名则跳过，避免 -2 重复
-                video.filename = rename_to(old, f"{stem}-视频")
+            if old.name != f"{stem_v}{old.suffix}":  # 已是目标名则跳过，避免 -2 重复
+                video.filename = rename_to(old, stem_v)
         except Exception:  # noqa: BLE001  改名失败保留旧名
             db.rollback()
     if video.cover_path:
         try:
             old = settings.covers_dir / video.cover_path
-            if old.name != f"{stem}-封面{old.suffix}":
-                video.cover_path = rename_to(old, f"{stem}-封面")
+            if old.name != f"{stem_c}{old.suffix}":
+                video.cover_path = rename_to(old, stem_c)
         except Exception:  # noqa: BLE001
             db.rollback()
     db.commit()

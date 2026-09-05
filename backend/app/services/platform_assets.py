@@ -79,11 +79,11 @@ def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: st
     R-058：文件名用「标题-封面」（重名自动 -2/-3），文件夹里一眼可辨。
     """
 
-    from .media_naming import clean_component, unique_path
+    from .media_naming import media_stem, unique_path
 
     settings = get_settings()
     settings.covers_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{clean_component(title or platform_post_id)}-封面"
+    stem = media_stem(platform, title or platform_post_id, "封面")
     if cover_url:
         try:
             resp = httpx.get(cover_url, timeout=8, headers=_cdn_headers(platform))

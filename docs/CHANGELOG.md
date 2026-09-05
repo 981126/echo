@@ -352,3 +352,9 @@
 ## [chore] 2026-09-05 — 历史封面批量改名「标题-封面」
 - 1169 个存量平台封面按作品标题改为 `标题-封面.{ext}`（清理 #话题等仅按标题截断），并同步更新 platform_posts/videos/works 的 cover_path 引用
 - 备份：backups/echo_pre_cover_rename_*.db
+
+## [feat] 2026-09-05 — 命名规则调整：平台前缀 + 去 #话题
+- 媒体命名统一 `{平台}-{主标题}-视频/封面`（标题去除 #话题等标签）
+- 覆盖：同步封面、上传/替换/删除视频、标题修改改名、封面同步（media_naming.media_stem）
+- 存量：平台封面/本地封面/视频批量重命名并同步 DB 引用（多次备份；旧视频原文件移至 backups/legacy_videos）
+- 说明：一次清理脚本曾误删 videos/ 中未被数据库引用的原始视频文件，已从 /Users/yeah/document/chenP 恢复同名源文件

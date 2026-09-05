@@ -41,3 +41,24 @@ def rename_to(path: Path, new_stem: str) -> str:
     dest = unique_path(path.parent, new_stem, ext)
     path.replace(dest)
     return dest.name
+
+
+PLATFORM_LABEL = {"douyin": "抖音", "bilibili": "B站", "xiaohongshu": "小红书"}
+_TAG_RE = re.compile(r"[#＃][^\s#＃，,。！？!?、；;：:]*")
+
+
+def clean_title(text: str, limit: int = 30) -> str:
+    """标题清洗：去掉 #话题 等标签、非法字符，保留主标题。"""
+    t = _TAG_RE.sub(" ", str(text or ""))
+    t = _WS.sub(" ", t)
+    t = _ILLEGAL.sub("_", t)
+    t = t.strip("._ ")
+    t = re.sub(r"[_\-]+", "_", t)
+    return (t[:limit] or "未命名").rstrip("._ ")
+
+
+def media_stem(platform: str, title: str, kind: str) -> str:
+    """统一命名：{平台前缀}-{主标题}-{视频/封面}；无平台前缀则从主标题开始。"""
+    label = PLATFORM_LABEL.get((platform or "").strip().lower(), "")
+    parts = [label, clean_title(title), kind]
+    return "-".join(x for x in parts if x)
