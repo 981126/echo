@@ -23,6 +23,7 @@ from app.core.signature import (  # noqa: E402
     utcnow_rfc1123,
 )
 from app.core.topics import is_valid_platform, normalize_main_topic  # noqa: E402
+from app.core.platform_links import build_platform_page_url, extract_raw_field  # noqa: E402
 from app.core.transcript import (  # noqa: E402
     estimate_duration_seconds,
     normalize_text,
@@ -179,6 +180,16 @@ def test_has_meaningful_change():
     assert has_meaningful_change("", "非空") is False
     assert has_meaningful_change("原稿", "") is False
 
+
+
+def test_build_platform_page_url():
+    assert build_platform_page_url("bilibili", "aid:123", '{"bvid":"BV1xx411c7mD"}') == "https://www.bilibili.com/video/BV1xx411c7mD"
+    assert build_platform_page_url("bilibili", "aid:123", "") == "https://www.bilibili.com/video/av123"
+    assert build_platform_page_url("bilibili", "BV1xx411c7mD", "") == "https://www.bilibili.com/video/BV1xx411c7mD"
+    assert build_platform_page_url("douyin", "7343913432204332303", "") == "https://www.douyin.com/video/7343913432204332303"
+    assert build_platform_page_url("douyin", "", '{"share_url":"https://v.douyin.com/abc/"}') == "https://v.douyin.com/abc/"
+    assert build_platform_page_url("xiaohongshu", "6a1471ed000000003502de6e", "") == "https://www.xiaohongshu.com/explore/6a1471ed000000003502de6e"
+    assert extract_raw_field('{"data":{"bvid":"BV1yy"}}', "bvid") == "BV1yy"
 
 
 if __name__ == "__main__":

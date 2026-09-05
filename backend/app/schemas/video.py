@@ -53,8 +53,18 @@ class TranscriptOut(BaseModel):
     asr_status: str = "pending"
 
 
+class PlatformLinkOut(BaseModel):
+    """素材绑定的平台作品链接（R-035：编辑页展示三平台链接）。"""
+
+    platform: str
+    platform_post_id: str = ""
+    url: str = ""
+    publish_time: Optional[datetime] = None
+
+
 class VideoDetailOut(VideoOut):
     transcript: Optional[TranscriptOut] = None
+    platform_links: list[PlatformLinkOut] = []
 
 
 class VideoUpdate(BaseModel):

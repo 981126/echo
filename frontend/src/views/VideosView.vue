@@ -113,6 +113,20 @@
           <label class="form-label">发布链接（可选，用于“同步数据”）</label>
           <n-input v-model:value="editing.publishLink" placeholder="粘贴抖音 /video/、B站 /video/BV、小红书 /explore/ 作品链接" />
         </div>
+
+        <div v-if="editing.platformLinks && editing.platformLinks.length" class="form-item">
+          <label class="form-label">平台链接（点击查看）</label>
+          <div class="row" style="gap: 8px; flex-wrap: wrap">
+            <a
+              v-for="lk in editing.platformLinks"
+              :key="lk.platform"
+              class="link-chip"
+              :href="lk.url || '#'"
+              target="_blank"
+              rel="noopener"
+            >{{ platformName(lk.platform) }} ↗</a>
+          </div>
+        </div>
         <div class="row" style="gap: 18px; align-items: flex-start; margin-bottom: 14px">
           <div class="cover-edit" @click="coverInput && coverInput.click()">
             <img v-if="editing.coverUrl" :src="editing.coverUrl" alt="封面" />
@@ -351,6 +365,26 @@ async function load() {
   }
 }
 
+async function loadQuiet() {
+  try {
+    const data = await api('/api/videos?limit=500')
+    videos.value = data.items
+    buildCards()
+  } catch (e) {
+    /* 静默：后台刷新失败不打断当前编辑 */
+  }
+}
+
+async function loadWorksQuiet() {
+  try {
+    const data = await api('/api/works')
+    works.value = data.items || []
+    buildCards()
+  } catch (e) {
+    /* 静默 */
+  }
+}
+
 function onFile(e) {
   file.value = e.target.files[0] || null
 }
@@ -362,11 +396,15 @@ async function doUpload() {
   }
   uploading.value = true
   try {
-    await uploadVideo(file.value)
-    message.success('上传成功（可点进素材，用「语音转文字」转写）')
+    const r = await uploadVideo(file.value)
+    message.success('上传成功')
     file.value = null
     if (fileInput.value) fileInput.value.value = ''
-    load()
+    await loadQuiet()
+    if (r && r.id) {
+      const v = videos.value.find(x => x.id === r.id)
+      if (v) openEdit(v)
+    }
   } catch (e) {
     message.error(e.message)
   } finally {
@@ -378,10 +416,10 @@ async function onCover(e) {
   const f = e.target.files[0]
   if (!f || !editing.value) return
   try {
-    await uploadCover(editing.value.id, f)
+    const r = await uploadCover(editing.value.id, f)
+    editing.value.coverUrl = r.cover_url || null
     message.success('封面已更新')
-    closeEdit()
-    load()
+    await loadQuiet()
   } catch (err) {
     message.error(err.message)
   } finally {
@@ -392,9 +430,9 @@ async function onCover(e) {
 async function removeCover() {
   try {
     await api(`/api/videos/${editing.value.id}/cover`, { method: 'DELETE' })
+    editing.value.coverUrl = null
     message.success('封面已移除')
-    closeEdit()
-    load()
+    await loadQuiet()
   } catch (e) {
     message.error(e.message)
   }
@@ -428,6 +466,7 @@ async function openEdit(v) {
     adPrice: v.ad_price == null ? null : Number(v.ad_price),
     sourceText: tr?.source_text || '',
     transcriptText: tr?.transcript_text || '',
+    platformLinks: detail.platform_links || [],
     plannedTs: parseTs(v.planned_publish_at),
     publishedTs: parseTs(v.published_at)
   }
@@ -771,8 +810,8 @@ async function saveCloudLocal() {
     const r = await resp.json()
     message.success(cloudFile.value ? '已转为本地素材（可到编辑页「语音转文字」）' : '已转为本地素材（可继续编辑）')
     showCloud.value = false
-    await load()
-    await loadWorks()
+    await loadQuiet()
+    await loadWorksQuiet()
     if (r.video_id) {
       const v = videos.value.find(x => x.id === r.video_id)
       if (v) openEdit(v)
@@ -1032,4 +1071,21 @@ onMounted(async () => {
   flex-wrap: wrap;
   margin-top: 6px;
 }
+
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 10px;
+  border: 1px solid var(--border-color, #e3ddd3);
+  border-radius: 999px;
+  color: #a34f2c;
+  font-size: 12px;
+  text-decoration: none;
+  background: rgba(163, 79, 44, 0.06);
+}
+.link-chip:hover {
+  background: rgba(163, 79, 44, 0.12);
+}
+
 </style>

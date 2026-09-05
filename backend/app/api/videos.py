@@ -13,8 +13,9 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..core.topics import normalize_platforms, normalize_topics
 from ..db import get_db
+from ..models.platform import PlatformPost
 from ..models.video import Transcript, Video
-from ..schemas.video import TagConfirmIn, VideoDetailOut, VideoListOut, VideoOut, VideoUpdate
+from ..schemas.video import PlatformLinkOut, TagConfirmIn, VideoDetailOut, VideoListOut, VideoOut, VideoUpdate
 from ..services.creator_service import current_creator_id
 from ..services.ingest import import_video_task
 from ..tasks import start_task
@@ -89,7 +90,41 @@ def get_video(video_id: int, db: Session = Depends(get_db)):
     video = db.get(Video, video_id)
     if video is None:
         raise HTTPException(status_code=404, detail="视频不存在")
-    return video
+    out = VideoDetailOut.model_validate(video)
+    out.platform_links = _platform_links(db, video)
+    return out
+
+
+def _platform_links(db: Session, video: Video) -> list[PlatformLinkOut]:
+    """素材绑定的平台作品链接（按跨平台 work 聚合，展示三平台链接）。"""
+    from ..core.platform_links import build_platform_page_url
+
+    posts: list[PlatformPost] = []
+    if video.work_id:
+        posts = db.query(PlatformPost).filter(PlatformPost.work_id == video.work_id).all()
+    if not posts and video.platform_post_id and ":" in video.platform_post_id:
+        platform, external_id = video.platform_post_id.split(":", 1)
+        posts = (
+            db.query(PlatformPost)
+            .filter(PlatformPost.platform == platform, PlatformPost.platform_post_id == external_id)
+            .all()
+        )
+    seen: list[str] = []
+    links: list[PlatformLinkOut] = []
+    for post in posts:
+        if post.platform in seen:
+            continue
+        seen.append(post.platform)
+        url = build_platform_page_url(post.platform, post.platform_post_id, post.raw or "")
+        links.append(
+            PlatformLinkOut(
+                platform=post.platform,
+                platform_post_id=post.platform_post_id,
+                url=url,
+                publish_time=post.publish_time,
+            )
+        )
+    return links
 
 
 @router.patch("/{video_id}", response_model=VideoOut)
