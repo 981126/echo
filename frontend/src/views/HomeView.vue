@@ -335,8 +335,9 @@ function goVideo(id) {
 
 function goEvent(e) {
   if (e.kind === 'cloud') {
+    // 已转本地 → 打开本地素材编辑；否则去素材库打开这条云端作品（不再跳到博主页）
     if (e.local_video_id) location.hash = `#/videos?edit=${e.local_video_id}`
-    else location.hash = '#/creators'
+    else location.hash = `#/videos?post=${e.id}`
     return
   }
   goVideo(e.id)

@@ -1072,9 +1072,15 @@ function delCloud(it) {
 onMounted(async () => {
   await initLoad()
   const m = location.hash.match(/edit=(\d+)/)
+  const pm = location.hash.match(/post=(\d+)/)
   if (m) {
     const v = videos.value.find(x => x.id === Number(m[1]))
     if (v) openEdit(v)
+  } else if (pm) {
+    const pid = Number(pm[1])
+    const card = cards.value.find(c => c.kind === 'cloud' && (c.cloudPosts || []).some(x => x.id === pid))
+    if (card) openCloud(card)
+    else message.info('未在当前素材库找到该云端作品（可能属于对标博主）')
   }
 })
 </script>
