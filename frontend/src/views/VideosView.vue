@@ -524,7 +524,7 @@ async function saveCloudLocal() {
     })
     if (!resp.ok) {
       let detail = resp.statusText
-      try { detail = (await resp.json()).detail || detail } catch {}
+      try { detail = (await resp.json()).detail || detail } catch (e) { detail = detail || e.message }
       throw new Error(detail)
     }
     const r = await resp.json()
