@@ -61,16 +61,7 @@
           <label class="form-label">标题</label>
           <n-input v-model:value="editing.title" placeholder="视频标题（选题标题）" />
         </div>
-        <div class="form-item">
-          <label class="form-label">平台链接（用于同步数据，可手动填写）</label>
-          <div style="display: flex; flex-direction: column; gap: 8px">
-            <div v-for="p in linkPlatforms" :key="p" class="row" style="gap: 8px; align-items: center">
-              <span class="plat-tag">{{ platformName(p) }}</span>
-              <n-input v-model:value="editing.links[p]" :placeholder="'粘贴' + platformName(p) + '作品链接'" clearable />
-            </div>
-          </div>
-          <span class="muted" style="font-size: 12px">填了哪个平台就同步哪个；已绑定的会自动带出。保存后点「同步数据」拉取最新数据</span>
-        </div>
+        <PlatformLinksInput :links="editing.links" @update:links="v => (editing.links = v)" />
         <CoverEditor :cover-url="editing.coverUrl" @change="onCover" @remove="removeCover" />
 
         <div v-if="linkedDrafts.length" class="form-item">
@@ -207,6 +198,7 @@ import UploadVideoBar from '../components/UploadVideoBar.vue'
 import MaterialCard from '../components/MaterialCard.vue'
 import CoverEditor from '../components/CoverEditor.vue'
 import TranscribeSection from '../components/TranscribeSection.vue'
+import PlatformLinksInput from '../components/PlatformLinksInput.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
