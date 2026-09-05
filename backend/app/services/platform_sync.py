@@ -77,8 +77,8 @@ def _charge(db: Session, count: int = 1) -> None:
     db.commit()
 
 
-def _img_ext(data: bytes) -> str:
-    """按文件头判断真实图片格式，避免把 webp 存成 .jpg 导致浏览器裂图。"""
+def _img_ext(data: bytes) -> str | None:
+    """按文件头识别图片真实格式；HEIC/未知格式返回 None（需转换或放弃）。"""
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return ".png"
     if data[:3] == b"\xff\xd8\xff":
@@ -87,7 +87,52 @@ def _img_ext(data: bytes) -> str:
         return ".webp"
     if data[:6] in (b"GIF87a", b"GIF89a"):
         return ".gif"
-    return ".jpg"
+    # HEIC/HEIF（苹果格式，浏览器不支持，需转 jpeg）
+    if data[4:12] in (b"ftypheic", b"ftypheix", b"ftypmif1", b"ftypmsf1", b"ftyphevc"):
+        return None
+    return None
+
+
+def _ensure_web_image(data: bytes) -> bytes | None:
+    """把下载内容转成浏览器可渲染的图片（HEIC→JPEG），非图片返回 None。"""
+    ext = _img_ext(data)
+    if ext is not None:
+        return data
+    if data[4:12].startswith(b"ftyp"):
+        return _heic_to_jpeg(data)
+    return None
+
+
+def _heic_to_jpeg(data: bytes) -> bytes | None:
+    """macOS 用 sips 把 HEIC 转 JPEG；失败返回 None（走占位图）。"""
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not shutil.which("sips"):
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.heic"
+            dst = Path(tmp) / "out.jpg"
+            src.write_bytes(data)
+            proc = subprocess.run(
+                ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85", str(src), "--out", str(dst)],
+                capture_output=True,
+                timeout=60,
+            )
+            if proc.returncode == 0 and dst.exists():
+                return dst.read_bytes()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _cdn_headers(platform: str) -> dict:
+    return {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Referer": {"xiaohongshu": "https://www.xiaohongshu.com/", "douyin": "https://www.douyin.com/", "bilibili": "https://www.bilibili.com/"}.get(platform, ""),
+    }
 
 
 def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: str, cover_url: str) -> str:
@@ -98,11 +143,13 @@ def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: st
     dest: Path
     if cover_url:
         try:
-            resp = httpx.get(cover_url, timeout=15)
+            resp = httpx.get(cover_url, timeout=15, headers=_cdn_headers(platform))
             if resp.status_code == 200 and resp.content:
-                dest = settings.covers_dir / f"{name}{_img_ext(resp.content)}"
-                dest.write_bytes(resp.content)
-                return dest.name
+                img = _ensure_web_image(resp.content)
+                if img:
+                    dest = settings.covers_dir / f"{name}.jpg"
+                    dest.write_bytes(img)
+                    return dest.name
         except Exception:  # noqa: BLE001  下载失败回退占位
             pass
     dest = settings.covers_dir / f"{name}.svg"
@@ -129,12 +176,14 @@ def _ensure_account_avatar(db: Session, account: CreatorAccount, profile) -> Non
     settings.covers_dir.mkdir(parents=True, exist_ok=True)
     name = f"avatar_{uuid.uuid4().hex[:12]}"
     try:
-        resp = httpx.get(profile.avatar_url, timeout=12)
+        resp = httpx.get(profile.avatar_url, timeout=12, headers=_cdn_headers(account.platform))
         if resp.status_code == 200 and resp.content:
-            dest = settings.covers_dir / f"{name}{_img_ext(resp.content)}"
-            dest.write_bytes(resp.content)
-            account.avatar_path = dest.name
-            db.commit()
+            img = _ensure_web_image(resp.content)
+            if img:
+                dest = settings.covers_dir / f"{name}.jpg"
+                dest.write_bytes(img)
+                account.avatar_path = dest.name
+                db.commit()
     except Exception:  # noqa: BLE001 下载失败保持空，前端显示空圆框
         pass
 
