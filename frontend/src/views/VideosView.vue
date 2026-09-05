@@ -449,7 +449,12 @@ async function loadWorks() {
 }
 
 function buildCards() {
-  const local = videos.value.map(v => ({
+  // 云端已绑定本地素材(转素材后)的记录不重复展示，避免合并后多个素材
+  const linkedLocal = new Set()
+  ;(works.value || []).forEach(w => {
+    ;(w.posts || []).forEach(pst => { if (pst.local_video_id) linkedLocal.add(pst.local_video_id) })
+  })
+  const local = videos.value.filter(v => !linkedLocal.has(v.id)).map(v => ({
     key: 'v' + v.id,
     kind: 'local',
     id: v.id,
@@ -491,8 +496,13 @@ function buildCards() {
 }
 
 function openItem(it) {
-  if (it.kind === 'cloud') openCloud(it)
-  else openEdit(it)
+  if (it.kind === 'cloud') {
+    if (it.local_video_id) {
+      goLocal(it.local_video_id)
+      return
+    }
+    openCloud(it)
+  } else openEdit(it)
 }
 
 function onCardClick(it) {
@@ -772,4 +782,7 @@ onMounted(async () => {
   min-height: 32px;
   margin-top: 8px;
 }
+
+.card-tile { display: flex; flex-direction: column; }
+.row-actions { margin-top: auto; }
 </style>
