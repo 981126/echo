@@ -96,6 +96,22 @@ _COMMENT_POOL = [
 ]
 
 
+def _tags_of(*texts: str) -> list[str]:
+    """解析 #话题 标签（去重、去纯平台词）。"""
+    import re
+
+    out: list[str] = []
+    skip = {"抖音", "小红书", "bilibili", "B站", "视频", "vlog"}
+    for text in texts:
+        for m in re.findall(r"[#＃]([^\s#＃，。！？!?、]+)", text or ""):
+            tag = m.strip()
+            if tag and tag not in skip and tag not in out:
+                out.append(tag)
+            if len(out) >= 20:
+                return out
+    return out
+
+
 def _seed_id(user_id: str, salt: str = "") -> int:
     return int(hashlib.md5(f"{user_id}:{salt}".encode()).hexdigest(), 16)
 
@@ -138,6 +154,7 @@ class PostData:
     platform_post_id: str
     title: str = ""
     desc: str = ""
+    tags: list[str] = field(default_factory=list)
     cover_url: str = ""
     video_url: str = ""
     publish_time: datetime | None = None
@@ -338,8 +355,117 @@ class TikHubClient:
     # ---------- 作品列表 ----------
     def fetch_user_posts(self, platform: str, user_id: str, count: int = 20, cursor: str = "", account=None) -> list[PostData]:
         if self.mode == "real":
+            if count <= 0:
+                return self._real_posts_all(platform, user_id)
             return self._real_posts(platform, user_id, count)
         return self._mock_posts(platform, user_id, count, account)
+
+    def _real_posts_all(self, platform: str, user_id: str, max_posts: int = 600) -> list[PostData]:
+        """全量拉取该用户全部作品（分页翻到底，上限 max_posts 防止异常）。"""
+        out: list[PostData] = []
+        if platform == "douyin":
+            cursor = ""
+            while len(out) < max_posts:
+                params: dict = {"sec_user_id": user_id, "count": 30}
+                if cursor:
+                    params["max_cursor"] = cursor
+                data = self._get("/douyin/app/v3/fetch_user_post_videos", params)
+                d = data.get("data") or {}
+                aweme_list = d.get("aweme_list") or []
+                for aw in aweme_list:
+                    stat = aw.get("statistics") or {}
+                    out.append(
+                        PostData(
+                            platform_post_id=str(aw.get("aweme_id") or ""),
+                            title=((aw.get("desc") or "")[:200]),
+                            desc=aw.get("desc") or "",
+                            tags=_tags_of(aw.get("desc") or ""),
+                            cover_url=((((aw.get("video") or {}).get("cover") or {}).get("url_list") or [""])[0]),
+                            video_url=((((aw.get("video") or {}).get("play_addr") or {}).get("url_list") or [""])[0]),
+                            publish_time=_ts(aw.get("create_time")),
+                            stats={
+                                "plays": int(stat.get("play_count") or 0),
+                                "likes": int(stat.get("digg_count") or 0),
+                                "favorites": int(stat.get("collect_count") or 0),
+                                "shares": int(stat.get("share_count") or 0),
+                                "comments": int(stat.get("comment_count") or 0),
+                                "extra": {},
+                            },
+                            raw=aw,
+                        )
+                    )
+                if not aweme_list or not d.get("has_more"):
+                    break
+                cursor = str(d.get("max_cursor") or "")
+        elif platform == "xiaohongshu":
+            cursor = ""
+            while len(out) < max_posts:
+                data = self._get("/xiaohongshu/app_v2/get_user_posted_notes", {"user_id": user_id, "cursor": cursor or ""})
+                inner = (((data.get("data") or {}).get("data")) or {})
+                notes = inner.get("notes") or []
+                for n in notes:
+                    cover = ""
+                    imgs = n.get("images_list") or []
+                    if imgs and isinstance(imgs[0], dict):
+                        img0 = imgs[0]
+                        cover = (img0.get("url_list") or [""])[0] or img0.get("url") or img0.get("url_size_large") or ""
+                    out.append(
+                        PostData(
+                            platform_post_id=str(n.get("id") or n.get("note_id") or ""),
+                            title=(n.get("title") or n.get("display_title") or "")[:200],
+                            desc=n.get("desc") or "",
+                            tags=_tags_of(n.get("title") or "", n.get("desc") or ""),
+                            cover_url=cover or "",
+                            video_url="",
+                            publish_time=_ts(n.get("create_time") or n.get("time")),
+                            stats={
+                                "plays": int(n.get("view_count") or 0),
+                                "likes": int(n.get("likes") or 0),
+                                "favorites": int(n.get("collected_count") or 0),
+                                "shares": int(n.get("share_count") or 0),
+                                "comments": int(n.get("comments_count") or 0),
+                                "extra": {},
+                            },
+                            raw=n,
+                        )
+                    )
+                if not notes or not inner.get("has_more"):
+                    break
+                cursor = str(inner.get("cursor") or "")
+        else:  # bilibili
+            page = 1
+            while len(out) < max_posts and page <= 50:
+                data = self._get("/bilibili/web/fetch_user_post_videos_v2", {"uid": user_id, "page_num": page, "page_size": 30})
+                vlist = ((((data.get("data") or {}).get("data")) or {}).get("archives")) or []
+                for v in vlist:
+                    stat = v.get("stat") or {}
+                    stats = {}
+                    if "like" in stat:
+                        stats = {
+                            "plays": int(stat.get("view") or 0),
+                            "likes": int(stat.get("like") or 0),
+                            "favorites": int(stat.get("favorite") or 0),
+                            "shares": int(stat.get("share") or 0),
+                            "comments": int(stat.get("reply") or 0),
+                            "extra": {"danmaku": int(stat.get("danmaku") or 0), "coin": int(stat.get("coin") or 0)},
+                        }
+                    out.append(
+                        PostData(
+                            platform_post_id=f"aid:{v.get('aid') or ''}",
+                            title=v.get("title") or "",
+                            desc=v.get("desc") or "",
+                            tags=_tags_of(v.get("title") or "", v.get("desc") or ""),
+                            cover_url=v.get("pic") or "",
+                            video_url="",
+                            publish_time=_ts(v.get("pubdate") or v.get("created")),
+                            stats=stats,
+                            raw=v,
+                        )
+                    )
+                if len(vlist) < 30:
+                    break
+                page += 1
+        return out
 
     def _mock_posts(self, platform: str, user_id: str, count: int, account=None) -> list[PostData]:
         rnd = random.Random(_seed_id(user_id, platform))

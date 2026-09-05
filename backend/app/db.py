@@ -119,6 +119,8 @@ def _migrate_creator_scope() -> None:
         cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(platform_posts)").fetchall()}
         if "work_id" not in cols:
             conn.exec_driver_sql("ALTER TABLE platform_posts ADD COLUMN work_id INTEGER REFERENCES works(id)")
+        if "tags" not in cols:
+            conn.exec_driver_sql("ALTER TABLE platform_posts ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
     with engine.begin() as conn:
         for table in ("drafts", "persona_tags"):
             cols = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()}

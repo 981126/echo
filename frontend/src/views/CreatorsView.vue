@@ -19,9 +19,9 @@
           :disabled="!current || !current.id"
           :loading="syncing"
           @click="runSync('daily')"
-        >同步今日 top10</n-button>
+        >同步前10条</n-button>
         <n-button size="small" secondary :disabled="!current || !current.id" @click="openSyncInit">
-          首次全量同步
+          全量同步
         </n-button>
         <div class="grow"></div>
         <span class="muted" style="font-size: 12px">
@@ -517,8 +517,8 @@ async function runSync(scope, accountId) {
 
 function openSyncInit() {
   dialog.info({
-    title: '首次全量同步',
-    content: '将同步当前主博主三平台最近 50 条作品（对标 20 条），视频不下载，封面缓存本地。确认开始？',
+    title: '全量同步',
+    content: '将同步该博主三个平台的主页数据（粉丝/作品数）与全部作品数据，视频不下载，封面缓存本地。确认开始？',
     positiveText: '开始',
     negativeText: '取消',
     onPositiveClick: () => runSync('initial')

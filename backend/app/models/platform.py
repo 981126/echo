@@ -101,6 +101,7 @@ class PlatformPost(Base):
     platform_post_id: Mapped[str] = mapped_column(String(200), index=True)
     title: Mapped[str] = mapped_column(String(500), default="")
     desc: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[str] = mapped_column(Text, default="[]")  # 解析出的 #标签 JSON 数组
     cover_url: Mapped[str] = mapped_column(String(1000), default="")  # 远端封面 URL
     cover_path: Mapped[str] = mapped_column(String(255), default="")  # 本地封面缓存文件名
     video_url: Mapped[str] = mapped_column(String(1000), default="")  # 默认空：不下载视频

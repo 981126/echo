@@ -64,14 +64,28 @@ def cloud_to_local(
             shutil.copyfileobj(file.file, out)
 
     platforms = []
+    tag_cloud: list[str] = []
     for post in posts:
         if post.platform not in platforms:
             platforms.append(post.platform)
+        try:
+            ptags = json.loads(post.tags or "[]")
+            if isinstance(ptags, list):
+                for t in ptags:
+                    if t not in tag_cloud:
+                        tag_cloud.append(t)
+        except json.JSONDecodeError:
+            pass
+    known5 = ["求职", "面试", "赚钱", "知识", "其他"]
+    main_topics = [t for t in tag_cloud if t in known5]
+    video_tags = [t for t in tag_cloud if t not in known5]
     video = Video(
         filename=filename,
         title=first.title or "",
         creator_id=cid,
         platforms=json.dumps(platforms, ensure_ascii=False),
+        main_topics=json.dumps(main_topics, ensure_ascii=False),
+        tags=json.dumps(video_tags, ensure_ascii=False),
         platform_post_id=f"{first.platform}:{first.platform_post_id}",
         work_id=posts[0].work_id,
         cover_path=first.cover_path or "",

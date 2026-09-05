@@ -256,6 +256,8 @@ def _ensure_post(db: Session, account: CreatorAccount, post, client: TikHubClien
         row.publish_time = post.publish_time or row.publish_time
         if post.raw:
             row.raw = json.dumps(post.raw, ensure_ascii=False)
+    if post.tags:
+        row.tags = json.dumps(list(dict.fromkeys(post.tags))[:20], ensure_ascii=False)
     if not row.cover_path:
         row.cover_path = _cover_path_for(
             db, account.platform, post.platform_post_id, post.title, post.cover_url
@@ -444,20 +446,16 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
         job = _log_job(db, "initial" if scope == "initial" else "daily", scope, creator_id=owner.id)
 
     try:
-        per_owner = int(top_n or (50 if scope == "initial" else 10))
+        per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 10)))
         results = []
         total_posts = 0
         total_comments = 0
         assert owner is not None
         for acc in accounts:
-            is_bench = owner.kind == "benchmark" or (owner.parent_id is not None)
-            limit = per_owner
-            if scope == "initial":
-                # 对标首次 20 条（作者已确认）
-                limit = 20 if is_bench else 50
+            limit = per_owner  # initial=0 → 全量作品（分页拉到底）
             if scope == "weekly":
                 limit = 3  # 对标每周 top3（评论选题够用且控额度）
-            st = sync_account(db, acc, scope=scope, top_n=limit, with_comments=scope in ("daily", "weekly", "initial"))
+            st = sync_account(db, acc, scope=scope, top_n=limit, with_comments=scope in ("daily", "weekly"))
             results.append({"account_id": acc.id, "platform": acc.platform, **st})
             total_posts += int(st.get("posts") or 0)
             total_comments += int(st.get("comments") or 0)
