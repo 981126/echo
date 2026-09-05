@@ -77,6 +77,19 @@ def _charge(db: Session, count: int = 1) -> None:
     db.commit()
 
 
+def _img_ext(data: bytes) -> str:
+    """按文件头判断真实图片格式，避免把 webp 存成 .jpg 导致浏览器裂图。"""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    return ".jpg"
+
+
 def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: str, cover_url: str) -> str:
     """返回本地封面文件名（下载真实封面或生成占位 SVG）。"""
     settings = get_settings()
@@ -87,8 +100,7 @@ def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: st
         try:
             resp = httpx.get(cover_url, timeout=15)
             if resp.status_code == 200 and resp.content:
-                suffix = ".jpg"
-                dest = settings.covers_dir / f"{name}{suffix}"
+                dest = settings.covers_dir / f"{name}{_img_ext(resp.content)}"
                 dest.write_bytes(resp.content)
                 return dest.name
         except Exception:  # noqa: BLE001  下载失败回退占位
@@ -119,8 +131,7 @@ def _ensure_account_avatar(db: Session, account: CreatorAccount, profile) -> Non
     try:
         resp = httpx.get(profile.avatar_url, timeout=12)
         if resp.status_code == 200 and resp.content:
-            suffix = ".png" if ".png" in (profile.avatar_url or "").lower() else ".jpg"
-            dest = settings.covers_dir / f"{name}{suffix}"
+            dest = settings.covers_dir / f"{name}{_img_ext(resp.content)}"
             dest.write_bytes(resp.content)
             account.avatar_path = dest.name
             db.commit()

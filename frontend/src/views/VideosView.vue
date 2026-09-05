@@ -513,6 +513,7 @@ onMounted(async () => {
 })
 </script>
 
+<style scoped>
 .work-list {
   display: flex;
   flex-direction: column;
@@ -563,3 +564,5 @@ onMounted(async () => {
 .plat-stat b {
   color: #a34f2c;
 }
+
+</style>
