@@ -293,3 +293,7 @@
 - 新增 services/platform/base.py：DataSource 统一接口 + PostData/ProfileData 契约 + make_source/register_platform_source
 - platform_sync 与 platform API 全部改走 make_source(platform)：默认 TikHub，可按整体或单平台注册替换
 - 契约测试（test_core 19 项 / pytest 47 项通过）
+
+## [M43 / R-061 批次 C 二期部分] 2026-09-05 — 预算模块 + 评论子组件
+- platform_sync 拆出 services/platform/budget.py（额度/预算/计费，行为不变）
+- 新增前端 MediaComments.vue 评论子组件并接入素材编辑页「评论数据」Tab（UI 不变）

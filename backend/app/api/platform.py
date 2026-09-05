@@ -22,10 +22,9 @@ from ..models.video import Video
 from ..schemas.platform import SyncRequest
 from ..services.creator_service import current_creator_id
 from ..services.platform.base import make_source
+from ..services.platform.budget import get_budget, set_budget
 from ..services.platform_sync import (
-    get_budget,
     run_sync,
-    set_budget,
     sync_local_video_metrics,
     sync_single_post,
 )

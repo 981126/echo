@@ -3,7 +3,7 @@
 - **日期**: 2026-09-05
 - **提出渠道**: 对话
 - **原文摘要**: 1) 检查所有代码，优化点、冗余设计；2) 表结构规划评估与优化。
-- **状态**: 🔨 实施中（A ✅；B 一期 ✅；B 二期 ✅：检索索引缓存 + post_item 输出级合并 + cookie 占位通道处理 + 通知助手；C/D 待实施）
+- **状态**: 🔨 实施中（A ✅；B ✅；C 后端拆分+预算+评论子组件 ✅；前端全量组件化/D 待续）
 - **排期**: M43（进行中）
 - **关联**: PRD §工程标准、ARCHITECTURE/DESIGN/DATABASE
 
@@ -11,5 +11,7 @@
 - **A（已完成，本批）**：删除死代码 `core/signature.py` 及测试；下线已无前端使用的旧 `bind-link` 单链接接口；补常用索引（platform_posts.local_video_id / publish_time、videos.platform_post_id、notifications.created_at，幂等）；新增每日 04:00 清理（通知90天/后台任务30天/同步记录60天/平台统计400天）
 - **B（一期 ✅）**：风格画像文本进程内缓存（素材数量/字数变化失效）；作品统计预取收敛到 `works_service.latest_stats_map`（works/platform 复用）
 - **B（二期 ✅）**：TF-IDF 检索索引缓存（素材版本失效）；`_post_item`/`post_item` 合并为统一序列化（works/platform 共用）；未启用 cookie 指标通道不再每日空跑；新增 `tasks.push_notification` 统一通知写入
-- **C（待实施）**：大文件拆分（VideosView/CreatorsView 组件化；tikhub/platform_sync 拆模块；前端 composables 统一）
+- **C（一期 ✅）**：后端大文件拆分——tikhub 拆 link_utils、platform_sync 拆 platform_assets 与 platform/budget、数据源适配器接线
+- **C（二期 ✅ 部分）**：前端新增 MediaComments 评论子组件并接入素材编辑页评论 Tab
+- **C（待续）**：VideosView/CreatorsView 全量组件化、前端 composables 统一
 - **D（待实施）**：schema 收敛——绑定关系单事实源(local_video_id)+唯一约束、tags 关联表、raw 归档策略（需备份迁移）

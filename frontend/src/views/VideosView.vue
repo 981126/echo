@@ -236,18 +236,8 @@
             <div v-if="!editing.platformPosts || !editing.platformPosts.length" class="muted" style="padding: 14px 0">
               该素材还没绑定平台作品。先在「编辑信息」里填平台链接并保存，即可查看各平台评论
             </div>
-            <div v-else style="display: flex; flex-direction: column; gap: 8px">
-              <div v-for="pst in editing.platformPosts" :key="pst.post_id" class="comment-block">
-                <div class="row" style="gap: 6px; align-items: center; flex-wrap: wrap">
-                  <b>{{ platformName(pst.platform) }}</b>
-                  <n-button size="tiny" secondary :loading="commentsLoading === pst.post_id" @click="refreshComments({ id: pst.post_id, platform: pst.platform })">加载评论</n-button>
-                  <span v-if="(commentsMap[pst.post_id] || []).length" class="muted">{{ commentsMap[pst.post_id].length }} 条</span>
-                </div>
-                <ul v-if="(commentsMap[pst.post_id] || []).length" class="comment-list">
-                  <li v-for="(c, i) in commentsMap[pst.post_id]" :key="i">{{ c }}</li>
-                </ul>
-                <p v-else class="muted" style="margin: 6px 0 0; font-size: 12px">暂无本地评论，点「加载评论」实时拉取并入库</p>
-              </div>
+            <div v-else>
+              <MediaComments :posts="editCommentPosts" />
             </div>
           </n-tab-pane>
         </n-tabs>
@@ -312,6 +302,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, uploadVideo, uploadCover, getToken } from '../api'
+import MediaComments from '../components/MediaComments.vue'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -537,6 +528,7 @@ const transcribing = ref(false)
 let transcribeTimer = null
 const linkPlatforms = ['douyin', 'bilibili', 'xiaohongshu']
 const platOrder = ['douyin', 'bilibili', 'xiaohongshu']
+const editCommentPosts = computed(() => ((editing.value && editing.value.platformPosts) || []).map(x => ({ id: x.post_id, platform: x.platform })))
 const syncingEdit = ref(false)
 const editPane = ref('edit')
 
