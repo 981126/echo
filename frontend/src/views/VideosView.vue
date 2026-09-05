@@ -65,9 +65,9 @@
           </p>
           <div class="row-actions" @click.stop>
             <n-tag v-if="it.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
-            <n-button v-if="it.platform_post_id" size="small" secondary :loading="syncing === it.id" @click="syncData(it)">同步数据</n-button>
-            <n-button v-if="!it.tags_confirmed" size="small" secondary @click="confirmTags(it)">确认标签</n-button>
-            <n-button size="small" quaternary type="error" @click="delLocal(it)">删除</n-button>
+            <n-button v-if="it.platform_post_id" size="tiny" secondary :loading="syncing === it.id" @click="syncData(it)">同步数据</n-button>
+            <n-button v-if="!it.tags_confirmed" size="tiny" secondary @click="confirmTags(it)">确认标签</n-button>
+            <n-button size="tiny" quaternary type="error" @click="delLocal(it)">删除</n-button>
           </div>
         </template>
 
@@ -94,9 +94,9 @@
           </div>
           <p v-if="it.pub" class="tile-meta">发布时间 {{ it.pub }}</p>
           <div class="row-actions" @click.stop>
-            <n-button size="small" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
-            <n-button v-if="it.merged >= 2" size="small" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
-                        <n-button size="small" quaternary type="error" @click="delCloud(it)">删除</n-button>
+            <n-button size="tiny" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
+            <n-button v-if="it.merged >= 2" size="tiny" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
+                        <n-button size="tiny" quaternary type="error" @click="delCloud(it)">删除</n-button>
           </div>
         </template>
       </div>
@@ -1265,6 +1265,15 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+
+.grid-videos {
+  align-items: start;
+}
+.row-actions {
+  margin-top: 8px;
+  min-height: 24px;
 }
 
 </style>
