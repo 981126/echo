@@ -47,7 +47,7 @@
 
         <template v-if="it.kind === 'local'">
           <div class="tag-row">
-            <template v-for="(t, ti) in it.tags.slice(0, 6)" :key="t">
+            <template v-for="t in it.tags.slice(0, 6)" :key="t">
               <n-tag size="small" :bordered="false">{{ t }}</n-tag>
             </template>
             <n-tag v-if="it.tags.length > 6" size="small" :bordered="false" round>… +{{ it.tags.length - 6 }}</n-tag>
@@ -68,7 +68,7 @@
 
         <template v-else>
           <div class="row tag-row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap; overflow: hidden">
-            <template v-for="(t, ti) in it.tags.slice(0, 8)" :key="t">
+            <template v-for="t in it.tags.slice(0, 8)" :key="t">
               <n-tag size="tiny" :bordered="false" round>{{ t }}</n-tag>
             </template>
             <n-tag v-if="it.tags.length > 8" size="tiny" :bordered="false" round>… +{{ it.tags.length - 8 }}</n-tag>
