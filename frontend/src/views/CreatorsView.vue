@@ -256,6 +256,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, getToken } from '../api'
+import { fmt, fmtNum, platformName } from '../lib/format'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -283,8 +284,6 @@ const freqOptions = [
   { label: '每周（对标）', value: 'weekly' },
   { label: '手动', value: 'manual' }
 ]
-const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
-const platformName = (p) => PLATFORM_NAMES[p] || p || ''
 const freqName = (f) => ({ daily: '每日', weekly: '每周', manual: '手动' }[f] || f)
 
 const owners = computed(() => creators.value.filter(c => c.kind === 'owner'))
@@ -311,15 +310,6 @@ const posts = ref({ items: [], total: 0 })
 const postsLoading = ref(false)
 const detailPost = ref(null)
 
-function fmt(v) {
-  return v ? String(v).replace('T', ' ').slice(0, 16) : ''
-}
-function fmtNum(n) {
-  n = Number(n || 0)
-  if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿'
-  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
-  return String(n)
-}
 function parseExtra(text) {
   try {
     const v = JSON.parse(text || '{}')
