@@ -38,25 +38,20 @@
     </div>
 
     <div v-for="c in owners" :key="c.id" class="card creator-card" :class="{ active: c.is_current }">
-      <div class="row wrap" style="gap: 8px; align-items: center">
-        <img v-if="c.avatar" class="av av-sm" :src="c.avatar" alt="" />
-        <h3 style="margin: 0">{{ c.name }}</h3>
-        <n-tag v-if="c.is_current" type="primary" size="small" round :bordered="false">当前</n-tag>
-        <span v-if="c.kind === 'owner'" class="muted fans" style="font-size: 12px">全网粉丝 {{ fmtNum(c.followers_total) }}</span>
-        <span class="muted grow" style="font-size: 12px">{{ c.note || '（无备注）' }}</span>
-        <n-button size="small" secondary :loading="syncingOwner === c.id" @click="syncCreator(c, 'daily')">同步前10条</n-button>
-        <n-button size="small" secondary :disabled="syncingOwner === c.id" @click="syncCreator(c, 'initial')">全量同步</n-button>
-        <n-button v-if="!c.is_current" size="tiny" secondary @click="askSwitch(c)">切换到此博主</n-button>
-        <n-button size="tiny" secondary @click="openOwnerModal(c)">编辑</n-button>
-        <n-button size="tiny" quaternary type="error" @click="delCreator(c)">删除</n-button>
-      </div>
-
-      <div class="row wrap" style="gap: 8px; margin-top: 10px">
-        <n-button size="tiny" secondary @click="openAccountModal(c)">+ 配置账号</n-button>
-        <n-button v-if="benchmarksOf(c).length" size="tiny" secondary @click="openBenchmarkModal(c)">+ 对标博主</n-button>
-      </div>
-
-      <CreatorAccountRow
+      <CreatorHeaderRow
+        :creator="c"
+        :is-current="c.is_current"
+        :can-switch="!c.is_current"
+        :show-add-benchmark="benchmarksOf(c).length > 0"
+        :syncing-owner-id="syncingOwner"
+        @daily="c => syncCreator(c, 'daily')"
+        @initial="c => syncCreator(c, 'initial')"
+        @switch="askSwitch"
+        @edit="openOwnerModal"
+        @addAccount="openAccountModal"
+        @addBenchmark="openBenchmarkModal"
+        @remove="delCreator"
+      /><CreatorAccountRow
         v-for="a in accountsOf(c)"
         :key="a.id"
         :account="a"
@@ -71,17 +66,16 @@
         @avatar="onAvatar"
       />
       <div v-for="bm in benchmarksOf(c)" :key="bm.id" class="bm-card">
-        <div class="row wrap" style="gap: 8px; align-items: center">
-          <n-tag size="small" type="info" :bordered="false" round>对标</n-tag>
-          <b>{{ bm.name }}</b>
-          <span class="muted grow" style="font-size: 12px">{{ bm.note || '' }}</span>
-          <n-button size="small" secondary :loading="syncingOwner === bm.id" @click="syncCreator(bm, 'daily')">同步前10条</n-button>
-          <n-button size="small" secondary :disabled="syncingOwner === bm.id" @click="syncCreator(bm, 'initial')">全量同步</n-button>
-          <n-button size="tiny" secondary @click="openOwnerModal(bm)">编辑</n-button>
-          <n-button size="tiny" secondary @click="openAccountModal(bm)">+ 账号</n-button>
-          <n-button size="tiny" quaternary type="error" @click="delCreator(bm)">删除</n-button>
-        </div>
-        <CreatorAccountRow
+        <CreatorHeaderRow
+        :creator="bm"
+        :benchmark="true"
+        :syncing-owner-id="syncingOwner"
+        @daily="bm => syncCreator(bm, 'daily')"
+        @initial="bm => syncCreator(bm, 'initial')"
+        @edit="openOwnerModal"
+        @addAccount="openAccountModal"
+        @remove="delCreator"
+      /><CreatorAccountRow
         v-for="a in accountsOf(bm)"
         :key="a.id"
         :account="a"
