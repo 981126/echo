@@ -5,7 +5,12 @@
     <div class="panel" style="margin-bottom: 16px">
       <div class="row wrap" style="gap: 10px; align-items: center">
         <span class="muted">当前主博主：</span>
-        <n-tag v-if="current && current.id" type="primary" round :bordered="false">{{ current.name }}</n-tag>
+        <span v-if="current && current.id" class="current-pill">
+          <img v-if="current.avatar" class="av" :src="current.avatar" alt="" />
+          <span class="av av-empty" v-else>E</span>
+          <b>{{ current.name }}</b>
+          <span class="muted fans">全网粉丝 {{ fmtNum(current.followers_total) }}</span>
+        </span>
         <n-tag v-else type="warning" round :bordered="false">未创建</n-tag>
         <n-button size="small" secondary @click="openOwnerModal()">+ 新建主博主</n-button>
         <n-button
@@ -44,8 +49,10 @@
 
     <div v-for="c in owners" :key="c.id" class="card creator-card" :class="{ active: c.is_current }">
       <div class="row wrap" style="gap: 8px; align-items: center">
+        <img v-if="c.avatar" class="av av-sm" :src="c.avatar" alt="" />
         <h3 style="margin: 0">{{ c.name }}</h3>
         <n-tag v-if="c.is_current" type="primary" size="small" round :bordered="false">当前</n-tag>
+        <span v-if="c.kind === 'owner'" class="muted fans" style="font-size: 12px">全网粉丝 {{ fmtNum(c.followers_total) }}</span>
         <span class="muted grow" style="font-size: 12px">{{ c.note || '（无备注）' }}</span>
         <n-button v-if="!c.is_current" size="tiny" secondary @click="askSwitch(c)">切换到此博主</n-button>
         <n-button size="tiny" secondary @click="openOwnerModal(c)">编辑</n-button>
@@ -58,12 +65,26 @@
       </div>
 
       <div v-for="a in accountsOf(c)" :key="a.id" class="acct-row">
-        <div class="row wrap" style="gap: 8px; align-items: center; flex-wrap: wrap">
-          <n-tag size="small" :bordered="false" round>{{ platformName(a.platform) }}</n-tag>
-          <b>{{ a.nickname || platformName(a.platform) }}</b>
-          <n-tag size="tiny" :bordered="false" :type="a.enabled ? 'success' : 'default'">{{ freqName(a.sync_frequency) }}</n-tag>
-          <span class="muted mono" style="font-size: 12px">{{ a.platform_user_id || '（未解析 ID）' }}</span>
-          <span v-if="a.last_sync_at" class="muted" style="font-size: 12px">同步于 {{ fmt(a.last_sync_at) }}</span>
+        <div class="row wrap" style="gap: 10px; align-items: center; flex-wrap: wrap">
+          <div class="av-wrap" @click="pickAvatar(a)">
+            <img v-if="a.avatar" class="av" :src="a.avatar" alt="头像" />
+            <span v-else class="av av-empty">{{ (a.nickname || platformName(a.platform))[0] }}</span>
+            <span class="av-edit">换</span>
+          </div>
+          <input :id="'av-' + a.id" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onAvatar(a, $event)" />
+          <div style="min-width: 0">
+            <div class="row" style="gap: 6px; align-items: center">
+              <n-tag size="small" :bordered="false" round>{{ platformName(a.platform) }}</n-tag>
+              <b>{{ a.nickname || platformName(a.platform) }}</b>
+              <n-tag size="tiny" :bordered="false" :type="a.enabled ? 'success' : 'default'">{{ freqName(a.sync_frequency) }}</n-tag>
+            </div>
+            <div class="row" style="gap: 10px; margin-top: 4px; flex-wrap: wrap">
+              <span class="muted mini">粉 {{ fmtNum(a.followers) }}</span>
+              <span class="muted mini">作品 {{ fmtNum(a.posts_total) }}</span>
+              <span class="mono uid" :title="a.platform_user_id">{{ a.platform_user_id || '未解析 ID' }}</span>
+              <span v-if="a.last_sync_at" class="muted mini">同步 {{ fmt(a.last_sync_at) }}</span>
+            </div>
+          </div>
           <div class="grow"></div>
           <n-button size="tiny" secondary :loading="syncingAcct === a.id" @click="runSync('daily', a.id)">同步</n-button>
           <n-button size="tiny" secondary @click="openPosts(a)">云端作品</n-button>
@@ -82,10 +103,24 @@
           <n-button size="tiny" quaternary type="error" @click="delCreator(bm)">删除</n-button>
         </div>
         <div v-for="a in accountsOf(bm)" :key="a.id" class="acct-row">
-          <div class="row wrap" style="gap: 8px; align-items: center">
-            <n-tag size="small" :bordered="false" round>{{ platformName(a.platform) }}</n-tag>
-            <b>{{ a.nickname || platformName(a.platform) }}</b>
-            <span class="muted mono" style="font-size: 12px">{{ a.platform_user_id || '（未解析）' }}</span>
+          <div class="row wrap" style="gap: 10px; align-items: center">
+            <div class="av-wrap" @click="pickAvatar(a)">
+              <img v-if="a.avatar" class="av" :src="a.avatar" alt="头像" />
+              <span v-else class="av av-empty">{{ (a.nickname || platformName(a.platform))[0] }}</span>
+              <span class="av-edit">换</span>
+            </div>
+            <input :id="'avb-' + a.id" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onAvatar(a, $event)" />
+            <div style="min-width: 0">
+              <div class="row" style="gap: 6px; align-items: center">
+                <n-tag size="small" :bordered="false" round>{{ platformName(a.platform) }}</n-tag>
+                <b>{{ a.nickname || platformName(a.platform) }}</b>
+              </div>
+              <div class="row" style="gap: 10px; margin-top: 4px; flex-wrap: wrap">
+                <span class="muted mini">粉 {{ fmtNum(a.followers) }}</span>
+                <span class="muted mini">作品 {{ fmtNum(a.posts_total) }}</span>
+                <span class="mono uid" :title="a.platform_user_id">{{ a.platform_user_id || '未解析 ID' }}</span>
+              </div>
+            </div>
             <div class="grow"></div>
             <n-button size="tiny" secondary :loading="syncingAcct === a.id" @click="runSync('weekly', a.id)">每周同步</n-button>
             <n-button size="tiny" secondary @click="openPosts(a)">云端作品</n-button>
@@ -226,7 +261,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
-import { api } from '../api'
+import { api, getToken } from '../api'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -537,6 +572,36 @@ function goMaterial(id) {
   location.hash = `#/videos?edit=${id}`
 }
 
+function pickAvatar(id) {
+  const el = document.getElementById(id)
+  if (el) el.click()
+}
+
+async function onAvatar(a, e) {
+  const f = e.target.files[0]
+  if (!f) return
+  const fd = new FormData()
+  fd.append('file', f)
+  try {
+    const resp = await fetch(`/api/creators/accounts/${a.id}/avatar`, {
+      method: 'POST',
+      headers: { 'X-Access-Token': getToken() },
+      body: fd
+    })
+    if (!resp.ok) {
+      let detail = resp.statusText
+      try { detail = (await resp.json()).detail || detail } catch (e) { detail = detail || e.message }
+      throw new Error(detail)
+    }
+    message.success('头像已更新（之后自动同步不覆盖手动头像）')
+    load()
+  } catch (err) {
+    message.error(err.message)
+  } finally {
+    e.target.value = ''
+  }
+}
+
 async function saveBudget() {
   try {
     await api('/api/platform/budget', { method: 'PUT', body: JSON.stringify({ limit: budgetLimit.value }) })
@@ -583,3 +648,66 @@ onMounted(load)
   flex-wrap: wrap;
 }
 </style>
+
+.current-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #f7f3ec;
+  border: 1px solid #eee5d8;
+  border-radius: 20px;
+  padding: 4px 12px 4px 5px;
+}
+.av {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+.av-sm {
+  width: 26px;
+  height: 26px;
+}
+.av-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #efe6d9;
+  color: #a34f2c;
+  font-weight: 600;
+}
+.av-wrap {
+  position: relative;
+  cursor: pointer;
+  flex: none;
+}
+.av-wrap .av-edit {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  background: #a34f2c;
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.av-wrap:hover .av-edit {
+  opacity: 1;
+}
+.fans {
+  font-size: 12px;
+}
+.mini {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.uid {
+  font-size: 12px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

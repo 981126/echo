@@ -148,6 +148,7 @@ class PostData:
 @dataclass
 class ProfileData:
     nickname: str = ""
+    avatar_url: str = ""
     followers: int = 0
     likes_total: int = 0
     posts_total: int = 0
@@ -248,8 +249,10 @@ class TikHubClient:
         if platform == "douyin":
             data = self._get("/douyin/app/v3/handler_user_profile", {"sec_user_id": user_id})
             user = ((data.get("data") or {}).get("user") or {})
+            avatar = ((user.get("avatar_thumb") or {}).get("url_list") or [""])[0]
             return ProfileData(
                 nickname=user.get("nickname", ""),
+                avatar_url=avatar or "",
                 followers=int(user.get("follower_count") or 0),
                 likes_total=int(user.get("total_favorited") or 0),
                 posts_total=int(user.get("aweme_count") or 0),
@@ -259,8 +262,10 @@ class TikHubClient:
         if platform == "xiaohongshu":
             data = self._get("/xiaohongshu/app_v2/get_user_info", {"user_id": user_id})
             d = data.get("data") or {}
+            avatar = ((d.get("avatar") or {}).get("url") or "")
             return ProfileData(
                 nickname=d.get("nickname", ""),
+                avatar_url=avatar or "",
                 followers=int(d.get("follower_count") or 0),
                 likes_total=int(d.get("likes_count") or 0),
                 posts_total=int(d.get("note_count") or 0),
@@ -272,6 +277,7 @@ class TikHubClient:
         d = data.get("data") or {}
         return ProfileData(
             nickname=d.get("name", ""),
+            avatar_url=d.get("face") or "",
             followers=int(d.get("follower") or 0),
             likes_total=int(d.get("likes") or 0),
             posts_total=int(d.get("video") or 0),

@@ -44,6 +44,8 @@ class CreatorAccount(Base):
     nickname: Mapped[str] = mapped_column(String(100), default="")
     home_link: Mapped[str] = mapped_column(String(500), default="")  # 主页分享链接
     platform_user_id: Mapped[str] = mapped_column(String(200), default="")  # 解析出的 sec_user_id/user_id/uid
+    avatar_path: Mapped[str] = mapped_column(String(255), default="")  # 本地头像文件名（手动上传或自动同步，存 covers/）
+    avatar_url: Mapped[str] = mapped_column(String(1000), default="")  # 远端头像 URL（自动同步来源，本地缺失时兜底）
     extra_config: Mapped[str] = mapped_column(Text, default="{}")  # JSON：cookie/share_text 等增强字段
     enabled: Mapped[bool] = mapped_column(default=True)
     sync_frequency: Mapped[str] = mapped_column(String(10), default="daily")  # daily|weekly|manual
@@ -51,6 +53,13 @@ class CreatorAccount(Base):
     sync_status: Mapped[str] = mapped_column(String(20), default="idle")  # idle|running|done|failed
     sync_message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    @property
+    def avatar(self) -> str | None:
+        """本地头像优先，否则回退远端。"""
+        if self.avatar_path:
+            return f"/covers/{self.avatar_path}"
+        return self.avatar_url or None
 
     def extra(self) -> dict:
         try:

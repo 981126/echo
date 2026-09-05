@@ -65,6 +65,9 @@ class AccountOut(BaseModel):
     nickname: str = ""
     home_link: str = ""
     platform_user_id: str = ""
+    avatar_path: str = ""
+    avatar_url: str = ""
+    avatar: Optional[str] = None
     enabled: bool = True
     sync_frequency: str = "daily"
     last_sync_at: Optional[datetime] = None

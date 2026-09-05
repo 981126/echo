@@ -85,6 +85,19 @@ def _migrate_videos() -> None:
                 pass
 
 
+def _migrate_account_avatars() -> None:
+    """M13：creator_accounts 增加头像列（手动上传/自动同步）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(creator_accounts)").fetchall()}
+        adds = []
+        if "avatar_path" not in cols:
+            adds.append("avatar_path VARCHAR(255) NOT NULL DEFAULT ''")
+        if "avatar_url" not in cols:
+            adds.append("avatar_url VARCHAR(1000) NOT NULL DEFAULT ''")
+        for ddl in adds:
+            conn.exec_driver_sql(f"ALTER TABLE creator_accounts ADD COLUMN {ddl}")
+
+
 def _migrate_feedback_dims() -> None:
     """R-030②：feedback 增加四维分节评分列。"""
     with engine.begin() as conn:
@@ -137,6 +150,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_videos()
     _migrate_creator_scope()
+    _migrate_account_avatars()
     _migrate_feedback_dims()
     _migrate_chat()
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）

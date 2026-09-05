@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import Base
 from app.models.platform import Creator, CreatorAccount, CreatorAccountSnapshot, PlatformPost, SyncJob
 from app.models.hot_topic import TopicIdea
-from app.services.creator_service import get_current_creator, switch_current
+from app.services.creator_service import creator_public_meta, get_current_creator, switch_current
 from app.services.platform.tikhub import make_client, parse_link, parse_post_id
 from app.services.platform_sync import get_budget, run_sync, set_budget
 
@@ -85,7 +85,7 @@ def test_creator_switch(db):
 
 
 def test_daily_sync_creates_posts_and_ideas(db):
-    _seed_owner(db)
+    owner, _ = _seed_owner(db)
     result = run_sync(db, scope="daily")
     assert result["accounts"][0]["posts"] > 0
     assert db.query(PlatformPost).count() > 0
@@ -94,6 +94,11 @@ def test_daily_sync_creates_posts_and_ideas(db):
     assert db.query(SyncJob).count() == 1
     job = db.query(SyncJob).first()
     assert job.status == "done"
+    # 账号头像自动生成 + 全网粉丝数 = 各平台粉丝独立累计的汇总
+    meta = creator_public_meta(db, owner)
+    assert meta["accounts"][0]["followers"] > 0
+    assert meta["followers_total"] == meta["accounts"][0]["followers"]
+    assert meta["avatar"] is not None  # mock 自动生成占位头像
 
 
 def test_budget_guard(db):

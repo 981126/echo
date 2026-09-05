@@ -107,6 +107,40 @@ def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: st
     return dest.name
 
 
+def _ensure_account_avatar(db: Session, account: CreatorAccount, profile) -> None:
+    """自动同步头像：有远端 URL 则下载本地；否则生成占位 SVG（只在本地位空时执行）。"""
+    if account.avatar_path:
+        return
+    settings = get_settings()
+    settings.covers_dir.mkdir(parents=True, exist_ok=True)
+    name = f"avatar_{uuid.uuid4().hex[:12]}"
+    if profile.avatar_url:
+        try:
+            resp = httpx.get(profile.avatar_url, timeout=12)
+            if resp.status_code == 200 and resp.content:
+                suffix = ".jpg" if resp.content[:3] != b"\xff" or True else ".jpg"
+                # 按 URL 后缀猜测
+                suffix = ".png" if ".png" in (profile.avatar_url or "").lower() else ".jpg"
+                dest = settings.covers_dir / f"{name}{suffix}"
+                dest.write_bytes(resp.content)
+                account.avatar_path = dest.name
+                db.commit()
+                return
+        except Exception:  # noqa: BLE001 下载失败走占位
+            pass
+    label = (account.nickname or account.platform)[:1] or "E"
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160">'
+        '<rect width="160" height="160" rx="80" fill="#efe6d9"/>'
+        f'<text x="80" y="104" font-family="-apple-system,PingFang SC,sans-serif" font-size="64" '
+        f'fill="#a34f2c" text-anchor="middle">{html.escape(label)}</text></svg>'
+    )
+    dest = settings.covers_dir / f"{name}.svg"
+    dest.write_text(svg, encoding="utf-8")
+    account.avatar_path = dest.name
+    db.commit()
+
+
 def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: TikHubClient) -> None:
     if not account.platform_user_id:
         return
@@ -141,6 +175,7 @@ def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: TikHu
         row.raw = json.dumps(profile.raw, ensure_ascii=False)
     if profile.nickname:
         account.nickname = profile.nickname
+    _ensure_account_avatar(db, account, profile)
     db.commit()
 
 

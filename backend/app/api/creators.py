@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import json
+import shutil
+import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..db import get_db
 from ..models.platform import Creator, CreatorAccount
 from ..schemas.platform import AccountIn, AccountOut, CreatorIn, CreatorOut
 from ..services.creator_service import (
+    creator_public_meta,
     current_creator_id,
     delete_creator,
     ensure_only_one_owner_current,
+    list_accounts_meta,
     list_creators_with_meta,
     switch_current,
 )
@@ -31,11 +37,18 @@ def list_creators(db: Session = Depends(get_db)):
 def get_current(db: Session = Depends(get_db)):
     cid = current_creator_id(db)
     if cid is None:
-        return {"id": None, "name": ""}
+        return {"id": None, "name": "", "avatar": None, "followers_total": 0}
     c = db.get(Creator, cid)
     if c is None:
-        return {"id": None, "name": ""}
-    return {"id": c.id, "name": c.name, "kind": c.kind}
+        return {"id": None, "name": "", "avatar": None, "followers_total": 0}
+    meta = creator_public_meta(db, c)
+    return {
+        "id": c.id,
+        "name": c.name,
+        "kind": c.kind,
+        "avatar": meta["avatar"],
+        "followers_total": meta["followers_total"],
+    }
 
 
 @router.post("", response_model=CreatorOut)
@@ -92,16 +105,11 @@ def remove_creator(creator_id: int, db: Session = Depends(get_db)):
 
 
 # ---------- 账号配置 ----------
-@router.get("/{creator_id}/accounts", response_model=list[AccountOut])
+@router.get("/{creator_id}/accounts", response_model=list[dict])
 def list_accounts(creator_id: int, db: Session = Depends(get_db)):
     if db.get(Creator, creator_id) is None:
         raise HTTPException(status_code=404, detail="博主不存在")
-    return (
-        db.query(CreatorAccount)
-        .filter(CreatorAccount.creator_id == creator_id)
-        .order_by(CreatorAccount.id)
-        .all()
-    )
+    return list_accounts_meta(db, creator_id)
 
 
 @router.post("/{creator_id}/accounts", response_model=AccountOut)
@@ -164,7 +172,34 @@ def remove_account(account_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.post("/parse-link", response_model=dict)
+@router.post("/accounts/{account_id}/avatar", response_model=dict)
+def upload_account_avatar(account_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """手动上传账号头像（jpg/png，存 covers/，之后自动同步不再覆盖）。"""
+    a = db.get(CreatorAccount, account_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png"}:
+        raise HTTPException(status_code=400, detail="头像仅支持 jpg/png")
+    settings = get_settings()
+    settings.covers_dir.mkdir(parents=True, exist_ok=True)
+    new_name = f"avatar_{uuid.uuid4().hex[:10]}{suffix}"
+    dest = settings.covers_dir / new_name
+    with dest.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+    if a.avatar_path:
+        try:
+            (settings.covers_dir / a.avatar_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+    a.avatar_path = new_name
+    db.commit()
+    from ..services.creator_service import account_meta
+
+    return account_meta(db, a)
+
+
+
 def parse_account_link(payload: dict, db: Session = Depends(get_db)):
     platform = (payload.get("platform") or "").strip()
     link = (payload.get("home_link") or "").strip()
