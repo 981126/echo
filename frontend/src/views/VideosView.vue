@@ -294,6 +294,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, uploadVideo, uploadCover, getToken } from '../api'
 import MediaComments from '../components/MediaComments.vue'
+import { fetchVideos, fetchWorks } from '../composables/media'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -374,8 +375,7 @@ function arrKey(arr) {
 async function load() {
   loading.value = true
   try {
-    const data = await api('/api/videos?limit=500')
-    videos.value = data.items
+    videos.value = await fetchVideos()
     buildCards()
   } catch (e) {
     message.error(e.message)
@@ -386,8 +386,7 @@ async function load() {
 
 async function loadQuiet() {
   try {
-    const data = await api('/api/videos?limit=500')
-    videos.value = data.items
+    videos.value = await fetchVideos()
     buildCards()
   } catch (e) {
     /* 静默：后台刷新失败不打断当前编辑 */
@@ -396,8 +395,7 @@ async function loadQuiet() {
 
 async function loadWorksQuiet() {
   try {
-    const data = await api('/api/works')
-    works.value = data.items || []
+    works.value = await fetchWorks()
     buildCards()
   } catch (e) {
     /* 静默 */
@@ -673,12 +671,9 @@ async function initLoad() {
   loading.value = true
   worksLoading.value = true
   try {
-    const [vs, ws] = await Promise.all([
-      api('/api/videos?limit=500'),
-      api('/api/works')
-    ])
-    videos.value = vs.items || []
-    works.value = ws.items || []
+    const [vs, ws] = await Promise.all([fetchVideos(), fetchWorks()])
+    videos.value = vs
+    works.value = ws
     buildCards()
   } catch (e) {
     message.error(e.message)
@@ -691,8 +686,7 @@ async function initLoad() {
 async function loadWorks() {
   worksLoading.value = true
   try {
-    const data = await api('/api/works')
-    works.value = data.items || []
+    works.value = await fetchWorks()
     buildCards()
   } catch (e) {
     works.value = []

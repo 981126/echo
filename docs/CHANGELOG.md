@@ -297,3 +297,7 @@
 ## [M43 / R-061 批次 C 二期部分] 2026-09-05 — 预算模块 + 评论子组件
 - platform_sync 拆出 services/platform/budget.py（额度/预算/计费，行为不变）
 - 新增前端 MediaComments.vue 评论子组件并接入素材编辑页「评论数据」Tab（UI 不变）
+
+## [M43 / R-061 C 继续] 2026-09-05 — 前端 composables 统一（第一块）
+- 新增 src/composables/media.js（fetchVideos/fetchWorks）
+- VideosView 5 处素材/作品拉取改走封装（load/loadQuiet/loadWorks/loadWorksQuiet/initLoad）
