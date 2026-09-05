@@ -56,35 +56,20 @@
         <n-button v-if="benchmarksOf(c).length" size="tiny" secondary @click="openBenchmarkModal(c)">+ 对标博主</n-button>
       </div>
 
-      <div v-for="a in accountsOf(c)" :key="a.id" class="acct-row">
-        <div class="row wrap" style="gap: 10px; align-items: center; flex-wrap: wrap">
-          <div class="av-wrap" @click="pickAvatar(a)">
-            <img v-if="a.avatar" class="av" :src="a.avatar" alt="头像" />
-            <span v-else class="av av-empty" />
-            <span class="av-edit">换</span>
-          </div>
-          <input :id="'av-' + a.id" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onAvatar(a, $event)" />
-          <div style="min-width: 0">
-            <div class="row" style="gap: 6px; align-items: center">
-              <n-tag size="small" :bordered="false" round>{{ platformName(a.platform) }}</n-tag>
-              <b>{{ a.nickname || platformName(a.platform) }}</b>
-              <n-tag size="tiny" :bordered="false" :type="a.enabled ? 'success' : 'default'">{{ freqName(a.sync_frequency) }}</n-tag>
-            </div>
-            <div class="row" style="gap: 10px; margin-top: 4px; flex-wrap: wrap">
-              <span class="muted mini">粉 {{ fmtNum(a.followers) }}</span>
-              <span class="muted mini">作品 {{ fmtNum(a.posts_total) }}</span>
-              <span class="mono uid" :title="a.platform_user_id">{{ a.platform_user_id || '未解析 ID' }}</span>
-              <span v-if="a.last_sync_at" class="muted mini">同步 {{ fmt(a.last_sync_at) }}</span>
-            </div>
-          </div>
-          <div class="grow"></div>
-          <n-button size="tiny" secondary :loading="syncingAcct === a.id" @click="runSync('daily', a.id)">同步</n-button>
-          <n-button size="tiny" secondary @click="openPosts(a)">云端作品</n-button>
-          <n-button size="tiny" secondary @click="openAccountModal(c, a)">编辑</n-button>
-          <n-button size="tiny" quaternary type="error" @click="delAccount(a)">删除</n-button>
-        </div>
-      </div>
-
+      <CreatorAccountRow
+        v-for="a in accountsOf(c)"
+        :key="a.id"
+        :account="a"
+        :benchmark="false"
+        :syncing-acct-id="syncingAcct"
+        :show-freq="true"
+        sync-label="同步"
+        @sync="a => runSync('daily', a.id)"
+        @posts="openPosts"
+        @edit="a => openAccountModal(c, a)"
+        @remove="delAccount"
+        @avatar="onAvatar"
+      />
       <div v-for="bm in benchmarksOf(c)" :key="bm.id" class="bm-card">
         <div class="row wrap" style="gap: 8px; align-items: center">
           <n-tag size="small" type="info" :bordered="false" round>对标</n-tag>
