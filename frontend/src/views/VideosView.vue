@@ -116,20 +116,12 @@
             <n-input v-model:value="tagsText" placeholder="干货, 反常识, 口播, 面试, 赚钱" />
             <span class="muted" style="font-size: 12px">命中 求职/面试/赚钱/知识/其他 的词会同时进入数据统计（复盘/缺口用）</span>
           </div>
-          <div v-if="editing.filename" class="form-item full">
-            <label class="form-label">语音转文字（阿里云 ASR）</label>
-            <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
-              <n-button
-                v-if="!editing.transcriptText"
-                secondary
-                :loading="transcribing"
-                @click="startTranscribe"
-              >{{ transcribing ? '识别中…' : '开始转写' }}</n-button>
-              <n-tag v-if="editing.transcriptText" size="small" type="success" :bordered="false" round>已转写</n-tag>
-              <span v-if="transcribing" class="muted">后台识别中，完成后会提醒并自动展示在下方</span>
-              <span v-else-if="!editing.transcriptText" class="muted">上传视频不会自动转写，点按钮把语音转成文字</span>
-            </div>
-          </div>
+          <TranscribeSection
+            v-if="editing.filename"
+            :transcript-text="editing.transcriptText"
+            :transcribing="transcribing"
+            @start="startTranscribe"
+          />
           <div class="form-item full" v-if="editing.transcriptText">
             <label class="form-label">ASR 转写（只读）</label>
             <div class="prose panel" style="margin-bottom: 0; background: var(--bg)">
@@ -214,6 +206,7 @@ import PlatformStats from '../components/PlatformStats.vue'
 import UploadVideoBar from '../components/UploadVideoBar.vue'
 import MaterialCard from '../components/MaterialCard.vue'
 import CoverEditor from '../components/CoverEditor.vue'
+import TranscribeSection from '../components/TranscribeSection.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
