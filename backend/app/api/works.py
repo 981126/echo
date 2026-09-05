@@ -145,6 +145,42 @@ def get_works(creator_id: int = 0, db: Session = Depends(get_db)):
     return {"total": len(items), "items": items}
 
 
+
+class MetaIn(BaseModel):
+    work_id: int | None = None
+    post_id: int | None = None
+    is_ad: bool = False
+    ad_price: int | None = None
+
+
+@router.post("/meta", response_model=dict)
+def set_meta(payload: MetaIn, db: Session = Depends(get_db)):
+    """设置云端作品广告/价格（作用于整个合并作品，并同步已转的本地素材）。"""
+    from ..models.platform import PlatformPost
+    from ..models.video import Video
+
+    posts: list = []
+    if payload.work_id:
+        posts = db.query(PlatformPost).filter(PlatformPost.work_id == payload.work_id).all()
+    elif payload.post_id:
+        p = db.get(PlatformPost, payload.post_id)
+        posts = [p] if p else []
+    if not posts:
+        raise HTTPException(status_code=404, detail="云端作品不存在")
+    vid_ids = set()
+    for post in posts:
+        post.is_ad = payload.is_ad
+        post.ad_price = payload.ad_price
+        if post.local_video_id:
+            vid_ids.add(post.local_video_id)
+    if vid_ids:
+        for v in db.query(Video).filter(Video.id.in_(list(vid_ids))).all():
+            v.is_ad = payload.is_ad
+            v.ad_price = payload.ad_price
+    db.commit()
+    return {"ok": True, "updated": len(posts)}
+
+
 @router.delete("/{item_id}", response_model=dict)
 def delete_item(item_id: int, kind: str = "post", db: Session = Depends(get_db)):
     """删除云端素材：kind=work 删整个合并作品及其平台记录；kind=post 只删单条。"""

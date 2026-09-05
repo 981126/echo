@@ -18,6 +18,7 @@
       <n-select v-model:value="adFilter" :options="adOptions" placeholder="广告" clearable style="width: 110px" />
       <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 150px" />
       <n-select multiple filterable v-model:value="tagSel" :options="allTags" placeholder="标签（可多选/输入过滤）" clearable style="width: 230px" />
+      <n-button type="primary" @click="applyFilters">查询</n-button>
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
     </div>
@@ -59,7 +60,7 @@
             <template v-if="it.planned_publish_at"> · 计划 {{ fmt(it.planned_publish_at) }}</template>
             <template v-if="it.published_at"> · 发布 {{ fmt(it.published_at) }}</template>
           </p>
-          <div class="row-actions">
+          <div class="row-actions" @click.stop>
             <n-tag v-if="it.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
             <n-button v-if="it.platform_post_id" size="small" secondary :loading="syncing === it.id" @click="syncData(it)">同步数据</n-button>
             <n-button v-if="!it.tags_confirmed" size="small" secondary @click="confirmTags(it)">确认标签</n-button>
@@ -84,7 +85,7 @@
             <span v-else class="muted">暂无指标</span>
           </div>
           <p v-if="it.pub" class="tile-meta">发布时间 {{ it.pub }}</p>
-          <div class="row-actions">
+          <div class="row-actions" @click.stop>
             <n-button size="small" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
             <n-button v-if="it.merged >= 2" size="small" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
             <n-button v-if="it.local_video_id" size="small" secondary @click="goLocal(it.local_video_id)">打开本地</n-button>
@@ -202,10 +203,19 @@
               <label class="form-label">文案 / 原始文字（可选）</label>
               <n-input v-model:value="cloudText" type="textarea" :rows="5" placeholder="粘贴你的口播文案或字幕，转本地素材后可用于 AI 学习" />
             </div>
+            <div class="form-item">
+              <label class="form-label">商务广告</label>
+              <n-checkbox v-model:checked="cloudAd">广告（不参与人设学习）</n-checkbox>
+            </div>
+            <div class="form-item">
+              <label class="form-label">广告价格（元）</label>
+              <n-input-number v-model:value="cloudPrice" :min="0" style="width: 100%" />
+            </div>
             <p class="muted" style="font-size: 12px">
               保存后此作品会出现在素材库（云端标识去掉），可继续编辑平台/赛道/发布时间。
             </p>
             <div class="row">
+              <n-button secondary :loading="cloudMetaSaving" @click="saveCloudMeta">仅保存广告设置</n-button>
               <n-button type="primary" :loading="cloudSaving" @click="saveCloudLocal">保存为本地素材</n-button>
               <n-button secondary @click="showCloud = false">取消</n-button>
             </div>
@@ -266,6 +276,9 @@ const cloudFile = ref(null)
 const cloudText = ref('')
 const cloudSaving = ref(false)
 const cloudFileInput = ref(null)
+const cloudAd = ref(false)
+const cloudPrice = ref(null)
+const cloudMetaSaving = ref(false)
 const cloudTab = ref('local')
 const commentsMap = ref({})
 const commentsLoading = ref(0)
@@ -492,17 +505,27 @@ const allTags = computed(() => {
   return [...set].sort().map(t => ({ label: t, value: t }))
 })
 
+const applied = ref({ kw: '', plats: [], tags: [], ad: null, status: null })
+
+function applyFilters() {
+  applied.value = {
+    kw: (searchText.value || '').trim(),
+    plats: [...(platformSel.value || [])],
+    tags: [...(tagSel.value || [])],
+    ad: adFilter.value,
+    status: filter.value.status
+  }
+}
+
 const filteredCards = computed(() => {
-  const kw = (searchText.value || '').trim()
-  const pls = platformSel.value || []
-  const tgs = tagSel.value || []
+  const a = applied.value
   return cards.value.filter(c => {
-    if (kw && !(c.title || '').toLowerCase().includes(kw.toLowerCase())) return false
-    if (filter.value.status && c.status !== filter.value.status) return false
-    if (adFilter.value === 'ad' && !c.is_ad) return false
-    if (adFilter.value === 'no' && c.is_ad) return false
-    if (pls.length && !pls.some(x => (c.platforms || []).includes(x))) return false
-    if (tgs.length && !tgs.every(x => (c.tags || []).includes(x))) return false
+    if (a.kw && !(c.title || '').toLowerCase().includes(a.kw.toLowerCase())) return false
+    if (a.status && c.status !== a.status) return false
+    if (a.ad === 'ad' && !c.is_ad) return false
+    if (a.ad === 'no' && c.is_ad) return false
+    if (a.plats.length && !a.plats.some(x => (c.platforms || []).includes(x))) return false
+    if (a.tags.length && !a.tags.every(x => (c.tags || []).includes(x))) return false
     return true
   })
 })
@@ -552,8 +575,9 @@ function buildCards() {
       tags,
       platforms: w.platforms || [],
       main_topics: [],
-      is_ad: false,
       status: 'published',
+      is_ad: (w.posts || []).some(x => x.is_ad),
+      ad_price: (() => { const arr = (w.posts || []).filter(x => x.ad_price != null).map(x => x.ad_price); return arr.length ? Math.max(...arr) : null })(),
       merged: w.type === 'work' ? (w.posts || []).length : 0,
       cloudPosts: w.posts || [],
       local_video_id: anyLocal ? anyLocal.local_video_id : null,
@@ -585,7 +609,28 @@ function openCloud(it) {
   cloudText.value = ''
   cloudTab.value = 'local'
   commentsMap.value = {}
+  const posts = it.cloudPosts || []
+  cloudAd.value = posts.some(x => x.is_ad)
+  const priced = posts.filter(x => x.ad_price != null).map(x => x.ad_price)
+  cloudPrice.value = priced.length ? Math.max(...priced) : null
   showCloud.value = true
+}
+
+async function saveCloudMeta() {
+  if (!cloudItem.value) return
+  cloudMetaSaving.value = true
+  try {
+    const body = { is_ad: cloudAd.value, ad_price: cloudPrice.value == null ? null : Number(cloudPrice.value) }
+    if (cloudItem.value.type === 'work') body.work_id = cloudItem.value.id
+    else body.post_id = cloudItem.value.id
+    await api('/api/works/meta', { method: 'POST', body: JSON.stringify(body) })
+    message.success('广告设置已保存')
+    await loadWorks()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    cloudMetaSaving.value = false
+  }
 }
 
 async function loadComments(pst) {

@@ -49,6 +49,8 @@ def post_item(db: Session, p: PlatformPost) -> dict:
         "id": p.id,
         "platform": p.platform,
         "tags": tags,
+        "is_ad": p.is_ad,
+        "ad_price": p.ad_price,
         "platform_post_id": p.platform_post_id,
         "title": p.title,
         "cover": p.cover_url_local,
