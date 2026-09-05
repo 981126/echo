@@ -507,7 +507,10 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
         except Exception:  # noqa: BLE001 合并失败不影响同步主体
             db.rollback()
         msg = f"同步 {len(results)} 个账号，更新作品 {total_posts}，采集评论 {total_comments}"
-        _finish_job(db, job, msg, {"accounts": results, "posts": total_posts, "comments": total_comments})
+        fails = [f"{r.get('platform')}({str(r.get('error'))[:60]})" for r in results if r.get("error")]
+        if fails:
+            msg += "；失败账号：" + "、".join(fails) + "（可单独重试该账号）"
+        _finish_job(db, job, msg, {"accounts": results, "posts": total_posts, "comments": total_comments, "failed": len(fails)})
         return {"job_id": job.id, "message": msg, "accounts": results}
     except BudgetExceeded as exc:
         _finish_job(db, job, str(exc), failed=True)

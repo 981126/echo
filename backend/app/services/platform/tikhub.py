@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -360,12 +361,14 @@ class TikHubClient:
             return self._real_posts(platform, user_id, count)
         return self._mock_posts(platform, user_id, count, account)
 
-    def _real_posts_all(self, platform: str, user_id: str, max_posts: int = 600) -> list[PostData]:
-        """全量拉取该用户全部作品（分页翻到底，上限 max_posts 防止异常）。"""
+    def _real_posts_all(self, platform: str, user_id: str, max_pages: int = 200) -> list[PostData]:
+        """全量拉取该用户全部作品：翻页直到平台返回 has_more=false（无作品数量硬上限）。"""
         out: list[PostData] = []
         if platform == "douyin":
             cursor = ""
-            while len(out) < max_posts:
+            pages = 0
+            while pages < max_pages:
+                pages += 1
                 params: dict = {"sec_user_id": user_id, "count": 30}
                 if cursor:
                     params["max_cursor"] = cursor
@@ -403,7 +406,9 @@ class TikHubClient:
                 cursor = next_cursor
         elif platform == "xiaohongshu":
             cursor = ""
-            while len(out) < max_posts:
+            pages = 0
+            while pages < max_pages:
+                pages += 1
                 try:
                     data = self._get("/xiaohongshu/app_v2/get_user_posted_notes", {"user_id": user_id, "cursor": cursor or ""})
                 except TikHubError:
@@ -445,19 +450,24 @@ class TikHubClient:
         else:  # bilibili
             page = 1
             seen_aids: set[str] = set()
-            while len(out) < max_posts and page <= 50:
+            total_pages = None
+            while page <= 120:
                 try:
                     data = self._get("/bilibili/web/fetch_user_post_videos_v2", {"uid": user_id, "pn": page, "ps": 30})
                 except TikHubError:
                     break
-                vlist = ((((data.get("data") or {}).get("data")) or {}).get("archives")) or []
-                new_count = 0
+                inner_data = (((data.get("data") or {}).get("data")) or {})
+                vlist = inner_data.get("archives") or []
+                page_info = inner_data.get("page") or {}
+                if total_pages is None:
+                    total = int(page_info.get("total") or 0)
+                    if total > 0:
+                        total_pages = math.ceil(total / 30)
                 for v in vlist:
                     aid = str(v.get("aid") or "")
                     if aid in seen_aids:
                         continue
                     seen_aids.add(aid)
-                    new_count += 1
                     stat = v.get("stat") or {}
                     # 全量：只存列表自带的 view（避免上百次详情请求拖慢）；赞藏评由“同步前10条”补全
                     stats = {
@@ -481,7 +491,12 @@ class TikHubClient:
                             raw=v,
                         )
                     )
-                if new_count == 0 or len(vlist) < 30:
+                # 分页重叠容错：即使某页全是重复（新投稿插队导致），也要翻到预期页数之后再多翻几页
+                if not vlist:
+                    break
+                if total_pages is not None and page >= total_pages + 3:
+                    break
+                if len(vlist) < 30 and page >= (total_pages or 1):
                     break
                 page += 1
         return out
@@ -491,7 +506,8 @@ class TikHubClient:
         pool = _TITLE_POOL.get(platform, _TITLE_POOL["douyin"])
         out: list[PostData] = []
         now = datetime.utcnow()
-        for i in range(min(count, 60)):
+        limit = 60 if count <= 0 else min(count, 60)  # count<=0 = 全量（mock 取满样本）
+        for i in range(limit):
             idx = (rnd.randint(0, 10**6) + i) % len(pool)
             post_id = f"{platform}_{str(_seed_id(user_id, str(i)))[-10:]}{i}"
             plays = rnd.randint(3000, 800000)
