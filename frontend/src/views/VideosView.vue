@@ -61,10 +61,10 @@
           <div class="plat-zone">
             <div v-for="p in platOrder" :key="p" class="plat-line missing">
               <b>{{ platformName(p) }}</b>
-              <span class="muted">播放 —</span>
-              <span class="muted">赞 —</span>
-              <span class="muted">藏 —</span>
-              <span class="muted">评 —</span>
+              <span class="ph">播放 —</span>
+              <span class="ph">赞 —</span>
+              <span class="ph">藏 —</span>
+              <span class="ph">评 —</span>
             </div>
           </div>
           <p class="tile-meta">
@@ -101,10 +101,10 @@
               </template>
               <template v-else>
                 <b>{{ platformName(p) }}</b>
-                <span class="muted">播放 —</span>
-                <span class="muted">赞 —</span>
-                <span class="muted">藏 —</span>
-                <span class="muted">评 —</span>
+                <span class="ph">播放 —</span>
+                <span class="ph">赞 —</span>
+                <span class="ph">藏 —</span>
+                <span class="ph">评 —</span>
               </template>
             </div>
           </div>
@@ -1267,8 +1267,15 @@ onMounted(async () => {
 .plat-zone {
   margin-top: 4px;
 }
+.plat-line .ph {
+  color: #bdb4a8;
+}
 .plat-line.missing {
   color: #bdb4a8;
+}
+.plat-line.missing b {
+  color: #bdb4a8;
+  font-weight: 400;
 }
 .plat-line {
   min-height: 12px;
