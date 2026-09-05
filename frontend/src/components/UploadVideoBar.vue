@@ -13,7 +13,7 @@
 <script setup>
 import { ref } from 'vue'
 
-const props = defineProps({
+defineProps({
   uploading: { type: Boolean, default: false }
 })
 const emit = defineEmits(['upload'])

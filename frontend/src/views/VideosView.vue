@@ -165,7 +165,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, uploadVideo, uploadCover, getToken } from '../api'
 import MediaComments from '../components/MediaComments.vue'
-import PlatformStats from '../components/PlatformStats.vue'
 import UploadVideoBar from '../components/UploadVideoBar.vue'
 import MaterialCard from '../components/MaterialCard.vue'
 import CoverEditor from '../components/CoverEditor.vue'
@@ -180,11 +179,10 @@ import CloudActions from '../components/CloudActions.vue'
 import CloudTextArea from '../components/CloudTextArea.vue'
 import { adOptions, platformOptions, statusOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
-import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
+import { platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
 const message = useMessage()
 const dialog = useDialog()
-const topics = ['求职', '面试', '赚钱', '知识', '其他']
 const videos = ref([])
 const filter = ref({ status: null })
 const adFilter = ref(null)
@@ -216,7 +214,6 @@ const autoMerging = ref(false)
 const showEdit = ref(false)
 const tagsText = ref('')
 
-const topicOptions = topics.map(t => ({ label: t, value: t }))
 async function load() {
   loading.value = true
   try {
@@ -328,7 +325,6 @@ async function openEdit(v) {
     plannedTs: parseTs(v.planned_publish_at),
     publishedTs: parseTs(v.published_at)
   }
-  const known5 = ['求职', '面试', '赚钱', '知识', '其他']
   const allTags = [...new Set([...(v.main_topics || []), ...(v.tags || [])])]
   tagsText.value = allTags.join(', ')
   orig.value = {
@@ -732,10 +728,6 @@ async function saveCloudLocal(transcribe = false) {
   }
 }
 
-function openWorkDetail(w) {
-  message.info('同一作品：' + (w.platforms || []).map(platformName).join(' / '))
-}
-
 function toggleSel(w) {
   const key = w.key || w.id
   const next = new Set(selected.value)
@@ -747,19 +739,6 @@ function toggleSel(w) {
 function cancelMerge() {
   mergeMode.value = false
   selected.value = new Set()
-}
-
-async function doMerge() {
-  const ids = [...selected.value]
-  if (ids.length < 2) return
-  try {
-    await api('/api/works/merge', { method: 'POST', body: JSON.stringify({ platform_post_ids: ids }) })
-    message.success('已合并为同一作品')
-    cancelMerge()
-    loadWorks()
-  } catch (e) {
-    message.error(e.message)
-  }
 }
 
 async function splitWork(w) {

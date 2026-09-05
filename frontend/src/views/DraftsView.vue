@@ -212,9 +212,6 @@ function list(status) {
   }
   return drafts.value.filter(d => d.status === status)
 }
-function discussionCount(id) {
-  return (discussionsMap.value[id] || []).length
-}
 function actorName(m) {
   if (m.actor === 'kimi') return 'Kimi'
   if (m.actor === 'deepseek') return 'DeepSeek'
@@ -246,12 +243,6 @@ async function load() {
   })
 }
 
-async function loadDiscussions(id) {
-  const rows = await api(`/api/drafts/${id}/discussions`)
-  discussions.value = rows
-  discussionsMap.value = { ...discussionsMap.value, [id]: rows }
-  await fetchStatus(id)
-}
 async function fetchStatus(id) {
   try {
     const r = await api(`/api/drafts/${id}/debate-status`)
@@ -275,14 +266,6 @@ function open(d, isNew = false) {
   if (editing.value.id) runCheck(editing.value.id)
 }
 
-function openDiscussion(d) {
-  editing.value = { ...d, video_id: d.video_id ?? null }
-  showEdit.value = true
-  editTab.value = 'discuss'
-  discussions.value = discussionsMap.value[d.id] || []
-  loadDiscussions(d.id)
-}
-
 async function runCheck(id) {
   if (!id) return
   try {
@@ -296,7 +279,7 @@ async function rework(id) {
   if (!id) return
   reworking.value = true
   try {
-    const r = await api(`/api/drafts/${id}/rework`, { method: 'POST', body: '{}' })
+    await api(`/api/drafts/${id}/rework`, { method: 'POST', body: '{}' })
     message.success('已提交回炉生成，完成后右上角通知（将替换本稿）')
   } catch (e) {
     message.error(e.message)

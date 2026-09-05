@@ -93,13 +93,6 @@ import { platformName } from '../lib/format'
 
 const videos = ref([])
 const hotItems = ref([])
-const platFilter = ref(null)
-const batch = ref(0)
-const platOptions = [
-  { label: '抖音', value: 'douyin' },
-  { label: 'B站', value: 'bilibili' },
-  { label: '小红书', value: 'xiaohongshu' }
-]
 const refreshing = ref(false)
 const generatingTitle = ref(null)
 const ideas = ref([])
@@ -111,17 +104,6 @@ const angleShow = ref(false)
 const angleLoading = ref(false)
 const angles = ref([])
 const pendingTopic = ref('')
-
-const shownHot = computed(() => {
-  let list = hotItems.value
-  if (platFilter.value) list = list.filter(h => h.platform === platFilter.value)
-  const arr = [...list]
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[arr[i], arr[j]] = [arr[j], arr[i]]
-  }
-  return arr.slice(0, 15)
-})
 
 const totalIdeas = computed(() => hotItems.value.length + ideas.value.length)
 
@@ -163,10 +145,6 @@ const shownIdeas = computed(() => unifiedIdeas())
 
 function rotateIdeas() {
   ideaBatch.value++
-}
-
-function shuffle() {
-  batch.value++
 }
 const message = useMessage()
 
@@ -223,7 +201,7 @@ async function generateWithAngle(title) {
   angleShow.value = false
   generatingTitle.value = pendingTopic.value
   try {
-    const r = await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic: title }) })
+    await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic: title }) })
     message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你')
   } catch (e) {
     message.error('提交失败：' + e.message)
@@ -287,19 +265,6 @@ async function loadIdeas() {
   }
 }
 
-async function genFromIdea(it) {
-  generatingIdea.value = it.id
-  try {
-    const r = await api(`/api/platform/topic-pool/${it.id}/generate`, { method: 'POST', body: '{}' })
-    if (r.draft && r.draft.id) location.hash = `#/drafts?id=${r.draft.id}`
-    else message.success('已生成')
-    await loadIdeas()
-  } catch (e) {
-    message.error('生成失败：' + e.message)
-  } finally {
-    generatingIdea.value = 0
-  }
-}
 
 onMounted(() => {
   loadVideos()

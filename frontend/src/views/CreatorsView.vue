@@ -164,8 +164,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, getToken } from '../api'
-import { fmt, fmtNum, platformName } from '../lib/format'
-import { freqOptions, platformOptions } from '../lib/options'
+import { fmtNum, platformName } from '../lib/format'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -182,8 +181,6 @@ const syncingOwner = ref(0)
 const syncingAcct = ref(0)
 const syncingPost = ref(0)
 const summary = ref({ items: [] })
-
-const freqName = (f) => ({ daily: '每日', weekly: '每周', manual: '手动' }[f] || f)
 
 const owners = computed(() => creators.value.filter(c => c.kind === 'owner'))
 const ownerOptions = computed(() => owners.value.map(c => ({ label: c.name, value: c.id })))
@@ -432,15 +429,7 @@ async function runSync(scope, accountId) {
   }
 }
 
-function openSyncInit() {
-  dialog.info({
-    title: '全量同步',
-    content: '将同步该博主三个平台的主页数据（粉丝/作品数）与全部作品数据，视频不下载，封面缓存本地。确认开始？',
-    positiveText: '开始',
-    negativeText: '取消',
-    onPositiveClick: () => runSync('initial')
-  })
-}
+
 
 async function openPosts(acct) {
   currentAcct.value = acct
@@ -471,7 +460,7 @@ async function syncPost(p) {
 
 async function toMaterial(p) {
   try {
-    const r = await api(`/api/platform/posts/${p.id}/to-material`, { method: 'POST' })
+    await api(`/api/platform/posts/${p.id}/to-material`, { method: 'POST' })
     message.success('已转为素材（可在素材库继续上传/编辑）')
     openPosts(currentAcct.value)
   } catch (e) {
