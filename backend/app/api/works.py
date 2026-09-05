@@ -173,6 +173,28 @@ def delete_item(item_id: int, kind: str = "post", db: Session = Depends(get_db))
     return {"ok": True, "removed": len(posts)}
 
 
+@router.post("/auto-merge", response_model=dict)
+def auto_merge_all(creator_id: int = 0, db: Session = Depends(get_db)):
+    """自动合并：把所有博主（或指定博主）下“同创作者+规范化标题相同”的跨平台作品合并为一。"""
+    from ..models.platform import Creator
+    from ..services.works_service import auto_merge_creator
+
+    creators = []
+    if creator_id:
+        c = db.get(Creator, creator_id)
+        if c:
+            creators = [c]
+    else:
+        creators = db.query(Creator).all()
+    created = 0
+    for c in creators:
+        try:
+            created += auto_merge_creator(db, c.id)
+        except Exception:  # noqa: BLE001 单博主失败不影响其它
+            db.rollback()
+    return {"ok": True, "merged_groups": created}
+
+
 @router.post("/merge", response_model=dict)
 def merge_items(payload: MergeIn, db: Session = Depends(get_db)):
     try:

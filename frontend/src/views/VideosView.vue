@@ -16,6 +16,7 @@
       <n-select v-model:value="filter.platform" :options="platformOptions" placeholder="平台" clearable style="width: 130px" />
       <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 130px" />
       <n-button secondary @click="load">查询</n-button>
+      <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
     </div>
     <div v-if="mergeMode" class="row" style="gap: 8px; margin: 8px 0">
@@ -230,6 +231,7 @@ const cloudFileInput = ref(null)
 const mergeMode = ref(false)
 const selected = ref(new Set())
 const syncingPost = ref(0)
+const autoMerging = ref(false)
 const showEdit = ref(false)
 const tagsText = ref('')
 
@@ -631,6 +633,21 @@ async function confirmTags(v) {
   await api(`/api/videos/${v.id}/confirm-tags`, { method: 'POST', body: JSON.stringify({ tags_confirmed: true }) })
   message.success('标签已确认')
   load()
+}
+
+async function autoMergeAll() {
+  autoMerging.value = true
+  try {
+    const r = await api('/api/works/auto-merge', { method: 'POST', body: '{}' })
+    if (r.merged_groups > 0) message.success(`自动合并完成：合并了 ${r.merged_groups} 组同标题作品`)
+    else message.info('没有需要合并的同标题作品（同标题会自动识别为同一作品）')
+    await loadWorks()
+    await load()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    autoMerging.value = false
+  }
 }
 
 async function doMergeCloud() {
