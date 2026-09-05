@@ -124,12 +124,7 @@
             <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
           </div>
         </div>
-        <div class="row" style="gap: 8px">
-          <n-button secondary :loading="syncingEdit" @click="syncEditLinks">同步数据</n-button>
-          <div class="grow" />
-          <n-button type="primary" @click="saveEdit">保存</n-button>
-          <n-button secondary @click="closeEdit">取消</n-button>
-        </div>
+        <EditActions :syncing="syncingEdit" @sync="syncEditLinks" @save="saveEdit" @cancel="closeEdit" />
           </n-tab-pane>
           <n-tab-pane name="comments" tab="评论数据">
             <div v-if="!editing.platformPosts || !editing.platformPosts.length" class="muted" style="padding: 14px 0">
@@ -199,6 +194,7 @@ import MaterialCard from '../components/MaterialCard.vue'
 import CoverEditor from '../components/CoverEditor.vue'
 import TranscribeSection from '../components/TranscribeSection.vue'
 import PlatformLinksInput from '../components/PlatformLinksInput.vue'
+import EditActions from '../components/EditActions.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
