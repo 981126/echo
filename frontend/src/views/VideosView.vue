@@ -133,13 +133,15 @@
               <label class="form-label">文案 / 原始文字（可选）</label>
               <n-input v-model:value="cloudText" type="textarea" :rows="5" placeholder="粘贴你的口播文案或字幕，转本地素材后可用于 AI 学习" />
             </div>
-            <div class="form-item">
-              <label class="form-label">商务广告</label>
-              <n-checkbox v-model:checked="cloudAd">广告（不参与人设学习）</n-checkbox>
-            </div>
-            <div class="form-item">
-              <label class="form-label">广告价格（元）</label>
-              <n-input-number v-model:value="cloudPrice" :min="0" style="width: 100%" />
+            <div class="row" style="gap: 18px">
+              <div class="form-item" style="flex: 1">
+                <label class="form-label">商务广告</label>
+                <n-checkbox v-model:checked="cloudAd">广告（不参与人设学习）</n-checkbox>
+              </div>
+              <div class="form-item" style="flex: 1">
+                <label class="form-label">广告价格（元）</label>
+                <n-input-number v-model:value="cloudPrice" :min="0" style="width: 100%" />
+              </div>
             </div>
             <p class="muted" style="font-size: 12px">
               保存后此作品会出现在素材库（云端标识去掉），可继续编辑平台/赛道/发布时间。
