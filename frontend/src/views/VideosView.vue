@@ -7,6 +7,7 @@
     <div class="toolbar">
       <n-select multiple filterable v-model:value="platformSel" :options="platformOptions" placeholder="平台（可多选/输入过滤）" clearable style="width: 210px" />
       <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 120px" />
+      <n-select v-model:value="videoFilter" :options="videoOptions" placeholder="视频" clearable style="width: 120px" />
       <n-select v-model:value="adFilter" :options="adOptions" placeholder="广告" clearable style="width: 110px" />
       <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 150px" />
       <n-select multiple filterable v-model:value="tagSel" :options="allTags" placeholder="标签（可多选/输入过滤）" clearable style="width: 230px" />
@@ -177,7 +178,7 @@ import MetaFields from '../components/MetaFields.vue'
 import CloudVideoPicker from '../components/CloudVideoPicker.vue'
 import CloudActions from '../components/CloudActions.vue'
 import CloudTextArea from '../components/CloudTextArea.vue'
-import { adOptions, platformOptions, statusOptions } from '../lib/options'
+import { adOptions, platformOptions, statusOptions, videoOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
@@ -529,6 +530,7 @@ const allTags = computed(() => {
 const applied = ref({ kw: '', plats: [], tags: [], ad: null, status: null, likesMin: null, likesMax: null })
 const likesMin = ref(null)
 const likesMax = ref(null)
+const videoFilter = ref('')
 
 function applyFilters() {
   applied.value = {
@@ -538,7 +540,8 @@ function applyFilters() {
     ad: adFilter.value,
     status: filter.value.status,
     likesMin: likesMin.value,
-    likesMax: likesMax.value
+    likesMax: likesMax.value,
+    video: videoFilter.value
   }
 }
 
@@ -549,6 +552,8 @@ const filteredCards = computed(() => {
     if (a.status && c.status !== a.status) return false
     if (a.ad === 'ad' && !c.is_ad) return false
     if (a.ad === 'no' && c.is_ad) return false
+    if (a.video === 'yes' && !c.hasVideo) return false
+    if (a.video === 'no' && c.hasVideo) return false
     if (a.plats.length && !a.plats.some(x => (c.platforms || []).includes(x))) return false
     if (a.tags.length && !a.tags.every(x => (c.tags || []).includes(x))) return false
     const likeLo = a.likesMin
@@ -565,6 +570,12 @@ const filteredCards = computed(() => {
 })
 
 function buildCards() {
+  const videoById = new Map((videos.value || []).map(v => [v.id, v]))
+  const realFile = (v) => {
+    const f = v && v.filename
+    return !!f && !f.startsWith('__cloud__')
+  }
+
   // 云端已绑定本地素材(转素材后)的记录不重复展示，避免合并后多个素材
   const linkedLocal = new Set()
   const cloudWorks = works.value || []
@@ -589,6 +600,7 @@ function buildCards() {
     filename: v.filename,
     tags_confirmed: v.tags_confirmed,
     platform_post_id: v.platform_post_id,
+    hasVideo: realFile(v),
     date: (v.published_at || v.planned_publish_at || v.created_at || '').slice(0, 10)
   }))
   const cloud = (works.value || []).map(w => {
@@ -615,6 +627,7 @@ function buildCards() {
       merged: w.type === 'work' ? (w.posts || []).length : 0,
       cloudPosts: w.posts || [],
       local_video_id: anyLocal ? anyLocal.local_video_id : null,
+      hasVideo: realFile(videoById.get(anyLocal ? anyLocal.local_video_id : null)),
       pub: ((w.posts || [])[0] && (w.posts[0].publish_time || '')).slice(0, 10) || '',
       date: (((w.posts || [])[0] && (w.posts[0].publish_time || '')) || '').slice(0, 10)
     }

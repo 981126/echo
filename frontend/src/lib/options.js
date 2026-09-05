@@ -21,3 +21,10 @@ export const freqOptions = [
   { label: '每周（对标）', value: 'weekly' },
   { label: '手动', value: 'manual' }
 ]
+
+
+export const videoOptions = [
+  { label: '全部', value: '' },
+  { label: '已上传', value: 'yes' },
+  { label: '未上传', value: 'no' }
+]
