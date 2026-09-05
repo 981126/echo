@@ -18,10 +18,9 @@
       <n-select v-model:value="adFilter" :options="adOptions" placeholder="广告" clearable style="width: 110px" />
       <n-input v-model:value="searchText" placeholder="搜索标题…" clearable style="width: 150px" />
       <n-select multiple filterable v-model:value="tagSel" :options="allTags" placeholder="标签（可多选/输入过滤）" clearable style="width: 230px" />
-      <span class="muted" style="font-size: 12px">点赞</span>
-      <n-input-number v-model:value="likesMin" :min="0" placeholder="≥ 多少" clearable style="width: 108px" />
-      <n-input-number v-model:value="likesMax" :min="0" placeholder="≤ 多少" clearable style="width: 108px" />
-      <span class="muted" style="font-size: 12px">任一平台匹配即可</span>
+      <n-input-number v-model:value="likesMax" :min="0" placeholder="≤ 点赞" clearable style="width: 108px" />
+      <n-input-number v-model:value="likesMin" :min="0" placeholder="≥ 点赞" clearable style="width: 108px" />
+      <span class="muted tl-hint">任一平台匹配即可</span>
       <n-button type="primary" @click="applyFilters">查询</n-button>
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
@@ -422,7 +421,10 @@ async function doUpload() {
     if (fileInput.value) fileInput.value.value = ''
     await loadQuiet()
     if (r && r.id) {
-      const v = videos.value.find(x => x.id === r.id)
+      let v = videos.value.find(x => x.id === r.id)
+      if (!v) {
+        try { v = await api('/api/videos/' + r.id) } catch { v = null }
+      }
       if (v) openEdit(v)
     }
   } catch (e) {
@@ -1213,6 +1215,27 @@ onMounted(async () => {
 .comment-list li {
   margin: 4px 0;
   font-size: 13px;
+}
+
+
+/* 筛选栏：控件与提示文案字号调小 */
+.toolbar { font-size: 12px; }
+.toolbar .muted { font-size: 11px; }
+.toolbar :deep(.n-input),
+.toolbar :deep(.n-input-number),
+.toolbar :deep(.n-select) {
+  --n-font-size: 12px;
+}
+
+
+.tl-hint {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.toolbar :deep(.n-base-selection-placeholder),
+.toolbar :deep(input::placeholder),
+.toolbar :deep(textarea::placeholder) {
+  font-size: 11px;
 }
 
 </style>
