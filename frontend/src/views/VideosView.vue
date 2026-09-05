@@ -27,59 +27,23 @@
     <div v-if="loading" class="panel empty">加载中…</div>
     <div v-else-if="!filteredCards.length" class="panel empty">没有匹配的素材（换个关键词/标签，或去「博主」页同步）</div>
     <div v-else class="grid grid-videos">
-      <div v-for="it in filteredCards" :key="it.key" class="card-tile" :class="{ picking: mergeMode && it.kind === 'cloud' }" @click="onCardClick(it)">
-        <div class="tile-cover" :class="{ has: it.cover_url }" @click.stop="onCardClick(it)">
-          <n-checkbox v-if="mergeMode && it.kind === 'cloud'" class="pick-box" :checked="selected.has(it.key)" @click.stop @update:checked="toggleSel(it)" />
-          <img v-if="it.cover_url" :src="it.cover_url" alt="封面" />
-          <span v-else>ECHO</span>
-        </div>
-        <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
-          <n-tag v-if="it.kind === 'cloud'" size="small" type="info" :bordered="false" round>云端</n-tag>
-          <n-tag v-if="it.kind === 'cloud'" size="small" type="success" :bordered="false" round>已发布</n-tag>
-          <n-tag v-if="it.kind === 'cloud' && it.merged" size="tiny" type="success" :bordered="false" round>合并×{{ it.merged }}</n-tag>
-          <n-tag v-if="it.is_ad" size="small" :bordered="false" round type="error">广告{{ it.ad_price ? ' ¥' + it.ad_price : '' }}</n-tag>
-          <n-tag v-for="t in it.main_topics || []" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
-        </div>
-        <h3 class="tile-title" :title="it.title">{{ it.title }}</h3>
-
-        <template v-if="it.kind === 'local'">
-          <div class="tag-row">
-            <template v-for="t in it.tags.slice(0, 5)" :key="t">
-              <n-tag size="small" :bordered="false">{{ t }}</n-tag>
-            </template>
-            <n-tag v-if="it.tags.length > 5" size="small" :bordered="false" round>… +{{ it.tags.length - 5 }}</n-tag>
-            <span v-if="!it.tags.length" class="muted">无标签</span>
-          </div>
-          <PlatformStats :posts="[]" />
-          <p class="tile-meta">
-            {{ it.status === 'published' ? '已发布' : '计划中' }}
-            <template v-if="it.planned_publish_at"> · 计划 {{ fmt(it.planned_publish_at) }}</template>
-            <template v-if="it.published_at"> · 发布 {{ fmt(it.published_at) }}</template>
-          </p>
-          <div class="row-actions" @click.stop>
-            <n-tag v-if="it.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
-            <n-button v-if="it.platform_post_id" size="tiny" secondary :loading="syncing === it.id" @click="syncData(it)">同步数据</n-button>
-            <n-button v-if="!it.tags_confirmed" size="tiny" secondary @click="confirmTags(it)">确认标签</n-button>
-            <n-button size="tiny" quaternary type="error" @click="delLocal(it)">删除</n-button>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="row tag-row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
-            <template v-for="t in it.tags.slice(0, 5)" :key="t">
-              <n-tag size="tiny" :bordered="false" round>{{ t }}</n-tag>
-            </template>
-            <n-tag v-if="it.tags.length > 5" size="tiny" :bordered="false" round>… +{{ it.tags.length - 5 }}</n-tag>
-          </div>
-          <PlatformStats :posts="it.cloudPosts || []" />
-          <p v-if="it.pub" class="tile-meta">发布时间 {{ it.pub }}</p>
-          <div class="row-actions" @click.stop>
-            <n-button size="tiny" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
-            <n-button v-if="it.merged >= 2" size="tiny" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
-                        <n-button size="tiny" quaternary type="error" @click="delCloud(it)">删除</n-button>
-          </div>
-        </template>
-      </div>
+      <MaterialCard
+        v-for="it in filteredCards"
+        :key="it.key"
+        :item="it"
+        :merge-mode="mergeMode"
+        :selected="selected.has(it.key)"
+        :syncing-id="syncing"
+        :syncing-post-id="syncingPost"
+        :click="onCardClick"
+        :toggle="toggleSel"
+        :sync-local="syncData"
+        :sync-post="syncCloudPost"
+        :confirm="confirmTags"
+        :del-local="delLocal"
+        :del-cloud="delCloud"
+        :split="splitWork"
+      />
     </div>
 
     <n-modal
@@ -260,6 +224,7 @@ import { api, uploadVideo, uploadCover, getToken } from '../api'
 import MediaComments from '../components/MediaComments.vue'
 import PlatformStats from '../components/PlatformStats.vue'
 import UploadVideoBar from '../components/UploadVideoBar.vue'
+import MaterialCard from '../components/MaterialCard.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 

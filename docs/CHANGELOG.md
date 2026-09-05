@@ -318,3 +318,6 @@
 
 ## [M43 / R-061 C 继续] 2026-09-05 — 时间线模型抽 lib/timeline.js
 - HomeView 时间线计算整体抽为纯函数 buildTimelineModel（lib/timeline.js），HomeView 仅一行调用
+
+## [M43 / R-061 C 继续] 2026-09-05 — MaterialCard 子组件（模板抽出，事件由 props 传入）
+- 新增 MaterialCard.vue：素材卡片整块模板（本地/云端）抽出，点击/同步/确认/删除/拆分等事件由父页 props 注入
