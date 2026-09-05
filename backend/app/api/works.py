@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import json
+import shutil
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -15,6 +20,107 @@ router = APIRouter()
 
 class MergeIn(BaseModel):
     platform_post_ids: list[int] = []
+
+
+@router.post("/to-local", response_model=dict)
+def cloud_to_local(
+    db: Session = Depends(get_db),
+    file: UploadFile | None = File(default=None),
+    text: str = Form(default=""),
+    work_id: int | None = Form(default=None),
+    post_id: int | None = Form(default=None),
+):
+    """把云端作品转成本地素材：上传视频（可选，触发转写）+ 文案（可选）后变成本地素材。"""
+    from ..config import get_settings
+    from ..core.pipeline import today_key
+    from ..models.metrics import MetricsSnapshot
+    from ..models.video import Transcript, Video
+    from ..services.creator_service import current_creator_id
+    from ..services.ingest import import_video_task
+    from ..tasks import start_task
+    from ..models.platform import PlatformPost
+
+    cid = current_creator_id(db)
+    if cid is None:
+        raise HTTPException(status_code=400, detail="请先创建并切换到一个主博主")
+
+    posts: list[PlatformPost] = []
+    if work_id:
+        posts = db.query(PlatformPost).filter(PlatformPost.work_id == work_id).all()
+    elif post_id:
+        p = db.get(PlatformPost, post_id)
+        posts = [p] if p else []
+    if not posts:
+        raise HTTPException(status_code=404, detail="云端作品不存在")
+    first = posts[0]
+
+    settings = get_settings()
+    filename = ""
+    if file is not None and (file.filename or ""):
+        filename = f"{uuid.uuid4().hex[:8]}_{Path(file.filename or 'video').name}"
+        settings.videos_dir.mkdir(parents=True, exist_ok=True)
+        dest = settings.videos_dir / filename
+        with dest.open("wb") as out:
+            shutil.copyfileobj(file.file, out)
+
+    platforms = []
+    for post in posts:
+        if post.platform not in platforms:
+            platforms.append(post.platform)
+    video = Video(
+        filename=filename,
+        title=first.title or "",
+        creator_id=cid,
+        platforms=json.dumps(platforms, ensure_ascii=False),
+        platform_post_id=f"{first.platform}:{first.platform_post_id}",
+        work_id=posts[0].work_id,
+        cover_path=first.cover_path or "",
+        status="planned",
+    )
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+
+    if (text or "").strip():
+        if video.transcript is None:
+            video.transcript = Transcript(video_id=video.id)
+            db.add(video.transcript)
+        video.transcript.source_text = text.strip()
+        video.transcript.corrected_text = text.strip()
+    db.commit()
+
+    # 各平台作品绑定到该本地素材
+    for post in posts:
+        post.local_video_id = video.id
+    db.commit()
+
+    # 若文件上传则触发转写/预打标；否则仅保留文案
+    if filename:
+        start_task("import_video", {"video_id": video.id}, import_video_task)
+    else:
+        # 复制云端最新指标到本地（复盘可用）
+        from ..models.platform import PlatformPostStat
+
+        stat = (
+            db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id == first.id)
+            .order_by(PlatformPostStat.stat_date.desc())
+            .first()
+        )
+        if stat:
+            db.add(
+                MetricsSnapshot(
+                    video_id=video.id,
+                    snapshot_date=today_key(),
+                    plays=stat.plays,
+                    likes=stat.likes,
+                    favorites=stat.favorites,
+                    comments=stat.comments,
+                    source="tikhub",
+                )
+            )
+            db.commit()
+    return {"ok": True, "video_id": video.id, "filename": filename}
 
 
 @router.get("", response_model=dict)

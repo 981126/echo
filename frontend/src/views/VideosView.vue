@@ -20,42 +20,68 @@
     </div>
 
     <div v-if="loading" class="panel empty">加载中…</div>
-    <div v-else-if="!videos.length" class="panel empty">暂无视频</div>
+    <div v-else-if="!cards.length" class="panel empty">暂无素材（可上传本地视频，或在「博主」页同步云端作品）</div>
     <div v-else class="grid grid-videos">
-      <div v-for="v in videos" :key="v.id" class="card-tile">
-        <div class="tile-cover" :class="{ has: v.cover_url }" @click="openEdit(v)">
-          <img v-if="v.cover_url" :src="v.cover_url" alt="封面" />
+      <div v-for="it in cards" :key="it.key" class="card-tile">
+        <div class="tile-cover" :class="{ has: it.cover_url }" @click="openItem(it)">
+          <img v-if="it.cover_url" :src="it.cover_url" alt="封面" />
           <span v-else>ECHO</span>
         </div>
-        <h3 class="tile-title" style="word-break: break-all" @click="openEdit(v)">{{ v.title || v.filename }}</h3>
-        <div class="row" style="gap: 6px">
-          <n-tag v-if="v.is_ad" size="small" :bordered="false" round type="error">广告</n-tag>
-          <n-tag v-for="p in v.platforms" :key="p" size="small" :bordered="false" round>{{ platformName(p) }}</n-tag>
-          <n-tag v-for="t in v.main_topics" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
+        <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
+          <n-tag v-if="it.kind === 'cloud'" size="small" type="info" :bordered="false" round>云端</n-tag>
+          <n-tag v-if="it.kind === 'cloud' && it.merged" size="tiny" type="success" :bordered="false" round>合并×{{ it.merged }}</n-tag>
+          <n-tag v-if="it.is_ad" size="small" :bordered="false" round type="error">广告</n-tag>
+          <n-tag v-for="p in it.platforms" :key="p" size="small" :bordered="false" round>{{ platformName(p) }}</n-tag>
+          <n-tag v-for="t in it.main_topics || []" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
         </div>
-        <p class="tile-meta" style="word-break: break-all; margin-top: 8px">{{ v.filename }}</p>
-        <p class="tile-meta" style="margin-top: -2px">
-          {{ v.status === 'published' ? '已发布' : '计划中' }}
-          <template v-if="v.planned_publish_at"> · 计划 {{ fmt(v.planned_publish_at) }}</template>
-          <template v-if="v.published_at"> · 发布 {{ fmt(v.published_at) }}</template>
-        </p>
-        <div class="row" style="gap: 5px; margin-bottom: 6px">
-          <n-tag v-for="t in v.tags" :key="t" size="small" :bordered="false">{{ t }}</n-tag>
-          <span v-if="!v.tags.length" class="muted">无标签</span>
-        </div>
-        <div class="row" style="gap: 6px; margin-top: 6px">
-          <n-tag v-if="v.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
-          <n-button
-            v-if="v.platform_post_id"
-            size="tiny"
-            secondary
-            :loading="syncing === v.id"
-            @click="syncData(v)"
-          >同步数据</n-button>
-        </div>
-        <div v-if="!v.tags_confirmed" class="tile-actions">
-          <n-button size="small" secondary @click="confirmTags(v)">确认标签</n-button>
-        </div>
+        <h3 class="tile-title" :title="it.title" @click="openItem(it)">{{ it.title }}</h3>
+
+        <template v-if="it.kind === 'local'">
+          <p class="tile-meta" style="word-break: break-all; margin-top: 8px">{{ it.filename }}</p>
+          <p class="tile-meta" style="margin-top: -2px">
+            {{ it.status === 'published' ? '已发布' : '计划中' }}
+            <template v-if="it.planned_publish_at"> · 计划 {{ fmt(it.planned_publish_at) }}</template>
+            <template v-if="it.published_at"> · 发布 {{ fmt(it.published_at) }}</template>
+          </p>
+          <div class="row" style="gap: 5px; margin-bottom: 6px">
+            <n-tag v-for="t in it.tags" :key="t" size="small" :bordered="false">{{ t }}</n-tag>
+            <span v-if="!it.tags.length" class="muted">无标签</span>
+          </div>
+          <div class="row" style="gap: 6px; margin-top: 6px">
+            <n-tag v-if="it.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
+            <n-button
+              v-if="it.platform_post_id"
+              size="tiny"
+              secondary
+              :loading="syncing === it.id"
+              @click="syncData(it)"
+            >同步数据</n-button>
+          </div>
+          <div v-if="!it.tags_confirmed" class="tile-actions">
+            <n-button size="small" secondary @click="confirmTags(it)">确认标签</n-button>
+          </div>
+        </template>
+
+        <template v-else>
+          <p class="tile-meta" style="margin-top: 6px">
+            {{ it.cloudPosts.map(x => platformName(x.platform)).join(' / ') }}
+            <template v-if="it.pub"> · {{ it.pub }}</template>
+          </p>
+          <div v-for="pst in it.cloudPosts.slice(0, 3)" :key="pst.id" class="plat-line">
+            <b>{{ platformName(pst.platform) }}</b>
+            <template v-if="pst.latest_stat">
+              <span>播放 {{ fmtNum(pst.latest_stat.plays) }}</span>
+              <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
+              <span v-if="pst.latest_stat.comments">评 {{ fmtNum(pst.latest_stat.comments) }}</span>
+            </template>
+            <span v-else class="muted">暂无指标</span>
+          </div>
+          <div class="row" style="gap: 5px; flex-wrap: wrap; margin-top: 8px">
+            <n-button size="tiny" type="primary" secondary @click="openCloud(it)">上传视频/文案</n-button>
+            <n-button v-if="it.cloudPosts.length" size="tiny" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
+            <n-button v-if="it.local_video_id" size="tiny" secondary @click="goLocal(it.local_video_id)">打开本地素材</n-button>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -150,49 +176,29 @@
       </div>
 
     </n-modal>
-    <div class="section-title" style="margin-top: 28px">
-      云端作品
-      <span class="muted" style="font-size: 12px">同一内容发三个平台会自动合并成一条，不重复展示</span>
-      <div class="grow"></div>
-      <n-button v-if="!mergeMode" size="tiny" secondary @click="mergeMode = true">选择合并</n-button>
-      <template v-else>
-        <n-button size="tiny" type="primary" :disabled="selected.size < 2" @click="doMerge">合并所选（{{ selected.size }}）</n-button>
-        <n-button size="tiny" secondary @click="cancelMerge">取消</n-button>
-      </template>
-    </div>
-    <div class="panel">
-      <div v-if="worksLoading" class="empty">加载中…</div>
-      <div v-else-if="!works.length" class="empty">暂无云端作品（先在「博主」页同步平台数据）</div>
-      <div v-else class="work-grid">
-        <div v-for="w in works" :key="(w.type === 'work' ? 'w' : 'p') + w.id" class="work-card" :class="{ sel: selected.has(w.id) }">
-          <div class="work-cover" @click="openWorkDetail(w)">
-            <img v-if="w.cover" :src="w.cover" alt="" />
-            <span v-else>ECHO</span>
-            <n-checkbox v-if="mergeMode && w.type === 'post'" class="work-sel" :checked="selected.has(w.id)" @update:checked="toggleSel(w)" />
-          </div>
-          <div class="work-body">
-            <div class="work-title" :title="w.title">{{ w.title }}</div>
-            <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
-              <n-tag v-for="pl in w.platforms" :key="pl" size="tiny" :bordered="false" round>{{ platformName(pl) }}</n-tag>
-              <n-tag v-if="w.type === 'work'" size="tiny" type="info" :bordered="false">合并×{{ w.posts.length }}</n-tag>
-            </div>
-            <div v-for="pst in w.posts" :key="pst.id" class="plat-line">
-              <b>{{ platformName(pst.platform) }}</b>
-              <template v-if="pst.latest_stat">
-                <span>播放 {{ fmtNum(pst.latest_stat.plays) }}</span>
-                <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
-                <span v-if="pst.latest_stat.comments">评 {{ fmtNum(pst.latest_stat.comments) }}</span>
-              </template>
-              <span v-else class="muted">暂无指标</span>
-            </div>
-            <div class="row" style="gap: 5px; flex-wrap: wrap; margin-top: 8px">
-              <n-button v-for="pst in w.posts" :key="'s' + pst.id" size="tiny" secondary :loading="syncingPost === pst.id" @click="syncCloudPost(pst)">同步{{ platformName(pst.platform) }}</n-button>
-              <n-button v-if="w.type === 'work'" size="tiny" quaternary type="error" @click="splitWork(w)">拆分</n-button>
-            </div>
+    <n-modal v-model:show="showCloud" preset="card" :title="'转本地素材：' + (cloudItem && cloudItem.title || '')" style="width: min(620px, 94vw)">
+      <div v-if="cloudItem" style="max-height: 70vh; overflow-y: auto; padding-right: 4px">
+        <div class="form-item">
+          <label class="form-label">上传视频（可选，会触发转写）</label>
+          <div class="row" style="gap: 8px">
+            <input ref="cloudFileInput" type="file" accept="video/*" class="file-hidden" @change="onCloudFile" />
+            <n-button secondary @click="cloudFileInput && cloudFileInput.click()">选择视频文件</n-button>
+            <span v-if="cloudFile" class="muted grow">{{ cloudFile.name }}</span>
           </div>
         </div>
+        <div class="form-item">
+          <label class="form-label">文案 / 原始文字（可选）</label>
+          <n-input v-model:value="cloudText" type="textarea" :rows="5" placeholder="粘贴你的口播文案或字幕，转本地素材后可用于 AI 学习" />
+        </div>
+        <p class="muted" style="font-size: 12px">
+          保存后此作品会出现在素材库（云端标识去掉），可继续编辑平台/赛道/发布时间。
+        </p>
+        <div class="row">
+          <n-button type="primary" :loading="cloudSaving" @click="saveCloudLocal">保存为本地素材</n-button>
+          <n-button secondary @click="showCloud = false">取消</n-button>
+        </div>
       </div>
-    </div>
+    </n-modal>
 
   </div>
 </template>
@@ -200,7 +206,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import { api, uploadVideo, uploadCover } from '../api'
+import { api, uploadVideo, uploadCover, getToken } from '../api'
 
 const message = useMessage()
 const topics = ['求职', '面试', '赚钱', '知识', '其他']
@@ -217,6 +223,13 @@ const orig = ref(null)
 const syncing = ref(0)
 const works = ref([])
 const worksLoading = ref(false)
+const cards = ref([])
+const showCloud = ref(false)
+const cloudItem = ref(null)
+const cloudFile = ref(null)
+const cloudText = ref('')
+const cloudSaving = ref(false)
+const cloudFileInput = ref(null)
 const mergeMode = ref(false)
 const selected = ref(new Set())
 const syncingPost = ref(0)
@@ -267,6 +280,7 @@ async function load() {
     params.set('limit', '500')
     const data = await api('/api/videos?' + params.toString())
     videos.value = data.items
+    buildCards()
   } catch (e) {
     message.error(e.message)
   } finally {
@@ -422,10 +436,111 @@ async function loadWorks() {
   try {
     const data = await api('/api/works')
     works.value = data.items || []
+    buildCards()
   } catch (e) {
     works.value = []
   } finally {
     worksLoading.value = false
+  }
+}
+
+function buildCards() {
+  const local = videos.value.map(v => ({
+    key: 'v' + v.id,
+    kind: 'local',
+    id: v.id,
+    title: v.title || v.filename || '',
+    cover_url: v.cover_url || '',
+    platforms: v.platforms || [],
+    main_topics: v.main_topics || [],
+    is_ad: v.is_ad,
+    tags: v.tags || [],
+    status: v.status,
+    planned_publish_at: v.planned_publish_at,
+    published_at: v.published_at,
+    filename: v.filename,
+    tags_confirmed: v.tags_confirmed,
+    platform_post_id: v.platform_post_id,
+    date: (v.published_at || v.planned_publish_at || v.created_at || '').slice(0, 10)
+  }))
+  const cloud = (works.value || []).map(w => {
+    const anyLocal = (w.posts || []).find(x => x.local_video_id)
+    return {
+      key: (w.type === 'work' ? 'w' : 'p') + w.id,
+      kind: 'cloud',
+      id: w.id,
+      type: w.type,
+      title: w.title || '（无标题）',
+      cover_url: w.cover || '',
+      platforms: w.platforms || [],
+      main_topics: [],
+      is_ad: false,
+      tags: [],
+      merged: w.type === 'work' ? (w.posts || []).length : 0,
+      cloudPosts: w.posts || [],
+      local_video_id: anyLocal ? anyLocal.local_video_id : null,
+      pub: ((w.posts || [])[0] && (w.posts[0].publish_time || '')).slice(0, 10) || '',
+      date: (((w.posts || [])[0] && (w.posts[0].publish_time || '')) || '').slice(0, 10)
+    }
+  })
+  cards.value = [...local, ...cloud].sort((a, b) => (b.date < a.date ? -1 : 1))
+}
+
+function openItem(it) {
+  if (it.kind === 'cloud') openCloud(it)
+  else openEdit(it)
+}
+
+function openCloud(it) {
+  cloudItem.value = it
+  cloudFile.value = null
+  cloudText.value = ''
+  showCloud.value = true
+}
+
+function onCloudFile(e) {
+  cloudFile.value = e.target.files[0] || null
+}
+
+async function goLocal(id) {
+  await load()
+  const v = videos.value.find(x => x.id === id)
+  if (v) openEdit(v)
+}
+
+async function saveCloudLocal() {
+  if (!cloudItem.value) return
+  cloudSaving.value = true
+  try {
+    const fd = new FormData()
+    if (cloudFile.value) fd.append('file', cloudFile.value)
+    if (cloudText.value) fd.append('text', cloudText.value)
+    if (cloudItem.value.type === 'work') fd.append('work_id', String(cloudItem.value.id))
+    else fd.append('post_id', String(cloudItem.value.id))
+    const resp = await fetch('/api/works/to-local', {
+      method: 'POST',
+      headers: { 'X-Access-Token': getToken() },
+      body: fd
+    })
+    if (!resp.ok) {
+      let detail = resp.statusText
+      try { detail = (await resp.json()).detail || detail } catch {}
+      throw new Error(detail)
+    }
+    const r = await resp.json()
+    message.success(cloudFile.value ? '已保存并触发转写' : '已转为本地素材（可继续编辑）')
+    showCloud.value = false
+    await load()
+    await loadWorks()
+    if (r.video_id) {
+      const v = videos.value.find(x => x.id === r.video_id)
+      if (v) openEdit(v)
+    }
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    cloudSaving.value = false
+    if (cloudFileInput.value) cloudFileInput.value.value = ''
   }
 }
 
