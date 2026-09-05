@@ -1002,37 +1002,6 @@ onMounted(async () => {
 }
 
 
-.card-tile { position: relative; }
-.tile-cover { position: relative; }
-.card-tile.picking { cursor: pointer; }
-.pick-box {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 3;
-  background: rgba(255, 255, 255, 0.85);
-  border-radius: 6px;
-  padding: 2px;
-}
-.row-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  min-height: 32px;
-  margin-top: 8px;
-}
-
-.card-tile { display: flex; flex-direction: column; }
-.row-actions { margin-top: auto; }
-
-.tag-row {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-
 .plat-tag {
   flex: 0 0 58px;
   text-align: center;
@@ -1066,30 +1035,8 @@ onMounted(async () => {
   font-size: 11px;
 }
 
-.tile-meta {
-  margin: 6px 0 0;
-  font-size: 8px;
-  line-height: 1.4;
-  color: #6f675c;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 
 .grid-videos {
   align-items: stretch;
 }
-.card-tile {
-  height: 100%;
-}
-.row-actions {
-  margin-top: auto;
-  padding-top: 8px;
-  min-height: 24px;
-}
-.tag-row {
-  min-height: 0;
-}
-
 </style>
