@@ -102,11 +102,12 @@ def _tags_of(*texts: str) -> list[str]:
     import re
 
     out: list[str] = []
-    skip = {"抖音", "小红书", "bilibili", "B站", "视频", "vlog"}
+    skip = {"抖音", "douyin", "小红书", "xiaohongshu", "bilibili", "B站", "b站", "哔哩哔哩", "视频", "vlog", "话题", "tag"}
+    _norm = {x.lower() for x in skip}
     for text in texts:
         for m in re.findall(r"[#＃]([^\s#＃，。！？!?、]+)", text or ""):
             tag = m.strip()
-            if tag and tag not in skip and tag not in out:
+            if tag and tag.lower() not in _norm and tag not in out:
                 out.append(tag)
             if len(out) >= 20:
                 return out

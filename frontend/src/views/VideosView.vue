@@ -46,8 +46,11 @@
         <h3 class="tile-title" :title="it.title" @click="openItem(it)">{{ it.title }}</h3>
 
         <template v-if="it.kind === 'local'">
-          <div class="row" style="gap: 5px; margin-bottom: 6px">
-            <n-tag v-for="t in it.tags" :key="t" size="small" :bordered="false">{{ t }}</n-tag>
+          <div class="tag-row">
+            <template v-for="(t, ti) in it.tags.slice(0, 6)" :key="t">
+              <n-tag size="small" :bordered="false">{{ t }}</n-tag>
+            </template>
+            <n-tag v-if="it.tags.length > 6" size="small" :bordered="false" round>… +{{ it.tags.length - 6 }}</n-tag>
             <span v-if="!it.tags.length" class="muted">无标签</span>
           </div>
           <p class="tile-meta">
@@ -64,8 +67,11 @@
         </template>
 
         <template v-else>
-          <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
-            <n-tag v-for="t in it.tags" :key="t" size="tiny" :bordered="false" round>{{ t }}</n-tag>
+          <div class="row tag-row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap; overflow: hidden">
+            <template v-for="(t, ti) in it.tags.slice(0, 8)" :key="t">
+              <n-tag size="tiny" :bordered="false" round>{{ t }}</n-tag>
+            </template>
+            <n-tag v-if="it.tags.length > 8" size="tiny" :bordered="false" round>… +{{ it.tags.length - 8 }}</n-tag>
           </div>
           <div v-for="pst in it.cloudPosts.slice(0, 3)" :key="pst.id" class="plat-line">
             <b>{{ platformName(pst.platform) }}</b>
@@ -177,7 +183,7 @@
     </n-modal>
     <n-modal v-model:show="showCloud" preset="card" :title="'转本地素材：' + (cloudItem && cloudItem.title || '')" style="width: min(620px, 94vw)">
       <div v-if="cloudItem" style="max-height: 70vh; overflow-y: auto; padding-right: 4px">
-        <n-tabs v-model:value="cloudTab" type="line" animated>
+        <n-tabs v-model:value="cloudTab" type="line" animated @update:value="onCloudTab">
           <n-tab-pane name="local" tab="转本地素材">
             <div class="form-item">
               <label class="form-label">上传视频（可选，会触发转写）</label>
@@ -204,7 +210,7 @@
             <div v-for="pst in cloudItem.cloudPosts || []" :key="pst.id" class="comment-block">
               <div class="row" style="gap: 6px; align-items: center; margin-top: 6px">
                 <b>{{ platformName(pst.platform) }}</b>
-                <n-button size="tiny" secondary :loading="commentsLoading === pst.id" @click="loadComments(pst)">加载评论</n-button>
+                <n-button size="tiny" secondary :loading="commentsLoading === pst.id" @click="refreshComments(pst)">加载评论</n-button>
                 <span v-if="(commentsMap[pst.id] || []).length" class="muted">{{ commentsMap[pst.id].length }} 条</span>
               </div>
               <ul v-if="(commentsMap[pst.id] || []).length" style="margin: 6px 0 0; padding-left: 1.2em; max-height: 180px; overflow-y: auto">
@@ -567,11 +573,26 @@ function openCloud(it) {
 }
 
 async function loadComments(pst) {
-  commentsLoading.value = pst.id
   try {
     const r = await api(`/api/platform/posts/${pst.id}/comments?limit=50`)
     commentsMap.value = { ...commentsMap.value, [pst.id]: r.items || [] }
-    if (!(r.items || []).length) message.info('本地暂无评论：点该作品卡片的「同步数据」后，评论会入库到这里')
+  } catch (e) {
+    /* 静默 */
+  }
+}
+
+function onCloudTab(name) {
+  if (name !== 'comments' || !cloudItem.value) return
+  const posts = cloudItem.value.cloudPosts || []
+  posts.forEach(pst => loadComments(pst))
+}
+
+async function refreshComments(pst) {
+  commentsLoading.value = pst.id
+  try {
+    const r = await api(`/api/platform/posts/${pst.id}/comments/refresh`, { method: 'POST', body: '{}' })
+    commentsMap.value = { ...commentsMap.value, [pst.id]: r.items || [] }
+    message.success(r.added > 0 ? `已入库 ${r.added} 条新评论，共 ${(r.items || []).length} 条` : `已是最新（共 ${(r.items || []).length} 条）`)
   } catch (e) {
     message.error('评论拉取失败：' + e.message)
   } finally {
@@ -862,4 +883,13 @@ onMounted(async () => {
 
 .card-tile { display: flex; flex-direction: column; }
 .row-actions { margin-top: auto; }
+
+.tag-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  max-height: 46px;
+  overflow: hidden;
+}
 </style>

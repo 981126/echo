@@ -154,22 +154,104 @@ def post_to_material(post_id: int, db: Session = Depends(get_db)):
     return {"ok": True, "video_id": video.id, "video": {"id": video.id, "title": video.title}}
 
 
-@router.get("/posts/{post_id}/comments", response_model=dict)
-def post_comments(post_id: int, limit: int = 50, db: Session = Depends(get_db)):
-    """读取本地已入库的评论（评论在同步/同步数据时写入，不再实时调第三方）。"""
+@router.post("/posts/{post_id}/comments/refresh", response_model=dict)
+def refresh_post_comments(post_id: int, limit: int = 30, db: Session = Depends(get_db)):
+    """点“加载评论”：实时调第三方拉取 → 去重落库 → 返回（下次直接读本地）。"""
+    import json as _json
+
     from ..models.platform import PlatformPostComment
 
     post = db.get(PlatformPost, post_id)
     if post is None:
         raise HTTPException(status_code=404, detail="云端作品不存在")
+    acc = db.get(CreatorAccount, post.account_id)
+    raw = {}
+    try:
+        raw = _json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
+    except _json.JSONDecodeError:
+        raw = {}
+    client = make_client()
+    try:
+        texts = client.fetch_comments(post.platform, post.platform_post_id, max(1, min(limit, 50)), acc, raw=raw)
+    except Exception:  # noqa: BLE001
+        texts = []
+    added = 0
+    for c in texts:
+        c = (c or "").strip()
+        if not c:
+            continue
+        dup = (
+            db.query(PlatformPostComment)
+            .filter(PlatformPostComment.post_id == post_id, PlatformPostComment.text == c)
+            .first()
+        )
+        if dup is None:
+            db.add(PlatformPostComment(post_id=post_id, platform=post.platform, text=c))
+            added += 1
+    db.commit()
     rows = (
         db.query(PlatformPostComment)
         .filter(PlatformPostComment.post_id == post_id)
         .order_by(PlatformPostComment.id.desc())
-        .limit(max(1, min(limit, 200)))
+        .limit(200)
         .all()
     )
-    return {"post_id": post_id, "platform": post.platform, "items": [r.text for r in rows]}
+    return {"post_id": post_id, "platform": post.platform, "items": [r.text for r in rows], "added": added}
+
+
+@router.get("/posts/{post_id}/comments", response_model=dict)
+def post_comments(post_id: int, limit: int = 50, refresh: int = 0, db: Session = Depends(get_db)):
+    """评论：默认读本地库；refresh=1 时实时调第三方并把新评论去重落库后再返回。"""
+    import json as _json
+
+    from ..models.platform import PlatformPostComment
+
+    post = db.get(PlatformPost, post_id)
+    if post is None:
+        raise HTTPException(status_code=404, detail="云端作品不存在")
+    if int(refresh or 0):
+        acc = db.get(CreatorAccount, post.account_id)
+        raw = {}
+        try:
+            raw = _json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
+        except _json.JSONDecodeError:
+            raw = {}
+        try:
+            client = make_client()
+            texts = client.fetch_comments(post.platform, post.platform_post_id, 50, acc, raw=raw)
+        except Exception:  # noqa: BLE001 拉取失败不阻断
+            texts = []
+        added = 0
+        for t in texts:
+            t = (t or "").strip()
+            if not t:
+                continue
+            dup = (
+                db.query(PlatformPostComment)
+                .filter(PlatformPostComment.post_id == post_id, PlatformPostComment.text == t)
+                .first()
+            )
+            if dup is None:
+                db.add(PlatformPostComment(post_id=post_id, platform=post.platform, text=t))
+                added += 1
+        db.commit()
+    rows = (
+        db.query(PlatformPostComment)
+        .filter(PlatformPostComment.post_id == post_id)
+        .order_by(PlatformPostComment.id)
+        .all()
+    )
+    seen = set()
+    items = []
+    for r in rows:
+        if r.text in seen:
+            continue
+        seen.add(r.text)
+        items.append(r.text)
+        if len(items) >= max(1, min(limit, 200)):
+            break
+    return {"post_id": post_id, "platform": post.platform, "items": items}
+
 
 
 @router.get("/posts/{post_id}/stats", response_model=dict)
