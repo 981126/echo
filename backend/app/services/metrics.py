@@ -200,7 +200,7 @@ def summary(db: Session) -> dict:
             ps["videos"] += 1
             ps["plays"] += latest.plays
             ps["likes"] += latest.likes
-    per_video.sort(key=lambda x: x["plays"], reverse=True)
+    per_video.sort(key=lambda x: (x["published_at"] is not None, str(x["published_at"] or "")), reverse=True)
     return {
         "per_video": per_video,
         "by_topic": topic_stats,
