@@ -105,46 +105,22 @@
     />
 
     <!-- 账号配置 -->
-    <n-modal v-model:show="showAccountModal" preset="card" :title="acctForm.id ? '编辑账号' : '配置 ' + platformName(acctForm.platform) + ' 账号'" style="width: min(560px, 94vw)">
-      <div class="form-item">
-        <label class="form-label">平台</label>
-        <n-select
-          v-model:value="acctForm.platform"
-          :options="platformOptions"
-          :disabled="!!acctForm.id"
-          placeholder="选择平台"
-          @update:value="() => (acctForm.platform_user_id = '')"
-        />
-      </div>
-      <div class="form-item">
-        <label class="form-label">昵称（可选）</label>
-        <n-input v-model:value="acctForm.nickname" placeholder="自动同步时会用主页昵称覆盖" />
-      </div>
-      <div class="form-item">
-        <label class="form-label">主页分享链接</label>
-        <div class="row" style="gap: 6px">
-          <n-input v-model:value="acctForm.home_link" placeholder="粘贴主页分享链接，点右侧自动解析 ID" style="flex: 1" />
-          <n-button secondary :loading="parsing" @click="parseLink">解析</n-button>
-        </div>
-      </div>
-      <div class="form-item">
-        <label class="form-label">平台用户 ID（解析后自动填入，也可手动改）</label>
-        <n-input v-model:value="acctForm.platform_user_id" placeholder="sec_user_id / user_id / uid" />
-      </div>
-      <div class="form-item">
-        <label class="form-label">同步频率</label>
-        <n-select v-model:value="acctForm.sync_frequency" :options="freqOptions" />
-      </div>
-      <div class="form-item">
-        <label class="form-label">增强配置（JSON，可选：cookie/share_text 等）</label>
-        <n-input v-model:value="acctExtraText" type="textarea" :rows="2" placeholder='{"share_text":""}' />
-      </div>
-      <n-checkbox v-model:checked="acctForm.enabled">启用自动同步</n-checkbox>
-      <div class="row" style="margin-top: 14px">
-        <n-button type="primary" @click="saveAccount">保存</n-button>
-        <n-button secondary @click="showAccountModal = false">取消</n-button>
-      </div>
-    </n-modal>
+    <AccountFormModal
+      :show="showAccountModal"
+      :form="acctForm"
+      :extra-text="acctExtraText"
+      :parsing="parsing"
+      @update:show="v => (showAccountModal = v)"
+      @update:platform="v => { acctForm.platform = v; acctForm.platform_user_id = '' }"
+      @update:nickname="v => (acctForm.nickname = v)"
+      @update:homeLink="v => (acctForm.home_link = v)"
+      @update:userId="v => (acctForm.platform_user_id = v)"
+      @update:freq="v => (acctForm.sync_frequency = v)"
+      @update:enabled="v => (acctForm.enabled = v)"
+      @update:extra="v => (acctExtraText = v)"
+      @parse="parseLink"
+      @save="saveAccount"
+    />
 
     <!-- 云端作品 -->
     <n-modal v-model:show="showPosts" preset="card" :title="'云端作品 · ' + (currentAcct ? platformName(currentAcct.platform) + ' ' + (currentAcct.nickname || '') : '')" style="width: min(960px, 96vw)">
