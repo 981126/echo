@@ -119,3 +119,12 @@
 - 前端：新增"博主"页（CRUD/切换/账号/同步/云端作品/预算/我 vs 对标汇总）；素材库发布链接 + 同步数据按钮；时间线来源标签；主页评论灵感池
 - 质量门禁 verify.sh 通过；后端 32 项 pytest 全绿（新增 6 项平台测试）
 - 未完成（下期）：R-030 写稿体验 8 项、复盘页正式"我 vs 对标"对比卡、real TikHub 实机联调
+
+## [M13 R-030 一期] 2026-09-05 — 写稿体验增强（①②③⑤⑦ + 复盘对比卡）
+- 选题→角度→草稿：POST /api/drafts/angles（LLM 3 角度，无密钥启发式兜底）；主页热点/评论灵感先选角度再生成
+- 分节反馈：feedback 增 hook/pace/ending/style_score 四维；脚本工作台卡片可点选"好/中/差"后统一"记反馈"
+- 像我金句库：/api/persona/phrases/suggest 从高表现素材抽短句 → 人设页一键收为锚点（category=phrase）→ 生成强注入（短句语气）
+- 对标风格参考：主博主下的对标备注注入生成上下文（仅参考，不污染主博主语料）
+- 生成前体检 + 一键回炉：/api/drafts/{id}/check（红线/钩子/结尾/篇幅）与 /rework（异步重写并替换回原草稿）
+- 复盘"我 vs 对标"对比卡：数据看板（复盘页）顶部展示主/对标粉丝/作品/中位播放（/api/platform/creator-summary）
+- .env / .env.example 补 ECHO_TIKHUB_API_KEY/BASE_URL/MODE/DAILY_BUDGET/PLATFORM_SYNC_TIMES（作者 key 已写入 .env，模式默认 mock）
