@@ -16,13 +16,15 @@
       <span class="muted tl-hint">任一平台匹配即可</span>
       <n-button type="primary" @click="applyFilters">查询</n-button>
       <n-button size="small" secondary :loading="autoMerging" @click="autoMergeAll">自动合并</n-button>
-      <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
     </div>
-    <div v-if="mergeMode" class="merge-bar row" style="gap: 8px">
-      <span class="muted">勾选 2 个以上云端素材，合并为同一作品</span>
-      <div class="grow" />
-      <n-button size="tiny" type="primary" :disabled="selected.size < 2" @click="doMergeCloud">合并所选（{{ selected.size }}）</n-button>
-      <n-button size="tiny" secondary @click="cancelMerge">取消</n-button>
+
+
+    <div class="merge-float">
+      <n-button v-if="!mergeMode" size="small" type="primary" secondary @click="mergeMode = true">合并</n-button>
+      <template v-else>
+        <n-button size="small" type="primary" :disabled="selected.size < 2" @click="doMergeCloud">合并所选（{{ selected.size }}）</n-button>
+        <n-button size="small" secondary @click="cancelMerge">取消</n-button>
+      </template>
     </div>
 
     <div v-if="loading" class="panel empty">加载中…</div>
@@ -1010,16 +1012,22 @@ onMounted(async () => {
   align-items: stretch;
 }
 
-.merge-bar {
-  position: sticky;
-  bottom: 14px;
-  z-index: 30;
-  margin: 8px 0 2px;
-  padding: 8px 12px;
-  background: var(--surface);
+.merge-float {
+  position: fixed;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(255, 253, 250, 0.92);
   border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(43, 40, 35, 0.10);
+  box-shadow: 0 4px 18px rgba(43, 40, 35, 0.12);
+  backdrop-filter: blur(2px);
 }
 
 </style>
