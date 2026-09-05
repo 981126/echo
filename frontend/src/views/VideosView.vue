@@ -451,8 +451,10 @@ async function loadWorks() {
 function buildCards() {
   // 云端已绑定本地素材(转素材后)的记录不重复展示，避免合并后多个素材
   const linkedLocal = new Set()
-  ;(works.value || []).forEach(w => {
-    ;(w.posts || []).forEach(pst => { if (pst.local_video_id) linkedLocal.add(pst.local_video_id) })
+  const cloudWorks = works.value || []
+  cloudWorks.forEach(w => {
+    const wPosts = w.posts || []
+    wPosts.forEach(pst => { if (pst.local_video_id) linkedLocal.add(pst.local_video_id) })
   })
   const local = videos.value.filter(v => !linkedLocal.has(v.id)).map(v => ({
     key: 'v' + v.id,
