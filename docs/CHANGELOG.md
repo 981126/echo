@@ -301,3 +301,7 @@
 ## [M43 / R-061 C 继续] 2026-09-05 — 前端 composables 统一（第一块）
 - 新增 src/composables/media.js（fetchVideos/fetchWorks）
 - VideosView 5 处素材/作品拉取改走封装（load/loadQuiet/loadWorks/loadWorksQuiet/initLoad）
+
+## [M43 / R-061 C 继续] 2026-09-05 — PlatformStats 子组件
+- 新增 PlatformStats.vue：平台指标三行（含灰字占位）统一组件
+- VideosView 本地/云端卡片平台区改用它，移除重复标记与 platOf/platOrder
