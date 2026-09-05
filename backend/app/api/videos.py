@@ -100,15 +100,25 @@ def _platform_links(db: Session, video: Video) -> list[PlatformLinkOut]:
     from ..core.platform_links import build_platform_page_url
 
     posts: list[PlatformPost] = []
+    seen_ids: set[int] = set()
+    for bound in db.query(PlatformPost).filter(PlatformPost.local_video_id == video.id).all():
+        if bound.id not in seen_ids:
+            posts.append(bound)
+            seen_ids.add(bound.id)
     if video.work_id:
-        posts = db.query(PlatformPost).filter(PlatformPost.work_id == video.work_id).all()
-    if not posts and video.platform_post_id and ":" in video.platform_post_id:
+        for bound in db.query(PlatformPost).filter(PlatformPost.work_id == video.work_id).all():
+            if bound.id not in seen_ids:
+                posts.append(bound)
+                seen_ids.add(bound.id)
+    if video.platform_post_id and ":" in video.platform_post_id:
         platform, external_id = video.platform_post_id.split(":", 1)
-        posts = (
+        found = (
             db.query(PlatformPost)
             .filter(PlatformPost.platform == platform, PlatformPost.platform_post_id == external_id)
-            .all()
+            .first()
         )
+        if found is not None and found.id not in seen_ids:
+            posts.append(found)
     seen: list[str] = []
     links: list[PlatformLinkOut] = []
     for post in posts:

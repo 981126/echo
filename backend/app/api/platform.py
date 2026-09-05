@@ -121,6 +121,81 @@ def bind_video_link(video_id: int, payload: dict, db: Session = Depends(get_db))
     return {"ok": True, "platform": platform, "platform_post_id": video.platform_post_id}
 
 
+@router.post("/videos/{video_id}/bind-links", response_model=dict)
+def bind_video_links(video_id: int, payload: dict, db: Session = Depends(get_db)):
+    """R-036：编辑页按平台填写链接 → 解析并绑定各平台作品（支持三平台）。
+
+    每个非空链接解析后：若平台作品表已有该作品则直接绑定（local_video_id），
+    否则在当前主博主的该平台账号下创建占位作品再绑定。
+    """
+    from ..services.platform.tikhub import parse_post_id
+
+    video = db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    links = (payload or {}).get("links") or {}
+    if not isinstance(links, dict):
+        raise HTTPException(status_code=400, detail="links 格式错误")
+    cid = current_creator_id(db)
+    bound: list[dict] = []
+    errors: list[str] = []
+    for platform in ("douyin", "bilibili", "xiaohongshu"):
+        link = str(links.get(platform) or "").strip()
+        if not link:
+            continue
+        parsed_platform, ext = parse_post_id(link)
+        if not parsed_platform or not ext:
+            errors.append(f"{platform} 链接无法解析")
+            continue
+        if parsed_platform != platform:
+            errors.append(f"该链接是 {parsed_platform}，却填在了 {platform} 栏")
+            continue
+        post = (
+            db.query(PlatformPost)
+            .filter(PlatformPost.platform == platform, PlatformPost.platform_post_id == ext)
+            .first()
+        )
+        if post is None:
+            account = None
+            if cid:
+                account = (
+                    db.query(CreatorAccount)
+                    .filter(CreatorAccount.creator_id == cid, CreatorAccount.platform == platform)
+                    .first()
+                )
+            if account is None:
+                errors.append(f"{platform}：未配置该平台账号（请先在博主管理添加）")
+                continue
+            post = PlatformPost(
+                account_id=account.id,
+                platform=platform,
+                platform_post_id=ext,
+                title=video.title or "",
+                raw="{}",
+            )
+            db.add(post)
+            db.flush()
+        post.local_video_id = video.id
+        plats = json.loads(video.platforms or "[]") if isinstance(video.platforms, str) else (video.platforms or [])
+        if platform not in plats:
+            plats.append(platform)
+            video.platforms = json.dumps(plats, ensure_ascii=False)
+        if not (video.platform_post_id or "").strip():
+            video.platform_post_id = f"{platform}:{ext}"
+        bound.append({"platform": platform, "platform_post_id": ext})
+    # 存在真实平台链接 => 已发布
+    if bound:
+        video.status = "published"
+        from datetime import datetime
+
+        if not video.published_at:
+            video.published_at = datetime.utcnow()
+    db.commit()
+    if errors and not bound:
+        raise HTTPException(status_code=400, detail="；".join(errors))
+    return {"ok": True, "bound": bound, "errors": errors}
+
+
 @router.post("/posts/{post_id}/sync", response_model=dict)
 def sync_post(post_id: int, db: Session = Depends(get_db)):
     try:

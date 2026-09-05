@@ -110,22 +110,14 @@
           <n-input v-model:value="editing.title" placeholder="视频标题（选题标题）" />
         </div>
         <div class="form-item">
-          <label class="form-label">发布链接（可选，用于“同步数据”）</label>
-          <n-input v-model:value="editing.publishLink" placeholder="粘贴抖音 /video/、B站 /video/BV、小红书 /explore/ 作品链接" />
-        </div>
-
-        <div v-if="editing.platformLinks && editing.platformLinks.length" class="form-item">
-          <label class="form-label">平台链接（点击查看）</label>
-          <div class="row" style="gap: 8px; flex-wrap: wrap">
-            <a
-              v-for="lk in editing.platformLinks"
-              :key="lk.platform"
-              class="link-chip"
-              :href="lk.url || '#'"
-              target="_blank"
-              rel="noopener"
-            >{{ platformName(lk.platform) }} ↗</a>
+          <label class="form-label">平台链接（用于同步数据，可手动填写）</label>
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div v-for="p in linkPlatforms" :key="p" class="row" style="gap: 8px; align-items: center">
+              <span class="plat-tag">{{ platformName(p) }}</span>
+              <n-input v-model:value="editing.links[p]" :placeholder="'粘贴' + platformName(p) + '作品链接'" clearable />
+            </div>
           </div>
+          <span class="muted" style="font-size: 12px">填了哪个平台就同步哪个；已绑定的会自动带出。保存后点「同步数据」拉取最新数据</span>
         </div>
         <div class="row" style="gap: 18px; align-items: flex-start; margin-bottom: 14px">
           <div class="cover-edit" @click="coverInput && coverInput.click()">
@@ -209,7 +201,9 @@
             <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
           </div>
         </div>
-        <div class="row">
+        <div class="row" style="gap: 8px">
+          <n-button secondary :loading="syncingEdit" @click="syncEditLinks">同步数据</n-button>
+          <div class="grow" />
           <n-button type="primary" @click="saveEdit">保存</n-button>
           <n-button secondary @click="closeEdit">取消</n-button>
         </div>
@@ -462,7 +456,7 @@ async function openEdit(v) {
     platforms: [...(v.platforms || [])],
     main_topics: [...(v.main_topics || [])],
     coverUrl: v.cover_url || null,
-    publishLink: v.platform_post_id || '',
+    links: linksFromPlatform(detail.platform_links || []),
     adPrice: v.ad_price == null ? null : Number(v.ad_price),
     sourceText: tr?.source_text || '',
     transcriptText: tr?.transcript_text || '',
@@ -483,7 +477,7 @@ async function openEdit(v) {
     publishedTs: editing.value.publishedTs,
     tagsText: tagsText.value,
     sourceText: editing.value.sourceText,
-    publishLink: editing.value.publishLink,
+    links: { ...(editing.value.links || {}) },
     adPrice: editing.value.adPrice
   }
   showEdit.value = true
@@ -491,6 +485,50 @@ async function openEdit(v) {
 
 const transcribing = ref(false)
 let transcribeTimer = null
+const linkPlatforms = ['douyin', 'bilibili', 'xiaohongshu']
+const syncingEdit = ref(false)
+
+function linksFromPlatform(platformLinks) {
+  const out = { douyin: '', bilibili: '', xiaohongshu: '' }
+  ;(platformLinks || []).forEach(x => {
+    if (x && x.platform && x.platform in out && x.url) out[x.platform] = x.url
+  })
+  return out
+}
+
+async function applyLinks() {
+  if (!editing.value || !orig.value) return true
+  const links = {}
+  for (const p of linkPlatforms) {
+    const v = (((editing.value.links || {})[p]) || '').trim()
+    const prev = (((orig.value.links || {})[p]) || '').trim()
+    if (v && v !== prev) links[p] = v
+  }
+  if (!Object.keys(links).length) return true
+  const r = await api(`/api/platform/videos/${editing.value.id}/bind-links`, { method: 'POST', body: JSON.stringify({ links }) })
+  if (r && r.errors && r.errors.length) message.warning('部分链接未绑定：' + r.errors.join('；'))
+  for (const p of Object.keys(links)) {
+    if (orig.value.links) orig.value.links[p] = editing.value.links[p]
+  }
+  return true
+}
+
+async function syncEditLinks() {
+  if (!editing.value || syncingEdit.value) return
+  syncingEdit.value = true
+  try {
+    await applyLinks()
+    const r = await api(`/api/platform/videos/${editing.value.id}/sync`, { method: 'POST' })
+    message.success(r.message || '同步完成')
+    await loadQuiet()
+    await loadWorksQuiet()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    syncingEdit.value = false
+  }
+}
+
 
 function clearTranscribePoll() {
   if (transcribeTimer) {
@@ -567,20 +605,17 @@ async function saveEdit() {
   }
   if (editing.value.sourceText !== o.sourceText) body.source_text = editing.value.sourceText || null
   if ((editing.value.adPrice ?? null) !== (o.adPrice ?? null)) body.ad_price = editing.value.adPrice == null ? null : Number(editing.value.adPrice)
-  const linkChanged = (editing.value.publishLink || '') !== (o.publishLink || '')
   try {
     await api('/api/videos/' + editing.value.id, { method: 'PATCH', body: JSON.stringify(body) })
-    if (linkChanged && editing.value.publishLink) {
-      try {
-        await api(`/api/platform/videos/${editing.value.id}/bind-link`, { method: 'POST', body: JSON.stringify({ link: editing.value.publishLink }) })
-        message.success('发布链接已绑定，可同步数据')
-      } catch (e) {
-        message.warning('保存成功，但发布链接解析失败：' + e.message)
-      }
+    try {
+      await applyLinks()
+    } catch (e) {
+      message.warning('已保存，但平台链接绑定失败：' + e.message)
     }
     message.success('已保存')
     closeEdit()
-    load()
+    await loadQuiet()
+    await loadWorksQuiet()
   } catch (e) {
     message.error(e.message)
   }
@@ -1072,20 +1107,15 @@ onMounted(async () => {
   margin-top: 6px;
 }
 
-.link-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 10px;
-  border: 1px solid var(--border-color, #e3ddd3);
-  border-radius: 999px;
+.plat-tag {
+  flex: 0 0 58px;
+  text-align: center;
+  padding: 3px 0;
+  border-radius: 6px;
   color: #a34f2c;
   font-size: 12px;
-  text-decoration: none;
-  background: rgba(163, 79, 44, 0.06);
-}
-.link-chip:hover {
-  background: rgba(163, 79, 44, 0.12);
+  font-weight: 600;
+  background: rgba(163, 79, 44, 0.08);
 }
 
 </style>

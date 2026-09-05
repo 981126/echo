@@ -128,7 +128,14 @@ def parse_post_id(link: str) -> tuple[str, str]:
         marker = "/video/"
         idx = low.find(marker)
         tail = link[idx + len(marker):].split("?")[0].split("/")[0]
-        return ("bilibili", f"bvid:{tail}") if tail else ("", "")
+        if not tail:
+            return "", ""
+        low_tail = tail.lower()
+        if low_tail.startswith("bv"):
+            return "bilibili", f"bvid:{tail}"
+        if low_tail.startswith("av") and tail[2:].isdigit():
+            return "bilibili", f"aid:{tail[2:]}"
+        return "bilibili", f"bvid:{tail}"
     if "douyin.com/video/" in low:
         marker = "/video/"
         idx = low.find(marker)

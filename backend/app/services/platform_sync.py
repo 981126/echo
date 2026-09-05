@@ -29,7 +29,7 @@ from ..models.platform import (
     PlatformPostStat,
     SyncJob,
 )
-from .creator_service import current_creator_id, get_current_creator
+from .creator_service import get_current_creator
 from .platform.tikhub import TikHubClient, make_client
 
 BUDGET_KEY = "tikhub_budget_limit"
@@ -618,48 +618,50 @@ def daily_top_sync_job(db: Session) -> dict:
     return run_sync(db, scope="daily")
 
 
-def sync_local_video_metrics(db: Session, video) -> dict:
-    """本地素材（已绑定 platform_post_id）的"同步数据"按钮。"""
+def _bound_platform_posts(db: Session, video) -> list[PlatformPost]:
+    """本地素材绑定的平台作品：local_video_id / work 聚合 / platform_post_id 三路汇总去重。"""
+    posts: dict[int, PlatformPost] = {}
+    for bound in db.query(PlatformPost).filter(PlatformPost.local_video_id == video.id).all():
+        posts[bound.id] = bound
+    if video.work_id:
+        for bound in db.query(PlatformPost).filter(PlatformPost.work_id == video.work_id).all():
+            posts[bound.id] = bound
     key = (video.platform_post_id or "").strip()
-    if not key or ":" not in key:
-        raise ValueError("该素材未绑定平台作品（请在编辑里填发布链接）")
-    platform, ext = key.split(":", 1)
-    if not ext:
-        raise ValueError("发布链接解析失败，请检查")
-    client = make_client()
-    stats = client.fetch_post_stats(platform, ext)
-    _charge(db)
-    # 写云端作品表（若有同名 post 则同步其快照）
-    post = (
-        db.query(PlatformPost)
-        .filter(PlatformPost.platform == platform, PlatformPost.platform_post_id == ext)
-        .first()
-    )
-    if post is None:
-        account = None
-        cid = current_creator_id(db)
-        if cid:
-            account = (
-                db.query(CreatorAccount)
-                .filter(CreatorAccount.creator_id == cid, CreatorAccount.platform == platform)
-                .first()
-            )
-        if account is None:
-            raise ValueError("未找到该平台的账号配置，无法写回云端作品表")
-        post = PlatformPost(
-            account_id=account.id,
-            platform=platform,
-            platform_post_id=ext,
-            title=video.title,
-            raw="{}",
+    if key and ":" in key:
+        platform, ext = key.split(":", 1)
+        found = (
+            db.query(PlatformPost)
+            .filter(PlatformPost.platform == platform, PlatformPost.platform_post_id == ext)
+            .first()
         )
-        db.add(post)
-        db.flush()
-        if not post.cover_path:
-            post.cover_path = _cover_path_for(db, platform, ext, video.title, "")
-        db.commit()
-    _write_stat(db, post, stats)
-    # 同步写回本地指标快照，供现有看板/复盘复用
+        if found is not None:
+            posts[found.id] = found
+    return list(posts.values())
+
+
+def sync_local_video_metrics(db: Session, video) -> dict:
+    """本地素材的"同步数据"：基于编辑页填写的平台链接，同步其绑定的各平台数据。
+
+    一个本地素材可绑定抖音/B站/小红书多条作品，逐个拉取最新数据写入
+    平台作品表与指标快照（当天多平台聚合），供看板/复盘使用。
+    """
+    posts = _bound_platform_posts(db, video)
+    if not posts:
+        raise ValueError("该素材未绑定平台作品（请先在编辑页填写平台链接并保存）")
+    client = make_client()
+    totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0, "shares": 0}
+    synced: list[str] = []
+    for post in posts:
+        try:
+            stats = client.fetch_post_stats(post.platform, post.platform_post_id)
+            _charge(db)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{post.platform} 同步失败: {exc}") from exc
+        _write_stat(db, post, stats)
+        for field in totals:
+            totals[field] += int(stats.get(field) or 0)
+        synced.append(post.platform)
+    # 同步写回本地指标快照（当天多平台聚合），供现有看板/复盘复用
     from ..models.metrics import MetricsSnapshot
 
     row = (
@@ -675,18 +677,18 @@ def sync_local_video_metrics(db: Session, video) -> dict:
             MetricsSnapshot(
                 video_id=video.id,
                 snapshot_date=today_key(),
-                plays=int(stats.get("plays") or 0),
-                likes=int(stats.get("likes") or 0),
-                favorites=int(stats.get("favorites") or 0),
-                comments=int(stats.get("comments") or 0),
+                plays=totals["plays"],
+                likes=totals["likes"],
+                favorites=totals["favorites"],
+                comments=totals["comments"],
                 source="tikhub",
             )
         )
     else:
-        row.plays = int(stats.get("plays") or 0)
-        row.likes = int(stats.get("likes") or 0)
-        row.favorites = int(stats.get("favorites") or 0)
-        row.comments = int(stats.get("comments") or 0)
+        row.plays = totals["plays"]
+        row.likes = totals["likes"]
+        row.favorites = totals["favorites"]
+        row.comments = totals["comments"]
         row.source = "tikhub"
     db.commit()
-    return {"message": "同步完成", "stats": stats}
+    return {"message": f"同步完成（{len(synced)} 个平台）", "platforms": synced, "stats": totals}
