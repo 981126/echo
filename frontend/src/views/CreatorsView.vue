@@ -160,31 +160,16 @@
         <div v-if="postsLoading" class="panel empty">加载中…</div>
         <div v-else-if="!posts.items.length" class="panel empty">暂无作品，先点“同步”拉取</div>
         <div class="grid grid-videos">
-          <div v-for="p in posts.items" :key="p.id" class="card-tile">
-            <div class="tile-cover has" @click="openPostsDetail(p)">
-              <img v-if="p.cover" :src="p.cover" alt="封面" />
-              <span v-else>ECHO</span>
-            </div>
-            <h3 class="tile-title" style="word-break: break-all" @click="openPostsDetail(p)">{{ p.title }}</h3>
-            <p class="tile-meta">
-              <template v-if="p.latest_stat">
-                <template v-if="p.latest_stat.plays">播放 {{ fmtNum(p.latest_stat.plays) }}</template>
-                <template v-if="p.latest_stat.likes"> · 赞 {{ fmtNum(p.latest_stat.likes) }}</template>
-                <template v-if="p.latest_stat.favorites"> · 藏 {{ fmtNum(p.latest_stat.favorites) }}</template>
-                <template v-if="p.latest_stat.comments"> · 评 {{ fmtNum(p.latest_stat.comments) }}</template>
-              </template>
-              <template v-else>暂无指标</template>
-            </p>
-            <div class="row" style="gap: 6px">
-              <n-tag v-if="p.creator_kind === 'benchmark'" size="tiny" type="info" :bordered="false">对标</n-tag>
-              <n-tag v-if="p.local_video_id" size="tiny" type="success" :bordered="false">已转素材</n-tag>
-            </div>
-            <div class="row" style="gap: 6px; margin-top: 8px">
-              <n-button size="tiny" secondary :loading="syncingPost === p.id" @click="syncPost(p)">同步数据</n-button>
-              <n-button v-if="!p.local_video_id" size="tiny" secondary @click="toMaterial(p)">转素材</n-button>
-              <n-button v-else size="tiny" secondary @click="goMaterial(p.local_video_id)">打开素材</n-button>
-            </div>
-          </div>
+<CloudPostTile
+          v-for="p in posts.items"
+          :key="p.id"
+          :post="p"
+          :syncing-post-id="syncingPost"
+          @detail="openPostsDetail"
+          @sync="syncPost"
+          @toMaterial="toMaterial"
+          @openMaterial="goMaterial"
+        />
         </div>
       </div>
     </n-modal>
