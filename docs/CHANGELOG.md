@@ -180,3 +180,9 @@
 - GET /api/platform/budget 默认只读本地预算（毫秒级）；余额改为 ?refresh_balance=true 显式拉取（页面未展示余额，不再为它卡整页）
 - 博主页前端 creators/current/budget/summary 并行请求（Promise.all）
 - 实测 budget 0.8s → ~1ms
+
+## [M22 / R-040] 2026-09-05 — 全站接口批量性能优化
+- 逐个实测所有页面首屏接口：多数已毫秒级；优化两处 N+1
+- /api/works：预取账号/作品/统计，0.34s → ~0.07s
+- /api/platform/posts：批量预取账号与最新统计，0.11s → ~0.06s
+- 全部 46 项测试 + ruff/mypy/前端构建通过

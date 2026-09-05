@@ -37,9 +37,12 @@ def _latest_stat(db: Session, post_id: int):
     )
 
 
-def post_item(db: Session, p: PlatformPost) -> dict:
-    stat = _latest_stat(db, p.id)
-    acc = db.get(CreatorAccount, p.account_id)
+def post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
+    if account is None:
+        account = db.get(CreatorAccount, p.account_id)
+    if stat is None:
+        stat = _latest_stat(db, p.id)
+    acc = account
     tags = []
     try:
         tags = json.loads(p.tags or "[]") if isinstance(p.tags, str) else (p.tags or [])
@@ -174,9 +177,25 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
         else:
             singles.append(p)
 
+    # 批量预取：账号、作品、每条最新统计（避免 N+1 逐条查询）
+    account_map = {a.id: a for a in db.query(CreatorAccount).all()}
+    work_map_cache = {
+        w.id: w for w in db.query(Work).filter(Work.id.in_(work_map.keys())).all()
+    }
+    post_ids = [p.id for p in posts]
+    stat_map: dict[int, PlatformPostStat] = {}
+    if post_ids:
+        for row in (
+            db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id.in_(post_ids))
+            .order_by(PlatformPostStat.stat_date)
+            .all()
+        ):
+            stat_map[row.post_id] = row
+
     out: list[dict] = []
     for wid, members in work_map.items():
-        work = db.get(Work, wid)
+        work = work_map_cache.get(wid)
         if work is None:
             continue
         members.sort(key=lambda m: m.platform)
@@ -188,11 +207,11 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
                 "creator_id": work.creator_id,
                 "cover": next((m.cover_url_local for m in members if m.cover_url_local), None),
                 "platforms": [m.platform for m in members],
-                "posts": [post_item(db, m) for m in members],
+                "posts": [post_item(db, m, account_map.get(m.account_id), stat_map.get(m.id)) for m in members],
             }
         )
     for p in singles:
-        acc = db.get(CreatorAccount, p.account_id)
+        acc = account_map.get(p.account_id)
         out.append(
             {
                 "type": "post",
@@ -201,7 +220,7 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
                 "creator_id": acc.creator_id if acc else None,
                 "cover": p.cover_url_local,
                 "platforms": [p.platform],
-                "posts": [post_item(db, p)],
+                "posts": [post_item(db, p, acc, stat_map.get(p.id))],
             }
         )
     return out

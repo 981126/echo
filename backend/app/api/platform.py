@@ -35,14 +35,17 @@ router = APIRouter()
 
 
 # ---------- 云端作品 ----------
-def _post_item(db: Session, p: PlatformPost) -> dict:
-    stat = (
-        db.query(PlatformPostStat)
-        .filter(PlatformPostStat.post_id == p.id)
-        .order_by(PlatformPostStat.stat_date.desc())
-        .first()
-    )
-    acc = db.get(CreatorAccount, p.account_id)
+def _post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
+    if account is None:
+        account = db.get(CreatorAccount, p.account_id)
+    if stat is None:
+        stat = (
+            db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id == p.id)
+            .order_by(PlatformPostStat.stat_date.desc())
+            .first()
+        )
+    acc = account
     creator = db.get(Creator, acc.creator_id) if acc else None
     return {
         "id": p.id,
@@ -95,7 +98,24 @@ def list_posts(
         q = q.filter(PlatformPost.platform == platform)
     total = q.count()
     items = q.order_by(PlatformPost.publish_time.desc().nullslast(), PlatformPost.id.desc()).offset(offset).limit(limit).all()
-    return {"total": total, "items": [_post_item(db, p) for p in items]}
+    # 批量预取账号与最新统计，避免 N+1
+    ids = [p.id for p in items]
+    account_map = {
+        a.id: a for a in db.query(CreatorAccount).filter(CreatorAccount.id.in_({p.account_id for p in items})).all()
+    }
+    stat_map: dict[int, PlatformPostStat] = {}
+    if ids:
+        for row in (
+            db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id.in_(ids))
+            .order_by(PlatformPostStat.stat_date)
+            .all()
+        ):
+            stat_map[row.post_id] = row
+    return {
+        "total": total,
+        "items": [_post_item(db, p, account_map.get(p.account_id), stat_map.get(p.id)) for p in items],
+    }
 
 
 @router.post("/videos/{video_id}/bind-link", response_model=dict)
