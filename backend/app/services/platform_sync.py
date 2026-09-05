@@ -137,23 +137,27 @@ def _cdn_headers(platform: str) -> dict:
 
 
 def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: str, cover_url: str) -> str:
-    """返回本地封面文件名（下载真实封面或生成占位 SVG）。"""
+    """返回本地封面文件名（下载真实封面或生成占位 SVG）。
+
+    R-058：文件名用「标题-封面」（重名自动 -2/-3），文件夹里一眼可辨。
+    """
+    from .media_naming import clean_component, unique_path
+
     settings = get_settings()
     settings.covers_dir.mkdir(parents=True, exist_ok=True)
-    name = f"cloud_{uuid.uuid4().hex[:12]}"
-    dest: Path
+    stem = f"{clean_component(title or platform_post_id)}-封面"
     if cover_url:
         try:
             resp = httpx.get(cover_url, timeout=8, headers=_cdn_headers(platform))
             if resp.status_code == 200 and resp.content:
                 img = _ensure_web_image(resp.content)
                 if img:
-                    dest = settings.covers_dir / f"{name}.jpg"
+                    dest = unique_path(settings.covers_dir, stem, ".jpg")
                     dest.write_bytes(img)
                     return dest.name
         except Exception:  # noqa: BLE001  下载失败回退占位
             pass
-    dest = settings.covers_dir / f"{name}.svg"
+    dest = unique_path(settings.covers_dir, stem, ".svg")
     label = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}.get(platform, platform)
     text = html.escape((title or "云端作品")[:26])
     svg = (

@@ -18,6 +18,7 @@ from ..models.video import Transcript, Video
 from ..schemas.video import PlatformLinkOut, TagConfirmIn, VideoDetailOut, VideoListOut, VideoOut, VideoUpdate
 from ..services.creator_service import current_creator_id
 from ..services.ingest import import_video_task
+from ..services.media_naming import clean_component, rename_to
 from ..tasks import start_task
 
 router = APIRouter()
@@ -37,9 +38,15 @@ def upload_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
     dest = settings.videos_dir / new_name
     with dest.open("wb") as out:
         shutil.copyfileobj(file.file, out)
-    video = Video(filename=new_name, creator_id=current_creator_id(db))
+    title = clean_component(Path(file.filename or "video").stem)
+    video = Video(filename=new_name, title=title, creator_id=current_creator_id(db))
     db.add(video)
     db.commit()
+    try:  # R-058：落盘文件名改为「标题-视频」（重名自动 -2）
+        video.filename = rename_to(dest, f"{title}-视频")
+        db.commit()
+    except Exception:  # noqa: BLE001  改名失败不影响入库
+        db.rollback()
     db.refresh(video)
     return video  # R-033：上传不自动转写，由编辑页「语音转文字」手动触发
 
@@ -171,6 +178,8 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
     if "ad_price" in data:
         video.ad_price = int(data["ad_price"]) if data["ad_price"] is not None else None
     db.commit()
+    if "title" in data and (video.title or "").strip():
+        _rename_by_title(db, video)
     db.refresh(video)
     return video
 
@@ -194,7 +203,11 @@ def upload_cover(video_id: int, file: UploadFile = File(...), db: Session = Depe
             (settings.covers_dir / video.cover_path).unlink(missing_ok=True)
         except OSError:
             pass
-    video.cover_path = new_name
+    stem = clean_component(video.title or Path(file.filename or "cover").stem)
+    try:  # R-058：封面落盘名改为「标题-封面」
+        video.cover_path = rename_to(dest, f"{stem}-封面")
+    except Exception:  # noqa: BLE001
+        video.cover_path = new_name
     db.commit()
     db.refresh(video)
     return video
@@ -232,6 +245,11 @@ def delete_video(video_id: int, db: Session = Depends(get_db)):
             (get_settings().videos_dir / video.filename).unlink(missing_ok=True)
         except OSError:
             pass
+    if video.cover_path:
+        try:
+            (get_settings().covers_dir / video.cover_path).unlink(missing_ok=True)
+        except OSError:
+            pass
     db.query(PlatformPost).filter(PlatformPost.local_video_id == video_id).update({"local_video_id": None})
     db.query(Draft).filter(Draft.video_id == video_id).update({"video_id": None})
     db.query(MetricsSnapshot).filter(MetricsSnapshot.video_id == video_id).delete()
@@ -251,3 +269,24 @@ def confirm_tags(video_id: int, payload: TagConfirmIn, db: Session = Depends(get
     db.commit()
     db.refresh(video)
     return video
+
+
+def _rename_by_title(db: Session, video: Video) -> None:
+    """R-058：标题确定后，把本地视频文件与封面统一改名为「标题-视频 / 标题-封面」。"""
+    settings = get_settings()
+    stem = clean_component(video.title)
+    if video.filename:
+        try:
+            old = settings.videos_dir / video.filename
+            if old.name != f"{stem}-视频{old.suffix}":  # 已是目标名则跳过，避免 -2 重复
+                video.filename = rename_to(old, f"{stem}-视频")
+        except Exception:  # noqa: BLE001  改名失败保留旧名
+            db.rollback()
+    if video.cover_path:
+        try:
+            old = settings.covers_dir / video.cover_path
+            if old.name != f"{stem}-封面{old.suffix}":
+                video.cover_path = rename_to(old, f"{stem}-封面")
+        except Exception:  # noqa: BLE001
+            db.rollback()
+    db.commit()
