@@ -71,19 +71,7 @@
           </div>
           <span class="muted" style="font-size: 12px">填了哪个平台就同步哪个；已绑定的会自动带出。保存后点「同步数据」拉取最新数据</span>
         </div>
-        <div class="row" style="gap: 18px; align-items: flex-start; margin-bottom: 14px">
-          <div class="cover-edit" @click="coverInput && coverInput.click()">
-            <img v-if="editing.coverUrl" :src="editing.coverUrl" alt="封面" />
-            <span v-else>上传封面</span>
-          </div>
-          <input ref="coverInput" type="file" accept="image/jpeg,image/png" class="file-hidden" @change="onCover" />
-          <div class="grow muted" style="font-size: 12px">
-            <div style="margin-top: 4px">jpg / png，点击图片上传或替换</div>
-            <n-button v-if="editing.coverUrl" size="tiny" quaternary type="error" style="margin-top: 8px" @click="removeCover">
-              移除封面
-            </n-button>
-          </div>
-        </div>
+        <CoverEditor :cover-url="editing.coverUrl" @change="onCover" @remove="removeCover" />
 
         <div v-if="linkedDrafts.length" class="form-item">
           <label class="form-label">已关联脚本（点击打开）</label>
@@ -225,6 +213,7 @@ import MediaComments from '../components/MediaComments.vue'
 import PlatformStats from '../components/PlatformStats.vue'
 import UploadVideoBar from '../components/UploadVideoBar.vue'
 import MaterialCard from '../components/MaterialCard.vue'
+import CoverEditor from '../components/CoverEditor.vue'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
@@ -242,7 +231,6 @@ const platformSel = ref([])
 const tagSel = ref([])
 const loading = ref(false)
 const uploading = ref(false)
-const coverInput = ref(null)
 const editing = ref(null)
 const linkedDrafts = ref([])
 const orig = ref(null)
@@ -332,8 +320,7 @@ async function doUpload(f) {
   }
 }
 
-async function onCover(e) {
-  const f = e.target.files[0]
+async function onCover(f) {
   if (!f || !editing.value) return
   try {
     const r = await uploadCover(editing.value.id, f)
@@ -342,8 +329,6 @@ async function onCover(e) {
     await loadQuiet()
   } catch (err) {
     message.error(err.message)
-  } finally {
-    if (coverInput.value) coverInput.value.value = ''
   }
 }
 
