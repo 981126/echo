@@ -173,6 +173,38 @@ def delete_item(item_id: int, kind: str = "post", db: Session = Depends(get_db))
     return {"ok": True, "removed": len(posts)}
 
 
+
+@router.post("/cleanup-tags", response_model=dict)
+def cleanup_tags(db: Session = Depends(get_db)):
+    """清理标签里的平台词与 [\u8bdd\u9898] 话题后缀（维护用）。"""
+    import json as _json
+    from ..models.platform import PlatformPost
+
+    suffix = "[" + "\u8bdd\u9898" + "]"
+    skip = {"douyin", "\u6296\u97f3", "xiaohongshu", "\u5c0f\u7ea2\u4e66", "bilibili", "B\u7ad9", "b\u7ad9", "\u89c6\u9891", "vlog", "\u8bdd\u9898", "tag"}
+    norms = {x.lower() for x in skip}
+    changed = 0
+    for post in db.query(PlatformPost).all():
+        try:
+            tags = _json.loads(post.tags or "[]") if isinstance(post.tags, str) else (post.tags or [])
+        except Exception:
+            continue
+        if not isinstance(tags, list):
+            continue
+        out = []
+        for t in tags:
+            t = str(t).replace(suffix, "").replace("[", "").replace("]", "").strip()
+            if (not t) or (t.lower() in norms) or (t in out):
+                continue
+            out.append(t)
+        new = _json.dumps(out, ensure_ascii=False)
+        if not (new == post.tags):
+            post.tags = new
+            changed += 1
+    db.commit()
+    return {"ok": True, "cleaned": changed}
+
+
 @router.post("/auto-merge", response_model=dict)
 def auto_merge_all(creator_id: int = 0, db: Session = Depends(get_db)):
     """自动合并：把所有博主（或指定博主）下“同创作者+规范化标题相同”的跨平台作品合并为一。"""

@@ -106,7 +106,7 @@ def _tags_of(*texts: str) -> list[str]:
     _norm = {x.lower() for x in skip}
     for text in texts:
         for m in re.findall(r"[#＃]([^\s#＃，。！？!?、]+)", text or ""):
-            tag = m.strip()
+            tag = m.strip().replace('[话题]', '').replace(']', '').strip()
             if tag and tag.lower() not in _norm and tag not in out:
                 out.append(tag)
             if len(out) >= 20:
