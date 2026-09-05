@@ -15,7 +15,6 @@
     <div class="toolbar">
       <n-select v-model:value="filter.platform" :options="platformOptions" placeholder="平台" clearable style="width: 130px" />
       <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 130px" />
-      <n-select v-model:value="filter.main_topic" :options="topicOptions" placeholder="赛道" clearable style="width: 130px" />
       <n-button secondary @click="load">查询</n-button>
       <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
     </div>
@@ -29,8 +28,9 @@
     <div v-if="loading" class="panel empty">加载中…</div>
     <div v-else-if="!cards.length" class="panel empty">暂无素材（可上传本地视频，或在「博主」页同步云端作品）</div>
     <div v-else class="grid grid-videos">
-      <div v-for="it in cards" :key="it.key" class="card-tile">
-        <div class="tile-cover" :class="{ has: it.cover_url }" @click="openItem(it)">
+      <div v-for="it in cards" :key="it.key" class="card-tile" :class="{ picking: mergeMode && it.kind === 'cloud' }" @click="onCardClick(it)">
+        <div class="tile-cover" :class="{ has: it.cover_url }" @click.stop="onCardClick(it)">
+          <n-checkbox v-if="mergeMode && it.kind === 'cloud'" class="pick-box" :checked="selected.has(it.key)" @click.stop @update:checked="toggleSel(it)" />
           <img v-if="it.cover_url" :src="it.cover_url" alt="封面" />
           <span v-else>ECHO</span>
         </div>
@@ -54,20 +54,10 @@
             <n-tag v-for="t in it.tags" :key="t" size="small" :bordered="false">{{ t }}</n-tag>
             <span v-if="!it.tags.length" class="muted">无标签</span>
           </div>
-          <div class="row" style="gap: 6px; margin-top: 6px">
+          <div class="row-actions">
             <n-tag v-if="it.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
-            <n-button
-              v-if="it.platform_post_id"
-              size="tiny"
-              secondary
-              :loading="syncing === it.id"
-              @click="syncData(it)"
-            >同步数据</n-button>
-          </div>
-          <div v-if="!it.tags_confirmed" class="tile-actions">
-            <n-button size="small" secondary @click="confirmTags(it)">确认标签</n-button>
-          </div>
-          <div class="tile-actions">
+            <n-button v-if="it.platform_post_id" size="small" secondary :loading="syncing === it.id" @click="syncData(it)">同步数据</n-button>
+            <n-button v-if="!it.tags_confirmed" size="small" secondary @click="confirmTags(it)">确认标签</n-button>
             <n-button size="small" quaternary type="error" @click="delLocal(it)">删除</n-button>
           </div>
         </template>
@@ -86,12 +76,12 @@
             </template>
             <span v-else class="muted">暂无指标</span>
           </div>
-          <div class="row" style="gap: 5px; flex-wrap: wrap; margin-top: 8px">
-            <n-checkbox v-if="mergeMode" :checked="selected.has(it.key)" @update:checked="toggleSel(it)">选</n-checkbox>
-            <n-button size="tiny" type="primary" secondary @click="openCloud(it)">上传视频/文案</n-button>
-            <n-button v-if="it.cloudPosts.length" size="tiny" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
-            <n-button v-if="it.local_video_id" size="tiny" secondary @click="goLocal(it.local_video_id)">打开本地素材</n-button>
-            <n-button size="tiny" quaternary type="error" @click="delCloud(it)">删除</n-button>
+          <div class="row-actions">
+            <n-button size="small" type="primary" secondary @click="openCloud(it)">上传视频/文案</n-button>
+            <n-button size="small" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
+            <n-button v-if="it.merged >= 2" size="small" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
+            <n-button v-if="it.local_video_id" size="small" secondary @click="goLocal(it.local_video_id)">打开本地</n-button>
+            <n-button size="small" quaternary type="error" @click="delCloud(it)">删除</n-button>
           </div>
         </template>
       </div>
@@ -147,10 +137,6 @@
             <n-select v-model:value="editing.platforms" multiple :options="platformOptions" placeholder="选择平台" />
           </div>
           <div class="form-item">
-            <label class="form-label">赛道（可多选）</label>
-            <n-select v-model:value="editing.main_topics" multiple :options="topicOptions" placeholder="选择赛道" />
-          </div>
-          <div class="form-item">
             <label class="form-label">状态</label>
             <n-select v-model:value="editing.status" :options="statusOptions" />
           </div>
@@ -167,8 +153,9 @@
             <n-date-picker v-model:value="editing.publishedTs" type="datetime" clearable style="width: 100%" />
           </div>
           <div class="form-item full">
-            <label class="form-label">标签（逗号分隔）</label>
-            <n-input v-model:value="tagsText" placeholder="干货, 反常识, 口播" />
+            <label class="form-label">标签（逗号分隔，自由填写）</label>
+            <n-input v-model:value="tagsText" placeholder="干货, 反常识, 口播, 面试, 赚钱" />
+            <span class="muted" style="font-size: 12px">命中 求职/面试/赚钱/知识/其他 的词会同时进入数据统计（复盘/缺口用）</span>
           </div>
           <div class="form-item full">
             <label class="form-label">原始文案（可选）</label>
@@ -380,7 +367,9 @@ async function openEdit(v) {
     plannedTs: parseTs(v.planned_publish_at),
     publishedTs: parseTs(v.published_at)
   }
-  tagsText.value = (v.tags || []).join(', ')
+  const known5 = ['求职', '面试', '赚钱', '知识', '其他']
+  const allTags = [...new Set([...(v.main_topics || []), ...(v.tags || [])])]
+  tagsText.value = allTags.join(', ')
   orig.value = {
     title: editing.value.title,
     platforms: [...editing.value.platforms],
@@ -409,13 +398,15 @@ async function saveEdit() {
   const body = {}
   if ((editing.value.title || '') !== (o.title || '')) body.title = editing.value.title || ''
   if (arrKey(editing.value.platforms) !== arrKey(o.platforms)) body.platforms = editing.value.platforms || []
-  if (arrKey(editing.value.main_topics) !== arrKey(o.main_topics)) body.main_topics = editing.value.main_topics || []
   if (editing.value.status !== o.status) body.status = editing.value.status
   if (editing.value.is_ad !== o.is_ad) body.is_ad = editing.value.is_ad
   if ((editing.value.plannedTs || null) !== o.plannedTs) body.planned_publish_at = tsLocal(editing.value.plannedTs)
   if ((editing.value.publishedTs || null) !== o.publishedTs) body.published_at = tsLocal(editing.value.publishedTs)
   if (tagsText.value !== o.tagsText) {
-    body.tags = tagsText.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+    const known5 = ['求职', '面试', '赚钱', '知识', '其他']
+    const parts = tagsText.value.split(/[,，]/).map(x => x.trim()).filter(Boolean)
+    body.main_topics = parts.filter(x => known5.includes(x))
+    body.tags = parts.filter(x => !known5.includes(x))
   }
   if (editing.value.sourceText !== o.sourceText) body.source_text = editing.value.sourceText || null
   const linkChanged = (editing.value.publishLink || '') !== (o.publishLink || '')
@@ -755,4 +746,25 @@ onMounted(async () => {
   color: #a34f2c;
 }
 
+
+.card-tile { position: relative; }
+.tile-cover { position: relative; }
+.card-tile.picking { cursor: pointer; }
+.pick-box {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  padding: 2px;
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 32px;
+  margin-top: 8px;
+}
 </style>
