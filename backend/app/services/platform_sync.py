@@ -387,6 +387,13 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
             results.append({"account_id": acc.id, "platform": acc.platform, **st})
             total_posts += int(st.get("posts") or 0)
             total_comments += int(st.get("comments") or 0)
+        # 跨平台同作品自动合并（同创作者 + 规范化标题相同）
+        from .works_service import auto_merge_creator
+
+        try:
+            auto_merge_creator(db, owner.id)
+        except Exception:  # noqa: BLE001 合并失败不影响同步主体
+            db.rollback()
         msg = f"同步 {len(results)} 个账号，更新作品 {total_posts}，采集评论 {total_comments}"
         _finish_job(db, job, msg, {"accounts": results, "posts": total_posts, "comments": total_comments})
         return {"job_id": job.id, "message": msg, "accounts": results}

@@ -21,6 +21,7 @@ from .platform import (
 from .prompt import AiPrompt
 from .task import BackgroundTask
 from .video import Transcript, Video
+from .work import Work
 
 __all__ = [
     "Video",
@@ -46,4 +47,5 @@ __all__ = [
     "PlatformPost",
     "PlatformPostStat",
     "SyncJob",
+    "Work",
 ]

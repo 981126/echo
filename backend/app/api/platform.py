@@ -142,11 +142,14 @@ def post_to_material(post_id: int, db: Session = Depends(get_db)):
         platforms=json.dumps([post.platform], ensure_ascii=False),
         status="planned",
         cover_path=post.cover_path,
+        work_id=post.work_id,
     )
     db.add(video)
     db.commit()
     db.refresh(video)
     post.local_video_id = video.id
+    if post.work_id and video.work_id is None:
+        video.work_id = post.work_id
     db.commit()
     return {"ok": True, "video_id": video.id, "video": {"id": video.id, "title": video.title}}
 

@@ -128,3 +128,8 @@
 - 生成前体检 + 一键回炉：/api/drafts/{id}/check（红线/钩子/结尾/篇幅）与 /rework（异步重写并替换回原草稿）
 - 复盘"我 vs 对标"对比卡：数据看板（复盘页）顶部展示主/对标粉丝/作品/中位播放（/api/platform/creator-summary）
 - .env / .env.example 补 ECHO_TIKHUB_API_KEY/BASE_URL/MODE/DAILY_BUDGET/PLATFORM_SYNC_TIMES（作者 key 已写入 .env，模式默认 mock）
+
+## [M13 二期] 2026-09-05 — 跨平台作品合并 + R-030 ④⑥ 收尾
+- R-031 作品合并：works 表 + platform_posts/videos.work_id；同步后同创作者同标题自动合并；素材库「云端作品」面板（自动合并展示各平台播放/赞/藏/评 + 手动合并/拆分 + 分平台同步）；转素材自动继承 work
+- R-030④：生成时注入"近期表现最好草稿的共性（标题/开头/结尾引导）"
+- R-030⑥：话题缺口 /api/topics/gaps（近 28 天发布话题覆盖 + 评论区在问数），主页展示补位建议

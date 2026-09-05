@@ -113,3 +113,61 @@ def test_budget_guard(db):
         run_sync(db, scope="daily")
     budget = get_budget(db)
     assert budget["used"] <= budget["limit"]
+
+
+def _post(db, account_id, platform, pid, title):
+    from app.models.platform import PlatformPost
+
+    p = PlatformPost(
+        account_id=account_id,
+        platform=platform,
+        platform_post_id=pid,
+        title=title,
+        raw="{}",
+    )
+    db.add(p)
+    return p
+
+
+def test_auto_merge_same_title_cross_platform(db):
+    from app.models.platform import CreatorAccount
+    from app.models.work import Work
+    from app.services.works_service import auto_merge_creator, list_works
+
+    owner, _ = _seed_owner(db)
+    a2 = CreatorAccount(creator_id=owner.id, platform="bilibili", nickname="B", platform_user_id="1", enabled=True)
+    db.add(a2)
+    db.commit()
+    _post(db, 1, "douyin", "dy1", "聊聊 offer 怎么选")
+    _post(db, a2.id, "bilibili", "bi1", "聊聊 offer 怎么选")
+    _post(db, 1, "douyin", "dy2", "完全不相关的另一条")
+    db.commit()
+    created = auto_merge_creator(db, owner.id)
+    assert created >= 1
+    works = list_works(db, owner.id)
+    merged = [w for w in works if w["type"] == "work"]
+    assert len(merged) == 1
+    assert sorted(m["platform"] for m in merged[0]["posts"]) == ["bilibili", "douyin"]
+    assert db.query(Work).count() == 1
+
+
+def test_manual_merge_and_split(db):
+    from app.models.work import Work
+    from app.services.works_service import list_works, merge_manual, split_work
+
+    owner, _ = _seed_owner(db)
+    from app.models.platform import CreatorAccount
+
+    a2 = CreatorAccount(creator_id=owner.id, platform="xiaohongshu", nickname="X", platform_user_id="2", enabled=True)
+    db.add(a2)
+    db.commit()
+    p1 = _post(db, 1, "douyin", "dy9", "标题 A")
+    p2 = _post(db, a2.id, "xiaohongshu", "xh9", "标题 B（其实是同一条视频）")
+    db.commit()
+    r = merge_manual(db, [p1.id, p2.id], owner.id)
+    assert r["work_id"]
+    works = list_works(db, owner.id)
+    assert len([w for w in works if w["type"] == "work"]) == 1
+    split_work(db, r["work_id"])
+    assert db.query(Work).count() == 0
+    assert db.query(PlatformPost).filter(PlatformPost.work_id.is_(None)).count() == 2

@@ -64,6 +64,8 @@ def _migrate_videos() -> None:
             adds.append("creator_id INTEGER REFERENCES creators(id)")
         if "platform_post_id" not in cols:
             adds.append("platform_post_id VARCHAR(200) NOT NULL DEFAULT ''")
+        if "work_id" not in cols:
+            adds.append("work_id INTEGER REFERENCES works(id)")
         for ddl in adds:
             conn.exec_driver_sql(f"ALTER TABLE videos ADD COLUMN {ddl}")
 
@@ -112,6 +114,11 @@ def _migrate_feedback_dims() -> None:
 
 def _migrate_creator_scope() -> None:
     """M13（R-029）：drafts / persona_tags 增加 creator_id（素材 creator_id 已在 _migrate_videos）。"""
+    with engine.begin() as conn:
+        # platform_posts 增加 work_id（跨平台合并）
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(platform_posts)").fetchall()}
+        if "work_id" not in cols:
+            conn.exec_driver_sql("ALTER TABLE platform_posts ADD COLUMN work_id INTEGER REFERENCES works(id)")
     with engine.begin() as conn:
         for table in ("drafts", "persona_tags"):
             cols = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()}

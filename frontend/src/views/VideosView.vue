@@ -148,7 +148,55 @@
           <n-button secondary @click="closeEdit">取消</n-button>
         </div>
       </div>
+
     </n-modal>
+    <div class="section-title" style="margin-top: 28px">
+      云端作品
+      <span class="muted" style="font-size: 12px">同一内容发三个平台会自动合并成一条，不重复展示</span>
+      <div class="grow"></div>
+      <n-button v-if="!mergeMode" size="tiny" secondary @click="mergeMode = true">选择合并</n-button>
+      <template v-else>
+        <n-button size="tiny" type="primary" :disabled="selected.size < 2" @click="doMerge">合并所选（{{ selected.size }}）</n-button>
+        <n-button size="tiny" secondary @click="cancelMerge">取消</n-button>
+      </template>
+    </div>
+    <div class="panel">
+      <div v-if="worksLoading" class="empty">加载中…</div>
+      <div v-else-if="!works.length" class="empty">暂无云端作品（先在「博主」页同步平台数据）</div>
+      <div v-else class="work-list">
+        <div v-for="w in works" :key="(w.type === 'work' ? 'w' : 'p') + w.id" class="work-row" :class="{ sel: selected.has(w.id) }">
+          <n-checkbox v-if="mergeMode && w.type === 'post'" :checked="selected.has(w.id)" @update:checked="toggleSel(w)" />
+          <div class="work-cover" @click="openWorkDetail(w)">
+            <img v-if="w.cover" :src="w.cover" alt="" />
+            <span v-else>ECHO</span>
+          </div>
+          <div class="grow" style="min-width: 0">
+            <div class="row" style="gap: 6px; align-items: center; flex-wrap: wrap">
+              <b style="word-break: break-all">{{ w.title }}</b>
+              <n-tag v-for="pl in w.platforms" :key="pl" size="small" :bordered="false" round>{{ platformName(pl) }}</n-tag>
+              <n-tag v-if="w.type === 'work'" size="tiny" type="info" :bordered="false">已合并 {{ w.posts.length }} 平台</n-tag>
+            </div>
+            <div class="row wrap" style="gap: 8px; margin-top: 6px">
+              <div v-for="pst in w.posts" :key="pst.id" class="plat-stat">
+                <b>{{ platformName(pst.platform) }}</b>
+                <template v-if="pst.latest_stat">
+                  <span>播放 {{ fmtNum(pst.latest_stat.plays) }}</span>
+                  <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
+                  <span v-if="pst.latest_stat.favorites">藏 {{ fmtNum(pst.latest_stat.favorites) }}</span>
+                  <span v-if="pst.latest_stat.comments">评 {{ fmtNum(pst.latest_stat.comments) }}</span>
+                </template>
+                <span v-else class="muted">暂无指标</span>
+              </div>
+            </div>
+          </div>
+          <div class="row" style="gap: 6px; flex-wrap: wrap">
+            <n-button v-for="pst in w.posts" :key="'s' + pst.id" size="tiny" secondary :loading="syncingPost === pst.id" @click="syncCloudPost(pst)">同步{{ platformName(pst.platform) }}</n-button>
+            <n-button v-if="w.type === 'work'" size="tiny" quaternary type="error" @click="splitWork(w)">拆分</n-button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -170,6 +218,11 @@ const editing = ref(null)
 const linkedDrafts = ref([])
 const orig = ref(null)
 const syncing = ref(0)
+const works = ref([])
+const worksLoading = ref(false)
+const mergeMode = ref(false)
+const selected = ref(new Set())
+const syncingPost = ref(0)
 const showEdit = ref(false)
 const tagsText = ref('')
 
@@ -360,6 +413,77 @@ async function saveEdit() {
   }
 }
 
+function fmtNum(n) {
+  n = Number(n || 0)
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿'
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  return String(n)
+}
+
+async function loadWorks() {
+  worksLoading.value = true
+  try {
+    const data = await api('/api/works')
+    works.value = data.items || []
+  } catch (e) {
+    works.value = []
+  } finally {
+    worksLoading.value = false
+  }
+}
+
+function openWorkDetail(w) {
+  message.info('同一作品：' + (w.platforms || []).map(platformName).join(' / '))
+}
+
+function toggleSel(w) {
+  const next = new Set(selected.value)
+  if (next.has(w.id)) next.delete(w.id)
+  else next.add(w.id)
+  selected.value = next
+}
+
+function cancelMerge() {
+  mergeMode.value = false
+  selected.value = new Set()
+}
+
+async function doMerge() {
+  const ids = [...selected.value]
+  if (ids.length < 2) return
+  try {
+    await api('/api/works/merge', { method: 'POST', body: JSON.stringify({ platform_post_ids: ids }) })
+    message.success('已合并为同一作品')
+    cancelMerge()
+    loadWorks()
+  } catch (e) {
+    message.error(e.message)
+  }
+}
+
+async function splitWork(w) {
+  try {
+    await api(`/api/works/${w.id}/split`, { method: 'POST', body: JSON.stringify({ platform_post_ids: [] }) })
+    message.success('已拆分')
+    loadWorks()
+  } catch (e) {
+    message.error(e.message)
+  }
+}
+
+async function syncCloudPost(pst) {
+  syncingPost.value = pst.id
+  try {
+    await api(`/api/platform/posts/${pst.id}/sync`, { method: 'POST' })
+    message.success('已同步 ' + platformName(pst.platform))
+    loadWorks()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    syncingPost.value = 0
+  }
+}
+
 async function syncData(v) {
   syncing.value = v.id
   try {
@@ -380,6 +504,7 @@ async function confirmTags(v) {
 
 onMounted(async () => {
   await load()
+  await loadWorks()
   const m = location.hash.match(/edit=(\d+)/)
   if (m) {
     const v = videos.value.find(x => x.id === Number(m[1]))
@@ -387,3 +512,54 @@ onMounted(async () => {
   }
 })
 </script>
+
+.work-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.work-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: #faf7f2;
+  border: 1px solid #eee5d8;
+  border-radius: 10px;
+}
+.work-row.sel {
+  border-color: #a34f2c88;
+  background: #fdf6ef;
+}
+.work-cover {
+  width: 110px;
+  height: 62px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #efe6d9;
+  color: #a34f2c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex: none;
+  cursor: pointer;
+}
+.work-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.plat-stat {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: #6f675c;
+  background: #fff;
+  border-radius: 6px;
+  padding: 3px 8px;
+  flex-wrap: wrap;
+}
+.plat-stat b {
+  color: #a34f2c;
+}

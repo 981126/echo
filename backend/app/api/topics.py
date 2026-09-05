@@ -13,6 +13,43 @@ from ..services.topic_mining import fetch_and_store
 router = APIRouter()
 
 
+@router.get("/gaps")
+def topic_gaps(days: int = 28, db: Session = Depends(get_db)):
+    """R-030⑥ 话题缺口：最近 N 天已发布内容的话题覆盖 + 评论区在问的相关问题数。"""
+    import datetime
+    import json
+    from ..core.topics import MAIN_TOPICS
+    from ..models.hot_topic import TopicIdea
+    from ..models.video import Video
+    from ..services.creator_service import current_creator_id
+
+    cid = current_creator_id(db)
+    cutoff = (datetime.date.today() - datetime.timedelta(days=max(7, days))).isoformat()
+    counts = {t: 0 for t in MAIN_TOPICS}
+    q = db.query(Video).filter(Video.is_ad.is_(False), Video.status == "published")
+    if cid:
+        q = q.filter(Video.creator_id == cid)
+    for v in q.all():
+        published = (v.published_at or v.planned_publish_at)
+        if not published or published.date().isoformat() < cutoff:
+            continue
+        topics = []
+        try:
+            topics = json.loads(v.main_topics or "[]")
+        except Exception:  # noqa: BLE001
+            topics = []
+        for t in topics:
+            counts[t] = counts.get(t, 0) + 1
+    ideas = db.query(TopicIdea).filter(TopicIdea.source == "comment").all()
+    rows = []
+    for t in MAIN_TOPICS:
+        kw = t if t != "其他" else ""
+        ask = sum(1 for it in ideas if kw and kw in it.title)
+        rows.append((counts.get(t, 0), ask, t))
+    rows.sort(key=lambda x: (x[0], -x[1]))
+    return {"items": [{"topic": t, "published": p, "asking_comments": a} for p, a, t in rows]}
+
+
 @router.get("/hot")
 def list_hot(date: str = "", db: Session = Depends(get_db)):
     key = date or today_key()

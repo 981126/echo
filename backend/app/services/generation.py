@@ -101,6 +101,36 @@ def _weight(db: Session, video: Video) -> float:
     return (1.0 + math.log1p(engage)) * math.exp(-age / 500.0)
 
 
+def _best_practice_lines(db: Session) -> str:
+    """R-030④：把近期表现最好的草稿共性（标题/开头/结尾）注入生成，模仿结构不抄内容。"""
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+    from .creator_service import get_current_creator
+
+    creator = get_current_creator(db)
+    q = (
+        db.query(Draft, Feedback)
+        .join(Feedback, Feedback.draft_id == Draft.id)
+        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
+        .order_by(Feedback.id.desc())
+        .limit(12)
+    )
+    if creator:
+        q = q.filter(Draft.creator_id == creator.id)
+    rows = q.all()
+    lines: list[str] = []
+    for d, _f in rows[:3]:
+        if not d.script:
+            continue
+        first = next((x.strip() for x in d.script.split("\n") if x.strip()), d.script)[:80]
+        tail = [x.strip() for x in d.script.split("\n") if x.strip()]
+        ending = tail[-1][:60] if tail else ""
+        lines.append(f"《{d.title or '无题'}》 开头：{first} … 结尾引导：{ending}")
+    if not lines:
+        return ""
+    return "\n".join(f"- {x}" for x in lines)
+
+
 def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
     rows = _all_texts(db)
     if not rows:
@@ -151,6 +181,7 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
     samples = _style_samples(db, topic)
     profile = _style_profile_lines(db)
     refs = benchmark_context_lines(db)
+    best = _best_practice_lines(db)
     user = "\n".join(
         [
             f"选题：{topic}",
@@ -168,6 +199,7 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
             "风格样本（模仿语气的原文节选）：",
             *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],
             *([] if not refs else ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs]),
+            *([] if not best else ["", "你近期表现最好的草稿共性（学它的结构和收束方式，内容要新）：", best]),
         ]
     )
 

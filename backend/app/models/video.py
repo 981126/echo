@@ -20,6 +20,7 @@ class Video(Base):
     platforms: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组 douyin/bilibili/xiaohongshu
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("creators.id"), nullable=True, index=True)  # 归属主博主（M13，R-029）
     platform_post_id: Mapped[str] = mapped_column(String(200), default="")  # 绑定的云端作品 "platform:external_id"（M13，R-027）
+    work_id: Mapped[int | None] = mapped_column(ForeignKey("works.id"), nullable=True, index=True)  # 跨平台同作品合并（M13+）
     status: Mapped[str] = mapped_column(String(20), default="planned")  # planned | published
     planned_publish_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

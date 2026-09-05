@@ -57,6 +57,19 @@
       </div>
     </div>
 
+    <div v-if="gaps.length" class="section-title" style="margin-top: 28px">
+      话题缺口 <span class="muted" style="font-size: 13px">最近发得少、但评论区在问的赛道</span>
+    </div>
+    <div v-if="gaps.length" class="panel">
+      <div class="row wrap" style="gap: 10px">
+        <div v-for="g in gaps" :key="g.topic" class="gap-tag" :class="{ low: g.published === 0 }">
+          <b>{{ g.topic }}</b>
+          <span class="muted">近 28 天发 {{ g.published }} 条</span>
+          <span v-if="g.asking_comments" class="ask">评论区 {{ g.asking_comments }} 条在问</span>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
       <div v-if="!shownHot.length" class="empty">暂无热点，点「抓取更新」</div>
       <div v-else class="hot-tags">
@@ -119,6 +132,7 @@ const generatingTitle = ref(null)
 const ideas = ref([])
 const generatingIdea = ref(0)
 const cloudPosts = ref([])
+const gaps = ref([])
 const angleShow = ref(false)
 const angleLoading = ref(false)
 const angles = ref([])
@@ -310,6 +324,15 @@ async function loadCloud() {
   }
 }
 
+async function loadGaps() {
+  try {
+    const r = await api('/api/topics/gaps?days=28')
+    gaps.value = (r.items || []).filter(g => g.published <= 1 || g.asking_comments > 0).slice(0, 4)
+  } catch (e) {
+    gaps.value = []
+  }
+}
+
 async function loadIdeas() {
   try {
     const data = await api('/api/platform/topic-pool')
@@ -338,6 +361,7 @@ onMounted(() => {
   loadHot()
   loadCloud()
   loadIdeas()
+  loadGaps()
 })
 </script>
 
@@ -413,4 +437,23 @@ onMounted(() => {
 .angle-go {
   margin-left: auto;
   flex: none;
+}
+
+.gap-tag {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #faf7f2;
+  border: 1px solid #eee5d8;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.gap-tag.low {
+  border-color: #a34f2c66;
+  background: #fdf6ef;
+}
+.gap-tag .ask {
+  color: #a34f2c;
+  font-size: 12px;
 }

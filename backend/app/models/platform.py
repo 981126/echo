@@ -109,6 +109,9 @@ class PlatformPost(Base):
     local_video_id: Mapped[int | None] = mapped_column(
         ForeignKey("videos.id"), nullable=True
     )  # 手动"转素材/下载"后关联本地视频
+    work_id: Mapped[int | None] = mapped_column(
+        ForeignKey("works.id"), nullable=True, index=True
+    )  # 跨平台同作品合并（M13+）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
