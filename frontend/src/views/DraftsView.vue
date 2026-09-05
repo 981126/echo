@@ -170,6 +170,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api, uploadImage } from '../api'
 import { fetchVideos } from '../composables/media'
+import { fmt } from '../lib/format'
 import { renderMd } from '../md'
 
 const drafts = ref([])
@@ -213,9 +214,6 @@ function list(status) {
 }
 function discussionCount(id) {
   return (discussionsMap.value[id] || []).length
-}
-function fmt(v) {
-  return v ? v.replace('T', ' ').slice(0, 16) : ''
 }
 function actorName(m) {
   if (m.actor === 'kimi') return 'Kimi'

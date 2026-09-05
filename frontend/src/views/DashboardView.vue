@@ -133,6 +133,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
+import { fmtNum, platformName } from '../lib/format'
 import { fetchVideos } from '../composables/media'
 
 const videos = ref([])
@@ -157,15 +158,6 @@ function tsToDate(ts) {
   if (!ts) return ''
   const d = new Date(ts)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
-const platformName = (p) => PLATFORM_NAMES[p] || p || ''
-function fmtNum(n) {
-  n = Number(n || 0)
-  if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿'
-  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
-  return String(n)
 }
 
 async function load() {
