@@ -64,22 +64,29 @@ export function buildTimelineModel(videos, cloudPosts) {
   const step = pickStep(span)          // 基础步长：按整体跨度，空档不会被撑开
   const minSep = 94                   // 相邻作品最小像素间距（卡片不叠）
 
-  const months = []
-  const s0 = new Date(start * DAY)
-  const e0 = new Date(end * DAY)
-  for (let d = new Date(Date.UTC(s0.getUTCFullYear(), s0.getUTCMonth(), 1)); d <= e0; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
-    const left = (end - dayNum(fmtDate(d))) * step
-    months.push({ key: `${d.getUTCFullYear()}-${d.getUTCMonth()}`, label: `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月`, left })
-  }
-
-  // 严格按“最新→最旧”从左到右顺序排布：
-  // 同一天多条按序排开（不再以天为中心左右错开 ±94px，避免相邻日期的卡片被挤到更早一侧、顺序看起来乱）
+  // 严格按“最新→最旧”从左到右顺序排布：同一天多条按序排开，相邻不足最小间距只往右推
   let prev = -Infinity
   const events = raw.map((r) => {
     const base = (end - dayNum(r.date)) * step + step / 2
     const left = Math.max(base, prev + minSep)
     prev = left
     return { ...r, left }
+  })
+
+  // R-061：月份刻度“跟着事件走”——事件被推到哪，刻度就放到对应月份的最新事件旁，
+  // 保证滑到最右（最早内容）也有日期刻度
+  const months = []
+  let lastYm = ''
+  events.forEach((e) => {
+    const ym = e.date.slice(0, 7)
+    if (ym !== lastYm) {
+      months.push({
+        key: ym,
+        label: `${ym.slice(0, 4)}年${Number(ym.slice(5, 7))}月`,
+        left: Math.max(0, e.left - 46)
+      })
+      lastYm = ym
+    }
   })
 
   const today = dayNum(fmtDate(new Date()))
