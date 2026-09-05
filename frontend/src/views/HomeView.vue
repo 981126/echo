@@ -227,44 +227,43 @@ const model = computed(() => {
   const start = Math.min(...dates) - 7
   const end = Math.max(...dates, dayNum(fmtDate(new Date()))) + 10
   const span = Math.max(30, end - start)
-  const baseStep = pickStep(span)
-  // 密集自适应：最近的“不同日期”间距尽量拉开到不叠字/图（颗粒度自动放大）
-  const uniqDays = [...new Set(dates)].sort((a, b) => a - b)
-  let minGap = Infinity
-  for (let i = 1; i < uniqDays.length; i++) {
-    const g = uniqDays[i] - uniqDays[i - 1]
-    if (g > 0 && g < minGap) minGap = g
-  }
-  const need = Number.isFinite(minGap) && minGap > 0 ? Math.ceil(100 / Math.min(minGap, 30)) : baseStep
-  const capBySpan = Math.max(12, Math.floor(30000 / span))  // 总宽封顶，避免长跨度被撑到离谱
-  const step = Math.min(Math.max(baseStep, need), capBySpan)
-  const width = span * step
+  const step = pickStep(span)          // 基础步长：按整体跨度，空档不会被撑开
+  const minSep = 94                   // 相邻作品最小像素间距（卡片不叠）
 
   const months = []
-  const s = new Date(start * DAY)
-  const e = new Date(end * DAY)
-  for (let d = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), 1)); d <= e; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+  const s0 = new Date(start * DAY)
+  const e0 = new Date(end * DAY)
+  for (let d = new Date(Date.UTC(s0.getUTCFullYear(), s0.getUTCMonth(), 1)); d <= e0; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
     const left = (dayNum(fmtDate(d)) - start) * step
     months.push({ key: `${d.getUTCFullYear()}-${d.getUTCMonth()}`, label: `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月`, left })
   }
 
-  // 同一天多条：以当天为中心向两侧错开，避免完全叠在一起
+  // 同一天多条：以当天为中心水平错开（间距 = minSep）
   const byDate = {}
   raw.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r) })
-  const events = []
+  const items = []
   Object.keys(byDate).sort().forEach((date) => {
     const list = byDate[date]
     const n = list.length
     const baseLeft = (dayNum(date) - start) * step + step / 2
-    const gap = Math.min(step * 1.15, 112)
     list.forEach((r, i) => {
-      const off = n > 1 ? (i - (n - 1) / 2) * Math.max(gap, 40) : 0
-      events.push({ ...r, left: baseLeft + off })
+      const off = n > 1 ? (i - (n - 1) / 2) * minSep : 0
+      items.push({ ...r, left0: baseLeft + off })
     })
+  })
+  items.sort((a, b) => a.left0 - b.left0)
+
+  // 局部弹性：只有“相邻太近”的才就地向右推开（级联），长空档不放大、不用滑很久
+  let prev = -Infinity
+  const events = items.map((it) => {
+    const left = Math.max(it.left0, prev + minSep)
+    prev = left
+    return { ...it, left }
   })
 
   const today = dayNum(fmtDate(new Date()))
   const todayLeft = today >= start && today <= end ? (today - start) * step + step / 2 : null
+  const width = Math.max(span * step, (events.length ? Math.max(...events.map(e => e.left)) : 0) + 140)
   return { events, months, width, todayLeft }
 })
 
