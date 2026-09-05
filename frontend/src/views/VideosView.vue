@@ -78,15 +78,19 @@
             </template>
             <n-tag v-if="it.tags.length > 5" size="tiny" :bordered="false" round>… +{{ it.tags.length - 5 }}</n-tag>
           </div>
-          <div v-for="pst in it.cloudPosts.slice(0, 3)" :key="pst.id" class="plat-line">
-            <b>{{ platformName(pst.platform) }}</b>
-            <template v-if="pst.latest_stat">
-              <span>播放 {{ pst.latest_stat.plays ? fmtNum(pst.latest_stat.plays) : '—' }}</span>
-              <span>赞 {{ fmtNum(pst.latest_stat.likes) }}</span>
-              <span>藏 {{ fmtNum(pst.latest_stat.favorites) }}</span>
-              <span>评 {{ fmtNum(pst.latest_stat.comments) }}</span>
-            </template>
-            <span v-else class="muted">暂无指标</span>
+          <div class="plat-zone">
+            <div v-for="p in platOrder" :key="p" class="plat-line" :class="{ empty: !platOf(it, p) }">
+              <template v-if="platOf(it, p)">
+                <b>{{ platformName(p) }}</b>
+                <template v-if="platOf(it, p).latest_stat">
+                  <span>播放 {{ platOf(it, p).latest_stat.plays ? fmtNum(platOf(it, p).latest_stat.plays) : '—' }}</span>
+                  <span>赞 {{ fmtNum(platOf(it, p).latest_stat.likes) }}</span>
+                  <span>藏 {{ fmtNum(platOf(it, p).latest_stat.favorites) }}</span>
+                  <span>评 {{ fmtNum(platOf(it, p).latest_stat.comments) }}</span>
+                </template>
+                <span v-else class="muted">暂无指标</span>
+              </template>
+            </div>
           </div>
           <p v-if="it.pub" class="tile-meta">发布时间 {{ it.pub }}</p>
           <div class="row-actions" @click.stop>
@@ -516,8 +520,13 @@ async function openEdit(v) {
 const transcribing = ref(false)
 let transcribeTimer = null
 const linkPlatforms = ['douyin', 'bilibili', 'xiaohongshu']
+const platOrder = ['douyin', 'bilibili', 'xiaohongshu']
 const syncingEdit = ref(false)
 const editPane = ref('edit')
+
+function platOf(card, platform) {
+  return ((card && card.cloudPosts) || []).find(x => x.platform === platform) || null
+}
 
 function linksFromPlatform(platformLinks) {
   const out = { douyin: '', bilibili: '', xiaohongshu: '' }
@@ -1236,6 +1245,26 @@ onMounted(async () => {
 .toolbar :deep(input::placeholder),
 .toolbar :deep(textarea::placeholder) {
   font-size: 11px;
+}
+
+
+.plat-zone {
+  margin-top: 4px;
+}
+.plat-line.empty {
+  visibility: hidden;
+}
+.plat-line {
+  min-height: 12px;
+}
+.tile-meta {
+  margin: 6px 0 0;
+  font-size: 8px;
+  line-height: 1.4;
+  color: #6f675c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 </style>
