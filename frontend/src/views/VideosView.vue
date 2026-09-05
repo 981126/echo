@@ -44,16 +44,15 @@
         <h3 class="tile-title" :title="it.title" @click="openItem(it)">{{ it.title }}</h3>
 
         <template v-if="it.kind === 'local'">
-          <p class="tile-meta" style="word-break: break-all; margin-top: 8px">{{ it.filename }}</p>
-          <p class="tile-meta" style="margin-top: -2px">
-            {{ it.status === 'published' ? '已发布' : '计划中' }}
-            <template v-if="it.planned_publish_at"> · 计划 {{ fmt(it.planned_publish_at) }}</template>
-            <template v-if="it.published_at"> · 发布 {{ fmt(it.published_at) }}</template>
-          </p>
           <div class="row" style="gap: 5px; margin-bottom: 6px">
             <n-tag v-for="t in it.tags" :key="t" size="small" :bordered="false">{{ t }}</n-tag>
             <span v-if="!it.tags.length" class="muted">无标签</span>
           </div>
+          <p class="tile-meta">
+            {{ it.status === 'published' ? '已发布' : '计划中' }}
+            <template v-if="it.planned_publish_at"> · 计划 {{ fmt(it.planned_publish_at) }}</template>
+            <template v-if="it.published_at"> · 发布 {{ fmt(it.published_at) }}</template>
+          </p>
           <div class="row-actions">
             <n-tag v-if="it.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
             <n-button v-if="it.platform_post_id" size="small" secondary :loading="syncing === it.id" @click="syncData(it)">同步数据</n-button>
@@ -65,7 +64,6 @@
         <template v-else>
           <p class="tile-meta" style="margin-top: 6px">
             {{ it.cloudPosts.map(x => platformName(x.platform)).join(' / ') }}
-            <template v-if="it.pub"> · {{ it.pub }}</template>
           </p>
           <div v-for="pst in it.cloudPosts.slice(0, 3)" :key="pst.id" class="plat-line">
             <b>{{ platformName(pst.platform) }}</b>
@@ -76,6 +74,7 @@
             </template>
             <span v-else class="muted">暂无指标</span>
           </div>
+          <p v-if="it.pub" class="tile-meta">发布时间 {{ it.pub }}</p>
           <div class="row-actions">
             <n-button size="small" type="primary" secondary @click="openCloud(it)">上传视频/文案</n-button>
             <n-button size="small" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
