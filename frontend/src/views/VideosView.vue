@@ -1032,19 +1032,6 @@ onMounted(async () => {
   font-weight: 600;
   font-size: 14px;
 }
-.plat-line {
-  display: grid;
-  grid-template-columns: 24px 54px 38px 36px 36px;
-  gap: 0;
-  align-items: baseline;
-  white-space: nowrap;
-  margin-top: 3px;
-  font-size: 8px;
-  color: #6f675c;
-}
-.plat-line b { color: #a34f2c; font-weight: 600; }
-.plat-line span { overflow: hidden; text-overflow: ellipsis; }
-
 .plat-stat b {
   color: #a34f2c;
 }
@@ -1093,17 +1080,6 @@ onMounted(async () => {
 }
 
 
-.comment-list {
-  margin: 6px 0 0;
-  padding-left: 1.2em;
-  max-height: 180px;
-  overflow-y: auto;
-}
-.comment-list li {
-  margin: 4px 0;
-  font-size: 13px;
-}
-
 
 /* 筛选栏：控件与提示文案字号调小 */
 .toolbar { font-size: 12px; }
@@ -1125,23 +1101,6 @@ onMounted(async () => {
   font-size: 11px;
 }
 
-
-.plat-zone {
-  margin-top: 4px;
-}
-.plat-line .ph {
-  color: #bdb4a8;
-}
-.plat-line.missing {
-  color: #bdb4a8;
-}
-.plat-line.missing b {
-  color: #bdb4a8;
-  font-weight: 400;
-}
-.plat-line {
-  min-height: 12px;
-}
 .tile-meta {
   margin: 6px 0 0;
   font-size: 8px;

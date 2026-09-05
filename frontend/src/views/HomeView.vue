@@ -171,10 +171,6 @@ const message = useMessage()
 
 const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
 const platformName = (p) => PLATFORM_NAMES[p] || p || '综合'
-function fmtDate(d) {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-}
-
 const model = computed(() => buildTimelineModel(videos.value, cloudPosts.value))
 
 async function loadVideos() {
