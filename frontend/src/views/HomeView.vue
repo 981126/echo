@@ -189,9 +189,10 @@ function pickStep(spanDays) {
 
 const model = computed(() => {
   const raw = []
+  const todayS = fmtDate(new Date())
   for (const v of videos.value) {
     const date = v.published_at ? v.published_at.slice(0, 10) : v.planned_publish_at ? v.planned_publish_at.slice(0, 10) : ''
-    if (!date) continue
+    if (!date || date > todayS) continue  // R-044：只显示今天及以前，未来计划不提前出现
     raw.push({
       id: v.id,
       key: 'v' + v.id,
@@ -206,7 +207,7 @@ const model = computed(() => {
   }
   for (const p of cloudPosts.value) {
     const date = p.publish_time ? p.publish_time.slice(0, 10) : ''
-    if (!date) continue
+    if (!date || date > todayS) continue  // R-044：未来发布不显示
     raw.push({
       id: p.id,
       key: 'c' + p.id,
