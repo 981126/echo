@@ -312,3 +312,6 @@
 
 ## [M43 / R-061 C 继续] 2026-09-05 — CreatorsView 复用 lib/format
 - CreatorsView 删除本地 platformName/fmt/fmtNum，改从 src/lib/format 导入（行为不变）
+
+## [M43 / R-061 C 继续] 2026-09-05 — composables 覆盖 Home/Dashboard/Drafts
+- HomeView/DashboardView/DraftsView 素材拉取改走 fetchVideos（消除重复）

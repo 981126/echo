@@ -169,6 +169,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api, uploadImage } from '../api'
+import { fetchVideos } from '../composables/media'
 import { renderMd } from '../md'
 
 const drafts = ref([])
@@ -234,10 +235,10 @@ function textarea() {
 async function load() {
   const [ds, vs] = await Promise.all([
     api('/api/drafts?limit=500'),
-    api('/api/videos?limit=500')
+    fetchVideos()
   ])
   drafts.value = ds
-  videos.value = vs.items || []
+  videos.value = vs
   const counts = await Promise.all(
     drafts.value.map(d => api(`/api/drafts/${d.id}/discussions`).catch(() => []))
   )

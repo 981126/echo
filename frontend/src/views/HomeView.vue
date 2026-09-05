@@ -87,6 +87,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
+import { fetchVideos } from '../composables/media'
 
 const videos = ref([])
 const hotItems = ref([])
@@ -256,8 +257,7 @@ const model = computed(() => {
 })
 
 async function loadVideos() {
-  const data = await api('/api/videos?limit=500')
-  videos.value = data.items
+  videos.value = await fetchVideos()
 }
 
 async function loadHot() {

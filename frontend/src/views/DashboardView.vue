@@ -133,6 +133,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
+import { fetchVideos } from '../composables/media'
 
 const videos = ref([])
 const summary = ref({ per_video: [], by_topic: {}, by_platform: {} })
@@ -169,12 +170,12 @@ function fmtNum(n) {
 
 async function load() {
   const [v, s, r, rep] = await Promise.all([
-    api('/api/videos?limit=500'),
+    fetchVideos(),
     api('/api/metrics/summary'),
     api('/api/review/radar'),
     api('/api/review/report')
   ])
-  videos.value = v.items
+  videos.value = v
   summary.value = s
   radar.value = r.radar
   report.value = rep
