@@ -54,6 +54,10 @@ export function uploadVideo(file) {
   return uploadFile('/api/videos/upload', file)
 }
 
+export function uploadVideoFile(videoId, file) {
+  return uploadFile(`/api/videos/${videoId}/video`, file)
+}
+
 export function uploadCover(videoId, file) {
   return uploadFile(`/api/videos/${videoId}/cover`, file)
 }

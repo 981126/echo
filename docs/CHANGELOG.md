@@ -344,3 +344,7 @@
 ## [fix] 2026-09-05 — 平台发布时间时区修复（时间线与发布时间对不上）
 - 根因：平台时间戳用 utcfromtimestamp 存成 UTC，界面按北京时间展示导致凌晨发布差一天
 - 修复：tikhub._ts 改为 fromtimestamp(Asia/Shanghai) 存储；存量一次性 +8h 迁移（platform_posts.publish_time + 平台转本地的 videos.published_at，已备份 echo_pre_tzfix_*.db）
+
+## [feat] 2026-09-05 — 素材视频文件管理
+- 新增接口：POST/DELETE /api/videos/{id}/video（给素材上传/替换/删除本地视频文件）
+- 编辑弹窗新增「本地视频文件」控制（上传/替换/删除）；卡片对“未上传视频”素材显示「上传视频」入口

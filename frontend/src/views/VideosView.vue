@@ -44,6 +44,7 @@
         :del-local="delLocal"
         :del-cloud="delCloud"
         :split="splitWork"
+        :upload-video="onCardClick"
       />
     </div>
 
@@ -64,6 +65,13 @@
         </div>
         <PlatformLinksInput :links="editing.links" @update:links="v => (editing.links = v)" />
         <CoverEditor :cover-url="editing.coverUrl" @change="onCover" @remove="removeCover" />
+        <LocalVideoControl
+          :has-file="!!editing.filename && !isPlaceholderFile(editing.filename)"
+          :file-name="editing.filename"
+          :uploading="videoUploading"
+          @upload="onAttachVideo"
+          @remove="onRemoveVideo"
+        />
 
         <div v-if="linkedDrafts.length" class="form-item">
           <label class="form-label">已关联脚本（点击打开）</label>
@@ -164,11 +172,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
-import { api, uploadVideo, uploadCover, getToken } from '../api'
+import { api, uploadVideo, uploadVideoFile, uploadCover, getToken } from '../api'
 import MediaComments from '../components/MediaComments.vue'
 import UploadVideoBar from '../components/UploadVideoBar.vue'
 import MaterialCard from '../components/MaterialCard.vue'
 import CoverEditor from '../components/CoverEditor.vue'
+import LocalVideoControl from '../components/LocalVideoControl.vue'
 import TranscribeSection from '../components/TranscribeSection.vue'
 import PlatformLinksInput from '../components/PlatformLinksInput.vue'
 import EditActions from '../components/EditActions.vue'
@@ -278,6 +287,35 @@ async function onCover(f) {
     await loadQuiet()
   } catch (err) {
     message.error(err.message)
+  }
+}
+
+const videoUploading = ref(false)
+
+async function onAttachVideo(f) {
+  if (!f || !editing.value) return
+  videoUploading.value = true
+  try {
+    const r = await uploadVideoFile(editing.value.id, f)
+    editing.value.filename = r.filename || editing.value.filename
+    message.success('视频已上传')
+    await loadQuiet()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    videoUploading.value = false
+  }
+}
+
+async function onRemoveVideo() {
+  if (!editing.value) return
+  try {
+    const r = await api(`/api/videos/${editing.value.id}/video`, { method: 'DELETE' })
+    editing.value.filename = r.filename || ''
+    message.success('已删除视频文件')
+    await loadQuiet()
+  } catch (e) {
+    message.error(e.message)
   }
 }
 

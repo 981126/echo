@@ -184,6 +184,52 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
     return video
 
 
+@router.post("/{video_id}/video", response_model=VideoOut)
+def attach_video(video_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """给已有素材上传/替换本地视频文件（不自动转写）。落盘名：标题-视频。"""
+    video = db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in VIDEO_EXTS:
+        raise HTTPException(status_code=400, detail=f"不支持的视频格式: {suffix}")
+    settings = get_settings()
+    settings.videos_dir.mkdir(parents=True, exist_ok=True)
+    if video.filename and not video.filename.startswith("__cloud__"):
+        try:
+            (settings.videos_dir / video.filename).unlink(missing_ok=True)
+        except OSError:
+            pass
+    stem = clean_component(video.title or Path(file.filename or "video").stem)
+    raw_name = f"{uuid.uuid4().hex[:8]}_{Path(file.filename or 'video').name}"
+    dest = settings.videos_dir / raw_name
+    with dest.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+    video.filename = rename_to(dest, f"{stem}-视频")
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@router.delete("/{video_id}/video", response_model=VideoOut)
+def remove_video_file(video_id: int, db: Session = Depends(get_db)):
+    """删除素材的本地视频文件（素材记录保留，回到“未上传视频”）。"""
+    video = db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    settings = get_settings()
+    if video.filename and not video.filename.startswith("__cloud__"):
+        try:
+            (settings.videos_dir / video.filename).unlink(missing_ok=True)
+        except OSError:
+            pass
+    video.filename = f"__cloud__{video.id}_{uuid.uuid4().hex[:6]}"  # 占位名唯一且前端识别为“未上传”
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+
 @router.post("/{video_id}/cover", response_model=VideoOut)
 def upload_cover(video_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     video = db.get(Video, video_id)
