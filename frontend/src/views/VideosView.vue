@@ -17,6 +17,13 @@
       <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 130px" />
       <n-select v-model:value="filter.main_topic" :options="topicOptions" placeholder="赛道" clearable style="width: 130px" />
       <n-button secondary @click="load">查询</n-button>
+      <n-button :type="mergeMode ? 'primary' : 'default'" size="small" secondary @click="mergeMode = !mergeMode">合并</n-button>
+    </div>
+    <div v-if="mergeMode" class="row" style="gap: 8px; margin: 8px 0">
+      <span class="muted">勾选 2 个以上云端素材，合并为同一作品</span>
+      <div class="grow" />
+      <n-button size="tiny" type="primary" :disabled="selected.size < 2" @click="doMergeCloud">合并所选（{{ selected.size }}）</n-button>
+      <n-button size="tiny" secondary @click="cancelMerge">取消</n-button>
     </div>
 
     <div v-if="loading" class="panel empty">加载中…</div>
@@ -60,6 +67,9 @@
           <div v-if="!it.tags_confirmed" class="tile-actions">
             <n-button size="small" secondary @click="confirmTags(it)">确认标签</n-button>
           </div>
+          <div class="tile-actions">
+            <n-button size="small" quaternary type="error" @click="delLocal(it)">删除</n-button>
+          </div>
         </template>
 
         <template v-else>
@@ -77,9 +87,11 @@
             <span v-else class="muted">暂无指标</span>
           </div>
           <div class="row" style="gap: 5px; flex-wrap: wrap; margin-top: 8px">
+            <n-checkbox v-if="mergeMode" :checked="selected.has(it.key)" @update:checked="toggleSel(it)">选</n-checkbox>
             <n-button size="tiny" type="primary" secondary @click="openCloud(it)">上传视频/文案</n-button>
             <n-button v-if="it.cloudPosts.length" size="tiny" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
             <n-button v-if="it.local_video_id" size="tiny" secondary @click="goLocal(it.local_video_id)">打开本地素材</n-button>
+            <n-button size="tiny" quaternary type="error" @click="delCloud(it)">删除</n-button>
           </div>
         </template>
       </div>
@@ -205,10 +217,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import { api, uploadVideo, uploadCover, getToken } from '../api'
 
 const message = useMessage()
+const dialog = useDialog()
 const topics = ['求职', '面试', '赚钱', '知识', '其他']
 const videos = ref([])
 const filter = ref({ platform: null, status: null, main_topic: null })
@@ -549,9 +562,10 @@ function openWorkDetail(w) {
 }
 
 function toggleSel(w) {
+  const key = w.key || w.id
   const next = new Set(selected.value)
-  if (next.has(w.id)) next.delete(w.id)
-  else next.add(w.id)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
   selected.value = next
 }
 
@@ -612,6 +626,67 @@ async function confirmTags(v) {
   await api(`/api/videos/${v.id}/confirm-tags`, { method: 'POST', body: JSON.stringify({ tags_confirmed: true }) })
   message.success('标签已确认')
   load()
+}
+
+async function doMergeCloud() {
+  const keys = [...selected.value]
+  const ids = []
+  cards.value.forEach(c => {
+    if (c.kind === 'cloud' && keys.includes(c.key)) {
+      (c.cloudPosts || []).forEach(x => ids.push(x.id))
+    }
+  })
+  const uniq = [...new Set(ids)]
+  if (uniq.length < 2) {
+    message.warning('请选择至少 2 个云端素材')
+    return
+  }
+  try {
+    await api('/api/works/merge', { method: 'POST', body: JSON.stringify({ platform_post_ids: uniq }) })
+    message.success('已合并为同一作品')
+    cancelMerge()
+    await loadWorks()
+  } catch (e) {
+    message.error(e.message)
+  }
+}
+
+function delLocal(it) {
+  dialog.warning({
+    title: '删除素材',
+    content: `确定删除「${it.title || it.filename}」？会删除本地记录与文件，不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await api(`/api/videos/${it.id}`, { method: 'DELETE' })
+        message.success('已删除')
+        await load()
+        await loadWorks()
+      } catch (e) {
+        message.error(e.message)
+      }
+    }
+  })
+}
+
+function delCloud(it) {
+  const kind = it.type === 'work' ? 'work' : 'post'
+  dialog.warning({
+    title: '删除云端素材',
+    content: `确定删除「${it.title}」？会删除该${kind === 'work' ? '合并作品及其所有平台记录' : '平台记录'}。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await api(`/api/works/${it.id}?kind=${kind}`, { method: 'DELETE' })
+        message.success('已删除')
+        await loadWorks()
+      } catch (e) {
+        message.error(e.message)
+      }
+    }
+  })
 }
 
 onMounted(async () => {

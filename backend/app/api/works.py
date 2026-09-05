@@ -130,6 +130,35 @@ def get_works(creator_id: int = 0, db: Session = Depends(get_db)):
     return {"total": len(items), "items": items}
 
 
+@router.delete("/{item_id}", response_model=dict)
+def delete_item(item_id: int, kind: str = "post", db: Session = Depends(get_db)):
+    """删除云端素材：kind=work 删整个合并作品及其平台记录；kind=post 只删单条。"""
+    from ..models.hot_topic import TopicIdea
+    from ..models.platform import PlatformPost, PlatformPostStat
+    from ..models.work import Work
+
+    posts = []
+    work = None
+    if kind == "work":
+        work = db.get(Work, item_id)
+        if work is None:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        posts = db.query(PlatformPost).filter(PlatformPost.work_id == item_id).all()
+    else:
+        p = db.get(PlatformPost, item_id)
+        posts = [p] if p else []
+    if not posts:
+        raise HTTPException(status_code=404, detail="云端素材不存在")
+    for post in posts:
+        db.query(PlatformPostStat).filter(PlatformPostStat.post_id == post.id).delete()
+        db.query(TopicIdea).filter(TopicIdea.post_id == post.id).delete()
+        db.delete(post)
+    if work is not None:
+        db.delete(work)
+    db.commit()
+    return {"ok": True, "removed": len(posts)}
+
+
 @router.post("/merge", response_model=dict)
 def merge_items(payload: MergeIn, db: Session = Depends(get_db)):
     try:

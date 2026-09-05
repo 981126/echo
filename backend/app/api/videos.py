@@ -152,6 +152,32 @@ def delete_cover(video_id: int, db: Session = Depends(get_db)):
     return video
 
 
+@router.delete("/{video_id}", response_model=dict)
+def delete_video(video_id: int, db: Session = Depends(get_db)):
+    """删除本地素材（逻辑清理：删除记录/转写/指标，解除云端作品绑定，本地视频文件一并删除）。"""
+    from ..config import get_settings
+    from ..models.draft import Draft
+    from ..models.metrics import MetricsSnapshot
+    from ..models.platform import PlatformPost
+
+    video = db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    if video.filename:
+        try:
+            (get_settings().videos_dir / video.filename).unlink(missing_ok=True)
+        except OSError:
+            pass
+    db.query(PlatformPost).filter(PlatformPost.local_video_id == video_id).update({"local_video_id": None})
+    db.query(Draft).filter(Draft.video_id == video_id).update({"video_id": None})
+    db.query(MetricsSnapshot).filter(MetricsSnapshot.video_id == video_id).delete()
+    if video.transcript:
+        db.delete(video.transcript)
+    db.delete(video)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{video_id}/confirm-tags", response_model=VideoOut)
 def confirm_tags(video_id: int, payload: TagConfirmIn, db: Session = Depends(get_db)):
     video = db.get(Video, video_id)
