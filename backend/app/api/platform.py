@@ -150,6 +150,7 @@ def bind_video_links(video_id: int, payload: dict, db: Session = Depends(get_db)
     db.commit()
     if errors and not bound:
         raise HTTPException(status_code=400, detail="；".join(errors))
+    _rename_media_after_bind(db, video)
     return {"ok": True, "bound": bound, "errors": errors}
 
 
@@ -540,3 +541,30 @@ def creator_summary(db: Session = Depends(get_db)):
             }
         )
     return {"items": out}
+
+
+def _rename_media_after_bind(db: Session, video: Video) -> None:
+    """绑定平台后，把已存在的本地视频/封面补成「平台-主标题-视频/封面」。"""
+    try:
+        from ..services.media_naming import media_stem, rename_to
+        import json as _json
+
+        plats = _json.loads(video.platforms or "[]") if isinstance(video.platforms, str) else (video.platforms or [])
+        plat = plats[0] if plats else ""
+        if not plat or not video.title:
+            return
+        from ..config import get_settings as _gs
+
+        settings = _gs()
+        if video.filename and not video.filename.startswith("__cloud__"):
+            old = settings.videos_dir / video.filename
+            if old.exists():
+                video.filename = rename_to(old, media_stem(plat, video.title, "视频"))
+        if video.cover_path and not video.cover_path.startswith("avatar_"):
+            old = settings.covers_dir / video.cover_path
+            if old.exists():
+                video.cover_path = rename_to(old, media_stem(plat, video.title, "封面"))
+        db.commit()
+    except Exception:  # noqa: BLE001 改名失败不影响绑定
+        db.rollback()
+

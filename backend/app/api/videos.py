@@ -99,6 +99,18 @@ def get_video(video_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="视频不存在")
     out = VideoDetailOut.model_validate(video)
     out.platform_links = _platform_links(db, video)
+    posts = _bound_platform_posts(db, video)
+    if posts:
+        if out.published_at is None:
+            with_time = [p.publish_time for p in posts if p.publish_time]
+            if with_time:
+                out.published_at = max(with_time)
+        if not out.is_ad and any(p.is_ad for p in posts):
+            out.is_ad = True
+        if out.ad_price is None:
+            priced = [p.ad_price for p in posts if p.ad_price is not None]
+            if priced:
+                out.ad_price = max(priced)
     return out
 
 
@@ -178,8 +190,9 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
     if "ad_price" in data:
         video.ad_price = int(data["ad_price"]) if data["ad_price"] is not None else None
     db.commit()
-    if "title" in data and (video.title or "").strip():
+    if ("title" in data or "platforms" in data) and (video.title or "").strip():
         _rename_by_title(db, video)
+    _sync_local_to_posts(db, video)
     db.refresh(video)
     return video
 
@@ -324,6 +337,49 @@ def _first_platform(video: Video) -> str:
         return arr[0] if arr else ""
     except (TypeError, ValueError):
         return ""
+
+
+def _bound_platform_posts(db: Session, video: Video) -> list[PlatformPost]:
+    """本地素材绑定的平台帖子（local_video_id 或 work 聚合，去重）。"""
+    seen: dict[int, PlatformPost] = {}
+    for p in db.query(PlatformPost).filter(PlatformPost.local_video_id == video.id).all():
+        seen[p.id] = p
+    if video.work_id:
+        for p in db.query(PlatformPost).filter(PlatformPost.work_id == video.work_id).all():
+            seen[p.id] = p
+    if video.platform_post_id and ":" in video.platform_post_id:
+        platform, ext = video.platform_post_id.split(":", 1)
+        found = db.query(PlatformPost).filter(PlatformPost.platform == platform, PlatformPost.platform_post_id == ext).first()
+        if found is not None:
+            seen[found.id] = found
+    return list(seen.values())
+
+
+def _sync_local_to_posts(db: Session, video: Video) -> None:
+    """把本地素材的修改同步到绑定的全部平台帖子（合并卡各条一致）。"""
+    posts = _bound_platform_posts(db, video)
+    if not posts:
+        return
+    # 本地缺字段时先用平台数据回填（点开即一致）
+    if video.published_at is None:
+        with_time = [p.publish_time for p in posts if p.publish_time]
+        if with_time:
+            video.published_at = max(with_time)
+    if not video.is_ad and any(p.is_ad for p in posts):
+        video.is_ad = True
+    if video.ad_price is None:
+        priced = [p.ad_price for p in posts if p.ad_price is not None]
+        if priced:
+            video.ad_price = max(priced)
+    # 用户编辑回写各平台帖子
+    for p in posts:
+        if video.title:
+            p.title = video.title
+        p.is_ad = video.is_ad
+        p.ad_price = video.ad_price
+        if video.published_at:
+            p.publish_time = video.published_at
+    db.commit()
 
 
 def _rename_by_title(db: Session, video: Video) -> None:
