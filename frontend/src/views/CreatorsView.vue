@@ -257,6 +257,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, getToken } from '../api'
 import { fmt, fmtNum, platformName } from '../lib/format'
+import { platformOptions } from '../lib/options'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -274,11 +275,6 @@ const syncingAcct = ref(0)
 const syncingPost = ref(0)
 const summary = ref({ items: [] })
 
-const platformOptions = [
-  { label: '抖音', value: 'douyin' },
-  { label: 'B站', value: 'bilibili' },
-  { label: '小红书', value: 'xiaohongshu' }
-]
 const freqOptions = [
   { label: '每日自动（主博主）', value: 'daily' },
   { label: '每周（对标）', value: 'weekly' },

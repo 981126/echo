@@ -179,6 +179,7 @@ import EditActions from '../components/EditActions.vue'
 import TranscriptEditor from '../components/TranscriptEditor.vue'
 import TagsInput from '../components/TagsInput.vue'
 import MetaFields from '../components/MetaFields.vue'
+import { platformOptions, statusOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
@@ -221,15 +222,6 @@ const autoMerging = ref(false)
 const showEdit = ref(false)
 const tagsText = ref('')
 
-const platformOptions = [
-  { label: '抖音', value: 'douyin' },
-  { label: 'B站', value: 'bilibili' },
-  { label: '小红书', value: 'xiaohongshu' }
-]
-const statusOptions = [
-  { label: '计划中', value: 'planned' },
-  { label: '已发布', value: 'published' }
-]
 const topicOptions = topics.map(t => ({ label: t, value: t }))
 async function load() {
   loading.value = true
