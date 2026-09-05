@@ -259,3 +259,9 @@
 - docs/ARCHITECTURE.md：重写为详细架构（技术栈/进程/模块/ER/配置/部署）
 - docs/DESIGN.md：开发设计（API/异步/定时/ASR/同步/生成算法/讨论/复盘/护栏）
 - 全部含 Mermaid 流程图
+
+## [M42 / R-060] 2026-09-05 — 文档体系 v2
+- docs/API.md：90 接口完整参数/字段（OpenAPI 自动生成）
+- docs/DATABASE.md：26 表完整字段/索引/外键（模型自动生成）
+- docs/QUICKSTART.md 小白上手、docs/GLOSSARY.md 术语、docs/FAQ.md 排查
+- README 文档导航更新

@@ -48,8 +48,15 @@ scripts/verify.sh   # lint + 类型检查 + 测试 + 前端构建
 | 文档 | 内容 |
 |---|---|
 | `AGENTS.md` | AI 行为手册（任何 agent 打开项目先读它） |
-| `docs/PRD.md` | 产品需求 |
-| `docs/ARCHITECTURE.md` | 架构总览与运行方式 |
+| `docs/PRD.md` | 产品需求（精简） |
+| `docs/PRODUCT.md` | 产品功能手册（全部功能+流程图） |
+| `docs/QUICKSTART.md` | ⭐ 小白上手指南（先读它） |
+| `docs/ARCHITECTURE.md` | 架构总览与运行方式（详细版） |
+| `docs/DESIGN.md` | 开发设计文档（算法/任务/扩展点） |
+| `docs/API.md` | 完整接口文档（90 个接口，OpenAPI 生成） |
+| `docs/DATABASE.md` | 数据库表结构设计（26 表，模型生成） |
+| `docs/GLOSSARY.md` | 术语表（新手向） |
+| `docs/FAQ.md` | 常见问题排查 |
 | `docs/WORKFLOW.md` | 标准流程与需求反问清单 |
 | `docs/DECISIONS.md` | 关键决策记录 |
 | `docs/milestones.md` | 里程碑进度 |
