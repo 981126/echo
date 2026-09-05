@@ -127,7 +127,7 @@
       @close="closeEdit"
     >
       <div v-if="editing" style="max-height: 72vh; overflow-y: auto; padding-right: 6px">
-        <n-tabs v-model:value="editPane" type="line" size="small" animated @update:value="onEditPane">
+        <n-tabs v-model:value="editPane" type="line" size="small" animated>
           <n-tab-pane name="edit" tab="编辑信息">
         <div class="form-item">
           <label class="form-label">标题</label>
@@ -246,7 +246,7 @@
     </n-modal>
     <n-modal v-model:show="showCloud" preset="card" :title="'转本地素材：' + (cloudItem && cloudItem.title || '')" style="width: min(620px, 94vw)">
       <div v-if="cloudItem" style="max-height: 70vh; overflow-y: auto; padding-right: 4px">
-        <n-tabs v-model:value="cloudTab" type="line" animated @update:value="onCloudTab">
+        <n-tabs v-model:value="cloudTab" type="line" animated>
           <n-tab-pane name="local" tab="转本地素材">
             <div class="form-item">
               <label class="form-label">上传视频（可选；选后可一键「保存并语音转文字」）</label>
@@ -280,16 +280,7 @@
           </n-tab-pane>
           <n-tab-pane name="comments" tab="评论数据">
             <div v-if="!(cloudItem.cloudPosts || []).length" class="empty">暂无平台记录</div>
-            <div v-for="pst in cloudItem.cloudPosts || []" :key="pst.id" class="comment-block">
-              <div class="row" style="gap: 6px; align-items: center; margin-top: 6px">
-                <b>{{ platformName(pst.platform) }}</b>
-                <n-button size="tiny" secondary :loading="commentsLoading === pst.id" @click="refreshComments(pst)">加载评论</n-button>
-                <span v-if="(commentsMap[pst.id] || []).length" class="muted">{{ commentsMap[pst.id].length }} 条</span>
-              </div>
-              <ul v-if="(commentsMap[pst.id] || []).length" style="margin: 6px 0 0; padding-left: 1.2em; max-height: 180px; overflow-y: auto">
-                <li v-for="(c, i) in commentsMap[pst.id]" :key="i" style="margin: 4px 0">{{ c }}</li>
-              </ul>
-            </div>
+            <MediaComments v-else :posts="cloudCommentPosts" />
           </n-tab-pane>
         </n-tabs>
       </div>
@@ -339,8 +330,6 @@ const cloudAd = ref(false)
 const cloudPrice = ref(null)
 const cloudMetaSaving = ref(false)
 const cloudTab = ref('local')
-const commentsMap = ref({})
-const commentsLoading = ref(0)
 const mergeMode = ref(false)
 const selected = ref(new Set())
 const syncingPost = ref(0)
@@ -529,6 +518,7 @@ let transcribeTimer = null
 const linkPlatforms = ['douyin', 'bilibili', 'xiaohongshu']
 const platOrder = ['douyin', 'bilibili', 'xiaohongshu']
 const editCommentPosts = computed(() => ((editing.value && editing.value.platformPosts) || []).map(x => ({ id: x.post_id, platform: x.platform })))
+const cloudCommentPosts = computed(() => ((cloudItem.value && cloudItem.value.cloudPosts) || []).map(x => ({ id: x.id, platform: x.platform })))
 const syncingEdit = ref(false)
 const editPane = ref('edit')
 
@@ -542,15 +532,6 @@ function linksFromPlatform(platformLinks) {
     if (x && x.platform && x.platform in out && x.url) out[x.platform] = x.url
   })
   return out
-}
-function onEditPane(name) {
-  if (name === 'comments') loadLocalComments()
-}
-
-function loadLocalComments() {
-  const posts = (editing.value && editing.value.platformPosts) || []
-  if (!posts.length) return
-  posts.forEach(pst => loadComments({ id: pst.post_id, platform: pst.platform }))
 }
 
 
@@ -842,7 +823,6 @@ function openCloud(it) {
   cloudFile.value = null
   cloudText.value = ''
   cloudTab.value = 'local'
-  commentsMap.value = {}
   const posts = it.cloudPosts || []
   cloudAd.value = posts.some(x => x.is_ad)
   const priced = posts.filter(x => x.ad_price != null).map(x => x.ad_price)
@@ -864,34 +844,6 @@ async function saveCloudMeta() {
     message.error(e.message)
   } finally {
     cloudMetaSaving.value = false
-  }
-}
-
-async function loadComments(pst) {
-  try {
-    const r = await api(`/api/platform/posts/${pst.id}/comments?limit=50`)
-    commentsMap.value = { ...commentsMap.value, [pst.id]: r.items || [] }
-  } catch (e) {
-    /* 静默 */
-  }
-}
-
-function onCloudTab(name) {
-  if (name !== 'comments' || !cloudItem.value) return
-  const posts = cloudItem.value.cloudPosts || []
-  posts.forEach(pst => loadComments(pst))
-}
-
-async function refreshComments(pst) {
-  commentsLoading.value = pst.id
-  try {
-    const r = await api(`/api/platform/posts/${pst.id}/comments/refresh`, { method: 'POST', body: '{}' })
-    commentsMap.value = { ...commentsMap.value, [pst.id]: r.items || [] }
-    message.success(r.added > 0 ? `已入库 ${r.added} 条新评论，共 ${(r.items || []).length} 条` : `已是最新（共 ${(r.items || []).length} 条）`)
-  } catch (e) {
-    message.error('评论拉取失败：' + e.message)
-  } finally {
-    commentsLoading.value = 0
   }
 }
 
