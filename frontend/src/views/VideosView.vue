@@ -60,7 +60,11 @@
           </div>
           <div class="plat-zone">
             <div v-for="p in platOrder" :key="p" class="plat-line missing">
-              <b>{{ platformName(p) }}</b><span class="muted">—</span>
+              <b>{{ platformName(p) }}</b>
+              <span class="muted">播放 —</span>
+              <span class="muted">赞 —</span>
+              <span class="muted">藏 —</span>
+              <span class="muted">评 —</span>
             </div>
           </div>
           <p class="tile-meta">
@@ -96,7 +100,11 @@
                 <span v-else class="muted">暂无指标</span>
               </template>
               <template v-else>
-                <b>{{ platformName(p) }}</b><span class="muted">—</span>
+                <b>{{ platformName(p) }}</b>
+                <span class="muted">播放 —</span>
+                <span class="muted">赞 —</span>
+                <span class="muted">藏 —</span>
+                <span class="muted">评 —</span>
               </template>
             </div>
           </div>
