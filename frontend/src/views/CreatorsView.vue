@@ -554,11 +554,6 @@ function goMaterial(id) {
   location.hash = `#/videos?edit=${id}`
 }
 
-function pickAvatar(id) {
-  const el = document.getElementById(id)
-  if (el) el.click()
-}
-
 async function onAvatar(a, e) {
   const f = e.target.files[0]
   if (!f) return
