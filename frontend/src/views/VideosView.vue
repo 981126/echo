@@ -495,6 +495,11 @@ function openItem(it) {
   else openEdit(it)
 }
 
+function onCardClick(it) {
+  if (mergeMode.value && it.kind === 'cloud') toggleSel(it)
+  else openItem(it)
+}
+
 function openCloud(it) {
   cloudItem.value = it
   cloudFile.value = null
