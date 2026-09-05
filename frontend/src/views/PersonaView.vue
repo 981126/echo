@@ -43,7 +43,10 @@
       </p>
     </div>
 
-    <div class="section-title">待确认建议</div>
+    <div class="section-title">
+      待确认建议
+      <n-button v-if="suggested.length" size="tiny" type="primary" secondary style="margin-left: 10px" :loading="confirmingAll" @click="confirmAll">一键确认建议</n-button>
+    </div>
     <div v-if="!suggested.length" class="panel empty">暂无待确认建议</div>
     <div v-for="t in suggested" :key="t.id" class="panel row" style="align-items: flex-start">
       <div class="grow">
@@ -138,6 +141,7 @@ const showEdit = ref(false)
 const editForm = ref({ id: null, label: '', description: '', category: 'style' })
 const phrases = ref([])
 const phraseLoading = ref(false)
+const confirmingAll = ref(false)
 const styleInfo = ref(null)
 const avoidList = ref([])
 const avoidText = ref('')
@@ -159,6 +163,20 @@ async function load() {
   ])
   suggested.value = s
   confirmed.value = c
+}
+
+async function confirmAll() {
+  if (!suggested.value.length) return
+  confirmingAll.value = true
+  try {
+    const r = await api('/api/persona/confirm-all', { method: 'POST', body: '{}' })
+    message.success(`已确认 ${r.count || 0} 条建议`)
+    await load()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    confirmingAll.value = false
+  }
 }
 
 async function loadStyle() {

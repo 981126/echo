@@ -26,6 +26,18 @@ def list_persona(status: str = "", db: Session = Depends(get_db)):
     return q.order_by(PersonaTag.category, PersonaTag.id).all()
 
 
+
+@router.post("/confirm-all", response_model=dict)
+def confirm_all_suggested(db: Session = Depends(get_db)):
+    """一键把当前博主的全部「待确认建议」标记为已确认。"""
+    q = db.query(PersonaTag).filter(PersonaTag.status == "suggested")
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
+    count = q.update({"status": "confirmed"}, synchronize_session=False)
+    db.commit()
+    return {"ok": True, "count": count}
+
 @router.post("/tags", response_model=PersonaTagOut)
 def add_manual_tag(payload: PersonaTagCreate, db: Session = Depends(get_db)):
     data = {k: v for k, v in payload.model_dump().items() if k != "source"}
