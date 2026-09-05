@@ -1277,11 +1277,20 @@ onMounted(async () => {
 
 
 .grid-videos {
-  align-items: start;
+  align-items: stretch;
+}
+.card-tile {
+  height: 100%;
 }
 .row-actions {
-  margin-top: 8px;
+  margin-top: auto;
+  padding-top: 8px;
   min-height: 24px;
+}
+.tag-row {
+  min-height: 22px;
+  max-height: 52px;
+  overflow: hidden;
 }
 
 </style>
