@@ -909,12 +909,12 @@ onMounted(async () => {
 }
 .plat-line {
   display: grid;
-  grid-template-columns: 44px 92px 62px 56px 56px;
-  gap: 2px;
+  grid-template-columns: 36px 74px 52px 52px 52px;
+  gap: 1px;
   align-items: baseline;
   white-space: nowrap;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 10px;
   color: #6f675c;
   overflow: hidden;
 }
