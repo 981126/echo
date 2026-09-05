@@ -25,7 +25,7 @@ def _make_engine():
     path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(
         f"sqlite:///{path}",
-        connect_args={"check_same_thread": False},
+        connect_args={"check_same_thread": False, "timeout": 30},  # 多线程同步时避免 database is locked
     )
 
 
