@@ -45,7 +45,7 @@
           <n-tag v-if="it.is_ad" size="small" :bordered="false" round type="error">广告{{ it.ad_price ? ' ¥' + it.ad_price : '' }}</n-tag>
           <n-tag v-for="t in it.main_topics || []" :key="t" size="small" :bordered="false" round type="info">{{ t }}</n-tag>
         </div>
-        <h3 class="tile-title" :title="it.title" @click="openItem(it)">{{ it.title }}</h3>
+        <h3 class="tile-title" :title="it.title">{{ it.title }}</h3>
 
         <template v-if="it.kind === 'local'">
           <div class="tag-row">
@@ -89,7 +89,7 @@
           <div class="row-actions" @click.stop>
             <n-button size="small" secondary :loading="syncingPost === it.cloudPosts[0].id" @click="syncCloudPost(it.cloudPosts[0])">同步数据</n-button>
             <n-button v-if="it.merged >= 2" size="small" quaternary type="warning" @click="splitWork(it)">拆分</n-button>
-            <n-button v-if="it.local_video_id" size="small" secondary @click="goLocal(it.local_video_id)">打开本地</n-button>
+            <n-button v-if="it.local_video_id" size="small" secondary @click="goLocal(it.local_video_id)">语音转文字</n-button>
             <n-button size="small" quaternary type="error" @click="delCloud(it)">删除</n-button>
           </div>
         </template>
@@ -184,15 +184,15 @@
               <span v-else-if="!editing.transcriptText" class="muted">上传视频不会自动转写，点按钮把语音转成文字</span>
             </div>
           </div>
-          <div class="form-item full">
-            <label class="form-label">原始文案（可选）</label>
-            <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
-          </div>
           <div class="form-item full" v-if="editing.transcriptText">
             <label class="form-label">ASR 转写（只读）</label>
             <div class="prose panel" style="margin-bottom: 0; background: var(--bg)">
               <p style="white-space: pre-wrap">{{ editing.transcriptText }}</p>
             </div>
+          </div>
+          <div class="form-item full">
+            <label class="form-label">原始文案（可选）</label>
+            <n-input v-model:value="editing.sourceText" type="textarea" :rows="3" placeholder="与口播可能不一致" />
           </div>
         </div>
         <div class="row">
@@ -734,9 +734,19 @@ function onCloudFile(e) {
 }
 
 async function goLocal(id) {
-  await load()
-  const v = videos.value.find(x => x.id === id)
+  let v = videos.value.find(x => x.id === id)
+  if (!v) {
+    try {
+      v = await api('/api/videos/' + id)
+    } catch {
+      v = null
+    }
+  }
   if (v) openEdit(v)
+  else {
+    message.warning('本地素材不存在或已删除')
+    await load()
+  }
 }
 
 async function saveCloudLocal() {
