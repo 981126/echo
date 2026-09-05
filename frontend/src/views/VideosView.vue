@@ -105,6 +105,8 @@
       @close="closeEdit"
     >
       <div v-if="editing" style="max-height: 72vh; overflow-y: auto; padding-right: 6px">
+        <n-tabs v-model:value="editPane" type="line" size="small" animated @update:value="onEditPane">
+          <n-tab-pane name="edit" tab="编辑信息">
         <div class="form-item">
           <label class="form-label">标题</label>
           <n-input v-model:value="editing.title" placeholder="视频标题（选题标题）" />
@@ -207,6 +209,26 @@
           <n-button type="primary" @click="saveEdit">保存</n-button>
           <n-button secondary @click="closeEdit">取消</n-button>
         </div>
+          </n-tab-pane>
+          <n-tab-pane name="comments" tab="评论数据">
+            <div v-if="!editing.platformPosts || !editing.platformPosts.length" class="muted" style="padding: 14px 0">
+              该素材还没绑定平台作品。先在「编辑信息」里填平台链接并保存，即可查看各平台评论
+            </div>
+            <div v-else style="display: flex; flex-direction: column; gap: 8px">
+              <div v-for="pst in editing.platformPosts" :key="pst.post_id" class="comment-block">
+                <div class="row" style="gap: 6px; align-items: center; flex-wrap: wrap">
+                  <b>{{ platformName(pst.platform) }}</b>
+                  <n-button size="tiny" secondary :loading="commentsLoading === pst.post_id" @click="refreshComments({ id: pst.post_id, platform: pst.platform })">加载评论</n-button>
+                  <span v-if="(commentsMap[pst.post_id] || []).length" class="muted">{{ commentsMap[pst.post_id].length }} 条</span>
+                </div>
+                <ul v-if="(commentsMap[pst.post_id] || []).length" class="comment-list">
+                  <li v-for="(c, i) in commentsMap[pst.post_id]" :key="i">{{ c }}</li>
+                </ul>
+                <p v-else class="muted" style="margin: 6px 0 0; font-size: 12px">暂无本地评论，点「加载评论」实时拉取并入库</p>
+              </div>
+            </div>
+          </n-tab-pane>
+        </n-tabs>
       </div>
 
     </n-modal>
@@ -439,6 +461,7 @@ function goDraft(id) {
 }
 
 async function openEdit(v) {
+  editPane.value = 'edit'
   let detail = v
   try {
     detail = await api('/api/videos/' + v.id)
@@ -461,6 +484,7 @@ async function openEdit(v) {
     sourceText: tr?.source_text || '',
     transcriptText: tr?.transcript_text || '',
     platformLinks: detail.platform_links || [],
+    platformPosts: detail.platform_links || [],
     plannedTs: parseTs(v.planned_publish_at),
     publishedTs: parseTs(v.published_at)
   }
@@ -487,6 +511,7 @@ const transcribing = ref(false)
 let transcribeTimer = null
 const linkPlatforms = ['douyin', 'bilibili', 'xiaohongshu']
 const syncingEdit = ref(false)
+const editPane = ref('edit')
 
 function linksFromPlatform(platformLinks) {
   const out = { douyin: '', bilibili: '', xiaohongshu: '' }
@@ -495,6 +520,16 @@ function linksFromPlatform(platformLinks) {
   })
   return out
 }
+function onEditPane(name) {
+  if (name === 'comments') loadLocalComments()
+}
+
+function loadLocalComments() {
+  const posts = (editing.value && editing.value.platformPosts) || []
+  if (!posts.length) return
+  posts.forEach(pst => loadComments({ id: pst.post_id, platform: pst.platform }))
+}
+
 
 async function applyLinks() {
   if (!editing.value || !orig.value) return true
@@ -579,6 +614,7 @@ function pollTranscript() {
 }
 
 function closeEdit() {
+  editPane.value = 'edit'
   clearTranscribePoll()
   transcribing.value = false
   showEdit.value = false
@@ -1116,6 +1152,18 @@ onMounted(async () => {
   font-size: 12px;
   font-weight: 600;
   background: rgba(163, 79, 44, 0.08);
+}
+
+
+.comment-list {
+  margin: 6px 0 0;
+  padding-left: 1.2em;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.comment-list li {
+  margin: 4px 0;
+  font-size: 13px;
 }
 
 </style>

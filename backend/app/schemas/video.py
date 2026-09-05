@@ -54,10 +54,11 @@ class TranscriptOut(BaseModel):
 
 
 class PlatformLinkOut(BaseModel):
-    """素材绑定的平台作品链接（R-035：编辑页展示三平台链接）。"""
+    """素材绑定的平台作品链接（R-035/R-037：展示三平台链接与评论用）。"""
 
     platform: str
     platform_post_id: str = ""
+    post_id: Optional[int] = None  # platform_posts.id（本地素材评论 tab 用）
     url: str = ""
     publish_time: Optional[datetime] = None
 

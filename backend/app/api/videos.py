@@ -130,6 +130,7 @@ def _platform_links(db: Session, video: Video) -> list[PlatformLinkOut]:
             PlatformLinkOut(
                 platform=post.platform,
                 platform_post_id=post.platform_post_id,
+                post_id=post.id,
                 url=url,
                 publish_time=post.publish_time,
             )
