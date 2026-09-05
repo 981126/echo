@@ -125,10 +125,7 @@
               <label class="form-label">上传视频（可选；选后可一键「保存并语音转文字」）</label>
               <CloudVideoPicker :file-name="cloudFile ? cloudFile.name : ''" @file="onCloudFile" />
             </div>
-            <div class="form-item">
-              <label class="form-label">文案 / 原始文字（可选）</label>
-              <n-input v-model:value="cloudText" type="textarea" :rows="5" placeholder="粘贴你的口播文案或字幕，转本地素材后可用于 AI 学习" />
-            </div>
+            <CloudTextArea :model-value="cloudText" @update:modelValue="v => (cloudText = v)" />
             <div class="row" style="gap: 18px">
               <div class="form-item" style="flex: 1">
                 <label class="form-label">商务广告</label>
@@ -180,6 +177,7 @@ import TagsInput from '../components/TagsInput.vue'
 import MetaFields from '../components/MetaFields.vue'
 import CloudVideoPicker from '../components/CloudVideoPicker.vue'
 import CloudActions from '../components/CloudActions.vue'
+import CloudTextArea from '../components/CloudTextArea.vue'
 import { adOptions, platformOptions, statusOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { fmt, fmtNum, platformName, parseTs, tsLocal, arrKey } from '../lib/format'
