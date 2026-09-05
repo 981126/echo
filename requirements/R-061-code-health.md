@@ -3,7 +3,7 @@
 - **日期**: 2026-09-05
 - **提出渠道**: 对话
 - **原文摘要**: 1) 检查所有代码，优化点、冗余设计；2) 表结构规划评估与优化。
-- **状态**: 🔨 实施中（A ✅；B ✅；C 后端拆分+预算+评论子组件 ✅；前端全量组件化/D 待续）
+- **状态**: 🔨 实施中（A ✅；B ✅；C 主要完成 ✅；D 待实施）
 - **排期**: M43（进行中）
 - **关联**: PRD §工程标准、ARCHITECTURE/DESIGN/DATABASE
 
@@ -13,5 +13,5 @@
 - **B（二期 ✅）**：TF-IDF 检索索引缓存（素材版本失效）；`_post_item`/`post_item` 合并为统一序列化（works/platform 共用）；未启用 cookie 指标通道不再每日空跑；新增 `tasks.push_notification` 统一通知写入
 - **C（一期 ✅）**：后端大文件拆分——tikhub 拆 link_utils、platform_sync 拆 platform_assets 与 platform/budget、数据源适配器接线
 - **C（二期 ✅ 部分）**：前端新增 MediaComments 评论子组件并接入素材编辑页评论 Tab
-- **C（待续）**：VideosView/CreatorsView 全量组件化、前端 composables 统一
+- **C（✅ 主要完成）**：VideosView 抽出 14 个组件/模块（MediaComments/PlatformStats/UploadVideoBar/MaterialCard/CoverEditor/TranscribeSection/PlatformLinksInput/EditActions/TranscriptEditor/TagsInput/MetaFields/CloudVideoPicker/CloudActions/CloudTextArea）；CreatorsView 抽出 CreatorAccountRow/CreatorHeaderRow/CloudPostTile/CloudPostDetail/CreatorFormModal/AccountFormModal；composables+lib 覆盖多页；转素材 500 修复
 - **D（待实施）**：schema 收敛——绑定关系单事实源(local_video_id)+唯一约束、tags 关联表、raw 归档策略（需备份迁移）

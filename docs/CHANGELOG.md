@@ -325,3 +325,8 @@
 ## [fix] 2026-09-05 — 云端“转素材”500 修复
 - 原因：无文件本地素材 filename='' 撞 videos.filename 唯一约束
 - 修复：占位名改 `__cloud__{post_id}`（works.to-local 同规则）；前端按占位名不显示转写按钮、标题显示素材标题
+
+## [M43 / R-061 C 收尾] 2026-09-05 — C 组件化主要完成
+- VideosView 14 组件 + CreatorsView 6 组件 + composables/lib 覆盖；后端拆分与适配器已完成
+- 顺带修复：云端“转素材”500（空 filename 撞唯一约束 → __cloud__ 占位名）
+- 剩余：D（schema 收敛，需备份迁移）及零散清理
