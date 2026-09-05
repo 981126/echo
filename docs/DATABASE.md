@@ -4,7 +4,7 @@
 > 字段口径备注在**说明**列；如需补注释可回写模型 docstring 或本文件下方附录。
 
 ## 约定
-- 主键：自增 `id`；时间统一 `datetime`（UTC 存，前端按 Asia/Shanghai 展示）
+- 主键：自增 `id`；系统时间（created_at 等）为 UTC；**平台发布时间（platform_posts.publish_time 及由平台转本地的 published_at）按北京时间 +8 存储**（R-061 时区修复，存量已 +8h 迁移）
 - 列表/多选字段（platforms/main_topics/tags 等）以 JSON 字符串存储，接口层自动解析为数组
 - 软删除：脚本草稿用 `status`（used/discarded/…）逻辑删除；素材删除为物理删除（连同文件）
 
