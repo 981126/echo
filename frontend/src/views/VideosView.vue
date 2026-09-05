@@ -749,6 +749,8 @@ async function saveCloudLocal(transcribe = false) {
     if (cloudText.value) fd.append('text', cloudText.value)
     if (cloudItem.value.type === 'work') fd.append('work_id', String(cloudItem.value.id))
     else fd.append('post_id', String(cloudItem.value.id))
+    fd.append('is_ad', cloudAd.value ? '1' : '0')
+    fd.append('ad_price', cloudPrice.value == null ? '' : String(cloudPrice.value))
     const resp = await fetch('/api/works/to-local', {
       method: 'POST',
       headers: { 'X-Access-Token': getToken() },

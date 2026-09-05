@@ -29,7 +29,16 @@ def cloud_to_local(
     text: str = Form(default=""),
     work_id: int | None = Form(default=None),
     post_id: int | None = Form(default=None),
+    is_ad: str = Form(default=""),
+    ad_price: str = Form(default=""),
 ):
+    ad_flag = is_ad in ("1", "true", "True", "on")
+    ad_val = None
+    if ad_price not in ("", "null", "None"):
+        try:
+            ad_val = int(float(ad_price))
+        except (TypeError, ValueError):
+            ad_val = None
     """把云端作品转成本地素材：上传视频（可选，不自动转写）+ 文案（可选）后变成本地素材。"""
     from ..config import get_settings
     from ..core.pipeline import today_key
@@ -91,6 +100,8 @@ def cloud_to_local(
         cover_path=first.cover_path or "",
         status="published",  # 云端有真实发布链接/时间 => 已发布
         published_at=first.publish_time,
+        is_ad=ad_flag if is_ad else False,
+        ad_price=ad_val if is_ad else None,
     )
     db.add(video)
     db.commit()

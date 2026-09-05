@@ -6,7 +6,7 @@
       <span v-else>ECHO</span>
     </div>
     <div class="row" style="gap: 4px; margin-top: 6px; flex-wrap: wrap">
-      <n-tag v-if="item.kind === 'cloud'" size="small" type="info" :bordered="false" round>云端</n-tag>
+      <n-tag v-if="item.kind === 'cloud' && !item.hasVideo" size="small" type="info" :bordered="false" round>云端</n-tag>
       <n-tag v-if="item.kind === 'cloud'" size="small" type="success" :bordered="false" round>已发布</n-tag>
       <n-tag v-if="item.kind === 'cloud' && item.merged" size="tiny" type="success" :bordered="false" round>合并×{{ item.merged }}</n-tag>
       <n-tag v-if="item.is_ad" size="small" :bordered="false" round type="error">广告{{ item.ad_price ? ' ¥' + item.ad_price : '' }}</n-tag>
