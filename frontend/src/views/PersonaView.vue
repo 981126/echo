@@ -8,6 +8,20 @@
       </n-button>
     </div>
 
+    <div class="section-title">
+      像我金句库
+      <n-button size="tiny" secondary style="margin-left: 10px" :loading="phraseLoading" @click="suggestPhrases">从高表现素材提取</n-button>
+      <span class="muted" style="font-size: 12px">确认后的句子会作为风格锚点强注入生成</span>
+    </div>
+    <div v-if="!phrases.length" class="panel empty">先点「从高表现素材提取」生成候选（需已有素材转写稿）</div>
+    <div v-for="(ph, i) in phrases" :key="i" class="panel row" style="align-items: flex-start; padding: 10px 12px">
+      <div class="grow">
+        <p style="margin: 0">“{{ ph.text }}”</p>
+        <span class="muted" style="font-size: 12px">{{ ph.source_title || '素材' }}</span>
+      </div>
+      <n-button size="tiny" type="primary" @click="adoptPhrase(ph)">收为锚点</n-button>
+    </div>
+
     <div class="section-title">待确认建议</div>
     <div v-if="!suggested.length" class="panel empty">暂无待确认建议</div>
     <div v-for="t in suggested" :key="t.id" class="panel row" style="align-items: flex-start">
@@ -101,13 +115,16 @@ const message = useMessage()
 const form = ref({ label: '', description: '', category: 'style' })
 const showEdit = ref(false)
 const editForm = ref({ id: null, label: '', description: '', category: 'style' })
+const phrases = ref([])
+const phraseLoading = ref(false)
 
 const categoryOptions = [
   { label: '风格', value: 'style' },
   { label: '赛道', value: 'topic' },
-  { label: '红线', value: 'redline' }
+  { label: '红线', value: 'redline' },
+  { label: '金句锚点', value: 'phrase' }
 ]
-const CATEGORY_NAMES = { style: '风格', topic: '赛道', redline: '红线' }
+const CATEGORY_NAMES = { style: '风格', topic: '赛道', redline: '红线', phrase: '金句锚点' }
 const categoryName = (c) => CATEGORY_NAMES[c] || c
 
 async function load() {
@@ -175,6 +192,29 @@ async function addTag() {
   await api('/api/persona/tags', { method: 'POST', body: JSON.stringify(form.value) })
   form.value = { label: '', description: '', category: 'style' }
   message.success('已添加')
+  load()
+}
+
+async function suggestPhrases() {
+  phraseLoading.value = true
+  try {
+    const r = await api('/api/persona/phrases/suggest?limit=12')
+    phrases.value = r.items || []
+    if (!phrases.value.length) message.info('暂无可提取的金句（需要先有素材转写稿）')
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    phraseLoading.value = false
+  }
+}
+
+async function adoptPhrase(ph) {
+  await api('/api/persona/tags', {
+    method: 'POST',
+    body: JSON.stringify({ label: ph.text.slice(0, 100), description: '风格锚点：来自「' + (ph.source_title || '高表现素材') + '」', category: 'phrase' })
+  })
+  message.success('已收为金句锚点（生成时会注入）')
+  phrases.value = phrases.value.filter(x => x !== ph)
   load()
 }
 

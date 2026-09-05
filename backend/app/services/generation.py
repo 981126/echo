@@ -39,6 +39,22 @@ def _creator_filter(db: Session):
     return creator.id if creator else None
 
 
+def benchmark_context_lines(db: Session) -> str:
+    """当前主博主挂的对标博主风格参考（R-030⑤：仅参考，不污染主博主语料）。"""
+    from ..models.platform import Creator
+    from .creator_service import get_current_creator
+
+    creator = get_current_creator(db)
+    if creator is None:
+        return ""
+    rows = (
+        db.query(Creator)
+        .filter(Creator.kind == "benchmark", Creator.parent_id == creator.id, Creator.note != "")
+        .all()
+    )
+    return "\n".join(f"- 对标「{c.name}」：{c.note}" for c in rows)
+
+
 def _persona_context(db: Session) -> dict:
     q = db.query(PersonaTag).filter(PersonaTag.status == "confirmed")
     cid = _creator_filter(db)
@@ -46,7 +62,8 @@ def _persona_context(db: Session) -> dict:
         q = q.filter(PersonaTag.creator_id == cid)
     tags = q.order_by(PersonaTag.category, PersonaTag.id).all()
     return {
-        "tags": [f"{t.label}: {t.description}" for t in tags if t.category != "redline"],
+        "tags": [f"{t.label}: {t.description}" for t in tags if t.category not in ("redline", "phrase")],
+        "anchors": [t.label for t in tags if t.category == "phrase"],
         "redlines": [t.label for t in tags if t.category == "redline"],
     }
 
@@ -133,6 +150,7 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
     ctx = _persona_context(db)
     samples = _style_samples(db, topic)
     profile = _style_profile_lines(db)
+    refs = benchmark_context_lines(db)
     user = "\n".join(
         [
             f"选题：{topic}",
@@ -143,11 +161,13 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
             "红线（不要违反）：",
             *[f"- {r}" for r in ctx["redlines"] or ["（无）"]],
             "",
+            *([] if not ctx.get("anchors") else ["", "作者金句锚点（用它的短句语气，不要整句照搬）：", *[f"- {a}" for a in ctx["anchors"]]]),
             "作者语言习惯（从全部素材统计，必须模仿）：",
             profile,
             "",
             "风格样本（模仿语气的原文节选）：",
             *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],
+            *([] if not refs else ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs]),
         ]
     )
 

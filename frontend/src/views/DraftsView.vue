@@ -23,6 +23,20 @@
               <button v-for="i in 5" :key="i" class="rate-star" :class="{ on: (ratings[d.id] || 0) >= i }" @click="rate(d, i)">{{ (ratings[d.id] || 0) >= i ? '★' : '☆' }}</button>
               <span v-if="ratings[d.id]" class="muted" style="font-size: 11px">{{ ratings[d.id] }} 分</span>
             </div>
+            <div class="tile-rate dims" @click.stop>
+              <span class="muted">分节</span>
+              <template v-for="def in dimDefs" :key="def.key">
+                <span class="dim-label">{{ def.label }}</span>
+                <button
+                  v-for="opt in dimOpts"
+                  :key="def.key + opt.v"
+                  class="rate-star dim-star"
+                  :class="{ on: (dims[d.id] || {})[def.key] === opt.v }"
+                  @click="setDim(d.id, def.key, opt.v)"
+                >{{ opt.label }}</button>
+              </template>
+              <n-button size="tiny" secondary @click="submitDims(d)">记反馈</n-button>
+            </div>
           </div>
         </div>
       </n-tab-pane>
@@ -158,6 +172,18 @@ const preview = ref(false)
 const scriptInput = ref(null)
 const imgInput = ref(null)
 const ratings = ref({})
+const dimDefs = [
+  { key: 'hook_score', label: '钩子' },
+  { key: 'pace_score', label: '节奏' },
+  { key: 'ending_score', label: '结尾' },
+  { key: 'style_score', label: '像我' }
+]
+const dimOpts = [
+  { v: 5, label: '好' },
+  { v: 3, label: '中' },
+  { v: 1, label: '差' }
+]
+const dims = ref({})
 const message = useMessage()
 let pollTimer = null
 
@@ -351,6 +377,30 @@ async function rate(d, i) {
   await api(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ liked: null, rating: i }) })
   ratings.value = { ...ratings.value, [d.id]: i }
   message.success(`已打 ${i} 分（进入人设/选题学习）`)
+}
+
+function setDim(id, key, v) {
+  const cur = dims.value[id] || {}
+  dims.value = { ...dims.value, [id]: { ...cur, [key]: cur[key] === v ? null : v } }
+}
+
+async function submitDims(d) {
+  const sel = dims.value[d.id] || {}
+  const body = { liked: null, comment: '' }
+  let has = false
+  for (const def of dimDefs) {
+    if (sel[def.key] != null) {
+      body[def.key] = sel[def.key]
+      has = true
+    }
+  }
+  if (!has) {
+    message.warning('先点选至少一个维度')
+    return
+  }
+  await api(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify(body) })
+  dims.value = { ...dims.value, [d.id]: {} }
+  message.success('分节反馈已记录（会精确回传人设学习）')
 }
 
 async function poll() {

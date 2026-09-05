@@ -52,7 +52,7 @@
         <div v-for="it in ideas" :key="it.id" class="idea-row">
           <span class="src">{{ platformName(it.platform) }}</span>
           <span class="grow">{{ it.title }}</span>
-          <n-button size="tiny" type="primary" secondary :loading="generatingIdea === it.id" @click="genFromIdea(it)">生成文案</n-button>
+          <n-button size="tiny" type="primary" secondary :loading="generatingIdea === it.id" @click="pickAngle(it.title)">生成文案</n-button>
         </div>
       </div>
     </div>
@@ -72,6 +72,31 @@
         </button>
       </div>
     </div>
+  <n-modal v-model:show="angleShow" preset="card" title="选一个切入角度" style="width: min(680px, 94vw)">
+    <div v-if="angleLoading" class="panel empty">正在想 3 个角度…</div>
+    <div v-else-if="!angles.length" class="panel empty">暂时没想出来，直接按原话题生成</div>
+    <div v-else class="angle-list">
+      <div
+        v-for="(a, i) in angles"
+        :key="i"
+        class="angle-card"
+        @click="generateWithAngle(a.title)"
+      >
+        <div class="angle-no">{{ i + 1 }}</div>
+        <div>
+          <div class="angle-title">{{ a.title }}</div>
+          <div v-if="a.hook" class="muted" style="font-size: 12px; margin-top: 4px">钩子：{{ a.hook }}</div>
+          <div v-if="a.reason" class="muted" style="font-size: 12px; opacity: .75; margin-top: 2px">{{ a.reason }}</div>
+        </div>
+        <n-button size="tiny" secondary class="angle-go">用它生成</n-button>
+      </div>
+    </div>
+    <div v-if="!angleLoading" class="row" style="margin-top: 10px">
+      <n-button size="small" secondary @click="generateDirect(pendingTopic)">不选角度，直接生成</n-button>
+      <n-button size="small" quaternary @click="angleShow = false">取消</n-button>
+    </div>
+  </n-modal>
+
   </div>
 </template>
 
@@ -94,6 +119,10 @@ const generatingTitle = ref(null)
 const ideas = ref([])
 const generatingIdea = ref(0)
 const cloudPosts = ref([])
+const angleShow = ref(false)
+const angleLoading = ref(false)
+const angles = ref([])
+const pendingTopic = ref('')
 
 const shownHot = computed(() => {
   let list = hotItems.value
@@ -217,10 +246,40 @@ async function refreshHot() {
   }
 }
 
-async function genFromHot(h) {
-  generatingTitle.value = h.title
+async function pickAngle(topic) {
+  pendingTopic.value = topic
+  angleShow.value = true
+  angleLoading.value = true
+  angles.value = []
   try {
-    const r = await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic: h.title }) })
+    const r = await api('/api/drafts/angles', { method: 'POST', body: JSON.stringify({ topic }) })
+    angles.value = r.angles || []
+  } catch (e) {
+    angles.value = []
+    message.warning('角度生成失败，将按原话题生成：' + e.message)
+  } finally {
+    angleLoading.value = false
+  }
+}
+
+async function generateWithAngle(title) {
+  angleShow.value = false
+  generatingTitle.value = pendingTopic.value
+  try {
+    const r = await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic: title }) })
+    message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你')
+  } catch (e) {
+    message.error('提交失败：' + e.message)
+  } finally {
+    generatingTitle.value = null
+  }
+}
+
+async function generateDirect(topic) {
+  angleShow.value = false
+  generatingTitle.value = topic
+  try {
+    await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic }) })
     message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你')
   } catch (e) {
     message.error('提交失败：' + e.message)
@@ -316,3 +375,42 @@ onMounted(() => {
   border-radius: 8px;
 }
 </style>
+
+.angle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.angle-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  background: #faf7f2;
+  border: 1px solid #eee5d8;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.angle-card:hover {
+  border-color: #a34f2c88;
+}
+.angle-no {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #a34f2c;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+.angle-title {
+  font-weight: 600;
+}
+.angle-go {
+  margin-left: auto;
+  flex: none;
+}

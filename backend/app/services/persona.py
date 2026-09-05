@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..core.topics import normalize_topics
 from .prompt_service import get_prompt
 from ..models.persona import PersonaTag
@@ -31,6 +33,64 @@ VIDEO_TAGS_SYSTEM = (
     "main_topics 为赛道数组（可多个，至少一个）；is_ad 表示是否为商务广告"
     "（口播中明显推广产品/品牌）。只输出 JSON。"
 )
+
+
+
+_SENT_SPLIT = re.compile(r"[。！？!?\n]+")
+
+
+def _split_phrases(text: str, limit: int) -> list[str]:
+    out: list[str] = []
+    seen = set()
+    for part in _SENT_SPLIT.split(text or ""):
+        part = part.strip()
+        if 6 <= len(part) <= 40 and part not in seen and not part.startswith(("我", "这", "那", "你", "今天", "然后", "就是", "其实")):
+            seen.add(part)
+            out.append(part)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def suggest_phrase_candidates(db, limit: int = 12) -> list[dict]:
+    """从当前主博主高表现素材里挑短句候选（R-030③ 金句库）。"""
+    from ..models.metrics import MetricsSnapshot
+    from ..models.video import Video
+    from .creator_service import current_creator_id
+
+    cid = current_creator_id(db)
+    q = db.query(Video).filter(Video.is_ad.is_(False))
+    if cid:
+        q = q.filter(Video.creator_id == cid)
+    rows = []
+    for v in q.all():
+        if not v.transcript:
+            continue
+        text = v.transcript.corrected_text or v.transcript.transcript_text
+        if not text:
+            continue
+        eng = 0
+        snap = (
+            db.query(MetricsSnapshot)
+            .filter(MetricsSnapshot.video_id == v.id)
+            .order_by(MetricsSnapshot.snapshot_date.desc())
+            .first()
+        )
+        if snap:
+            eng = snap.plays + snap.likes * 5 + snap.favorites * 3 + snap.comments * 10
+        rows.append((eng, v.title or "", text))
+    rows.sort(key=lambda x: x[0], reverse=True)
+    candidates: list[dict] = []
+    seen = set()
+    for eng, title, text in rows[:40]:
+        for ph in _split_phrases(text, limit=5):
+            if ph in seen:
+                continue
+            seen.add(ph)
+            candidates.append({"text": ph, "source_title": title, "engagement": eng})
+        if len(candidates) >= limit:
+            break
+    return candidates
 
 
 class PersonaService:

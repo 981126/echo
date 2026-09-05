@@ -85,6 +85,18 @@ def _migrate_videos() -> None:
                 pass
 
 
+def _migrate_feedback_dims() -> None:
+    """R-030②：feedback 增加四维分节评分列。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(feedback)").fetchall()}
+        adds = []
+        for col in ("hook_score", "pace_score", "ending_score", "style_score"):
+            if col not in cols:
+                adds.append(f"{col} INTEGER")
+        for ddl in adds:
+            conn.exec_driver_sql(f"ALTER TABLE feedback ADD COLUMN {ddl}")
+
+
 def _migrate_creator_scope() -> None:
     """M13（R-029）：drafts / persona_tags 增加 creator_id（素材 creator_id 已在 _migrate_videos）。"""
     with engine.begin() as conn:
@@ -125,6 +137,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_videos()
     _migrate_creator_scope()
+    _migrate_feedback_dims()
     _migrate_chat()
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults

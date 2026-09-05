@@ -73,6 +73,15 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.get("/phrases/suggest", response_model=dict)
+def suggest_phrases(limit: int = 12, db: Session = Depends(get_db)):
+    """像我金句库（R-030③）：从高表现素材提取短句候选，供作者一键收为风格锚点。"""
+    from ..services.persona import suggest_phrase_candidates
+
+    items = suggest_phrase_candidates(db, limit=max(1, min(limit, 30)))
+    return {"items": items}
+
+
 @router.post("/init")
 def init_persona(db: Session = Depends(get_db)):
     """用全部历史转写稿初始化/刷新人设档案（后台任务，建议非广告视频转写完成后调用）。"""

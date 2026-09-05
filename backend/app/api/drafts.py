@@ -15,6 +15,7 @@ from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
 from ..services.diff_analysis import apply_diff_suggestions
 from ..services.feedback import add_feedback
 from ..services.generation import generate_draft
+from ..services.persona import PersonaService
 from ..tasks import start_task
 
 router = APIRouter()
@@ -24,10 +25,19 @@ class GenerateIn(BaseModel):
     topic: str
 
 
+class AnglesIn(BaseModel):
+    topic: str
+    platform: str = ""
+
+
 class FeedbackIn(BaseModel):
     liked: bool | None = None
     rating: int | None = Field(default=None, ge=1, le=5)
     comment: str = ""
+    hook_score: int | None = Field(default=None, ge=1, le=5)
+    pace_score: int | None = Field(default=None, ge=1, le=5)
+    ending_score: int | None = Field(default=None, ge=1, le=5)
+    style_score: int | None = Field(default=None, ge=1, le=5)
 
 
 def _diff_task(db: Session, payload: dict) -> None:
@@ -60,6 +70,54 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
         run_debate_draft,
     )
     return {"task_id": task_id, "draft_id": draft.id}
+
+
+@router.post("/angles", response_model=dict)
+def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
+    """选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。"""
+    from ..services.generation import benchmark_context_lines
+
+    topic = (payload.topic or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic 不能为空")
+    persona = PersonaService()
+    refs = benchmark_context_lines(db)
+    system = (
+        "你是短视频选题策划。针对作者给出的选题，输出 3 个不同的切入角度。"
+        "每个角度要：标题抓人但不标题党、开头钩子一句能留住人、贴合作者口播风格。"
+        "只输出 JSON："
+        '{"angles":[{"title":"完整选题标题(直接可用于生成脚本)","hook":"开头钩子句","reason":"为什么这个角度能火"}]}'
+    )
+    user_parts = [f"选题：{topic}"]
+    if payload.platform:
+        user_parts.append(f"目标平台：{payload.platform}")
+    if refs:
+        user_parts.append("参考风格（仅借鉴语气/结构，观点用你自己的）：\n" + refs)
+    try:
+        data = persona.llm.chat_json(
+            [{"role": "system", "content": system}, {"role": "user", "content": "\n".join(user_parts)}],
+            temperature=0.8,
+        )
+        angles = []
+        for a in data.get("angles") or []:
+            if isinstance(a, dict) and str(a.get("title", "")).strip():
+                angles.append({
+                    "title": str(a["title"]).strip(),
+                    "hook": str(a.get("hook", "")).strip(),
+                    "reason": str(a.get("reason", "")).strip(),
+                })
+        if angles:
+            return {"topic": topic, "angles": angles}
+    except Exception:  # noqa: BLE001 无密钥/超时走启发式兜底
+        pass
+    return {
+        "topic": topic,
+        "angles": [
+            {"title": f"{topic}：大多数人没想明白的 3 件事", "hook": f"关于{topic}，先说一个反常识的结论。", "reason": "反常识钩子 + 清单结构"},
+            {"title": f"我亲测过{topic}，结果和你想的不一样", "hook": "一开始我也不信，直到自己踩了坑。", "reason": "第一人称故事 + 反转"},
+            {"title": f"聊{topic}前，先避开这 3 个坑", "hook": "如果你正在这个话题上，这条一定要看完。", "reason": "避坑清单，实用转发高"},
+        ],
+    }
 
 
 @router.get("/{draft_id}/debate-status", response_model=dict)
@@ -99,8 +157,26 @@ def list_discussions(draft_id: int, db: Session = Depends(get_db)):
 def feedback(draft_id: int, payload: FeedbackIn, db: Session = Depends(get_db)):
     if db.get(Draft, draft_id) is None:
         raise HTTPException(status_code=404, detail="草稿不存在")
-    row = add_feedback(db, draft_id, payload.liked, payload.rating, payload.comment)
-    return {"id": row.id, "liked": row.liked, "rating": row.rating}
+    row = add_feedback(
+        db,
+        draft_id,
+        payload.liked,
+        payload.rating,
+        payload.comment,
+        hook_score=payload.hook_score,
+        pace_score=payload.pace_score,
+        ending_score=payload.ending_score,
+        style_score=payload.style_score,
+    )
+    return {
+        "id": row.id,
+        "liked": row.liked,
+        "rating": row.rating,
+        "hook_score": row.hook_score,
+        "pace_score": row.pace_score,
+        "ending_score": row.ending_score,
+        "style_score": row.style_score,
+    }
 
 
 @router.get("", response_model=list[DraftOut])

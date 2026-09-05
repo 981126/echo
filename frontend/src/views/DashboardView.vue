@@ -2,6 +2,27 @@
   <div class="page">
     <h1 class="page-title">数据看板</h1>
 
+    <div v-if="compare.length" class="panel">
+      <div class="section-title" style="margin-top: 0">我 vs 对标</div>
+      <div class="cmp-grid">
+        <div v-for="c in compare" :key="c.creator.id" class="cmp-cell" :class="{ me: c.creator.kind === 'owner' && c.creator.is_current }">
+          <div class="row" style="gap: 6px; align-items: center">
+            <b>{{ c.creator.name }}</b>
+            <n-tag size="tiny" :bordered="false" round :type="c.creator.kind === 'owner' ? 'primary' : 'info'">{{ c.creator.kind === 'owner' ? '我' : '对标' }}</n-tag>
+          </div>
+          <div class="cmp-num">{{ fmtNum(c.totals.followers) }}<span>总粉丝</span></div>
+          <div class="cmp-sub">{{ fmtNum(c.totals.posts) }} 作品 · 播放 {{ fmtNum(c.totals.plays) }}</div>
+          <div class="row wrap" style="gap: 6px; margin-top: 6px">
+            <div v-for="ac in c.accounts" :key="ac.platform" class="cmp-acct">
+              <b>{{ platformName(ac.platform) }}</b>
+              <span>粉 {{ fmtNum(ac.followers) }}</span>
+              <span>中位播 {{ fmtNum(ac.median_plays) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="section-title" style="margin-top: 0">指标录入</div>
       <div class="form-grid">
@@ -119,6 +140,7 @@ const radar = ref([])
 const report = ref(null)
 const generating = ref(false)
 const importText = ref('')
+const compare = ref([])
 const message = useMessage()
 const m = ref({ video_id: null, dateTs: Date.now(), plays: 0, likes: 0, favorites: 0, comments: 0 })
 
@@ -136,6 +158,15 @@ function tsToDate(ts) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+const PLATFORM_NAMES = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
+const platformName = (p) => PLATFORM_NAMES[p] || p || ''
+function fmtNum(n) {
+  n = Number(n || 0)
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿'
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  return String(n)
+}
+
 async function load() {
   const [v, s, r, rep] = await Promise.all([
     api('/api/videos?limit=500'),
@@ -147,6 +178,12 @@ async function load() {
   summary.value = s
   radar.value = r.radar
   report.value = rep
+  try {
+    const cs = await api('/api/platform/creator-summary')
+    compare.value = cs.items || []
+  } catch (e) {
+    compare.value = []
+  }
 }
 
 async function addMetric() {
@@ -195,3 +232,46 @@ async function generate() {
 
 onMounted(load)
 </script>
+
+.cmp-grid {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cmp-cell {
+  flex: 1 1 220px;
+  background: #faf7f2;
+  border: 1px solid #eee5d8;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.cmp-cell.me {
+  border-color: #a34f2c55;
+  background: #fdf6ef;
+}
+.cmp-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #a34f2c;
+  margin-top: 6px;
+}
+.cmp-num span {
+  font-size: 12px;
+  font-weight: 400;
+  color: #8b8378;
+  margin-left: 6px;
+}
+.cmp-sub {
+  font-size: 12px;
+  color: #8b8378;
+  margin-top: 2px;
+}
+.cmp-acct {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  color: #6f675c;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
