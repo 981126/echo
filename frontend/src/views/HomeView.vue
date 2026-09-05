@@ -24,12 +24,13 @@
             :class="e.status"
             :style="{ left: e.left + 'px' }"
             :title="e.fullTitle + ' · ' + e.date"
-            @click="goVideo(e.id)"
+            @click="goEvent(e)"
           >
-            <img v-if="e.coverUrl" class="tl-cover" :src="e.coverUrl" loading="lazy" alt="" @click.stop="goVideo(e.id)" />
+            <img v-if="e.coverUrl" class="tl-cover" :src="e.coverUrl" loading="lazy" alt="" @click.stop="goEvent(e)" />
             <span v-else class="tl-cover empty">ECHO</span>
             <span class="dot" />
             <span class="nm">{{ e.title }}</span>
+            <span v-if="e.srcLabel" class="tl-src">{{ e.srcLabel }}</span>
           </div>
         </div>
       </div>
@@ -42,6 +43,20 @@
       <n-button size="small" secondary :loading="refreshing" @click="refreshHot">抓取更新</n-button>
       <span class="muted">共 {{ shownHot.length }} 条</span>
     </div>
+    <div class="section-title" style="margin-top: 28px">
+      评论灵感池 <span class="muted" style="font-size: 13px">来自评论区 · 人工挑选，不自动推送</span>
+    </div>
+    <div class="panel">
+      <div v-if="!ideas.length" class="empty">暂无评论灵感（每日同步后自动抓取主/对标评论区）</div>
+      <div v-else class="idea-list">
+        <div v-for="it in ideas" :key="it.id" class="idea-row">
+          <span class="src">{{ platformName(it.platform) }}</span>
+          <span class="grow">{{ it.title }}</span>
+          <n-button size="tiny" type="primary" secondary :loading="generatingIdea === it.id" @click="genFromIdea(it)">生成文案</n-button>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
       <div v-if="!shownHot.length" class="empty">暂无热点，点「抓取更新」</div>
       <div v-else class="hot-tags">
@@ -76,6 +91,9 @@ const platOptions = [
 ]
 const refreshing = ref(false)
 const generatingTitle = ref(null)
+const ideas = ref([])
+const generatingIdea = ref(0)
+const cloudPosts = ref([])
 
 const shownHot = computed(() => {
   let list = hotItems.value
@@ -120,11 +138,28 @@ const model = computed(() => {
     if (!date) continue
     raw.push({
       id: v.id,
+      kind: 'video',
       date,
       status: v.published_at ? 'published' : 'planned',
       title: (v.title || (v.main_topics && v.main_topics[0]) || v.filename).slice(0, 14),
       fullTitle: v.title || v.filename,
-      coverUrl: v.cover_url || ''
+      coverUrl: v.cover_url || '',
+      srcLabel: ''
+    })
+  }
+  for (const p of cloudPosts.value) {
+    const date = p.publish_time ? p.publish_time.slice(0, 10) : ''
+    if (!date) continue
+    raw.push({
+      id: p.id,
+      kind: 'cloud',
+      date,
+      status: 'published',
+      title: (p.title || '').slice(0, 14) || '云端作品',
+      fullTitle: p.title || '云端作品',
+      coverUrl: p.cover || '',
+      srcLabel: p.creator_kind === 'benchmark' ? platformName(p.platform) + '·对标' : platformName(p.platform),
+      local_video_id: p.local_video_id
     })
   }
   raw.sort((a, b) => (a.date < b.date ? -1 : 1))
@@ -198,8 +233,86 @@ function goVideo(id) {
   location.hash = `#/videos?edit=${id}`
 }
 
+function goEvent(e) {
+  if (e.kind === 'cloud') {
+    if (e.local_video_id) location.hash = `#/videos?edit=${e.local_video_id}`
+    else location.hash = '#/creators'
+    return
+  }
+  goVideo(e.id)
+}
+
+async function loadCloud() {
+  try {
+    const data = await api('/api/platform/posts?limit=300')
+    cloudPosts.value = data.items || []
+  } catch (e) {
+    /* 静默 */
+  }
+}
+
+async function loadIdeas() {
+  try {
+    const data = await api('/api/platform/topic-pool')
+    ideas.value = data.items || []
+  } catch (e) {
+    /* 静默 */
+  }
+}
+
+async function genFromIdea(it) {
+  generatingIdea.value = it.id
+  try {
+    const r = await api(`/api/platform/topic-pool/${it.id}/generate`, { method: 'POST', body: '{}' })
+    if (r.draft && r.draft.id) location.hash = `#/drafts?id=${r.draft.id}`
+    else message.success('已生成')
+    await loadIdeas()
+  } catch (e) {
+    message.error('生成失败：' + e.message)
+  } finally {
+    generatingIdea.value = 0
+  }
+}
+
 onMounted(() => {
   loadVideos()
   loadHot()
+  loadCloud()
+  loadIdeas()
 })
 </script>
+
+<style scoped>
+.tl-src {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  font-size: 10px;
+  color: #a34f2c;
+  background: rgba(163, 79, 44, 0.08);
+  padding: 0 5px;
+  border-radius: 8px;
+}
+.idea-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.idea-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #faf7f2;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.src {
+  flex: none;
+  font-size: 11px;
+  color: #a34f2c;
+  background: rgba(163, 79, 44, 0.1);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+</style>

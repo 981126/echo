@@ -100,6 +100,35 @@ def _seed_id(user_id: str, salt: str = "") -> int:
     return int(hashlib.md5(f"{user_id}:{salt}".encode()).hexdigest(), 16)
 
 
+def parse_post_id(link: str) -> tuple[str, str]:
+    """从作品分享链接解析 (platform, 作品ID)。支持抖音/B站/小红书常见形态。"""
+    link = (link or "").strip()
+    if not link:
+        return "", ""
+    low = link.lower()
+    if "bilibili.com/video/" in low:
+        marker = "/video/"
+        idx = low.find(marker)
+        tail = link[idx + len(marker):].split("?")[0].split("/")[0]
+        return ("bilibili", f"bvid:{tail}") if tail else ("", "")
+    if "douyin.com/video/" in low:
+        marker = "/video/"
+        idx = low.find(marker)
+        tail = link[idx + len(marker):].split("?")[0].split("/")[0]
+        return ("douyin", tail) if tail else ("", "")
+    if "xiaohongshu.com/explore/" in low:
+        marker = "/explore/"
+        idx = low.find(marker)
+        tail = link[idx + len(marker):].split("?")[0].split("/")[0]
+        return ("xiaohongshu", tail) if tail else ("", "")
+    if "xiaohongshu.com/discovery/item/" in low:
+        marker = "/discovery/item/"
+        idx = low.find(marker)
+        tail = link[idx + len(marker):].split("?")[0].split("/")[0]
+        return ("xiaohongshu", tail) if tail else ("", "")
+    return "", ""
+
+
 class TikHubError(RuntimeError):
     pass
 

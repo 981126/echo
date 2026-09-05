@@ -43,6 +43,16 @@
           <n-tag v-for="t in v.tags" :key="t" size="small" :bordered="false">{{ t }}</n-tag>
           <span v-if="!v.tags.length" class="muted">无标签</span>
         </div>
+        <div class="row" style="gap: 6px; margin-top: 6px">
+          <n-tag v-if="v.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
+          <n-button
+            v-if="v.platform_post_id"
+            size="tiny"
+            secondary
+            :loading="syncing === v.id"
+            @click="syncData(v)"
+          >同步数据</n-button>
+        </div>
         <div v-if="!v.tags_confirmed" class="tile-actions">
           <n-button size="small" secondary @click="confirmTags(v)">确认标签</n-button>
         </div>
@@ -61,6 +71,10 @@
         <div class="form-item">
           <label class="form-label">标题</label>
           <n-input v-model:value="editing.title" placeholder="视频标题（选题标题）" />
+        </div>
+        <div class="form-item">
+          <label class="form-label">发布链接（可选，用于“同步数据”）</label>
+          <n-input v-model:value="editing.publishLink" placeholder="粘贴抖音 /video/、B站 /video/BV、小红书 /explore/ 作品链接" />
         </div>
         <div class="row" style="gap: 18px; align-items: flex-start; margin-bottom: 14px">
           <div class="cover-edit" @click="coverInput && coverInput.click()">
@@ -155,6 +169,7 @@ const coverInput = ref(null)
 const editing = ref(null)
 const linkedDrafts = ref([])
 const orig = ref(null)
+const syncing = ref(0)
 const showEdit = ref(false)
 const tagsText = ref('')
 
@@ -282,6 +297,7 @@ async function openEdit(v) {
     platforms: [...(v.platforms || [])],
     main_topics: [...(v.main_topics || [])],
     coverUrl: v.cover_url || null,
+    publishLink: v.platform_post_id || '',
     sourceText: tr?.source_text || '',
     transcriptText: tr?.transcript_text || '',
     plannedTs: parseTs(v.planned_publish_at),
@@ -297,7 +313,8 @@ async function openEdit(v) {
     plannedTs: editing.value.plannedTs,
     publishedTs: editing.value.publishedTs,
     tagsText: tagsText.value,
-    sourceText: editing.value.sourceText
+    sourceText: editing.value.sourceText,
+    publishLink: editing.value.publishLink
   }
   showEdit.value = true
 }
@@ -324,13 +341,34 @@ async function saveEdit() {
     body.tags = tagsText.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
   }
   if (editing.value.sourceText !== o.sourceText) body.source_text = editing.value.sourceText || null
+  const linkChanged = (editing.value.publishLink || '') !== (o.publishLink || '')
   try {
     await api('/api/videos/' + editing.value.id, { method: 'PATCH', body: JSON.stringify(body) })
+    if (linkChanged && editing.value.publishLink) {
+      try {
+        await api(`/api/platform/videos/${editing.value.id}/bind-link`, { method: 'POST', body: JSON.stringify({ link: editing.value.publishLink }) })
+        message.success('发布链接已绑定，可同步数据')
+      } catch (e) {
+        message.warning('保存成功，但发布链接解析失败：' + e.message)
+      }
+    }
     message.success('已保存')
     closeEdit()
     load()
   } catch (e) {
     message.error(e.message)
+  }
+}
+
+async function syncData(v) {
+  syncing.value = v.id
+  try {
+    const r = await api(`/api/platform/videos/${v.id}/sync`, { method: 'POST' })
+    message.success(r.message || '同步完成')
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    syncing.value = 0
   }
 }
 

@@ -56,6 +56,7 @@ const isLogin = computed(() => route.path === '/login')
 
 const navs = [
   { to: '/home', label: '主页' },
+  { to: '/creators', label: '博主' },
   { to: '/videos', label: '素材库' },
   { to: '/drafts', label: '脚本工作台' },
   { to: '/chat', label: 'AI 对话' },

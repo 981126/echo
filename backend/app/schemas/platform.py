@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _parse_json_field(value, fallback=None):
@@ -53,12 +53,18 @@ class AccountOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    extra_config: dict = Field(default_factory=dict)
+
+    @field_validator("extra_config", mode="before")
+    @classmethod
+    def _parse_extra(cls, value):
+        return _parse_json_field(value)
+
     creator_id: int
     platform: str
     nickname: str = ""
     home_link: str = ""
     platform_user_id: str = ""
-    extra_config: dict = Field(default_factory=dict)
     enabled: bool = True
     sync_frequency: str = "daily"
     last_sync_at: Optional[datetime] = None

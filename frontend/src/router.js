@@ -11,7 +11,8 @@ const routes = [
   { path: '/persona', component: () => import('./views/PersonaView.vue'), meta: { title: '人设档案' } },
   { path: '/requirements', component: () => import('./views/RequirementsView.vue'), meta: { title: '需求管理' } },
   { path: '/prompts', component: () => import('./views/PromptsView.vue'), meta: { title: 'AI 提示词' } },
-  { path: '/dashboard', component: () => import('./views/DashboardView.vue'), meta: { title: '看板' } }
+  { path: '/dashboard', component: () => import('./views/DashboardView.vue'), meta: { title: '看板' } },
+  { path: '/creators', component: () => import('./views/CreatorsView.vue'), meta: { title: '博主管理' } }
 ]
 
 const router = createRouter({

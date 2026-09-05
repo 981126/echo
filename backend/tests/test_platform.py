@@ -15,7 +15,7 @@ from app.db import Base
 from app.models.platform import Creator, CreatorAccount, CreatorAccountSnapshot, PlatformPost, SyncJob
 from app.models.hot_topic import TopicIdea
 from app.services.creator_service import get_current_creator, switch_current
-from app.services.platform.tikhub import make_client, parse_link
+from app.services.platform.tikhub import make_client, parse_link, parse_post_id
 from app.services.platform_sync import get_budget, run_sync, set_budget
 
 
@@ -52,6 +52,13 @@ def test_parse_link():
     assert parse_link("xiaohongshu", "https://www.xiaohongshu.com/user/profile?userId=abc123&x=1") == "abc123"
     assert parse_link("bilibili", "https://space.bilibili.com/1234567?spm_id_from=333") == "1234567"
     assert parse_link("douyin", "") == ""
+
+
+def test_parse_post_id():
+    assert parse_post_id("https://www.douyin.com/video/7299881234567?x=1") == ("douyin", "7299881234567")
+    assert parse_post_id("https://www.bilibili.com/video/BV1xx411c7mD") == ("bilibili", "bvid:BV1xx411c7mD")
+    assert parse_post_id("https://www.xiaohongshu.com/explore/64f0a1b2000000001203abcd")[0] == "xiaohongshu"
+    assert parse_post_id("https://example.com/foo") == ("", "")
 
 
 def test_mock_client_deterministic():
