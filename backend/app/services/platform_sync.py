@@ -450,31 +450,55 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
 
     try:
         per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 10)))
-        results = []
-        total_posts = 0
-        total_comments = 0
         assert owner is not None
-        for acc in accounts:
-            limit = per_owner  # initial=0 → 全量作品（分页拉到底）
+        with_comments = scope in ("daily", "weekly")
+
+        def _limit_for(acc) -> int:
             if scope == "weekly":
-                limit = 3  # 对标每周 top3（评论选题够用且控额度）
+                return 3
+            return per_owner
+
+        def _sync_one_acc(acc_id: int) -> dict:
+            from sqlalchemy.orm import sessionmaker
+
+            s = sessionmaker(bind=db.get_bind(), autoflush=False)()
             try:
-                st = sync_account(db, acc, scope=scope, top_n=limit, with_comments=scope in ("daily", "weekly"))
-                results.append({"account_id": acc.id, "platform": acc.platform, **st})
-                total_posts += int(st.get("posts") or 0)
-                total_comments += int(st.get("comments") or 0)
+                acc = s.get(CreatorAccount, acc_id)
+                if acc is None:
+                    return {"account_id": acc_id, "error": "账号不存在"}
+                plat = acc.platform
+                acc.sync_status = "running"
+                s.commit()
+                st = sync_account(s, acc, scope=scope, top_n=_limit_for(acc), with_comments=with_comments)
+                acc = s.get(CreatorAccount, acc_id)
+                if acc is not None:
+                    acc.sync_status = "done"
+                    acc.last_sync_at = datetime.utcnow()
+                    s.commit()
+                return {"account_id": acc_id, "platform": plat, **st}
             except Exception as exc:  # noqa: BLE001 单平台失败不影响其它平台
-                db.rollback()
-                acc.sync_status = "failed"
-                acc.sync_message = str(exc)[:200]
-                db.commit()
-                results.append({"account_id": acc.id, "platform": acc.platform, "error": str(exc)[:200]})
-        # 收尾：账号状态归位
-        for acc in accounts:
-            if acc.sync_status == "running":
-                acc.sync_status = "done"
-                acc.last_sync_at = datetime.utcnow()
-        db.commit()
+                s.rollback()
+                acc = s.get(CreatorAccount, acc_id)
+                if acc is not None:
+                    acc.sync_status = "failed"
+                    acc.sync_message = str(exc)[:200]
+                    s.commit()
+                return {"account_id": acc_id, "platform": acc.platform if acc else "", "error": str(exc)[:200]}
+            finally:
+                s.close()
+
+        # 多线程并发：三个平台同时同步（每个用独立会话），大幅提速
+        from concurrent.futures import ThreadPoolExecutor
+
+        results = []
+        with ThreadPoolExecutor(max_workers=min(3, max(1, len(accounts)))) as ex:
+            futures = {ex.submit(_sync_one_acc, acc.id): acc for acc in accounts}
+            from concurrent.futures import as_completed
+
+            for fut in as_completed(futures):
+                results.append(fut.result())
+        total_posts = sum(int(r.get("posts") or 0) for r in results)
+        total_comments = sum(int(r.get("comments") or 0) for r in results)
         # 跨平台同作品自动合并（同创作者 + 规范化标题相同）
         from .works_service import auto_merge_creator
 

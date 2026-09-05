@@ -175,25 +175,42 @@
     </n-modal>
     <n-modal v-model:show="showCloud" preset="card" :title="'转本地素材：' + (cloudItem && cloudItem.title || '')" style="width: min(620px, 94vw)">
       <div v-if="cloudItem" style="max-height: 70vh; overflow-y: auto; padding-right: 4px">
-        <div class="form-item">
-          <label class="form-label">上传视频（可选，会触发转写）</label>
-          <div class="row" style="gap: 8px">
-            <input ref="cloudFileInput" type="file" accept="video/*" class="file-hidden" @change="onCloudFile" />
-            <n-button secondary @click="cloudFileInput && cloudFileInput.click()">选择视频文件</n-button>
-            <span v-if="cloudFile" class="muted grow">{{ cloudFile.name }}</span>
-          </div>
-        </div>
-        <div class="form-item">
-          <label class="form-label">文案 / 原始文字（可选）</label>
-          <n-input v-model:value="cloudText" type="textarea" :rows="5" placeholder="粘贴你的口播文案或字幕，转本地素材后可用于 AI 学习" />
-        </div>
-        <p class="muted" style="font-size: 12px">
-          保存后此作品会出现在素材库（云端标识去掉），可继续编辑平台/赛道/发布时间。
-        </p>
-        <div class="row">
-          <n-button type="primary" :loading="cloudSaving" @click="saveCloudLocal">保存为本地素材</n-button>
-          <n-button secondary @click="showCloud = false">取消</n-button>
-        </div>
+        <n-tabs v-model:value="cloudTab" type="line" animated>
+          <n-tab-pane name="local" tab="转本地素材">
+            <div class="form-item">
+              <label class="form-label">上传视频（可选，会触发转写）</label>
+              <div class="row" style="gap: 8px">
+                <input ref="cloudFileInput" type="file" accept="video/*" class="file-hidden" @change="onCloudFile" />
+                <n-button secondary @click="cloudFileInput && cloudFileInput.click()">选择视频文件</n-button>
+                <span v-if="cloudFile" class="muted grow">{{ cloudFile.name }}</span>
+              </div>
+            </div>
+            <div class="form-item">
+              <label class="form-label">文案 / 原始文字（可选）</label>
+              <n-input v-model:value="cloudText" type="textarea" :rows="5" placeholder="粘贴你的口播文案或字幕，转本地素材后可用于 AI 学习" />
+            </div>
+            <p class="muted" style="font-size: 12px">
+              保存后此作品会出现在素材库（云端标识去掉），可继续编辑平台/赛道/发布时间。
+            </p>
+            <div class="row">
+              <n-button type="primary" :loading="cloudSaving" @click="saveCloudLocal">保存为本地素材</n-button>
+              <n-button secondary @click="showCloud = false">取消</n-button>
+            </div>
+          </n-tab-pane>
+          <n-tab-pane name="comments" tab="评论数据">
+            <div v-if="!(cloudItem.cloudPosts || []).length" class="empty">暂无平台记录</div>
+            <div v-for="pst in cloudItem.cloudPosts || []" :key="pst.id" class="comment-block">
+              <div class="row" style="gap: 6px; align-items: center; margin-top: 6px">
+                <b>{{ platformName(pst.platform) }}</b>
+                <n-button size="tiny" secondary :loading="commentsLoading === pst.id" @click="loadComments(pst)">加载评论</n-button>
+                <span v-if="(commentsMap[pst.id] || []).length" class="muted">{{ commentsMap[pst.id].length }} 条</span>
+              </div>
+              <ul v-if="(commentsMap[pst.id] || []).length" style="margin: 6px 0 0; padding-left: 1.2em; max-height: 180px; overflow-y: auto">
+                <li v-for="(c, i) in commentsMap[pst.id]" :key="i" style="margin: 4px 0">{{ c }}</li>
+              </ul>
+            </div>
+          </n-tab-pane>
+        </n-tabs>
       </div>
     </n-modal>
 
@@ -228,6 +245,9 @@ const cloudFile = ref(null)
 const cloudText = ref('')
 const cloudSaving = ref(false)
 const cloudFileInput = ref(null)
+const cloudTab = ref('local')
+const commentsMap = ref({})
+const commentsLoading = ref(0)
 const mergeMode = ref(false)
 const selected = ref(new Set())
 const syncingPost = ref(0)
@@ -515,7 +535,21 @@ function openCloud(it) {
   cloudItem.value = it
   cloudFile.value = null
   cloudText.value = ''
+  cloudTab.value = 'local'
+  commentsMap.value = {}
   showCloud.value = true
+}
+
+async function loadComments(pst) {
+  commentsLoading.value = pst.id
+  try {
+    const r = await api(`/api/platform/posts/${pst.id}/comments?count=30`)
+    commentsMap.value = { ...commentsMap.value, [pst.id]: r.items || [] }
+  } catch (e) {
+    message.error('评论拉取失败：' + e.message)
+  } finally {
+    commentsLoading.value = 0
+  }
 }
 
 function onCloudFile(e) {

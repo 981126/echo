@@ -397,9 +397,10 @@ class TikHubClient:
                             raw=aw,
                         )
                     )
-                if not aweme_list or not d.get("has_more"):
+                next_cursor = str(d.get("max_cursor") or "")
+                if not aweme_list or not d.get("has_more") or next_cursor == cursor:
                     break
-                cursor = str(d.get("max_cursor") or "")
+                cursor = next_cursor
         elif platform == "xiaohongshu":
             cursor = ""
             while len(out) < max_posts:
@@ -437,13 +438,16 @@ class TikHubClient:
                     )
                 if not notes or not inner.get("has_more"):
                     break
-                cursor = str(inner.get("cursor") or "")
+                last_cursor = str((notes[-1].get("cursor") or ""))
+                if not last_cursor or last_cursor == cursor:
+                    break
+                cursor = last_cursor
         else:  # bilibili
             page = 1
             seen_aids: set[str] = set()
             while len(out) < max_posts and page <= 50:
                 try:
-                    data = self._get("/bilibili/web/fetch_user_post_videos_v2", {"uid": user_id, "page_num": page, "page_size": 30})
+                    data = self._get("/bilibili/web/fetch_user_post_videos_v2", {"uid": user_id, "pn": page, "ps": 30})
                 except TikHubError:
                     break
                 vlist = ((((data.get("data") or {}).get("data")) or {}).get("archives")) or []

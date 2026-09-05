@@ -154,6 +154,28 @@ def post_to_material(post_id: int, db: Session = Depends(get_db)):
     return {"ok": True, "video_id": video.id, "video": {"id": video.id, "title": video.title}}
 
 
+@router.get("/posts/{post_id}/comments", response_model=dict)
+def post_comments(post_id: int, count: int = 20, db: Session = Depends(get_db)):
+    """按需拉取某条平台作品的评论（每次实时请求，计一次 TikHub 用量）。"""
+    import json as _json
+
+    post = db.get(PlatformPost, post_id)
+    if post is None:
+        raise HTTPException(status_code=404, detail="云端作品不存在")
+    acc = db.get(CreatorAccount, post.account_id)
+    raw = {}
+    try:
+        raw = _json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
+    except _json.JSONDecodeError:
+        raw = {}
+    client = make_client()
+    try:
+        texts = client.fetch_comments(post.platform, post.platform_post_id, max(1, min(count, 50)), acc, raw=raw)
+    except Exception:  # noqa: BLE001 评论拉取失败返回空
+        texts = []
+    return {"post_id": post_id, "platform": post.platform, "items": texts}
+
+
 @router.get("/posts/{post_id}/stats", response_model=dict)
 def post_stats_series(post_id: int, db: Session = Depends(get_db)):
     rows = (
