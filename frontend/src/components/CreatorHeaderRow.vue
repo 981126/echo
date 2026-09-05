@@ -39,3 +39,11 @@ defineProps({
 })
 defineEmits(['daily', 'initial', 'switch', 'edit', 'addAccount', 'addBenchmark', 'remove'])
 </script>
+
+<style scoped>
+.av { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex: none; }
+.av-sm { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex: none; }
+.wrap { flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
+.fans { font-size: 12px; }
+</style>
