@@ -30,7 +30,7 @@
       </p>
       <div class="row-actions" @click.stop>
         <n-tag v-if="item.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
-        <n-button v-if="item.platform_post_id" size="tiny" secondary :loading="syncingId === item.id" @click="syncLocal(item)">同步数据</n-button>
+        <n-button v-if="item.platform_post_id" size="tiny" secondary :loading="syncingId === item.key" @click="syncLocal(item)">同步数据</n-button>
         <n-button v-if="!item.tags_confirmed" size="tiny" secondary @click="confirm(item)">确认标签</n-button>
         <n-button size="tiny" quaternary type="error" @click="delLocal(item)">删除</n-button>
       </div>
@@ -46,7 +46,7 @@
       <PlatformStats :posts="item.cloudPosts || []" />
       <p v-if="item.pub" class="tile-meta">发布时间 {{ item.pub }}</p>
       <div class="row-actions" @click.stop>
-        <n-button size="tiny" secondary :loading="syncingPostId === item.id" @click="syncPost(item)">同步数据</n-button>
+        <n-button size="tiny" secondary :loading="syncingPostId === item.key" @click="syncPost(item)">同步数据</n-button>
         <n-button v-if="item.merged >= 2" size="tiny" quaternary type="warning" @click="split(item)">拆分</n-button>
         <n-button size="tiny" quaternary type="error" @click="delCloud(item)">删除</n-button>
       </div>
@@ -62,8 +62,8 @@ defineProps({
   item: { type: Object, required: true },
   mergeMode: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
-  syncingId: { type: Number, default: -1 },
-  syncingPostId: { type: Number, default: -1 },
+  syncingId: { type: String, default: "" },
+  syncingPostId: { type: String, default: "" },
   click: { type: Function, required: true },
   toggle: { type: Function, required: true },
   syncLocal: { type: Function, required: true },

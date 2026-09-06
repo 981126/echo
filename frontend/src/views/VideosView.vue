@@ -823,7 +823,7 @@ function syncMessage(r, fallback) {
 
 async function syncCloudPost(it) {
   if (!it || !(it.cloudPosts || []).length) return
-  syncingPost.value = it.id
+  syncingPost.value = it.key
   try {
     // R-067：合并作品卡同步全部平台帖（不再只同步第一个平台），单平台帖走单条同步
     const r = it.type === 'work'
@@ -834,12 +834,12 @@ async function syncCloudPost(it) {
   } catch (e) {
     message.error(e.message)
   } finally {
-    syncingPost.value = 0
+    syncingPost.value = ''
   }
 }
 
 async function syncData(v) {
-  syncing.value = v.id
+  syncing.value = v.key
   try {
     const r = await api(`/api/platform/videos/${v.id}/sync`, { method: 'POST' })
     message.success(syncMessage(r, '同步完成'))
@@ -848,7 +848,7 @@ async function syncData(v) {
   } catch (e) {
     message.error(e.message)
   } finally {
-    syncing.value = 0
+    syncing.value = ''
   }
 }
 
