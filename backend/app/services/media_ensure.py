@@ -215,7 +215,9 @@ def _pick_source_posts(posts: list[PlatformPost]) -> list[PlatformPost]:
     )
 
 
-def _download_pick(db: Session, posts: list[PlatformPost]) -> tuple[str, PlatformPost]:
+def _download_pick(
+    db: Session, posts: list[PlatformPost], on_try=None
+) -> tuple[str, PlatformPost]:
     """按平台优先级尝试下载；成功返回（文件名, 命中的平台帖），全失败抛 MediaDownloadError。"""
     settings = get_settings()
     settings.videos_dir.mkdir(parents=True, exist_ok=True)
@@ -223,6 +225,8 @@ def _download_pick(db: Session, posts: list[PlatformPost]) -> tuple[str, Platfor
     for post in _pick_source_posts(posts):
         account = db.get(CreatorAccount, post.account_id)
         try:
+            if on_try is not None:
+                on_try(post.platform)
             from .platform.base import make_source  # 延迟导入避免循环
 
             client = make_source(post.platform)
@@ -259,11 +263,19 @@ def _download_pick(db: Session, posts: list[PlatformPost]) -> tuple[str, Platfor
     raise MediaDownloadError(f"无可用视频源（{last_error or '该作品可能无视频或需登录'}）")
 
 
-def platform_media_task(db: Session, payload: dict) -> dict:
-    """后台任务：补视频 →（成功且缺转写）自动转写。"""
+def platform_media_task(db: Session, payload: dict, update=None) -> dict:
+    """后台任务：补视频 →（成功且缺转写）自动转写。
+
+    update(pct, note) 可选：由 tasks 运行器注入，实时回写进度百分比与阶段说明（R-081）。
+    """
+    def _up(pct: int, note: str = "") -> None:
+        if update is not None:
+            update(pct, note)
+
     video_id = payload.get("video_id")
     work_id = payload.get("work_id")
     post_id = payload.get("post_id")
+    _up(15, "检查视频文件与转写状态…")
     posts = _posts_of(db, video_id=video_id, work_id=work_id, post_id=post_id)
     video = _find_video(db, posts, video_id=video_id)
 
@@ -271,7 +283,13 @@ def platform_media_task(db: Session, payload: dict) -> dict:
     file_name = ""
     hit_post: PlatformPost | None = None
     if not has_real_file(video):
-        file_name, hit_post = _download_pick(db, posts)
+        _up(35, "准备下载视频…")
+
+        def _on_try(platform: str) -> None:
+            label = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}.get(platform, platform)
+            _up(40, f"正在下载视频（{label}）…")
+
+        file_name, hit_post = _download_pick(db, posts, on_try=_on_try)
         if video is None:
             video = _create_video(db, posts, filename=file_name)
             if video is None:  # 无主博主：不留死文件，明确失败
@@ -288,10 +306,12 @@ def platform_media_task(db: Session, payload: dict) -> dict:
     # 有真实文件但缺转写 => 自动触发转写（复用完整流水线：ASR→校对→预打标签）
     transcribed = False
     if video is not None and has_real_file(video) and not has_transcript(video):
+        _up(88, "语音转写中（可能需要几分钟）…")
         from .ingest import import_video_task  # 延迟导入避免循环
 
         import_video_task(db, {"video_id": video.id})
         transcribed = True
+        _up(96, "转写完成，整理中…")
 
     if not downloaded and not transcribed:
         return {"status": "skip", "reason": "已有本地视频与转写", "video_id": video.id if video else None}

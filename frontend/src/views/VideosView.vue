@@ -41,6 +41,7 @@
         :merge-mode="mergeMode"
         :selected="selected.has(it.key)"
         :progress="cardProgress[it.key] || 0"
+        :note="cardNote[it.key] || ''"
         :syncing-id="syncing"
         :syncing-post-id="syncingPost"
         :click="onCardClick"
@@ -176,7 +177,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { api, uploadVideo, uploadVideoFile, uploadCover, getToken } from '../api'
@@ -822,71 +823,116 @@ async function splitWork(w) {
   }
 }
 
-// R-080：卡片同步覆盖进度（透明蓝自下而上慢慢覆盖整卡）
+// R-080/R-081：卡片同步覆盖层——请求阶段本地过渡 + 媒体补齐后台任务实时进度/说明（切页回来可恢复）
 const cardProgress = reactive({})
-const cardProgressTimers = {}
+const cardNote = reactive({})
+const cardRequestTimers = {}
+const cardTaskPollers = {}
+const cardTaskIds = {}
+
+function clearCardProgress(key) {
+  clearInterval(cardRequestTimers[key]); delete cardRequestTimers[key]
+  clearInterval(cardTaskPollers[key]); delete cardTaskPollers[key]
+  delete cardTaskIds[key]
+  delete cardProgress[key]
+  delete cardNote[key]
+}
 function stopCardProgress(key, done = true) {
-  clearInterval(cardProgressTimers[key])
-  delete cardProgressTimers[key]
+  clearInterval(cardRequestTimers[key]); delete cardRequestTimers[key]
   if (done) {
     cardProgress[key] = 100
-    setTimeout(() => { delete cardProgress[key] }, 520)
+    cardNote[key] = '同步完成'
+    setTimeout(() => { clearCardProgress(key) }, 800)
   } else {
-    delete cardProgress[key]
+    clearCardProgress(key)
   }
 }
-function startCardProgress(key) {
+function startRequestProgress(key) {
   stopCardProgress(key, false)
-  cardProgress[key] = 6
-  cardProgressTimers[key] = setInterval(() => {
+  cardProgress[key] = 5
+  cardNote[key] = '数据/评论同步中…'
+  cardRequestTimers[key] = setInterval(() => {
     const cur = cardProgress[key] ?? 0
-    cardProgress[key] = cur < 90 ? cur + Math.max(0.4, (90 - cur) * 0.05) : cur + 0.15
-  }, 160)
+    if (cur < 60) cardProgress[key] = cur + Math.max(0.5, (60 - cur) * 0.04)
+  }, 200)
 }
-function creepCardProgress(key) {
-  // 媒体补齐在后台下载/转写：覆盖层缓慢推进到 ~98，任务结束再补满
-  clearInterval(cardProgressTimers[key])
-  delete cardProgressTimers[key]
-  cardProgressTimers[key] = setInterval(() => {
-    const cur = cardProgress[key] ?? 0
-    cardProgress[key] = cur < 98 ? cur + Math.max(0.15, (98 - cur) * 0.02) : 98
-  }, 600)
-}
-
-const mediaTimers = {}
-function pollMediaTask(taskId, key = '') {
-  clearTimeout(mediaTimers[taskId])
-  let tries = 0
+function pollCardTask(key, taskId, notify = false) {
+  clearInterval(cardTaskPollers[key])
+  let stopped = false
   const tick = async () => {
-    tries += 1
+    if (stopped) return
+    let t = null
     try {
-      const t = await api('/api/tasks/' + taskId)
-      if (t && (t.status === 'done' || t.status === 'failed')) {
-        delete mediaTimers[taskId]
-        stopCardProgress(key, t.status === 'done')
-        if (t.status === 'done') message.success('视频补齐完成，已刷新')
-        else message.warning('视频补齐失败：' + (t.error || '请查看通知') + '')
-        await loadQuiet()
-        await loadWorksQuiet()
-        return
-      }
+      t = await api('/api/tasks/' + taskId)
     } catch (e) { /* 轮询抖动继续 */ }
-    if (tries < 360) mediaTimers[taskId] = setTimeout(tick, 3000)
+    if (!t) return
+    if (t.status === 'running' || t.status === 'pending') {
+      cardProgress[key] = Math.max(2, Math.min(99, Number(t.progress) || 2))
+      cardNote[key] = t.note || '同步中…'
+      return
+    }
+    stopped = true
+    clearInterval(cardTaskPollers[key]); delete cardTaskPollers[key]; delete cardTaskIds[key]
+    if (t.status === 'done') {
+      cardProgress[key] = 100
+      cardNote[key] = '同步完成'
+      setTimeout(() => { clearCardProgress(key) }, 800)
+      if (notify) message.success('同步完成')
+    } else {
+      clearCardProgress(key)
+      if (notify) message.warning('同步失败：' + (t.error || '请查看通知'))
+    }
+    await loadQuiet()
+    await loadWorksQuiet()
   }
+  cardTaskPollers[key] = setInterval(tick, 1500)
   tick()
 }
+function showServerTask(key, taskId, notify = false) {
+  stopCardProgress(key, false)  // 停掉请求阶段的本地过渡
+  cardTaskIds[key] = taskId
+  cardProgress[key] = cardProgress[key] || 2
+  cardNote[key] = '同步中…'
+  pollCardTask(key, taskId, notify)
+}
+
+// 任务 payload → 当前素材卡 key（切页回来/定期扫描恢复用）
+function cardKeyForTask(t) {
+  let pl = t && t.payload
+  try {
+    pl = typeof pl === 'string' ? JSON.parse(pl) : (pl || {})
+  } catch (e) { return '' }
+  for (const c of cards.value) {
+    if (pl.video_id != null && c.kind === 'local' && c.id === Number(pl.video_id)) return c.key
+    if (pl.work_id != null && c.kind === 'cloud' && c.type === 'work' && c.id === Number(pl.work_id)) return c.key
+    if (pl.post_id != null && c.kind === 'cloud' && (c.cloudPosts || []).some(x => Number(x.id) === Number(pl.post_id))) return c.key
+  }
+  return ''
+}
+async function refreshActiveCardTasks() {
+  let list = []
+  try {
+    list = await api('/api/tasks?status=running&kind=platform_media&limit=100')
+  } catch (e) { return }
+  for (const t of (list || [])) {
+    const key = cardKeyForTask(t)
+    if (!key) continue
+    if (!cardTaskIds[key] || cardTaskIds[key] !== t.id) showServerTask(key, t.id, true)
+  }
+}
+
 function applyMediaMsg(r, baseMsg) {
   const m = r && r.media
   if (!m) return baseMsg
   if (m.status === 'skip') return baseMsg + '（已有视频与转写，跳过下载/转写）'
-  if (m.status === 'started') return baseMsg + '（缺视频/转写，已开始下载并自动转写）'
+  if (m.status === 'started') return baseMsg + '（缺视频/转写，后台下载/转写中，进度见卡片）'
   return baseMsg
 }
 
-// R-077/R-080：单卡「同步」统一入口（数据同步 + 覆盖进度 + 媒体补齐轮询）
+// R-077/R-080/R-081：单卡「同步」统一入口（请求阶段 + 后台媒体任务实时进度）
 async function runCardSync(it) {
   const key = it.key
-  startCardProgress(key)
+  startRequestProgress(key)
   try {
     let r
     if (it.kind === 'local') {
@@ -900,8 +946,7 @@ async function runCardSync(it) {
     }
     const m = r && r.media
     if (m && m.status === 'started' && m.task_id) {
-      creepCardProgress(key)
-      pollMediaTask(m.task_id, key)
+      showServerTask(key, m.task_id, false)
     } else {
       stopCardProgress(key)
     }
@@ -1150,10 +1195,19 @@ async function onCreatorChange() {
 
 watch(() => [route.query.edit, route.query.post], handleDeepLink)
 
+let activeTasksTimer = null
 onMounted(async () => {
   await loadCreatorOptions()
   await initLoad()
   handleDeepLink()
+  await refreshActiveCardTasks()
+  activeTasksTimer = setInterval(refreshActiveCardTasks, 6000)  // R-081：切页回来/跨页触发的同步进度自动恢复
+})
+onUnmounted(() => {
+  if (activeTasksTimer) {
+    clearInterval(activeTasksTimer)
+    activeTasksTimer = null
+  }
 })
 </script>
 

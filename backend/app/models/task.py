@@ -19,6 +19,7 @@ class BackgroundTask(Base):
     kind: Mapped[str] = mapped_column(String(50), index=True)  # import_video | persona_init
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|running|done|failed
     progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    note: Mapped[str] = mapped_column(String(255), default="")  # 阶段说明（R-081：下载中/转写中等）
     payload: Mapped[str] = mapped_column(Text, default="{}")
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

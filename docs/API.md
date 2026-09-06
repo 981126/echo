@@ -303,6 +303,8 @@ List Tasks
 **参数**
 
 - `limit`（query）integer
+- `status`（query）string（可选：pending/running/done/failed）
+- `kind`（query）string（可选：按任务类型过滤，如 platform_media）
 - `x-access-token`（header）string
 **返回 200**：application/json → array
 

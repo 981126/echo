@@ -437,7 +437,9 @@ def test_platform_media_task_downloads_then_transcribes_cloud_post(db, monkeypat
     p = _post(db, acc.id, "douyin", "dy-r077-1", "媒体补齐测试")
     db.commit()
 
-    def fake_pick(_db, posts):
+    def fake_pick(_db, posts, on_try=None):
+        if on_try is not None:
+            on_try("douyin")
         settings = get_settings()
         settings.videos_dir.mkdir(parents=True, exist_ok=True)
         dest = settings.videos_dir / "R077_媒体补齐测试_视频.mp4"

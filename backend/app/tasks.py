@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import threading
 
@@ -89,18 +90,35 @@ def start_task(kind: str, payload: dict, fn) -> int:
 
 def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
     db = SessionLocal()
+
+    def _update(pct: int | None = None, note: str = "") -> None:
+        """任务函数（三参签名 fn(db,payload,update)）实时回写进度/阶段说明（R-081）。"""
+        task = db.get(BackgroundTask, task_id)
+        if task is None:
+            return
+        if pct is not None:
+            task.progress = max(0, min(100, int(pct)))
+        if note:
+            task.note = note[:255]
+        db.commit()
+
     try:
         task = db.get(BackgroundTask, task_id)
         if task is None:
             return
         task.status = "running"
-        task.progress = 10
+        task.progress = 5
         db.commit()
-        result = fn(db, payload)
+        params = inspect.signature(fn).parameters
+        if len(params) >= 3:
+            result = fn(db, payload, _update)
+        else:
+            result = fn(db, payload)
         task = db.get(BackgroundTask, task_id)
         if task is not None:
             task.status = "done"
             task.progress = 100
+            task.note = "完成"
             db.commit()
         _notify(db, kind=kind, payload=payload, status="done", result=result)
         if kind == "import_video":

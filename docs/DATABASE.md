@@ -10,7 +10,7 @@
 |---|---|
 | `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版，content 为提示词正文；支持历史回滚与自动优化候选。 |
 | `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、一次性迁移标记、R-022 优化节流计数等。 |
-| `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/error，结束自动写通知。 |
+| `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。 |
 | `chat_conversations` | AI 对话会话（R-017）：标题 + 创建/更新时间，单用户多会话。 |
 | `chat_messages` | AI 对话消息：角色（user/assistant/system）、内容、会话归属 conversation_id、是否流式完成等。 |
 | `creator_account_snapshots` | 博主×平台账号主页指标按天快照：粉丝/获赞/作品数/关注数 + raw 原文，支撑涨粉曲线。(account_id, snapshot_date) 唯一。 |
@@ -78,7 +78,7 @@ AI 提示词版本库（R-021）：key 标识用途，version 递增，status=en
 
 ## `background_tasks`
 
-后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/error，结束自动写通知。
+后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -86,6 +86,7 @@ AI 提示词版本库（R-021）：key 标识用途，version 递增，status=en
 | `kind` | VARCHAR(50) |  | 否 |  |
 | `status` | VARCHAR(20) |  | 否 | pending |
 | `progress` | INTEGER |  | 否 | 0 |
+| `note` | VARCHAR(255) |  | 否 |  |
 | `payload` | TEXT |  | 否 | {} |
 | `error` | TEXT |  | 否 |  |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |

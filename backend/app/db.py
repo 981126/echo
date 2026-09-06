@@ -198,6 +198,14 @@ def _migrate_chat() -> None:
             )
 
 
+def _migrate_task_note() -> None:
+    """background_tasks 增加 note（阶段说明），R-081。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(background_tasks)").fetchall()}
+        if "note" not in cols:
+            conn.exec_driver_sql("ALTER TABLE background_tasks ADD COLUMN note VARCHAR(255) NOT NULL DEFAULT ''")
+
+
 def _ensure_indexes() -> None:
     """补常见查询缺的索引（幂等：已存在跳过）。"""
     wanted = {
@@ -356,6 +364,7 @@ def init_db() -> None:
     _migrate_sync_progress()
     _migrate_topic_idea_likes()
     _migrate_topic_candidate_slot()
+    _migrate_task_note()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults

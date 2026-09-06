@@ -1,6 +1,7 @@
 <template>
   <div class="card-tile" :class="{ picking: mergeMode }" @click="click(item)">
     <div v-if="progress > 0" class="sync-cover" :style="{ height: progress + '%' }" />
+    <div v-if="progress > 0" class="sync-status">{{ note || '同步中…' }} · {{ Math.round(progress) }}%</div>
     <div class="tile-cover" :class="{ has: item.cover_url }" @click.stop="click(item)">
       <n-checkbox v-if="mergeMode" class="pick-box" :checked="selected" @click.stop @update:checked="toggle(item)" />
       <img v-if="item.cover_url" :src="item.cover_url" alt="封面" />
@@ -64,6 +65,7 @@ defineProps({
   mergeMode: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
   progress: { type: Number, default: 0 },
+  note: { type: String, default: '' },
   syncingId: { type: String, default: "" },
   syncingPostId: { type: String, default: "" },
   click: { type: Function, required: true },
@@ -97,6 +99,25 @@ defineProps({
   right: 0;
   height: 2px;
   background: rgba(38, 132, 255, 0.65);
+}
+.sync-status {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  pointer-events: none;
+  max-width: calc(100% - 16px);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.55);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card-tile.picking { cursor: pointer; }
 .tile-cover { position: relative; }

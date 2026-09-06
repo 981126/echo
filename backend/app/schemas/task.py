@@ -14,6 +14,7 @@ class TaskOut(BaseModel):
     kind: str
     status: str
     progress: int
+    note: str = ""
     error: str = ""
     created_at: datetime
     updated_at: datetime
