@@ -73,19 +73,14 @@ def _weekly_style_job() -> None:
     自动产出一版新的生成提示词候选（不启用）并通知作者。"""
     db = SessionLocal()
     try:
-        from .core.style_profile import build_style_profile, format_style_profile
-        from .services.generation import _all_texts, _weight
+        from .services.generation import _all_texts
         from .services.prompt_service import optimize
 
         rows = _all_texts(db)
         if len(rows) < 5:
             return  # 语料太少不值得每周重建
-        texts = [t for _, t in rows]
-        profile = format_style_profile(build_style_profile(texts))
-        top = sorted(rows, key=lambda vt: _weight(db, vt[0]), reverse=True)[:3]
-        snippets = "\n".join(f"- {text[:300]}" for _, text in top)
-        material = f"{profile}\n\n表现最好的素材节选（学习腔调）：\n{snippets}"
-        candidate = optimize(db, "generation", material)
+        # 语料=人设 + 全部 ASR 转写文案（按点赞率/互动加权），由 optimize 内部组装
+        candidate = optimize(db, "generation")
         if candidate is not None:
             from .tasks import push_notification
 

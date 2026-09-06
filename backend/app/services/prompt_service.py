@@ -30,8 +30,9 @@ PROMPT_META: dict[str, tuple[str, str, str]] = {
 }
 
 OPT_SYSTEM = (
-    "你是提示词工程专家。基于作者当前提示词、作者素材与反馈，优化该提示词，"
+    "你是提示词工程专家。基于作者当前提示词、人设、真实口播文案与打分反馈，优化该提示词，"
     "使其更贴合作者语气、减少 AI 感、保持原有输出格式约束。"
+    "素材按点赞率/互动从高到低排列：越靠前越代表作者受欢迎的真实腔调，权重越高，应重点模仿。"
     "只输出优化后的提示词正文，不要解释、不要 markdown 代码块。"
 )
 
@@ -160,11 +161,96 @@ def feedback_context(db: Session) -> str:
     return "\n".join(lines)
 
 
+def learning_material(db: Session, max_items: int = 16) -> str:
+    """组装「提示词优化语料」：人设 + 语言画像 + 全部 ASR 转写文案（按点赞率/互动加权）。
+
+    不再只看最新单条视频：当前所有真实口播文案（优先 ASR 转写）参与，
+    点赞率/互动高的权重更高、排更前；人设与红线一并作为优化输入。
+    """
+    import math
+    from datetime import date as _date
+
+    from ..models.metrics import MetricsSnapshot
+    from ..models.video import Video
+    from .generation import _creator_filter, _persona_context, _style_profile_lines
+    from .metrics import _platform_breakdown
+
+    parts: list[str] = []
+    cid = _creator_filter(db)
+
+    ctx = _persona_context(db)
+    if ctx.get("tags"):
+        parts.append("作者人设：\n" + "\n".join(f"- {t}" for t in ctx["tags"]))
+    if ctx.get("redlines"):
+        parts.append("红线（不要违反）：\n" + "\n".join(f"- {r}" for r in ctx["redlines"]))
+    if ctx.get("anchors"):
+        parts.append("作者金句锚点：\n" + "\n".join(f"- {a}" for a in ctx["anchors"]))
+    try:
+        profile = _style_profile_lines(db)
+        if profile:
+            parts.append("作者语言习惯画像（从全部素材统计）：\n" + profile)
+    except Exception:  # noqa: BLE001 画像失败不阻断
+        pass
+
+    q = db.query(Video).filter(Video.is_ad.is_(False))
+    if cid:
+        q = q.filter(Video.creator_id == cid)
+    snap: dict[int, MetricsSnapshot] = {}
+    for _s in db.query(MetricsSnapshot).order_by(MetricsSnapshot.snapshot_date.desc()).all():
+        snap.setdefault(_s.video_id, _s)
+
+    scored: list[tuple[float, str, str]] = []
+    for v in q.all():
+        tr = v.transcript
+        if tr is None:
+            continue
+        text = (tr.corrected_text or tr.transcript_text or "").strip()
+        if not text:
+            continue
+        plays = likes = fav = comments = 0
+        for row in _platform_breakdown(db, v):  # 绑定平台最新真实数据
+            plays += int(row.get("plays") or 0)
+            likes += int(row.get("likes") or 0)
+            fav += int(row.get("favorites") or 0)
+            comments += int(row.get("comments") or 0)
+        if plays <= 0 and likes <= 0:  # 无平台数据退回指标快照
+            s = snap.get(v.id)
+            if s is not None:
+                plays = int(s.plays or 0)
+                likes = int(s.likes or 0)
+                fav = int(s.favorites or 0)
+                comments = int(s.comments or 0)
+        rate = min((likes / plays), 1.0) if plays > 0 else 0.0
+        engage = plays + likes * 5 + fav * 3 + comments * 10
+        base = v.published_at.date() if v.published_at else v.created_at.date()
+        age = max((_date.today() - base).days, 0)
+        w = (1.0 + math.log1p(engage)) * (1.0 + rate * 3.0) * math.exp(-age / 400.0)
+        scored.append((w, text, f"播放{plays} 赞{likes} 藏{fav} 评{comments}"))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    if scored:
+        lines = []
+        for i, (_w, text, stat) in enumerate(scored[:max_items], 1):
+            lines.append(f"[素材{i}] {stat}：\n{text[:300]}")
+        parts.append(
+            "作者真实口播文案（全部 ASR 转写，按点赞率/互动加权从高到低，越靠前越该学）：\n"
+            + "\n\n".join(lines)
+        )
+        if len(scored) > max_items:
+            parts.append(f"（另有 {len(scored) - max_items} 条，只取权重最高的前 {max_items} 条）")
+    return "\n\n".join(parts)
+
+
 def optimize(db: Session, key: str, material: str = "") -> AiPrompt | None:
-    """基于当前启用版 + 素材 + 打分反馈，产出候选新版（不启用）；失败返回 None。"""
+    """基于当前启用版 + 人设/全量素材(按点赞率加权) + 打分反馈，产出候选新版（不启用）。"""
     current = get_prompt(key, db)
     if not current:
         return None
+    try:
+        if not (material or "").strip():
+            material = learning_material(db)
+    except Exception:  # noqa: BLE001 组装语料失败仍可用反馈兜底
+        material = ""
     ctx = feedback_context(db)
     parts = [material or "", ctx]
     user_material = "\n".join(x for x in parts if x.strip()) or "（无）"
@@ -183,8 +269,12 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt | None:
     return create_candidate(db, key, content, note="AI 自动优化（待启用）")
 
 
-def auto_optimize_generation(db: Session, material: str, threshold: int = 3) -> AiPrompt | None:
-    """每累计 threshold 条新素材才产出一次候选（R-022 节流，防过拟合单条）。"""
+def auto_optimize_generation(db: Session, material: str = "", threshold: int = 3) -> AiPrompt | None:
+    """每累计 threshold 条新素材才产出一次候选（R-022 节流）。
+
+    触发时基于当前所有素材/人设组装语料（material 留空走 learning_material），
+    不再只拿最新一条视频做优化。
+    """
     from ..models.kv import Kv
 
     row = db.get(Kv, "generation_import_count")
