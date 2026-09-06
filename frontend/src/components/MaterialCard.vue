@@ -33,7 +33,7 @@
       <div class="row-actions" @click.stop>
         <n-tag v-if="item.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
         <n-button v-if="item.platform_post_id" size="tiny" secondary :loading="syncingId === item.key" @click="syncLocal(item)">同步</n-button>
-        <n-button v-if="!item.tags_confirmed" size="tiny" secondary @click="confirm(item)">确认标签</n-button>
+        <n-button v-if="!item.tags_confirmed && ((item.main_topics || []).length || (item.tags || []).length)" size="tiny" secondary @click="confirm(item)">确认标签</n-button>
         <n-button size="tiny" quaternary type="error" @click="delLocal(item)">删除</n-button>
       </div>
     </template>

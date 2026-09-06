@@ -126,6 +126,7 @@ def import_video_task(db, payload: dict) -> None:
                     video.main_topics = json.dumps(suggestion["main_topics"], ensure_ascii=False)
                 video.is_ad = suggestion["is_ad"]
                 video.tags = json.dumps(suggestion["tags"], ensure_ascii=False)
+                video.tags_confirmed = True  # R-083：AI 预打标签自动确认，不再要求逐条点「确认标签」
                 db.commit()
             except Exception:
                 # 预打标签失败不影响转写结果；保持 tags_confirmed=False 待后续重试/手填

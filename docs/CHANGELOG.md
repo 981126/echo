@@ -498,3 +498,7 @@
 - media_ensure._create_video 归属改为素材所属博主（work→账号→兜底）；新增 _fix_video_creator_binding 幂等迁移修复存量错挂。
 - 效果：跨博主同步下载不再“跳到另一个博主素材库”；云端卡同步按钮正常保留；对标内容归属对标（D-028）。
 - 新增测试；verify.sh 全绿。
+
+## [M65 / R-083] 2026-09-06 — AI 预打标签自动确认
+- import_video_task 打标成功后自动 tags_confirmed=True；存量已转写已打标素材回填确认；前端无标签不显示确认按钮。
+- 新增测试；verify.sh 全绿。

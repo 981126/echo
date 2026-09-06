@@ -654,3 +654,31 @@ def test_media_ensure_attributes_video_to_post_owner(db, monkeypatch):
     v = db.query(Video).first()
     assert v is not None
     assert v.creator_id == b.id  # 归属作品博主 B，而非当前主博主 A
+
+
+# ---------- R-083：AI 预打标签自动确认（不再逐条点「确认标签」） ----------
+
+def test_import_video_task_auto_confirms_tags(db, monkeypatch):
+    from app.models.video import Transcript
+    from app.services import ingest
+
+    v = _mk_video_file(db)
+    v.transcript = Transcript(
+        transcript_text="测试口播内容，求职面试相关",
+        corrected_text="测试口播内容，求职面试相关",
+        asr_status="done",
+    )
+    db.commit()
+    monkeypatch.setattr(
+        ingest.PersonaService, "suggest_video_tags",
+        lambda self, text: {"main_topics": ["求职"], "is_ad": False, "tags": ["产品"]},
+    )
+    monkeypatch.setattr(
+        ingest.PersonaService, "suggest_updates",
+        lambda self, text, current: {"suggestions": []},
+    )
+    ingest.import_video_task(db, {"video_id": v.id})
+    db.refresh(v)
+    assert v.tags_confirmed is True
+    assert "产品" in (v.tags or "")
+    assert "求职" in (v.main_topics or "")

@@ -244,6 +244,22 @@ def _fix_video_creator_binding() -> None:
         )
 
 
+def _auto_confirm_tags() -> None:
+    """R-083：存量 AI 预打标签素材自动确认（tags_confirmed=1）。"""
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            UPDATE videos SET tags_confirmed = 1
+            WHERE tags_confirmed = 0 AND tags IS NOT NULL AND tags != '[]'
+              AND EXISTS (
+                SELECT 1 FROM transcripts t
+                WHERE t.video_id = videos.id AND t.asr_status = 'done'
+                  AND (t.transcript_text != '' OR t.corrected_text != '')
+              )
+            """
+        )
+
+
 def _ensure_indexes() -> None:
     """补常见查询缺的索引（幂等：已存在跳过）。"""
     wanted = {
@@ -404,6 +420,7 @@ def init_db() -> None:
     _migrate_topic_candidate_slot()
     _migrate_task_note()
     _fix_video_creator_binding()
+    _auto_confirm_tags()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults
