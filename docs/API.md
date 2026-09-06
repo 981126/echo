@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 91 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 92 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -1416,3 +1416,6 @@ AI 判断“我能不能讲”。
 ### POST /api/benchmark/rewrite
 
 按人设洗稿并存脚本草稿。
+### POST /api/benchmark/rerun
+
+R-102：页顶「再次对标」一键重跑——重捞所有对标最新10条 + 自动补 Top3 文案（长任务后台执行，返回 task_id）。

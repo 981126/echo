@@ -16,9 +16,11 @@ from ..services.benchmark import (
     score_unit,
     unit_payload,
     analyze_text,
+    rerun_benchmarks,
     rewrite_text,
 )
 from ..services.creator_service import get_current_creator
+from ..tasks import start_task
 
 router = APIRouter()
 
@@ -87,3 +89,26 @@ def benchmark_rewrite(payload: TextIn, db: Session = Depends(get_db)):
         return res
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _rerun_worker(db, payload, update):
+    """后台任务体：重跑当前主博主所有对标（R-102）。"""
+    from ..models.platform import Creator
+
+    owner = db.get(Creator, int(payload.get("owner_id") or 0))
+    if owner is None:
+        raise ValueError("主博主不存在，请先创建并切换主博主")
+    return rerun_benchmarks(db, owner, update=update)
+
+
+@router.post("/rerun", response_model=dict)
+def benchmark_rerun(db: Session = Depends(get_db)):
+    """R-102：页面顶部「再次对标」——重跑当前主博主所有对标：重捞最新10条 + 自动补 Top3 文案。
+
+    长任务（含同步与转写，可能较久）：落后台任务+进度+完成通知，返回 task_id 供前端轮询。
+    """
+    owner = _owner(db)
+    if not benchmarks_of_owner(db, owner):
+        raise HTTPException(status_code=400, detail="还没有对标博主，先去「博主管理」添加")
+    task_id = start_task("benchmark_rerun", {"owner_id": owner.id}, _rerun_worker)
+    return {"task_id": task_id}

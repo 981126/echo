@@ -21,6 +21,7 @@ KIND_LABELS = {
     "platform_sync_single": "素材数据同步",
     "platform_media": "素材媒体补齐",
     "card_sync": "素材同步",
+    "benchmark_rerun": "再次对标",
 }
 
 
@@ -43,6 +44,8 @@ def _target(kind: str, payload: dict, result) -> str:
         return "/drafts"
     if kind in ("platform_sync", "platform_sync_single"):
         return "/creators"
+    if kind == "benchmark_rerun":
+        return "/benchmark"
     return "/home"
 
 

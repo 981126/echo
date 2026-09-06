@@ -319,3 +319,71 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str) -> dict:
     db.commit()
     db.refresh(draft)
     return {"title": new_title, "script": script, "draft_id": draft.id}
+
+
+def rerun_benchmarks(db: Session, owner: Creator, update=None) -> dict:
+    """R-102：一键重跑当前主博主所有对标——逐个重捞最新10条 + 自动补 Top3 文案。
+
+    update(pct, note) 可选：由后台任务运行器注入，实时回写进度（R-081 同款）。
+    """
+    from ..core.timeutil import now as _app_now
+    from .platform.budget import BudgetExceeded
+    from .platform_sync import sync_account
+
+    bms = benchmarks_of_owner(db, owner)
+    if not bms:
+        raise ValueError("还没有对标博主，先去「博主管理」添加")
+    total = len(bms)
+    summary: list[dict] = []
+    ok_count = 0
+    text_count = 0
+
+    def _up(inner_pct: int, note: str = "") -> None:
+        if update is not None:
+            overall = int(((i - 1) + inner_pct / 100) / total * 100)
+            overall = max(5, min(99, overall))
+            update(overall, f"[{i}/{total}] {name}：{note}")
+
+    for i, bm in enumerate(bms, start=1):
+        name = bm.name or f"对标#{bm.id}"
+        try:
+            _up(0, "捞数据中…")
+            accounts = (
+                db.query(CreatorAccount)
+                .filter(CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True))
+                .order_by(CreatorAccount.id)
+                .all()
+            )
+            for acc in accounts:
+                try:
+                    sync_account(db, acc, scope="benchmark", top_n=10, with_comments=False)
+                    acc2 = db.get(CreatorAccount, acc.id)
+                    if acc2 is not None:
+                        acc2.sync_status = "done"
+                        acc2.sync_message = ""
+                        acc2.last_sync_at = _app_now()
+                        db.commit()
+                except BudgetExceeded:
+                    raise
+                except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
+                    db.rollback()
+            _up(55, "计算 Top3 并补齐文案…")
+            picked = ensure_top3_with_text(db, bm, limit_candidates=10)
+            n = len(picked)
+            ok_count += 1
+            text_count += n
+            summary.append({"benchmark_id": bm.id, "name": name, "top3_with_text": n, "error": ""})
+            _up(100, f"完成（Top3 有文案 {n} 条）")
+        except BudgetExceeded:
+            raise
+        except Exception as exc:  # noqa: BLE001 单个对标失败不阻断整体
+            db.rollback()
+            summary.append({"benchmark_id": bm.id, "name": name, "top3_with_text": 0, "error": str(exc)[:200]})
+            _up(100, "失败")
+    return {
+        "title": f"共 {ok_count}/{total} 个对标已更新（Top3 有文案 {text_count} 条）",
+        "summary": summary,
+        "benchmark_count": total,
+        "ok_count": ok_count,
+        "top3_with_text_total": text_count,
+    }

@@ -1,6 +1,12 @@
 <template>
   <div class="page">
-    <h1 class="page-title">博主对标</h1>
+    <div class="row wrap" style="justify-content: space-between; align-items: center; gap: 10px">
+      <h1 class="page-title">博主对标</h1>
+      <div class="row" style="gap: 10px; align-items: center">
+        <span v-if="rerunning" class="muted mini">{{ rerunNote }} {{ rerunPct > 0 && rerunPct < 100 ? rerunPct + '%' : '' }}</span>
+        <n-button size="small" type="primary" :loading="rerunning" :disabled="!benchmarks.length" @click="rerunAll">再次对标</n-button>
+      </div>
+    </div>
     <div v-if="loading" class="panel empty">加载中…</div>
     <div v-else-if="!benchmarks.length" class="panel empty">
       还没有对标博主。去「博主管理」为当前主博主添加对标账号后，这里会自动展示其最新 10 条里数据最好的前 3 条。
@@ -67,6 +73,9 @@ const message = useMessage()
 const loading = ref(true)
 const benchmarks = ref([])
 const preparingId = ref(0)
+const rerunning = ref(false)
+const rerunPct = ref(0)
+const rerunNote = ref('')
 const analyzingKey = ref('')
 const rewritingKey = ref('')
 const analysisMap = ref({})
@@ -99,6 +108,47 @@ async function prepare(b) {
     message.error(e.message)
   } finally {
     preparingId.value = 0
+  }
+}
+
+async function rerunAll() {
+  rerunning.value = true
+  rerunPct.value = 0
+  rerunNote.value = '准备中…'
+  message.info('开始再次对标：重捞各对标最新数据并自动补齐 Top3 文案，需几分钟，请稍候…')
+  try {
+    const d = await api('/api/benchmark/rerun', { method: 'POST' })
+    await waitTask(d.task_id)
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    rerunning.value = false
+  }
+}
+
+async function waitTask(taskId) {
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2000))
+    let t
+    try {
+      t = await api('/api/tasks/' + taskId)
+    } catch (e) {
+      message.error(e.message)
+      return
+    }
+    rerunPct.value = t.progress || 0
+    rerunNote.value = t.note && t.note !== '完成' ? t.note : '进行中…'
+    if (t.status === 'done') {
+      rerunNote.value = ''
+      message.success('再次对标完成，Top3 已刷新')
+      await load()
+      return
+    }
+    if (t.status === 'failed') {
+      rerunNote.value = ''
+      message.error(t.error || '再次对标失败')
+      return
+    }
   }
 }
 

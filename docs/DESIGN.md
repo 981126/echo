@@ -27,6 +27,7 @@
 | works.py | /api/works | 云端作品列表、to-local、meta、merge/split、auto-merge、删除、cleanup-tags |
 | platform.py | /api/platform | 云端作品/评论/指标/同步触发与任务/预算/选题池/主页快照；bind-links |
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
+| benchmark.py | /api/benchmark | 博主对标：Top3 展示/转写补齐/AI可讲/洗稿；「再次对标」一键重跑（R-102，后台任务） |
 | metrics.py | /api/metrics | 手动录入/批量导入/汇总/单视频序列 |
 | review.py | /api/review | 生成报告/最新报告/雷达 |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选 |
@@ -58,6 +59,7 @@
 - `review.py`：ABCD 复盘：A 报表（按视频/赛道/平台）、B 归因（启发式+LLM）、C 建议、D 赛道方向；`_radar` 赛道雷达（按互动率）。
 - `metrics.py`：`upsert_snapshot/import_snapshots/fetch_daily/series_for_video/_platform_breakdown/summary`；`apply_retention`（热点 30 天清理）。
 - `chat_service.py`：只读工具集 + 流式问答；工具：search_videos/get_video_detail/get_persona/list_requirements/get_metrics_summary/get_today_topics/get_review_report/get_radar/search_drafts/generate_draft（写操作需明确同意）。SSE 由 api/chat 组装。
+- `benchmark.py`：对标聚合（最新10条按互动分 Top3；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `ensure_top3_with_text`（缺文案自动下载转写、无文案顺延）+ `rerun_benchmarks`（R-102：逐个对标重捞最新10条 → 自动补 Top3 文案，供后台任务回调进度）。
 - `platform_sync.py`：见 §4。
 - `works_service.py`：标题规范化（去话题/标点/空白/小写）+ 自动合并 + 手动合并/拆分 + `list_works`（合并作品含各平台）+ `post_item`（作品序列化）。
 - `creator_service.py`：当前博主/切换/账号元数据/全网粉丝汇总/删除保护。
