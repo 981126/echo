@@ -618,3 +618,39 @@ def test_bvid_of_parses_raw_and_data_wrapper():
     class Fake2:
         raw = _json.dumps({"bvid": "BV2yyy"})
     assert me._bvid_of(Fake2()) == "BV2yyy"
+
+
+# ---------- R-082：自动下载素材归属素材所属博主（不是全局当前主博主） ----------
+
+def test_media_ensure_attributes_video_to_post_owner(db, monkeypatch):
+    from app.config import get_settings
+    from app.models.video import Video
+    from app.services import media_ensure as me
+
+    owner_current, _ = _seed_owner(db)  # 全局当前主博主 A
+    # 另一个主博主 B（非当前）
+    b = Creator(kind="owner", name="马甲号B")
+    db.add(b)
+    db.commit()
+    a2 = CreatorAccount(
+        creator_id=b.id, platform="douyin", nickname="B的抖音",
+        platform_user_id="u-b", enabled=True, sync_frequency="daily",
+    )
+    db.add(a2)
+    db.commit()
+    p = _post(db, a2.id, "douyin", "dy-r082-owner", "归属测试素材")
+    db.commit()
+
+    def fake_pick(_db, posts, on_try=None):
+        settings = get_settings()
+        settings.videos_dir.mkdir(parents=True, exist_ok=True)
+        dest = settings.videos_dir / "R082_归属测试素材_视频.mp4"
+        dest.write_bytes(b"fake")
+        return dest.name, posts[0]
+
+    monkeypatch.setattr(me, "_download_pick", fake_pick)
+    res = me.platform_media_task(db, {"post_id": p.id})
+    assert res["status"] == "done"
+    v = db.query(Video).first()
+    assert v is not None
+    assert v.creator_id == b.id  # 归属作品博主 B，而非当前主博主 A

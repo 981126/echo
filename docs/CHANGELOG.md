@@ -493,3 +493,8 @@
 - background_tasks 增加 note（阶段说明）；/api/tasks 支持 status/kind 过滤；platform_media 任务实时回写进度与文字（下载中/转写中等）。
 - 前端覆盖层：请求阶段显示「数据/评论同步中…」，后台任务阶段显示后端推送的阶段文字+百分比；切页回来/跨页触发每 6s 扫描自动恢复覆盖层。
 - 自测 verify.sh 全绿；API.md/DATABASE.md 同步。
+
+## [M64 / R-082] 2026-09-06 — 同步自动下载素材归属修复（不跨博主）
+- media_ensure._create_video 归属改为素材所属博主（work→账号→兜底）；新增 _fix_video_creator_binding 幂等迁移修复存量错挂。
+- 效果：跨博主同步下载不再“跳到另一个博主素材库”；云端卡同步按钮正常保留；对标内容归属对标（D-028）。
+- 新增测试；verify.sh 全绿。

@@ -206,6 +206,44 @@ def _migrate_task_note() -> None:
             conn.exec_driver_sql("ALTER TABLE background_tasks ADD COLUMN note VARCHAR(255) NOT NULL DEFAULT ''")
 
 
+def _fix_video_creator_binding() -> None:
+    """R-082：自动下载的本地素材归属错挂修复。
+
+    原因：R-077 建本地素材时用了“全局当前主博主”，若同步的是其它博主(如马甲号/对标)的作品，
+    视频会被挂到错误博主名下，导致切到正确博主看不到文件、点卡片跳到别的博主。
+    修复规则：有 work 绑定 → 跟随 work.creator_id；否则跟随首个 local_video_id 绑定帖的账号博主。
+    """
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            UPDATE videos SET creator_id = (
+                SELECT w.creator_id FROM works w WHERE w.id = videos.work_id
+            )
+            WHERE videos.work_id IS NOT NULL
+              AND videos.creator_id IS NOT NULL
+              AND (SELECT w.creator_id FROM works w WHERE w.id = videos.work_id) IS NOT NULL
+              AND videos.creator_id != (SELECT w.creator_id FROM works w WHERE w.id = videos.work_id)
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            UPDATE videos SET creator_id = (
+                SELECT ca.creator_id FROM platform_posts pp
+                  JOIN creator_accounts ca ON ca.id = pp.account_id
+                 WHERE pp.local_video_id = videos.id ORDER BY pp.id LIMIT 1
+            )
+            WHERE videos.work_id IS NULL
+              AND videos.creator_id IS NOT NULL
+              AND (SELECT ca.creator_id FROM platform_posts pp
+                     JOIN creator_accounts ca ON ca.id = pp.account_id
+                    WHERE pp.local_video_id = videos.id ORDER BY pp.id LIMIT 1) IS NOT NULL
+              AND videos.creator_id != (SELECT ca.creator_id FROM platform_posts pp
+                     JOIN creator_accounts ca ON ca.id = pp.account_id
+                    WHERE pp.local_video_id = videos.id ORDER BY pp.id LIMIT 1)
+            """
+        )
+
+
 def _ensure_indexes() -> None:
     """补常见查询缺的索引（幂等：已存在跳过）。"""
     wanted = {
@@ -365,6 +403,7 @@ def init_db() -> None:
     _migrate_topic_idea_likes()
     _migrate_topic_candidate_slot()
     _migrate_task_note()
+    _fix_video_creator_binding()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults

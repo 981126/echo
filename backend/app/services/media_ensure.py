@@ -100,9 +100,29 @@ def _find_video(
     return rows[0]
 
 
+def _video_owner_id(db: Session, posts: list[PlatformPost]) -> int | None:
+    """自动下载的本地素材应归属「素材所属博主」，而不是全局当前主博主（R-082 修复跨博主错挂）。
+
+    优先级：合并作品 work.creator_id → 平台帖账号的 creator_id → 当前主博主兜底。
+    """
+    if not posts:
+        return None
+    work_id = posts[0].work_id
+    if work_id:
+        from ..models.work import Work  # 延迟导入避免循环
+
+        work = db.get(Work, work_id)
+        if work is not None and work.creator_id:
+            return work.creator_id
+    account = db.get(CreatorAccount, posts[0].account_id) if posts[0].account_id else None
+    if account is not None and account.creator_id:
+        return account.creator_id
+    return current_creator_id(db)
+
+
 def _create_video(db: Session, posts: list[PlatformPost], *, filename: str) -> Video | None:
-    """下载成功后为云端卡建本地素材行；无当前主博主则不建（调用方清理文件）。"""
-    cid = current_creator_id(db)
+    """下载成功后为云端卡建本地素材行；找不到归属博主则不建（调用方清理文件）。"""
+    cid = _video_owner_id(db, posts)
     if cid is None or not posts:
         return None
     first = posts[0]
