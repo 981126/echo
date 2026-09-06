@@ -304,3 +304,43 @@ def test_daily_sync_records_progress(db):
     assert job.progress_done <= job.progress_total
     assert "抖音" in (job.progress_note or "")
     assert result["accounts"][0]["posts"] > 0
+
+
+# ---------- R-072：灵感池人设相关度 ----------
+
+def test_idea_relevance_pure_scoring():
+    from app.core.ideas import score_title, topic_expansion, words_of
+
+    assert score_title("应届生第一份工作：大厂还是小厂", keywords=["求职", "offer"], avoid=[]) == 0
+    assert score_title("应届生 offer 怎么选：大厂还是小厂", keywords=["求职", "offer", "简历"], avoid=[]) == 1
+    assert score_title("赌博网站推荐", keywords=["求职"], avoid=["赌博"]) == -1
+    assert "求职" in topic_expansion(["求职"])
+    assert "面试" in topic_expansion(["面试"])
+    assert words_of("犀利敢说 一针见血") and "犀利敢说" in words_of("犀利敢说 一针见血")
+
+
+def test_persona_profile_and_annotate(db):
+    from app.models.persona import PersonaTag
+    from app.models.video import Video
+    from app.services.ideas_service import annotate_items, persona_profile
+
+    owner, _ = _seed_owner(db)
+    db.add(PersonaTag(creator_id=owner.id, label="求职干货", category="topic", status="confirmed", source="manual"))
+    db.add(PersonaTag(creator_id=owner.id, label="赌博", category="redline", status="confirmed", source="manual"))
+    v = Video(filename="idea-test.mp4", title="应届生到底怎么选 offer", creator_id=owner.id, status="published", main_topics='["求职"]', is_ad=False)
+    db.add(v)
+    db.commit()
+    profile = persona_profile(db)
+    assert profile["active"] is True
+    assert profile["keywords"]
+    assert "赌博" in profile["avoid"]
+    items = annotate_items(db, [
+        {"title": "应届生到底选大厂还是小厂？"},
+        {"title": "今天 世界杯 谁赢 盘口"},
+        {"title": "足球博彩 赌博 平台推荐"},
+    ], profile)
+    assert items[0]["matched"] is True and items[0]["score"] > 0
+    assert items[2]["redlined"] is True
+    # 无人设（未建当前博主）时全部中性，不误标低相关
+    fresh = annotate_items(db, [{"title": "随便一条内容"}], {"keywords": [], "avoid": [], "active": False})
+    assert fresh[0]["matched"] is True and fresh[0]["score"] == 0

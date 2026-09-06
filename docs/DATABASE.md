@@ -173,7 +173,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `sync_message` | TEXT |  | 否 |  |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
-**索引**：`ix_creator_accounts_platform`（platform）；`ix_creator_accounts_creator_id`（creator_id）
+**索引**：`ix_creator_accounts_creator_id`（creator_id）；`ix_creator_accounts_platform`（platform）
 
 **外键**：`creator_id` → `creators.id`
 
@@ -364,7 +364,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `version` | INTEGER |  | 否 | 1 |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
-**索引**：`ix_persona_tags_creator_id`（creator_id）；`ix_persona_tags_label`（label）
+**索引**：`ix_persona_tags_label`（label）；`ix_persona_tags_creator_id`（creator_id）
 
 **外键**：`creator_id` → `creators.id`
 
@@ -555,10 +555,11 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `post_title` | VARCHAR(500) |  | 否 |  |
 | `creator_id` | INTEGER |  | 是 |  |
 | `snapshot_date` | VARCHAR(10) |  | 否 |  |
+| `likes` | INTEGER |  | 否 | 0 |
 | `used` | BOOLEAN |  | 否 | false |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
-**索引**：`ix_topic_ideas_creator_id`（creator_id）；`ix_topic_ideas_used`（used）；`ix_topic_ideas_snapshot_date`（snapshot_date）；`ix_topic_ideas_platform`（platform）
+**索引**：`ix_topic_ideas_used`（used）；`ix_topic_ideas_snapshot_date`（snapshot_date）；`ix_topic_ideas_platform`（platform）；`ix_topic_ideas_creator_id`（creator_id）
 
 **外键**：`post_id` → `platform_posts.id`；`creator_id` → `creators.id`
 
@@ -608,7 +609,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `tags_confirmed` | BOOLEAN |  | 否 | false |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
-**索引**：`ix_videos_work_id`（work_id）；`ix_videos_creator_id`（creator_id）；`ix_videos_filename`（filename）
+**索引**：`ix_videos_creator_id`（creator_id）；`ix_videos_filename`（filename）；`ix_videos_work_id`（work_id）
 
 **外键**：`creator_id` → `creators.id`；`work_id` → `works.id`
 

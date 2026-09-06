@@ -272,6 +272,7 @@ def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, 
             text = (c.text or "").strip()
             if not text or len(text) < 4:
                 continue
+            likes = int(c.likes or 0)
             exists = (
                 db.query(TopicIdea)
                 .filter(
@@ -292,9 +293,12 @@ def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, 
                         post_title=post.title,
                         creator_id=account.creator_id,
                         snapshot_date=date_key,
+                        likes=likes,
                     )
                 )
                 added += 1
+            elif likes > int(exists.likes or 0):
+                exists.likes = likes
     db.commit()
     return added
 
@@ -368,11 +372,11 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
         except Exception:  # noqa: BLE001
             db.rollback()
     if with_comments:
-        # 增量：评论只抓新增作品；无新增时刷新最新 3 条（省额度）
-        targets = (new_posts or synced)[:10] if new_posts else synced[:3]
+        # R-072：每次同步对最近 10 条作品的评论 Top50 都尝试进池（按天去重）；完整评论照常入库
+        targets = synced[:10]
         if targets:
             _job_progress(db, job_id, note=f"{label}：拉取评论…")
-            stats["comments"] = _collect_comments(db, account, client, targets)
+            stats["comments"] = _collect_comments(db, account, client, targets, per_post=50)
     if account.platform == "bilibili":
         # B站列表不含赞/藏/评，全量时逐条详情太重；这里每轮补全最多 BACKFILL 条
         stats["backfilled"] = _backfill_bili_stats(db, account, client, job_id=job_id)

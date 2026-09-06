@@ -38,8 +38,13 @@
 
     <div class="section-title" style="margin-top: 28px">
       灵感池
-      <span class="muted" style="font-size: 13px">各平台热榜 + 评论均衡混排 · 人工挑选，不自动推送</span>
+      <span class="muted" style="font-size: 13px">评论与热榜按人设相关度均衡展示 · 人工挑选，不自动推送</span>
       <div class="grow" />
+      <n-button-group size="small" style="margin-right: 8px">
+        <n-button :type="sourceTab === 'all' ? 'primary' : 'default'" @click="sourceTab = 'all'">全部</n-button>
+        <n-button :type="sourceTab === 'comment' ? 'primary' : 'default'" @click="sourceTab = 'comment'">只看评论</n-button>
+        <n-button :type="sourceTab === 'hot' ? 'primary' : 'default'" @click="sourceTab = 'hot'">只看热榜</n-button>
+      </n-button-group>
       <n-button v-if="totalIdeas" size="tiny" secondary @click="rotateIdeas">换一批</n-button>
       <n-button size="tiny" secondary :loading="refreshing" @click="refreshIdeas">抓取更新</n-button>
     </div>
@@ -49,6 +54,9 @@
         <div v-for="it in shownIdeas" :key="it.id" class="idea-row">
           <span class="src">{{ platformName(it.platform, '综合') }}</span>
           <span class="kind">{{ it.source === 'hot' ? '热榜' : '评论' }}</span>
+          <span v-if="it.source === 'hot' && !it.matched" class="low">低相关</span>
+          <span v-else-if="it.matched && (it.source === 'comment' || (it.score || 0) > 0)" class="rel">相关</span>
+          <span v-if="it.source === 'comment' && it.likes" class="likes">👍 {{ fmtNum(it.likes) }}</span>
           <span class="grow ellipsis" style="min-width: 0">{{ it.title }}</span>
           <n-button size="tiny" type="primary" secondary :loading="generatingIdea === it.id" @click="pickAngle(it.title)">生成文案</n-button>
         </div>
@@ -89,7 +97,7 @@ import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { buildTimelineModel } from '../lib/timeline'
-import { platformName } from '../lib/format'
+import { platformName, fmtNum } from '../lib/format'
 
 const videos = ref([])
 const hotItems = ref([])
@@ -107,42 +115,73 @@ const angles = ref([])
 const pendingTopic = ref('')
 
 const totalIdeas = computed(() => hotItems.value.length + ideas.value.length)
+const sourceTab = ref('all')  // all | hot | comment
 
-function unifiedIdeas() {
-  const hot = hotItems.value.map(h => ({
+function withHot() {
+  return hotItems.value.map(h => ({
     id: 'hot-' + (h.platform || '') + '-' + h.title,
     platform: h.platform || 'hot',
     title: h.title,
-    source: 'hot'
+    heat: h.heat || '',
+    source: 'hot',
+    score: h.score || 0,
+    matched: h.matched !== false
   }))
-  const comments = ideas.value.map(it => ({ ...it, source: 'comment' }))
-  const all = [...hot, ...comments]
-  const groups = {}
-  all.forEach(it => { (groups[it.platform] = groups[it.platform] || []).push(it) })
-  // 平台多的排前，保证混排时每个平台都能轮流出现
-  const plats = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length)
-  const per = 8
+}
+function withComments() {
+  return ideas.value.map(it => ({
+    id: 'idea-' + it.id,
+    platform: it.platform || '',
+    title: it.title,
+    likes: it.likes || 0,
+    source: 'comment',
+    score: it.score || 0,
+    matched: it.matched !== false
+  }))
+}
+// 相关优先（稳定排序：同分保持接口顺序——评论已按点赞降序）
+function related(list) {
+  const arr = [...list]
+  return arr.sort((a, b) => (b.score || 0) - (a.score || 0))
+}
+function sliceBatch(list) {
+  if (!list.length) return []
+  const size = Math.min(8, list.length)
+  const start = (ideaBatch.value * 8) % list.length
   const out = []
-  const cursor = {}
-  plats.forEach((pl, pi) => {
-    cursor[pl] = (ideaBatch.value * Math.max(1, Math.ceil(per / Math.max(plats.length, 1))) + pi) % groups[pl].length
-  })
-  while (out.length < per) {
-    let moved = false
-    for (const pl of plats) {
-      const g = groups[pl]
-      if (cursor[pl] >= g.length) continue
-      out.push(g[cursor[pl]])
-      cursor[pl] += 1
-      moved = true
-      if (out.length >= per) break
-    }
-    if (!moved) break
+  for (let i = 0; i < size; i++) out.push(list[(start + i) % list.length])
+  return out
+}
+// 「全部」= 评论/热榜各半交替，避免热榜把评论淹没
+function mixed(listA, listB) {
+  const a = [...listA]
+  const b = [...listB]
+  const out = []
+  const total = 8
+  for (let i = 0; i < total; i++) {
+    if (i % 2 === 0 && a.length) out.push(a.shift())
+    else if (b.length) out.push(b.shift())
+    else if (a.length) out.push(a.shift())
   }
   return out
 }
 
-const shownIdeas = computed(() => unifiedIdeas())
+const shownIdeas = computed(() => {
+  const hot = withHot()
+  const comments = withComments()
+  if (sourceTab.value === 'hot') return sliceBatch(related(hot))
+  if (sourceTab.value === 'comment') return sliceBatch(related(comments))
+  const cs = related(comments)
+  const hs = related(hot)
+  // 换一批：从不同起点开始取半批
+  const step = Math.max(1, Math.ceil(4 / Math.max(1, Math.max(cs.length, hs.length))))
+  const rot = ideaBatch.value * step
+  const ca = []
+  const ha = []
+  if (cs.length) for (let i = 0; i < 4; i++) ca.push(cs[(rot + i) % cs.length])
+  if (hs.length) for (let i = 0; i < 4; i++) ha.push(hs[(rot + i) % hs.length])
+  return mixed(ca, ha)
+})
 
 function rotateIdeas() {
   ideaBatch.value++
@@ -339,6 +378,29 @@ onMounted(() => {
   background: rgba(163, 79, 44, 0.1);
   padding: 1px 6px;
   border-radius: 8px;
+}
+.kind {
+  flex: none;
+  font-size: 11px;
+  color: #6f675c;
+  background: #efebe3;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.rel {
+  flex: none;
+  font-size: 11px;
+  color: #2f7d4d;
+}
+.low {
+  flex: none;
+  font-size: 11px;
+  color: #b26a3d;
+}
+.likes {
+  flex: none;
+  font-size: 11px;
+  color: #a34f2c;
 }
 
 .angle-list {

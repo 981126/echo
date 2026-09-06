@@ -437,3 +437,12 @@
 - 修正关键事实：数据目录由 .env 指向 echo_resource（非仓库 data/）、模式全部 real/aliyun、top20、评论 Top50、同步进度条、测试数 53、R-061 未用 Alembic 等
 - 自测：verify.sh 全绿
 
+## [M54 / R-072] 2026-09-06 — 主页灵感池人设相关化
+- 展示：灵感池「全部/只看评论/只看热榜」标签；「全部」每批 8 条=评论与热榜各半交替，评论不再被热榜淹没；换一批轮换起点
+- 人设相关度（纯本地零成本）：core/ideas.py 关键词命中打分（含赛道扩展词/#话题/红线词）；services/ideas_service.py 组装当前主博主人设画像
+  - /api/topics/hot 返回 score/matched/redlined，命中红线词剔除；未建人设不误标
+  - /api/platform/topic-pool 返回 likes/score/matched，按点赞降序
+- 评论进池：平台同步对最近 10 条作品评论 Top50 尝试进池（按天去重）；topic_ideas 增 likes 列（幂等迁移 + 重复同步回填）
+- 前端：评论行显示点赞与「相关」，热榜显示「低相关」排后
+- 测试：新增相关度纯逻辑与画像标注测试（55 项）；verify.sh 全绿
+

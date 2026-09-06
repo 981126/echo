@@ -114,6 +114,14 @@ def _migrate_feedback_dims() -> None:
             conn.exec_driver_sql(f"ALTER TABLE feedback ADD COLUMN {ddl}")
 
 
+def _migrate_topic_idea_likes() -> None:
+    """R-072：topic_ideas 增加 likes 列（按来源评论点赞排序）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(topic_ideas)").fetchall()}
+        if "likes" not in cols:
+            conn.exec_driver_sql("ALTER TABLE topic_ideas ADD COLUMN likes INTEGER NOT NULL DEFAULT 0")
+
+
 def _migrate_sync_progress() -> None:
     """R-070：sync_jobs 增加进度列（done/total/note），供博主页进度条轮询。"""
     with engine.begin() as conn:
@@ -338,6 +346,7 @@ def init_db() -> None:
     _migrate_chat()
     _migrate_comment_likes()
     _migrate_sync_progress()
+    _migrate_topic_idea_likes()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults

@@ -53,5 +53,6 @@ class TopicIdea(Base):
     post_title: Mapped[str] = mapped_column(String(500), default="")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("creators.id"), nullable=True, index=True)
     snapshot_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    likes: Mapped[int] = mapped_column(Integer, default=0)  # 来源评论点赞数（R-072 按赞排序）
     used: Mapped[bool] = mapped_column(default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

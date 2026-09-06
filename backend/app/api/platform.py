@@ -434,23 +434,29 @@ def topic_pool(date: str = "", db: Session = Depends(get_db)):
     ideas = (
         db.query(TopicIdea)
         .filter(TopicIdea.snapshot_date == key, TopicIdea.used.is_(False))
-        .order_by(TopicIdea.id.desc())
+        .order_by(TopicIdea.likes.desc(), TopicIdea.id.desc())
         .all()
     )
+    items = [
+        {
+            "id": r.id,
+            "source": r.source,
+            "platform": r.platform,
+            "title": r.title,
+            "detail": r.detail,
+            "post_title": r.post_title,
+            "likes": r.likes or 0,
+        }
+        for r in ideas
+    ]
+    # R-072：标注人设相关度（评论不剔除，只供排序/展示）
+    from ..services.ideas_service import annotate_items
+
+    annotated = annotate_items(db, items)
     return {
         "date": key,
-        "total": len(ideas),
-        "items": [
-            {
-                "id": r.id,
-                "source": r.source,
-                "platform": r.platform,
-                "title": r.title,
-                "detail": r.detail,
-                "post_title": r.post_title,
-            }
-            for r in ideas
-        ],
+        "total": len(annotated),
+        "items": annotated,
     }
 
 

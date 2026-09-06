@@ -52,6 +52,9 @@ def topic_gaps(days: int = 28, db: Session = Depends(get_db)):
 
 @router.get("/hot")
 def list_hot(date: str = "", db: Session = Depends(get_db)):
+    """当日热榜（R-072：按当前人设本地打分；命中红线词剔除，其余附带 score/matched）。"""
+    from ..services.ideas_service import annotate_items, persona_profile
+
     key = date or today_key()
     rows = (
         db.query(HotTopic)
@@ -59,14 +62,14 @@ def list_hot(date: str = "", db: Session = Depends(get_db)):
         .order_by(HotTopic.platform, HotTopic.id.desc())
         .all()
     )
-    return {
-        "date": key,
-        "total": len(rows),
-        "items": [
-            {"platform": r.platform, "title": r.title, "heat": r.heat, "url": r.url}
-            for r in rows
-        ],
-    }
+    items = annotate_items(
+        db,
+        [{"platform": r.platform, "title": r.title, "heat": r.heat, "url": r.url} for r in rows],
+        persona_profile(db),
+    )
+    # 命中红线词的热榜直接剔除
+    items = [it for it in items if not it["redlined"]]
+    return {"date": key, "total": len(items), "items": items}
 
 
 @router.post("/refresh")
