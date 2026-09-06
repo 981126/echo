@@ -1,0 +1,157 @@
+<template>
+  <div class="page">
+    <h1 class="page-title">博主对标</h1>
+    <div v-if="loading" class="panel empty">加载中…</div>
+    <div v-else-if="!benchmarks.length" class="panel empty">
+      还没有对标博主。去「博主管理」为当前主博主添加对标账号后，这里会自动展示其最新 10 条里数据最好的前 3 条。
+    </div>
+    <div v-else class="bm-list">
+      <div v-for="b in benchmarks" :key="b.benchmark_id" class="panel" style="margin-bottom: 16px">
+        <div class="row wrap" style="justify-content: space-between; gap: 8px">
+          <div>
+            <b>{{ b.name }}</b>
+            <span v-if="b.note" class="muted" style="margin-left: 8px">{{ b.note }}</span>
+          </div>
+          <div class="row" style="gap: 8px">
+            <n-button size="small" secondary :loading="preparingId === b.benchmark_id" @click="prepare(b)">
+              转写补齐Top3（无文案自动顺延）
+            </n-button>
+          </div>
+        </div>
+        <div v-if="!b.items.length" class="muted" style="padding: 10px 0">暂无作品，先同步该对标账号</div>
+        <div v-for="(it, idx) in b.items" :key="it.key" class="bm-item">
+          <div class="bm-rank">{{ idx + 1 }}</div>
+          <div class="grow" style="min-width: 0">
+            <div class="row wrap" style="gap: 6px">
+              <b>{{ it.title }}</b>
+              <n-tag v-for="p in it.platforms" :key="p" size="tiny" :bordered="false" round>{{ platformName(p) }}</n-tag>
+              <n-tag v-if="it.has_text" size="tiny" type="success" :bordered="false" round>有文案</n-tag>
+              <n-tag v-else size="tiny" type="warning" :bordered="false" round>暂无文案</n-tag>
+            </div>
+            <div class="muted" style="font-size: 12px; margin: 4px 0">
+              赞 {{ it.likes }} · 藏 {{ it.favorites }} · 评 {{ it.comments }} · 播放 {{ it.plays }} · 互动分 {{ it.score }}
+            </div>
+            <div v-if="it.desc" class="muted bm-desc">{{ it.desc }}</div>
+          </div>
+          <div class="row" style="gap: 6px; flex-wrap: wrap">
+            <n-button size="tiny" secondary :loading="analyzingKey === it.key" @click="analyze(b, it)">AI分析</n-button>
+            <template v-if="analysisMap[it.key]">
+              <div class="talk-result">
+                <span :class="analysisMap[it.key].can ? 'can' : 'no'">{{ analysisMap[it.key].can ? '✅ 能讲' : '❌ 不建议' }}</span>
+                <span class="muted">{{ analysisMap[it.key].reason }}</span>
+              </div>
+              <n-button v-if="analysisMap[it.key].can" size="tiny" type="primary" :loading="rewritingKey === it.key" @click="rewrite(b, it)">洗稿</n-button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <n-modal v-model:show="showScript" preset="card" :title="'洗稿完成 · 已存入草稿 #' + (draftId || '')" style="width: min(720px, 96vw)">
+      <pre class="script-pre">{{ scriptText }}</pre>
+      <div class="row" style="justify-content: flex-end; gap: 8px; margin-top: 8px">
+        <n-button size="small" @click="copyScript">复制</n-button>
+        <n-button size="small" type="primary" @click="showScript = false">关闭</n-button>
+      </div>
+    </n-modal>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useMessage } from 'naive-ui'
+import { api } from '../api'
+import { platformName } from '../lib/format'
+
+const message = useMessage()
+const loading = ref(true)
+const benchmarks = ref([])
+const preparingId = ref(0)
+const analyzingKey = ref('')
+const rewritingKey = ref('')
+const analysisMap = ref({})
+const showScript = ref(false)
+const scriptText = ref('')
+const draftId = ref(0)
+
+async function load() {
+  loading.value = true
+  try {
+    const d = await api('/api/benchmark/top')
+    benchmarks.value = d.benchmarks || []
+    analysisMap.value = {}
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function prepare(b) {
+  preparingId.value = b.benchmark_id
+  message.info(`开始为「${b.name}」补齐文案并取 Top3（需几分钟，请稍候…）`)
+  try {
+    const d = await api('/api/benchmark/prepare', { method: 'POST', body: JSON.stringify({ benchmark_id: b.benchmark_id }) })
+    b.items = d.items || []
+    message.success('Top3 文案已就绪')
+    await load()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    preparingId.value = 0
+  }
+}
+
+async function analyze(b, it) {
+  if (!it.text) {
+    message.warning('该条还没有文案，请先“转写补齐Top3”')
+    return
+  }
+  analyzingKey.value = it.key
+  try {
+    const d = await api('/api/benchmark/analyze', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text }) })
+    analysisMap.value = { ...analysisMap.value, [it.key]: d }
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    analyzingKey.value = ''
+  }
+}
+
+async function rewrite(b, it) {
+  rewritingKey.value = it.key
+  try {
+    const d = await api('/api/benchmark/rewrite', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text }) })
+    scriptText.value = d.script
+    draftId.value = d.draft_id || 0
+    showScript.value = true
+    message.success(`洗稿完成，已存入草稿 #${draftId.value}`)
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    rewritingKey.value = ''
+  }
+}
+
+async function copyScript() {
+  try {
+    await navigator.clipboard.writeText(scriptText.value)
+    message.success('已复制')
+  } catch {
+    message.warning('复制失败，请手动选择复制')
+  }
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+.bm-list { display: flex; flex-direction: column; }
+.bm-item { display: flex; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line, #eee5d8); align-items: flex-start; }
+.bm-rank { width: 22px; height: 22px; flex: none; border-radius: 6px; background: #a34f2c; color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+.bm-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; }
+.talk-result { display: flex; flex-direction: column; gap: 2px; max-width: 280px; font-size: 12px; }
+.can { color: #18a058; font-weight: 600; }
+.no { color: #d03050; font-weight: 600; }
+.script-pre { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 60vh; overflow: auto; }
+</style>

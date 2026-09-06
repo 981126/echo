@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 92 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 90 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -702,101 +702,7 @@ Pipeline Status
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 
-## metrics
 
-### POST /api/metrics
-
-Add Metric
-
-**参数**
-
-- `x-access-token`（header）string
-**请求体**（application/json，`MetricIn`）
-
-字段：
-  - `video_id` integer（必填）
-  - `snapshot_date` string（必填）
-  - `plays` integer
-  - `likes` integer
-  - `favorites` integer
-  - `comments` integer
-  - `followers_gained` integer
-
-**返回 200**：application/json → object
-
-### POST /api/metrics/fetch
-
-Trigger Fetch
-
-每日 cookie 抓取（best-effort）；mock 模式不造假数据。
-
-**参数**
-
-- `x-access-token`（header）string
-**返回 200**：application/json → object
-
-### POST /api/metrics/import
-
-Import Metrics
-
-**参数**
-
-- `x-access-token`（header）string
-**请求体**（application/json，`ImportIn`）
-
-字段：
-  - `rows` array（必填）
-
-**返回 200**：application/json → object
-
-### GET /api/metrics/summary
-
-Get Summary
-
-**参数**
-
-- `x-access-token`（header）string
-**返回 200**：application/json → object
-
-### GET /api/metrics/video/{video_id}
-
-Get Series
-
-**参数**
-
-- `video_id`（path）integer，必填
-- `x-access-token`（header）string
-**返回 200**：application/json → object
-
-## review
-
-### POST /api/review/generate
-
-Generate
-
-**参数**
-
-- `run_date`（query）string
-- `x-access-token`（header）string
-**返回 200**：application/json → object
-
-### GET /api/review/radar
-
-Radar
-
-**参数**
-
-- `x-access-token`（header）string
-**返回 200**：application/json → object
-
-### GET /api/review/report
-
-Get Report
-
-**参数**
-
-- `x-access-token`（header）string
-**返回 200**：application/json → object
 
 ## uploads
 
@@ -1475,3 +1381,21 @@ Split Items
 Health
 
 **返回 200**：application/json → object
+
+## benchmark
+
+### GET /api/benchmark/top
+
+对标博主最新10条互动分 Top3。
+
+### POST /api/benchmark/prepare
+
+转写补齐文案并返回有文案 Top3（无文案顺延）。
+
+### POST /api/benchmark/analyze
+
+AI 判断“我能不能讲”。
+
+### POST /api/benchmark/rewrite
+
+按人设洗稿并存脚本草稿。

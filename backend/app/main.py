@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import chat, creators, drafts, events, works, metrics, notifications, persona, pipeline, platform, prompts, requirements, review, settings, tasks, topics, uploads, videos
+from .api import benchmark, chat, creators, drafts, events, works, notifications, persona, pipeline, platform, prompts, requirements, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .db import init_db
 from .scheduler import setup_scheduler
@@ -48,6 +48,7 @@ app.include_router(videos.router, prefix="/api/videos", tags=["videos"], depende
 app.include_router(persona.router, prefix="/api/persona", tags=["persona"], dependencies=API_DEPENDENCIES)
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"], dependencies=API_DEPENDENCIES)
 app.include_router(events.router, prefix="/api", tags=["events"], dependencies=API_DEPENDENCIES)
+app.include_router(benchmark.router, prefix="/api/benchmark", tags=["benchmark"], dependencies=API_DEPENDENCIES)
 app.include_router(drafts.router, prefix="/api/drafts", tags=["drafts"], dependencies=API_DEPENDENCIES)
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"], dependencies=API_DEPENDENCIES)
 app.include_router(
@@ -55,8 +56,6 @@ app.include_router(
 )
 app.include_router(topics.router, prefix="/api/topics", tags=["topics"], dependencies=API_DEPENDENCIES)
 app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"], dependencies=API_DEPENDENCIES)
-app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"], dependencies=API_DEPENDENCIES)
-app.include_router(review.router, prefix="/api/review", tags=["review"], dependencies=API_DEPENDENCIES)
 app.include_router(uploads.router, prefix="/api/uploads", tags=["uploads"], dependencies=API_DEPENDENCIES)
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"], dependencies=API_DEPENDENCIES)
 app.include_router(prompts.router, prefix="/api/prompts", tags=["prompts"], dependencies=API_DEPENDENCIES)
