@@ -103,7 +103,7 @@ def _rerun_worker(db, payload, update):
 
 @router.post("/rerun", response_model=dict)
 def benchmark_rerun(db: Session = Depends(get_db)):
-    """R-102：页面顶部「再次对标」——重跑当前主博主所有对标：重捞最新10条 + 自动补 Top3 文案。
+    """R-102/R-104：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新10条 + 自动补 Top3 文案。
 
     长任务（含同步与转写，可能较久）：落后台任务+进度+完成通知，返回 task_id 供前端轮询。
     """

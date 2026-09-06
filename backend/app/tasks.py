@@ -21,7 +21,7 @@ KIND_LABELS = {
     "platform_sync_single": "素材数据同步",
     "platform_media": "素材媒体补齐",
     "card_sync": "素材同步",
-    "benchmark_rerun": "再次对标",
+    "benchmark_rerun": "重新对标",
 }
 
 

@@ -27,7 +27,7 @@
 | works.py | /api/works | 云端作品列表、to-local、meta、merge/split、auto-merge、删除、cleanup-tags |
 | platform.py | /api/platform | 云端作品/评论/指标/同步触发与任务/预算/选题池/主页快照；bind-links |
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
-| benchmark.py | /api/benchmark | 博主对标：Top3 展示/转写补齐/AI可讲/洗稿；「再次对标」一键重跑（R-102，后台任务） |
+| benchmark.py | /api/benchmark | 博主对标：Top3 展示/转写补齐/AI可讲/洗稿；「重新对标」一键重跑（R-102，后台任务） |
 | metrics.py | /api/metrics | 手动录入/批量导入/汇总/单视频序列 |
 | review.py | /api/review | 生成报告/最新报告/雷达 |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选 |

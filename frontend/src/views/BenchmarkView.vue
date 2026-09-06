@@ -4,7 +4,7 @@
       <h1 class="page-title">博主对标</h1>
       <div class="row" style="gap: 10px; align-items: center">
         <span v-if="rerunning" class="muted mini">{{ rerunNote }} {{ rerunPct > 0 && rerunPct < 100 ? rerunPct + '%' : '' }}</span>
-        <n-button size="small" type="primary" :loading="rerunning" :disabled="!benchmarks.length" @click="rerunAll">再次对标</n-button>
+        <n-button size="small" type="primary" :loading="rerunning" :disabled="!benchmarks.length" @click="rerunAll">重新对标</n-button>
       </div>
     </div>
     <div v-if="loading" class="panel empty">加载中…</div>
@@ -116,7 +116,7 @@ async function rerunAll() {
   rerunning.value = true
   rerunPct.value = 0
   rerunNote.value = '准备中…'
-  message.info('开始再次对标：重捞各对标最新数据并自动补齐 Top3 文案，需几分钟，请稍候…')
+  message.info('开始重新对标：重捞各对标最新数据并自动补齐 Top3 文案，需几分钟，请稍候…')
   try {
     const d = await api('/api/benchmark/rerun', { method: 'POST' })
     await waitTask(d.task_id)
@@ -147,7 +147,7 @@ async function waitTask(taskId) {
       rerunNote.value = ''
       rerunning.value = false
       if (pollAlive) {
-        message.success('再次对标完成，Top3 已刷新')
+        message.success('重新对标完成，Top3 已刷新')
         await load()
       }
       return
@@ -155,14 +155,14 @@ async function waitTask(taskId) {
     if (t.status === 'failed') {
       rerunNote.value = ''
       rerunning.value = false
-      if (pollAlive) message.error(t.error || '再次对标失败')
+      if (pollAlive) message.error(t.error || '重新对标失败')
       return
     }
   }
 }
 
 async function resumeRunning() {
-  // R-103：切页回来时若后台仍在“再次对标”，恢复进度显示与轮询
+  // R-103：切页回来时若后台仍在“重新对标”，恢复进度显示与轮询
   try {
     const list = await api('/api/tasks?status=running&kind=benchmark_rerun&limit=5')
     const task = (list || []).find(t => t.kind === 'benchmark_rerun')
