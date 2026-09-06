@@ -57,6 +57,7 @@ def candidates(db: Session, bm: Creator, limit: int = 10) -> list[dict]:
         .order_by(PlatformPost.publish_time.desc())
         .all()
     )
+    posts = [p for p in posts if not p.is_ad]  # R-099：广告素材不对标
     # 按 work 聚合（work_id 相同的算同一作品）
     work_map: dict[int, list[PlatformPost]] = {}
     singles: list[PlatformPost] = []
@@ -69,6 +70,7 @@ def candidates(db: Session, bm: Creator, limit: int = 10) -> list[dict]:
     for p in singles:
         units.append({"work_id": None, "post": p})
     for wid, members in work_map.items():
+        members = [m for m in members if not m.is_ad]
         if not members:
             continue
         members.sort(key=lambda m: (m.publish_time or _EPOCH), reverse=True)
@@ -92,11 +94,12 @@ def _unit_text(db: Session, unit: dict) -> str:
         for v in db.query(Video).filter(Video.work_id == unit["work_id"]).all():
             if v.id not in {x.id for x in vids}:
                 vids.append(v)
+    # R-099：对标素材文案优先（只）使用 ASR 转写稿；无转写则视为“暂无文案”，由 prepare 下载转写补齐
     for v in vids:
         tr = v.transcript
         if tr and (tr.corrected_text or tr.transcript_text):
             return (tr.corrected_text or tr.transcript_text or "").strip()
-    return (post.desc or "").strip() or (post.title or "").strip()
+    return ""
 
 
 def _stats_map(db: Session, units: list[dict]) -> dict[int, dict]:
