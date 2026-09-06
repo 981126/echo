@@ -80,7 +80,13 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
     topic = (payload.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="选题不能为空")
-    draft = Draft(title=topic, cover_text="", script="（双模型讨论生成中…）", source="ai")
+    draft = Draft(
+        title=topic,
+        cover_text="",
+        script="（双模型讨论生成中…）",
+        source="ai",
+        creator_id=current_creator_id(db),  # 归属当前主博主，否则工作台看不到（R-063 后续修复）
+    )
     db.add(draft)
     db.commit()
     db.refresh(draft)

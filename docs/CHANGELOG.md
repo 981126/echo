@@ -379,3 +379,7 @@
 ## [fix] 2026-09-06 — 素材库深链不弹窗
 - 根因：?edit= / ?post= 只在组件挂载时解析一次，已在素材库页再改 URL 不会触发
 - 修复：改响应式监听 route.query.edit/post（数据就绪后自动打开对应弹窗），打开后清掉 query 以便再次点击同一素材也能触发
+
+## [fix] 2026-09-06 — AI 文案生成完成但脚本工作台看不到
+- 根因：双模型讨论生成的占位草稿未写 creator_id（NULL），而工作台按当前主博主过滤，导致生成的文案查不到
+- 修复：generate-async 建占位稿时写 creator_id；debate 后台任务兜底补归属；存量 NULL 草稿归属当前主博主（已备份 echo_pre_draft_creator_*.db）

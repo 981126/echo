@@ -19,6 +19,7 @@ from ..models.kv import Kv
 from .generation import _persona_context, _style_profile_lines, _style_samples
 from .llm import LLMError, get_llm
 from .prompt_service import get_prompt
+from .creator_service import current_creator_id
 
 MODELS = ["deepseek", "kimi"]
 
@@ -108,6 +109,8 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
     draft = db.get(Draft, int(payload.get("draft_id") or 0))
     if draft is None:
         raise LLMError("草稿不存在")
+    if draft.creator_id is None:
+        draft.creator_id = current_creator_id(db)  # 兜底：老占位稿无归属时补当前主博主
     topic = str(payload.get("topic", "")).strip() or draft.title or "今日话题"
     ctx = _context(db, topic)
 
