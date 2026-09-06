@@ -16,5 +16,6 @@ class TaskOut(BaseModel):
     progress: int
     note: str = ""
     error: str = ""
+    payload: str = "{}"  # R-088/R-089：任务关联的 work/post/video，前端切页回来按此认领到卡片
     created_at: datetime
     updated_at: datetime

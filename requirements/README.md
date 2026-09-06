@@ -94,3 +94,4 @@
 | R-086 | 2026-09-06 | 博主页 daily 同步条数前10→前15（按钮+自动同步，仍带视频下载转写） | ✅ 已完成 | M68（已完成） | R-085、run_sync、CreatorHeaderRow |
 | R-087 | 2026-09-06 | SSE 事件推送：GET /api/events + 通知/任务进度/完成即时推送（NotificationBell、素材卡进度接入） | ✅ 已完成 | M69（已完成） | 架构·events.py、tasks、NotificationBell/VideosView |
 | R-088 | 2026-09-06 | 博主页同步进度切页恢复（onMounted 启轮询）+ daily 媒体补齐注册为卡片可见任务（run_media_seq） | ✅ 已完成 | M70（已完成） | CreatorsView、run_sync、media_ensure、R-070/081/085/087 |
+| R-089 | 2026-09-06 | 素材卡认领后端任务：TaskOut/事件带 payload、进度单调不回退、切页恢复修复 | ✅ 已完成 | M71（已完成） | TaskOut、tasks/media_ensure 事件、VideosView |

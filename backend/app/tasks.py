@@ -106,7 +106,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
         if note:
             task.note = note[:255]
         db.commit()
-        publish("task.update", {"id": task_id, "status": task.status, "progress": task.progress, "note": task.note or ""})
+        publish("task.update", {"id": task_id, "status": task.status, "progress": task.progress, "note": task.note or "", "payload": payload})
 
     try:
         task = db.get(BackgroundTask, task_id)
@@ -126,7 +126,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             task.progress = 100
             task.note = "完成"
             db.commit()
-            publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成"})
+            publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": payload})
         _notify(db, kind=kind, payload=payload, status="done", result=result)
         if kind == "import_video":
             _maybe_optimize_prompt(db, payload)
@@ -137,7 +137,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             task.status = "failed"
             task.error = str(exc)[:2000]
             db.commit()
-            publish("task.update", {"id": task_id, "status": "failed", "progress": task.progress, "note": task.note or "", "error": task.error[:500]})
+            publish("task.update", {"id": task_id, "status": "failed", "progress": task.progress, "note": task.note or "", "error": task.error[:500], "payload": payload})
         _notify(db, kind=kind, payload=payload, status="failed", error=str(exc))
     finally:
         db.close()

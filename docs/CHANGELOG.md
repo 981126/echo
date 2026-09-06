@@ -525,3 +525,8 @@
 - CreatorsView onMounted 启动任务轮询：切页回来恢复同步进度条。
 - 新增 run_media_seq：博主页前15/每日自动的视频补齐逐条注册为 platform_media 任务并广播 task.update，素材库卡片显示覆盖进度并可恢复；全量/每周仍无媒体。
 - verify.sh 全绿。
+
+## [M71 / R-089] 2026-09-06 — 素材卡认领后端任务 + 进度不回退
+- TaskOut 与 task.update 事件带 payload；素材卡按 work/post/video 认领任务（切页回来/博主页触发的媒体任务可显示）。
+- 覆盖层进度单调不回退；同卡不重复覆盖。
+- verify.sh 全绿。

@@ -917,8 +917,8 @@ async function finishCardTask(key, t) {
 }
 function applyTaskState(key, t) {
   if (t.status === 'running' || t.status === 'pending') {
-    cardProgress[key] = Math.max(2, Math.min(99, Number(t.progress) || 2))
-    cardNote[key] = t.note || '同步中…'
+    cardProgress[key] = Math.max(cardProgress[key] || 2, Math.min(99, Number(t.progress) || 2))  // 不回退
+    cardNote[key] = t.note || cardNote[key] || '同步中…'
     return false
   }
   return true
@@ -926,10 +926,18 @@ function applyTaskState(key, t) {
 function handleTaskEvent(t) {
   const taskId = Number(t && t.id)
   if (!taskId) return
-  for (const key of Object.keys(cardTaskIds)) {
-    if (cardTaskIds[key] !== taskId) continue
-    if (applyTaskState(key, t)) finishCardTask(key, t)  // R-087：SSE 到达即结束，无需等轮询
+  let key = ''
+  for (const k of Object.keys(cardTaskIds)) {
+    if (cardTaskIds[k] === taskId) { key = k; break }
   }
+  if (!key) {
+    // R-089：事件带 payload → 可直接认领到卡片（博主页同步触发的媒体任务也能即时显示）
+    if (t.status === 'done' || t.status === 'failed') return
+    key = cardKeyForTask({ payload: t.payload || {} })
+    if (!key) return
+    showServerTask(key, taskId, false)
+  }
+  if (applyTaskState(key, t)) finishCardTask(key, t)
 }
 function pollCardTask(key, taskId, notify = false) {
   clearInterval(cardTaskPollers[key])
@@ -947,10 +955,12 @@ function pollCardTask(key, taskId, notify = false) {
   tick()
 }
 function showServerTask(key, taskId, notify = false) {
-  stopCardProgress(key, false)  // 停掉请求阶段的本地过渡
+  // 只停本地过渡计时器，保留已有进度（进度单调不回退，R-089）
+  clearInterval(cardRequestTimers[key]); delete cardRequestTimers[key]
+  if (!(key in cardProgress)) cardProgress[key] = 2
   cardTaskIds[key] = taskId
-  cardProgress[key] = cardProgress[key] || 2
-  cardNote[key] = '同步中…'
+  cardTaskNotify[key] = notify
+  cardNote[key] = cardNote[key] || '同步中…'
   pollCardTask(key, taskId, notify)
 }
 
@@ -975,7 +985,8 @@ async function refreshActiveCardTasks() {
   for (const t of (list || [])) {
     const key = cardKeyForTask(t)
     if (!key) continue
-    if (!cardTaskIds[key] || cardTaskIds[key] !== t.id) showServerTask(key, t.id, true)
+    if (cardTaskIds[key] && cardTaskIds[key] !== t.id) continue  // 已有任务在跑，不重复覆盖
+    if (!cardTaskIds[key]) showServerTask(key, t.id, true)
   }
 }
 

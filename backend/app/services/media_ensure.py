@@ -382,7 +382,7 @@ def run_media_seq(db: Session, posts: list[PlatformPost]) -> dict:
             db.commit()
             publish(
                 "task.update",
-                {"id": tid, "status": "running", "progress": t.progress, "note": t.note or ""},
+                {"id": tid, "status": "running", "progress": t.progress, "note": t.note or "", "payload": {"post_id": post.id}},
             )
 
         def _fail(err: str) -> None:
@@ -393,7 +393,7 @@ def run_media_seq(db: Session, posts: list[PlatformPost]) -> dict:
                 db.commit()
                 publish(
                     "task.update",
-                    {"id": tid, "status": "failed", "progress": t.progress, "note": t.note or "", "error": err[:500]},
+                    {"id": tid, "status": "failed", "progress": t.progress, "note": t.note or "", "error": err[:500], "payload": {"post_id": post.id}},
                 )
 
         _up(5, "准备同步该作品…")
@@ -405,7 +405,7 @@ def run_media_seq(db: Session, posts: list[PlatformPost]) -> dict:
                 t.progress = 100
                 t.note = "完成"
                 db.commit()
-                publish("task.update", {"id": tid, "status": "done", "progress": 100, "note": "完成"})
+                publish("task.update", {"id": tid, "status": "done", "progress": 100, "note": "完成", "payload": {"post_id": post.id}})
             if res.get("status") == "done":
                 if res.get("downloaded"):
                     stats["downloaded"] += 1
