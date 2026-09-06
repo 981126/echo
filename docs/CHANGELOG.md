@@ -430,3 +430,10 @@
 - 前端：博主管理页新增 SyncProgressBar，点「同步前20条」「全量同步」后 1 秒轮询，在对应博主卡片下显示实时进度；全量拉列表阶段（总数未知）显示流动动画“进行中”
 - 测试：新增同步进度记录测试（53 项）；verify.sh 全绿
 
+## [M53 / R-071] 2026-09-06 — 全量重写项目文档（API/DATABASE 自动生成 + 各文档按代码校准）
+- docs/API.md：改由 FastAPI OpenAPI 自动生成（92 路由，含方法/路径/标签/参数/请求体/返回），不再手写过期内容
+- docs/DATABASE.md：改由 SQLAlchemy 模型元数据自动生成（26 表 schema + 索引/唯一/外键/关系）+ 人工注释
+- 按代码重写/校准：AGENTS.md、README.md、PRD、PRODUCT、ARCHITECTURE（定时任务以 scheduler.py 为准）、DESIGN（代码级地图）、milestones（M0–M52 + 待排期）、WORKFLOW、DECISIONS（整理 D-001~D-037）、QUICKSTART、GLOSSARY、FAQ
+- 修正关键事实：数据目录由 .env 指向 echo_resource（非仓库 data/）、模式全部 real/aliyun、top20、评论 Top50、同步进度条、测试数 53、R-061 未用 Alembic 等
+- 自测：verify.sh 全绿
+

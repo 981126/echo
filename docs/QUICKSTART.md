@@ -1,108 +1,62 @@
-# 小白上手指南（echo）
+# QUICKSTART — 快速上手 / 新设备部署
 
-> 目标：照着做，30 分钟内把系统跑起来并完成“第一次产出”。
-> 你不需要懂代码——只需要按顺序复制命令、填一个配置文件、点几个按钮。
+> 面向「把系统跑起来」的人。完整架构见 ARCHITECTURE.md，配置项见 backend/app/config.py。
 
-## 0. 这是什么东西
-一个**帮你做短视频文案的私人工具**：把平台的视频/数据同步进来 → 用 AI 学习你的口播和风格 →
-每天基于热点帮你出选题和脚本 → 你打分，它越学越像你。
-核心概念（后面会用到）：
-- **主博主**：你自己（在系统里建一个，配三个平台账号）
-- **本地素材 / 云端作品**：上传的算本地；从平台同步回来的算云端
-- **语音转文字**：把视频口播转成文字（AI 学习靠它）
-- **人设档案**：AI 记住的“你”（风格/赛道/红线/金句）
-- **脚本工作台**：AI 出稿、你改稿/打分的地方
+## 1. 你需要准备
+- Python 3.12+（开发机已建 `backend/.venv`）
+- Node 18+（前端）
+- 真实服务密钥（放根目录 `.env`，**不要提交**）：
+  - TikHub：`ECHO_TIKHUB_API_KEY`（平台数据/热搜）
+  - DeepSeek / Kimi：`ECHO_DEEPSEEK_API_KEY` / `ECHO_KIMI_API_KEY`
+  - 阿里云：ASR（AccessKey + AppKey）与 OSS（bucket/region）
+  - QQ 邮箱 SMTP：`ECHO_SMTP_USER/AUTH_CODE/MAIL_TO`（可选，推送用）
+  - 访问令牌：`ECHO_ACCESS_TOKEN`（登录用）
 
-## 1. 准备工作
-- 一台电脑（Mac/Linux 都行；已按 Windows 兼容写了路径提示）
-- Python 3.10+、Node.js 18+（装好即可）
-- 一个 `.env` 配置文件（里面放各家的密钥）
-- 阿里云：AppKey + AccessKey + OSS（用于语音转文字）；不配也能用 mock 模式体验
-- DeepSeek / Kimi 任选一个 Key（生成文案用）
+## 2. 目录与数据
+- 代码：本仓库；**运行时数据不在仓库 `data/`**，由 `.env` 决定（本项目当前 `ECHO_DATA_DIR=/Users/yeah/document/echo_resource`，`ECHO_DB_PATH=…/echo.db`）
+- 子目录：`videos/`（素材文件）、`covers/`、`uploads/`、`inbox/`（拖入自动入库）
+- 备份：`scripts/backup.sh`（或每日 02:30 自动）；数据库建议用官方热备
 
-## 2. 一键启动（开发机）
+## 3. 首次启动（笔记本）
 ```bash
-# ① 进项目
-cd /Users/yeah/document/project/echo
-
-# ② 配置（首次）
-cp .env.example .env
-#    用编辑器打开 .env，至少填：
-#    ECHO_ACCESS_TOKEN=随便一串你记得住的字符串
-#    ECHO_DATA_DIR=/你的数据目录（放视频/封面/数据库，建议独立目录）
-#    ECHO_DEEPSEEK_API_KEY=sk-xxx
-
-# ③ 后端
+# 后端
 cd backend
-python3 -m venv .venv && source .venv/bin/activate   # Windows: python -m venv .venv ; .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --port 8000                     # 出现 “Application startup complete” 即成功
+.venv/bin/pip install -r requirements.txt   # 首次
+.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+# 首次启动自动：建表/迁移/seed 默认提示词/注册定时任务/启动 inbox 监听
 
-# ④ 另开一个终端：前端
+# 前端
 cd frontend
-npm install
-npm run dev
+npm install          # 首次
+npm run dev          # http://localhost:5173
 ```
-浏览器打开 **http://localhost:5173** → 输入你填的 `ECHO_ACCESS_TOKEN` 登录。
+登录：打开页面输入 `ECHO_ACCESS_TOKEN`。
+也可只跑后端（已 `npm run build` 时 FastAPI 直接托管 http://localhost:8000）。
 
-> 端口占用？后端用 8000、前端 5173。被占用就换端口（后端换端口时前端代理要同步改）。
-> 服务没起来？先看终端有没有报错；健康检查 `curl http://127.0.0.1:8000/health` 应返回 `{"status":"ok"}`。
+## 4. 首次使用流程
+1. **博主管理**：新建主博主 → 为它配置抖音/B站/小红书账号（填主页分享链接，系统自动解析平台 ID）
+2. **同步数据**：点「同步前 20 条」或「全量同步」，页面显示进度条；完成后云端作品进入素材库/看板
+3. **素材**：上传视频 → 编辑页「语音转文字」（真实阿里云）→ 确认标签
+4. **选题/生成**：主页「抓取更新」→ 挑灵感 → 工作台生成/改写 → 保存/发布
+5. **复盘**：看板查看增长曲线/赛道雷达；跑 ABCD 复盘
 
-## 3. 第一次使用向导（约 20 分钟）
+## 5. 模式开关（务必理解）
+`.env` 三处模式字段只接受白名单，**行尾注释必须另起一行**，否则启动报错（R-068）：
+```dotenv
+ECHO_TIKHUB_MODE=real      # ← 正确写法
+ECHO_HOT_SOURCE_MODE=real
+ECHO_ASR_MODE=aliyun
+# ECHO_TIKHUB_MODE=real# 注释 ← 错误：整串被当值，启动即报错
+```
 
-### 第 1 步：建主博主 + 配三平台账号（博主管理）
-1. 左侧菜单进「博主管理」→「+ 主博主」，名字写你自己（如：陈皮的使用手册）
-2. 点「+ 账号」，分别加**抖音 / B站 / 小红书**：
-   - 把对应平台主页的**分享链接**粘进“主页分享链接”，系统自动解析出用户 ID
-   - 首次可先“全量同步”（把三个平台的作品全拉回来，视频不下载，封面会缓存）
-3. 同步完，素材库会出现一堆“云端作品”（已发布视频），首页时间线也能看到它们
+## 6. 质量门禁与测试
+```bash
+PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh
+# ruff + mypy + pytest(53) + 前端 lint/build + 文档完整性
+```
 
-### 第 2 步：传真实视频 + 语音转文字（让 AI 学你）
-1. 「素材库」→ 顶部“选择视频文件 → 上传”（自动进入该素材编辑页）
-2. 编辑页填标题（文件会自动命名成 `标题-视频` / 封面 `标题-封面`）
-3. 点「语音转文字」→ 等后台识别完（右上角会通知），转写稿自动出现
-4. 想批量：把视频拖进 `ECHO_DATA_DIR/inbox/`，系统自动入库，再逐条点转写
-> 提示：AI 学得像不像，取决于你喂的真实口播数量。先喂 20~50 条。
-
-### 第 3 步：初始化人设（可选但推荐）
-「人设档案」→ 点「用历史转写稿初始化人设」→ 后台分析完会给你一批建议标签，逐条“确认/拒绝”；
-不满意可手动增删改，红线类标签标“不碰负面热点”之类。
-
-### 第 4 步：第一次出稿
-1. 「首页」灵感池/热点里挑一个话题 →「生成文案」（可先选角度）
-2. 或「脚本工作台」→ 新建 → 填话题 → 生成（可选双模型讨论）
-3. 在工作台改成“你的话”，保存；然后打分（1-5）或 👍/👎
-4. “采用”的稿子会进“待制作”；打分和改稿都会让 AI 学你
-
-## 4. 日常怎么用（建议节奏）
-| 时间 | 动作 |
-|---|---|
-| 早上 | 看首页时间线/灵感池；博主同步自动跑（07:30） |
-| 白天 | 挑 2 个选题 → 生成 → 改 → 打分 |
-| 晚上 | 复盘页看数据；必要时「同步数据」更新最新互动 |
-| 每周 | 人设页看表达风格；提示词页决定是否启用 AI 自动优化出的新版本 |
-
-## 5. 文件都放哪（重要）
-| 内容 | 位置（由 .env 的 ECHO_DATA_DIR 决定） |
-|---|---|
-| 数据库 | `<数据目录>/echo.db` |
-| 视频 | `<数据目录>/videos/`（标题-视频.*） |
-| 封面 | `<数据目录>/covers/`（标题-封面.*） |
-| 富文本图片 | `<数据目录>/uploads/` |
-| 自动入库 | 把文件放进 `<数据目录>/inbox/` |
-| 备份 | `<数据目录>/backups/`（每天 02:30 自动） |
-
-> 整个 `<数据目录>` 就是你的“全部家当”，备份 = 把这个目录拷走。
-
-## 6. 常见疑问
-- **为什么素材上传后没有转写稿？** 现在改为手动：进编辑页点「语音转文字」。
-- **为什么时间线/素材有些平台显示 “—”？** 只发了部分平台；同步数据后会填上。
-- **云端作品能变成本地素材吗？** 能：点云端作品 → 选视频/文案 → “保存为本地素材”（或“保存并语音转文字”）。
-- **怎么知道 AI 学得怎么样？** 人设页“表达风格”面板；每周自动重建提示词候选，通知里看。
-
-## 7. 想进一步了解？
-- 功能：`docs/PRODUCT.md`
-- 架构/数据：`docs/ARCHITECTURE.md`、`docs/DATABASE.md`
-- 接口：`docs/API.md`
-- 实现细节：`docs/DESIGN.md`
-- 常见报错排查：`docs/FAQ.md`；术语：`docs/GLOSSARY.md`
+## 7. 常见运维
+- 改 `.env` 后重启后端（配置启动时读取）
+- 数据迁移自动（启动时幂等补列）；重大变更先 `scripts/backup.sh`
+- 定时任务在进程内（APScheduler）；改时间在 `.env`（如 `ECHO_PLATFORM_SYNC_TIMES=07:30,18:00`）
+- 接口/表结构文档重新生成：见 docs/DATABASE.md 头注（API 用 app.openapi() 生成，模型用 SQLAlchemy metadata 生成）

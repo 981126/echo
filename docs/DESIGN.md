@@ -1,174 +1,130 @@
-# echo 开发设计文档
+# DESIGN — 开发设计细节（代码级）
 
-> 面向开发者的实现细节：API 面、异步任务、定时任务、各核心算法与数据设计、异常与
-> 护栏、扩展点。产品与架构见 `PRODUCT.md` / `ARCHITECTURE.md`。
+> 本文与代码一一对应，作为实现/排查时的地图。API 与表结构以 `docs/API.md`、`docs/DATABASE.md`（自动生成）为准。
 
-## 1. API 面（前缀 /api，除登录外均需 X-Access-Token）
+## 0. 运行入口与配置
 
-| 域 | 前缀 | 主要能力 |
+### backend/app/main.py
+- `lifespan`：`init_db()` → `setup_scheduler()` → `start_inbox_watcher()`。
+- 路由均挂 `/api/*` 且默认带 `Depends(require_token)`（`X-Access-Token`）。
+- `GET /health` 免令牌；`/covers`、`/uploads` 静态目录挂载；存在 `frontend/dist` 时用 FastAPI 托管前端（hash 路由）。
+- CORS 全开（局域网单用户）。
+
+### backend/app/config.py
+- pydantic-settings，env 前缀 `ECHO_`，读取根目录 `.env`（`env_file=(".env","../.env")`，从 backend 启动时解析项目根）。
+- `normalize_mode(value, allowed, default)`：`TIKHUB_MODE/HOT_SOURCE_MODE/ASR_MODE` 先按 `#` 剥离行尾注释再 trim/lower，非法值**抛错**（R-068）。取值：`tikhub_mode ∈ mock|real`、`hot_source_mode ∈ mock|real`、`asr_mode ∈ mock|aliyun`。
+- 路径：未显式给 `ECHO_DB_PATH/*_DIR` 时由 `ECHO_DATA_DIR` 派生（db=数据根/echo.db，inbox/videos/covers/uploads 同名子目录）。
+- `get_settings()` lru_cache：改 `.env` 需重启进程。
+
+### backend/app/db.py
+- `Base.metadata.create_all` → `_ensure_indexes/_ensure_binding_integrity` → 各 `_migrate_*`（幂等补列/迁移）→ `ensure_defaults`（提示词 v1 种子）→ 时区迁移标记。
+- 迁移函数：`_migrate_videos`（platforms/main_topics/cover_path/creator_id/platform_post_id/work_id/ad_price 补列与单值转 JSON）、`_migrate_creator_scope`（work_id/tags/is_ad/ad_price/creator_id、本地绑定唯一索引、videos↔posts 反向补绑）、`_migrate_account_avatars`、`_migrate_feedback_dims`、`_migrate_chat`（conversation_id 归属）、`_migrate_comment_likes`（R-067 likes）、`_migrate_sync_progress`（R-070 done/total/note）、`_fix_app_utc_columns`/`_fix_platform_timezone`（历史 +8h 一次性）。
+
+## 1. API 层（backend/app/api/）
+| 文件 | 前缀 | 职责 |
 |---|---|---|
-| 素材 | /api/videos | 上传、列表、详情(含 platform_links/transcript)、PATCH、封面、删除、确认标签、手动转写 POST /{id}/transcribe |
-| 人设 | /api/persona | 列表(建议/确认)、手动增、决策、编辑/删除、金句提取、初始化、风格 GET/PUT /style |
-| 草稿/脚本 | /api/drafts | 列表、CRUD、生成(异步)、改写、check、rework、discussions、debate-status、feedback |
-| AI 对话 | /api/chat | conversations CRUD、history、SSE 流式 message |
-| 提示词 | /api/prompts | keys、版本列表、save/enable/optimize/selfcheck |
-| 设置 | /api/settings | 生成模型(deepseek/kimi/random/alternate)、讨论轮数 |
-| 选题/流水线 | /api/topics · /api/pipeline | 热点列表/刷新、缺口、角度生成、每日流水线触发 |
-| 指标/复盘 | /api/metrics · /api/review | 录入/批量导入/抓取、汇总、报告生成与读取、雷达 |
-| 博主/平台 | /api/creators · /api/platform · /api/works | 博主/账号 CRUD、链接解析、同步(scope)、帖子/统计/评论、作品合并/拆分/转本地、预算 |
-| 通知 | /api/notifications | 列表、已读、清空 |
-| 上传 | /api/uploads | 富文本插图 |
+| videos.py | /api/videos | 上传/列表/详情/更新/确认标签/封面/视频文件/转写触发 |
+| works.py | /api/works | 云端作品列表、to-local、meta、merge/split、auto-merge、删除、cleanup-tags |
+| platform.py | /api/platform | 云端作品/评论/指标/同步触发与任务/预算/选题池/主页快照；bind-links |
+| creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
+| metrics.py | /api/metrics | 手动录入/批量导入/汇总/单视频序列 |
+| review.py | /api/review | 生成报告/最新报告/雷达 |
+| persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选 |
+| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分 |
+| chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
+| pipeline.py | /api/pipeline | 每日流水线手动触发/热点刷新/运行记录 |
+| topics.py | /api/topics | 热点/话题缺口/匹配选题 |
+| prompts.py | /api/prompts | 提示词版本 CRUD/启用/优化候选/历史回滚 |
+| requirements.py | /api/requirements | 需求归档读写（文件为事实源） |
+| notifications.py | /api/notifications | 通知列表/已读/清空 |
+| tasks.py | /api/tasks | 后台任务状态查询 |
+| settings.py | /api/settings | 页面可调设置 |
+| uploads.py | /api/uploads | 编辑器插图上传 |
 
-统一约定：列表带分页(total/items)；错误返回 `{detail}`；写操作多数先建后台任务再通知。
+### 校验与错误
+- 路由薄：参数校验在 Pydantic schema；业务在 services；HTTP 层把 `ValueError` 转 `400`（多数接口已做 try→HTTPException(400, str(exc))）。
+- 后台长任务统一 `tasks.start_task(kind, payload, fn)`，完成/失败写 `notifications`（前端铃铛 + toast）。
 
-## 2. 异步任务与通知（tasks.py）
+## 2. 服务层（backend/app/services/）
+- `ingest.py`：`import_video_task`（转写+校对+预打标签+人设建议+自动优化提示词触发）、`correct_transcript`、`persona_init_task`（全量初始化）、`suggest_persona_updates`（增量建议，需作者确认）。
+- `transcription.py`：`Transcriber.transcribe`：mock 假转写（离线）/ aliyun 真实（`aliyun_filetrans` 泛化调用提交+轮询）。
+- `aliyun_filetrans.py / aliyun_oss.py`：FileTrans 4.0（CommonRequest）与 OSS 上传/预签名 URL；上传前由 `media_tools`/`media_naming` 用 ffmpeg 抽 16k 单声道 wav。
+- `generation.py`：生成草稿（DeepSeek/Kimi/random/alternate）；上下文 = 人设(tags+红线+禁词) + 风格画像 + 检索到的最高分样本（TF-IDF，表现加权+时间衰减）+ 金句/最佳实践 + 对标风格卡。`_all_texts`（全量素材加权语料）供优化与每周重建（R-064）。
+- `debate.py`：双模型 5 轮讨论定稿，写入 `draft_discussions`；失败降级单模型。
+- `topic_mining.py`：热点源类（mock/公开接口/Bilibili、Douyin、Xiaohongshu/TikHub 热搜实现）；`get_sources` 按 `hot_source_mode` 选择；`fetch_and_store` 入库去重（platform+title+date）。
+- `persona.py`：LLM 分析（初版/打标/建议）；`_split_phrases` 与 `suggest_phrase_candidates`（金句候选）。
+- `prompt_service.py`：提示词 key→版本管理；`ensure_defaults`、`save_new_version/enable_version/create_candidate`、`feedback_context`、`learning_material`（全量加权前 16 条，R-064）、`optimize/auto_optimize_generation`（每 3 条新素材触发候选，R-022）。
+- `style_profile`（core）：口癖/句长/感叹反问占比等画像；R-057 表达风格面板 + 禁词注入。
+- `review.py`：ABCD 复盘：A 报表（按视频/赛道/平台）、B 归因（启发式+LLM）、C 建议、D 赛道方向；`_radar` 赛道雷达（按互动率）。
+- `metrics.py`：`upsert_snapshot/import_snapshots/fetch_daily/series_for_video/_platform_breakdown/summary`；`apply_retention`（热点 30 天清理）。
+- `chat_service.py`：只读工具集 + 流式问答；工具：search_videos/get_video_detail/get_persona/list_requirements/get_metrics_summary/get_today_topics/get_review_report/get_radar/search_drafts/generate_draft（写操作需明确同意）。SSE 由 api/chat 组装。
+- `platform_sync.py`：见 §4。
+- `works_service.py`：标题规范化（去话题/标点/空白/小写）+ 自动合并 + 手动合并/拆分 + `list_works`（合并作品含各平台）+ `post_item`（作品序列化）。
+- `creator_service.py`：当前博主/切换/账号元数据/全网粉丝汇总/删除保护。
+- `platform_assets.py`：封面/头像下载本地、HEIC 兼容、占位 SVG（mock 无封面时）。
+- `notify.py`：QQ SMTP 每日推送 digest/失败告警（HTML）。
+- `requirements_service.py`：以 `requirements/` 文件为事实源读写（列表/详情/新建/状态机）。
+- `media_naming.py / media_tools.py`：R-058「标题-视频/封面」命名、抽音轨工具。
+- `diff_analysis.py / feedback.py`：改稿差异分析、反馈回流。
 
-```mermaid
-sequenceDiagram
-    participant UI as 前端
-    participant API as API
-    participant DB as background_tasks
-    participant W as 线程
-    participant N as notifications
-    UI->>API: POST 触发(转写/同步/生成…)
-    API->>DB: 插入 task(pending)
-    API->>W: start daemon 线程
-    W->>DB: running → 执行业务 → done/failed(error)
-    W->>N: 写通知(完成/失败+跳转目标)
-    UI-->>N: 铃铛轮询拉取
-```
+## 3. 核心算法（backend/app/core/）
+- `timeutil.py`：`now()/today()/tz`（默认 Asia/Shanghai，`ECHO_TIMEZONE` 覆盖）——全项目唯一时间来源。
+- `retrieval.py`：字符二元组 TF-IDF 检索（中文）。
+- `style_profile.py`：风格画像统计。
+- `transcript.py`：转写稿切分/处理。
+- `matching.py`：热点标题与确认关键词的命中打分。
+- `metrics.py`：互动率等规范化。
+- `review.py`：复盘启发式。
+- `diff.py`：改稿差异（diff 文本）。
+- `digest.py`：每日邮件 HTML。
+- `draft_check.py`：生成前体检（红线/人设词频/开头钩子/结尾引导，R-030⑦）。
+- `pipeline.py`：`today_key()` 等流水线幂等键。
+- `requirement_file.py`：R-xxx 文件解析/编号。
+- `platform_links.py`：根据 platform_post_id/raw 拼作品页 URL。
+- `topics.py`：平台/赛道多选规范化。
 
-- 任务类型：import_video(素材转写)、persona_init、daily_pipeline、diff_analysis、generate_draft、platform_sync(_single)、prompt_selfcheck。
-- 通知 target 映射页面深链（如 `/videos?edit=id`、`/prompts?key=generation`）。
+## 4. 平台同步（platform_sync.py）——重点
+### 数据结构
+`DataSource` Protocol（base.py）；`PostData`（platform_post_id/title/cover/stats/raw…）、`ProfileData`、`CommentData(text, likes, user_nick)`。
 
-## 3. 定时任务（scheduler.py，Asia/Shanghai）
+### 数据源 TikHub（tikhub.py）
+- mode=mock：确定性种子假数据（离线验收）；mode=real：真实 REST（douyin app v3 / xhs app v2 / bilibili web）。
+- 预算：每次真实/模拟请求后 `_charge(db)` 计数（Kv `tikhub_budget_used:<date>`），超 `tikhub_daily_budget`（默认 2000，可页面调）抛 `BudgetExceeded` → 停止本轮并通知。
+- 列表自带 stats 则不额外请求；B站列表无赞藏评 → `_backfill_bili_stats` 每轮最多 150 条单条详情补全。
 
-| 时间 | 任务 |
-|---|---|
-| 07:00 | 每日流水线：热点→选题→匹配打分→生成脚本→(可选)邮件 |
-| 08:00 | 每日指标归档 + 热点/指标留存清理 |
-| 07:30 / 18:00 | 平台同步（前10条 + 评论选题采集） |
-| 02:30 | 每日备份 |
-| 04:00 | 每日清理（R-061：通知90天/任务30天/同步60天/平台统计400天） |
-| 周日 03:20 | 每周风格重建 → 产出提示词候选并通知 |
+### 幂等与去重
+- 作品：`(platform, platform_post_id)` 唯一约束 + `_ensure_post` 先查后建/更新（含 title/cover/publish_time/raw/tags/cover_path）。
+- 指标：`(post_id, stat_date)` 唯一 upsert（当天多次同步覆盖成最新，历史保留）。
+- 评论：`_upsert_comments` 按 post_id+text 去重、点赞保留更高值、**按点赞降序取 Top50**（R-067）。
+- 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；`GET /api/platform/jobs` 输出进度供前端轮询。
 
-## 4. 语音转文字设计（R-032/R-033）
+### 编排（run_sync）
+- 入口：手动（博主页 前20条/全量/每周/单账号）、定时（07:30/18:00）、单条（posts/videos/works 同步）。
+- `scope=daily`：每平台 top20（R-070）；`weekly`：对标每账号 top3；`initial`：`count<=0 → _real_posts_all` 翻页全量。
+- 并发：`ThreadPoolExecutor(max_workers=3)` 每账号独立 SQLAlchemy session（account 级隔离，单平台失败不拖垮其它）。
+- 结束：`auto_merge_creator` 合并同标题跨平台帖 → `works`；写 SyncJob stats/message + 账号 sync_status；通知中心收到完成。
+- 本地素材卡片同步 `sync_local_video_metrics`：遍历 `_bound_platform_posts`（local_video_id + work_id + platform_post_id 三路去重）拉各平台指标 + 评论 Top50，并写 `metrics_snapshots`（当天多平台聚合）；单平台失败不中断，全部失败才报错。
+- 云端合并卡同步 `sync_work_posts`（R-067 新增）：遍历 work 下全部平台帖（原只同步 cloudPosts[0]）。
 
-```mermaid
-flowchart TD
-    A[本地视频] --> B{后缀是纯音频?}
-    B --否--> C[ffmpeg 抽音轨 16k 单声道 wav]
-    B --是--> D[直接使用]
-    C --> E[上传 OSS asr/… 预签名URL]
-    D --> E
-    E --> F[FileTrans SubmitTask v4.0]
-    F --> G{轮询 GetTaskResult}
-    G --RUNNING/QUEUEING--> G
-    G --SUCCESS--> H[解析 Sentences 回填]
-    G --超时--> I[任务失败可重试]
-    H --> J[AI 校对 correct]
-    E -.识别完.-> K[删除 OSS 临时对象]
-```
+### 卡片同步按钮状态（前端 R-069）
+同步中状态按卡片唯一 `key`（`v<id>` 本地 / `w<id>` 合并 / `p<id>` 单条）判断，避免 work_id 与 post id 数字撞车误高亮。
 
-要点：官方限制识别文件必须公网 URL→OSS 中转；AppKey+AK 签名走官方 CommonRequest；
-上传文件按“标题-视频/音频”语义由上游命名；超时/轮询间隔可在 .env 配置；错误清晰入任务 failed + 通知。
+## 5. 定时与后台（scheduler.py / tasks.py）
+- 计划见 ARCHITECTURE §4。`_platform_sync_job` 通过 `start_task` 跑 `run_sync(scope=daily)`。
+- `tasks.py`：`background_tasks` 表 + daemon 线程；progress 0→10→100；完成写 Notification；`import_video` 完成后若语料已≥阈值（每 3 条新素材）自动产出提示词候选并通知（R-022/R-064）。
+- `watcher.py`：10s 轮询 inbox，移入 videos 目录并建 `Video` 行（文件名 uuid 前缀防重），**不自动转写**（R-033，手动按钮触发）。
 
-## 5. 平台同步设计（R-027~R-029，platform_sync.py）
+## 6. 前端结构（frontend/src/）
+- `router.js`：/home /videos /drafts /chat /persona /requirements /prompts /dashboard /creators /login（hash）。
+- `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并）、DraftsView（三 tab+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、DashboardView、CreatorsView（博主/账号/作品/同步+进度条）、RequirementsView、LoginView。
+- `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）。
+- `composables/media.js`：fetchVideos/fetchWorks 统一入口。
+- `lib/`：format.js（平台名/数字缩写）、options.js（平台/赛道/状态选项）、timeline.js。
+- dev：vite 5173 代理后端 8000（`vite.config`）；构建产物 dist 由后端托管。
 
-### 5.1 scope 语义
-- `daily`：每平台最新 N(默认10) 条 + 资料快照 + 评论（仅新增作品，否则刷新最新3条省额度）
-- `initial`（全量）：翻页拉取该账号全部作品（has_more=false），无数量上限
-- `weekly`：对标账号最新 3 条
-- 账号级同步：单账号走 daily；三平台并发（ThreadPoolExecutor ≤3，各自独立会话）
-- B站列表不含赞/藏/评：`_backfill_bili_stats` 每轮最多 150 条详情补全，重复同步会补完
-
-### 5.2 预算与幂等
-- 每日请求预算（默认 2000，页面可改）：`_charge(db)` 扣减，超限抛 BudgetExceeded 停止本轮并通知
-- 作品幂等：按 (platform, platform_post_id) upsert；评论按 (post_id, text) 去重
-- 同步后自动跨平台合并：规范化标题(去话题/标点/空白、小写)相同 → 同一 work
-- 隔离：单平台失败不拖垮其它平台；失败账号可单独重试
-
-### 5.3 素材/作品语义
-- 云端作品=已发布：有真实平台链接/发布时间即 published
-- 本地素材：上传/转本地；可绑定多平台（local_video_id / work_id / platform_post_id 三路）
-- 绑定链接：编辑页三平台链接 → `POST /api/platform/videos/{id}/bind-links`（解析→复用/创建 PlatformPost→绑定）
-- `同步数据`：本地=遍历绑定平台逐个拉统计并聚合当天 MetricsSnapshot；云端=单条拉统计+评论
-- 文件命名：`标题-视频/封面`，安全清洗 + 重名自增
-
-## 6. 生成与“像作者”设计（generation.py / core）
-
-### 6.1 生成上下文（按序注入 prompt）
-人设标签 → 红线 → 金句锚点 → 语言习惯统计 → 风格样本节选 → 对标参考 → 近期最佳草稿共性 → AI 腔禁用词
-
-### 6.2 风格样本检索与加权
-- TF-IDF(二元组) 检索，样本权重重合三点：
-  1. 互动加权：`weight = (1+log1p(plays+likes*5+favorites*3+comments*10)) * e^(-age/500)`
-  2. 去重：同文案只计一次
-  3. 黄金样本：你打 4-5 分/采用的稿 weight=6 直入
-- 高互动自动加权已在生效（无需额外开发）
-- R-061：TF-IDF 检索索引进程内缓存（素材/指标/反馈/草稿版本变化才重建，结果一致）；平台作品统一序列化收敛到 `works_service.post_item`（works/platform 共用）；未启用的 cookie 指标抓取不再每日空跑
-
-### 6.3 风格画像（style_profile.py，纯逻辑、离线可测）
-- R-061：画像文本进程内缓存（素材数量/字数变化才重算，结果一致）
-输入全部非广告文案 → 输出：样本数/平均句长/中位句长/问句与感叹占比/高频二元与三元组/标志性语气词。
-每周重建 & 表达清单：人设页“表达风格”面板可查可编辑；AI 腔禁用词注入生成；
-`core/style_profile.default_avoid_words()` 提供默认清单。
-
-```mermaid
-flowchart TD
-    T[选题/热点] --> A[召回相关风格样本(TF-IDF×权重)]
-    A --> B[拼上下文: 人设+画像+样本+红线+禁词]
-    B --> C{单模型 or 双模型?}
-    C --单--> D[DeepSeek/Kimi 生成 JSON]
-    C --双5轮--> E[DeepSeek/Kimi 讨论定稿]
-    D --> F[脚本入库]
-    E --> F
-    F --> G[工作台 你 打分/改稿]
-    G --> H[黄金样本/反馈回流]
-    H --> A
-```
-
-### 6.4 提示词版本化（prompt_service.py）
-- 每 key 一套 AiPrompt：version/enabled；`get_prompt(key)` 取当前启用版
-- `optimize()`：当前版 + 新素材 + 打分反馈 → LLM 产出候选(不启用)
-- 节流：`auto_optimize_generation` 每累计 3 条新素材才产出一次（Kv 计数）
-- 每周重建：全量画像 + 表现最好 3 条 → 候选 + 通知
-
-## 7. 双模型讨论（R-023，services/debate.py）
-生成(或改写)可选“讨论模式”：DeepSeek/Kimi 交替发言 N 轮(默认5，页面可配)，
-讨论全程写入 `draft_discussions`（聊天式 UI 留痕），最后形成定稿脚本；模型可在配置切换 A/B。
-
-## 8. 复盘设计（R-006/R-007）
-- 指标快照：(video_id, snapshot_date) 幂等 upsert；多平台聚合当天指标
-- 复盘报告：A 报表(按视频/赛道/平台) + B 归因 + C 建议 + D 赛道方向（LLM 优先、启发式兜底），结果落 `review_reports`
-- 赛道雷达：按互动率/发布天数归一化排序
-
-## 9. AI 对话权限（chat_service.py）
-- 会话模型 + SSE 流式；工具按“只读直答 / 写操作需同意”两类：
-  - 只读：指标汇总、今日选题、复盘报告、赛道雷达、搜草稿
-  - 写操作（生成草稿等）：先明确询问作者同意再执行
-
-## 9.5 平台数据源适配器（R-062）
-- `base.py`：`DataSource` Protocol（fetch_profile / fetch_user_posts / fetch_post_stats / fetch_comments / get_balance）+ `PostData/ProfileData` 契约
-- `make_source(platform)`：override（`register_platform_source`，支持 default 整体替换或 douyin/bilibili/xiaohongshu 单平台替换）优先，缺省回落 TikHub
-- 业务层（同步/评论/余额）一律走 `make_source`，不再直依赖 TikHub
-
-## 10. 工程护栏与测试
-- 五维：简单/易读/可靠/扩展/性能；适配器模式；分层依赖方向
-- 质量门禁 `scripts/verify.sh`：compileall → test_core(离线纯逻辑) → ruff → mypy → pytest → 前端 lint/build
-- 测试策略：纯逻辑放 `tests/test_core.py`（stdlib 可跑）；服务层 mock 外部依赖放 pytest；
-  真实链路用“真实素材+阿里云/TikHub 冒烟”在交付前人工跑
-- 交付前 AI 自测 + 改完保持前后端运行（见 AGENTS.md）
-
-## 10.5 大文件拆分（R-061-C 一期）
-- tikhub.py → 拆出 `link_utils.py`（链接解析纯逻辑+短链重定向，旧导入 re-export 兼容）
-- platform_sync.py → 拆出 `platform_assets.py`（图片识别/HEIC 转换/封面头像下载命名）
-- C 二期：前端大文件组件化（VideosView/CreatorsView）、platform_sync 编排进一步拆分
-
-## 10.6 R-061-D 收口结论
-- D-1 ✅：绑定关系单事实源（local_video_id）+ 唯一部分索引 + 反向补绑（已备份迁移）
-- D-2/D-3（tags 表、raw 归档）评估后暂缓：单用户量级过度设计 / 与 D-027 全存冲突
-
-## 11. 扩展点（未来）
-- 分词升级 BM25/向量检索；批量历史文件按标题重命名脚本；多用户化（数据隔离层）；
-- 平台/LLM/ASR/推送全部可插拔适配器；Alembic 迁移落地。
+## 7. 常见改动指南
+- 加接口：api/xxx.py + schemas + services；记得跑 verify；涉及注释/文档同步。
+- 加表/列：models/*.py + db.py 幂等迁移函数（init_db 注册）；改完生成 DATABASE.md。
+- 改平台字段：先看 platform_sync 与 tikhub `_real_*` 解析函数。
+- 改生成上下文：generation.py + prompt_service + ai_prompts 页面（版本化，不要写死进系统提示词之外的代码）。
