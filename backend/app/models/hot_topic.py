@@ -34,6 +34,7 @@ class TopicCandidate(Base):
     title: Mapped[str] = mapped_column(String(255))  # 改写后的选题
     platform: Mapped[str] = mapped_column(String(20), default="")
     score: Mapped[int] = mapped_column(Integer, default=0)
+    slot: Mapped[str] = mapped_column(String(10), default="")  # R-073: comment|hot|ai
     reason: Mapped[str] = mapped_column(Text, default="")
     draft_id: Mapped[int | None] = mapped_column(ForeignKey("drafts.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

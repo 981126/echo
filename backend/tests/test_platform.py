@@ -344,3 +344,45 @@ def test_persona_profile_and_annotate(db):
     # 无人设（未建当前博主）时全部中性，不误标低相关
     fresh = annotate_items(db, [{"title": "随便一条内容"}], {"keywords": [], "avoid": [], "active": False})
     assert fresh[0]["matched"] is True and fresh[0]["score"] == 0
+
+
+def test_daily_candidates_compose_three_slots(db, monkeypatch):
+    """R-073：每日候选 = 评论区 + 热榜 + AI 建议 三槽，均贴合人设。"""
+    from unittest.mock import MagicMock
+
+    from app.core.pipeline import today_key
+    from app.models.hot_topic import TopicIdea
+    from app.models.persona import PersonaTag
+    from app.models.video import Video
+    from app.services import pipeline as pl
+
+    owner, _ = _seed_owner(db)
+    db.add(PersonaTag(creator_id=owner.id, label="求职干货", category="topic", status="confirmed", source="manual"))
+    db.add(Video(filename="p-x.mp4", title="应届生怎么选 offer", creator_id=owner.id, status="published", main_topics='["求职"]', is_ad=False))
+    db.add(TopicIdea(
+        source="comment", platform="douyin", title="简历空窗期到底怎么解释才好",
+        post_title="应届生 offer 怎么选", creator_id=owner.id, snapshot_date=today_key(), likes=88,
+    ))
+    db.commit()
+
+    hot = [
+        {"platform": "douyin", "title": "大厂秋招缩编，应届生先就业还是再等等", "heat": "9000"},
+        {"platform": "bilibili", "title": "某游戏新版本上线", "heat": "20000"},
+    ]
+    monkeypatch.setattr(
+        pl, "_ai_candidate",
+        lambda db, hots, profile: {
+            "title": "面试被问职业规划，怎么答才不扣分",
+            "platform": "ai", "score": 80, "reason": "ai 建议", "slot": pl.SLOT_AI,
+        },
+    )
+    cands = pl._compose_daily_candidates(db, hot, MagicMock(pipeline_topics_count=3))
+    assert len(cands) == 3
+    slots = [c["slot"] for c in cands]
+    assert {"comment", "hot", "ai"}.issubset(slots)
+    by = {c["slot"]: c for c in cands}
+    # 评论槽：人设命中（含“简历”）
+    assert "简历" in by["comment"]["title"]
+    # 热榜槽：命中“应届生/校招”的求职热榜，而不是无关游戏热榜
+    assert "应届生" in by["hot"]["title"] or "秋招" in by["hot"]["title"]
+    assert by["ai"]["title"].startswith("面试被问职业规划")
