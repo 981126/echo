@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import chat, creators, drafts, works, metrics, notifications, persona, pipeline, platform, prompts, requirements, review, settings, tasks, topics, uploads, videos
+from .api import chat, creators, drafts, events, works, metrics, notifications, persona, pipeline, platform, prompts, requirements, review, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .db import init_db
 from .scheduler import setup_scheduler
@@ -45,6 +45,7 @@ API_DEPENDENCIES = [Depends(require_token)]
 app.include_router(videos.router, prefix="/api/videos", tags=["videos"], dependencies=API_DEPENDENCIES)
 app.include_router(persona.router, prefix="/api/persona", tags=["persona"], dependencies=API_DEPENDENCIES)
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"], dependencies=API_DEPENDENCIES)
+app.include_router(events.router, prefix="/api", tags=["events"], dependencies=API_DEPENDENCIES)
 app.include_router(drafts.router, prefix="/api/drafts", tags=["drafts"], dependencies=API_DEPENDENCIES)
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"], dependencies=API_DEPENDENCIES)
 app.include_router(

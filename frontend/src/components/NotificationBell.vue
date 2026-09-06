@@ -51,6 +51,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
+import { busOn } from '../lib/eventbus'
+import { connectEvents, disconnectEvents } from '../lib/sse'
 
 const notifs = ref([])
 const open = ref(false)
@@ -58,6 +60,7 @@ const message = useMessage()
 let timer = null
 let prevMaxId = 0
 let inited = false
+let offNotif = null
 
 const unreadCount = computed(() => notifs.value.filter(n => !n.read).length)
 
@@ -114,12 +117,16 @@ function onDocClick(e) {
 
 onMounted(() => {
   load(true)
-  timer = setInterval(() => load(true), 5000)
+  connectEvents()  // R-087：SSE 长连接，收到新通知即时刷新
+  offNotif = busOn('notification.new', () => load(true))
+  timer = setInterval(() => load(true), 15000)  // 兜底轮询（SSE 断线时仍能补上）
   document.addEventListener('click', onDocClick)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  if (offNotif) offNotif()
+  disconnectEvents()
   document.removeEventListener('click', onDocClick)
 })
 </script>

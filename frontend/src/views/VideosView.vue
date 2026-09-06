@@ -198,6 +198,7 @@ import CloudTextArea from '../components/CloudTextArea.vue'
 import { adOptions, platformOptions, statusOptions, videoOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
 import { platformName, parseTs, tsLocal, arrKey } from '../lib/format'
+import { busOn } from '../lib/eventbus'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -869,6 +870,7 @@ const cardNote = reactive({})
 const cardRequestTimers = {}
 const cardTaskPollers = {}
 const cardTaskIds = {}
+const cardTaskNotify = {}
 
 function clearCardProgress(key) {
   clearInterval(cardRequestTimers[key]); delete cardRequestTimers[key]
@@ -896,36 +898,52 @@ function startRequestProgress(key) {
     if (cur < 60) cardProgress[key] = cur + Math.max(0.5, (60 - cur) * 0.04)
   }, 200)
 }
+async function finishCardTask(key, t) {
+  if (!cardTaskIds[key]) return  // 已结束，幂等
+  const notify = !!cardTaskNotify[key]
+  clearInterval(cardTaskPollers[key]); delete cardTaskPollers[key]
+  delete cardTaskIds[key]; delete cardTaskNotify[key]
+  if (t.status === 'done') {
+    cardProgress[key] = 100
+    cardNote[key] = '同步完成'
+    setTimeout(() => { clearCardProgress(key) }, 800)
+    if (notify) message.success('同步完成')
+  } else {
+    clearCardProgress(key)
+    if (notify) message.warning('同步失败：' + (t.error || '请查看通知'))
+  }
+  await loadQuiet()
+  await loadWorksQuiet()
+}
+function applyTaskState(key, t) {
+  if (t.status === 'running' || t.status === 'pending') {
+    cardProgress[key] = Math.max(2, Math.min(99, Number(t.progress) || 2))
+    cardNote[key] = t.note || '同步中…'
+    return false
+  }
+  return true
+}
+function handleTaskEvent(t) {
+  const taskId = Number(t && t.id)
+  if (!taskId) return
+  for (const key of Object.keys(cardTaskIds)) {
+    if (cardTaskIds[key] !== taskId) continue
+    if (applyTaskState(key, t)) finishCardTask(key, t)  // R-087：SSE 到达即结束，无需等轮询
+  }
+}
 function pollCardTask(key, taskId, notify = false) {
   clearInterval(cardTaskPollers[key])
-  let stopped = false
+  cardTaskNotify[key] = notify
   const tick = async () => {
-    if (stopped) return
+    if (!cardTaskIds[key]) return
     let t = null
     try {
       t = await api('/api/tasks/' + taskId)
     } catch (e) { /* 轮询抖动继续 */ }
     if (!t) return
-    if (t.status === 'running' || t.status === 'pending') {
-      cardProgress[key] = Math.max(2, Math.min(99, Number(t.progress) || 2))
-      cardNote[key] = t.note || '同步中…'
-      return
-    }
-    stopped = true
-    clearInterval(cardTaskPollers[key]); delete cardTaskPollers[key]; delete cardTaskIds[key]
-    if (t.status === 'done') {
-      cardProgress[key] = 100
-      cardNote[key] = '同步完成'
-      setTimeout(() => { clearCardProgress(key) }, 800)
-      if (notify) message.success('同步完成')
-    } else {
-      clearCardProgress(key)
-      if (notify) message.warning('同步失败：' + (t.error || '请查看通知'))
-    }
-    await loadQuiet()
-    await loadWorksQuiet()
+    if (applyTaskState(key, t)) finishCardTask(key, t)
   }
-  cardTaskPollers[key] = setInterval(tick, 1500)
+  cardTaskPollers[key] = setInterval(tick, 5000)  // SSE 事件为主，轮询作兜底（断线仍能恢复）
   tick()
 }
 function showServerTask(key, taskId, notify = false) {
@@ -1236,12 +1254,14 @@ async function onCreatorChange() {
 watch(() => [route.query.edit, route.query.post], handleDeepLink)
 
 let activeTasksTimer = null
+let offTaskBus = null
 onMounted(async () => {
   loadFilters()  // R-084：恢复上次筛选
   applyFilters()
   await loadCreatorOptions()
   await initLoad()
   handleDeepLink()
+  offTaskBus = busOn('task.update', handleTaskEvent)  // R-087：SSE 任务进度/完成事件
   await refreshActiveCardTasks()
   activeTasksTimer = setInterval(refreshActiveCardTasks, 6000)  // R-081：切页回来/跨页触发的同步进度自动恢复
 })
@@ -1250,6 +1270,7 @@ onUnmounted(() => {
     clearInterval(activeTasksTimer)
     activeTasksTimer = null
   }
+  if (offTaskBus) offTaskBus()
 })
 </script>
 

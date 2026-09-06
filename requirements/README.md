@@ -92,3 +92,4 @@
 | R-084 | 2026-09-06 | 素材库筛选条件切页/刷新后保留（localStorage 记忆） | ✅ 已完成 | M66（已完成） | PRD §3.2、VideosView |
 | R-085 | 2026-09-06 | 博主页：全量同步前置；daily 改前10条并自动下载视频+转写；【云端作品】改【作品】 | ✅ 已完成 | M67（已完成） | PRD §3.3、CreatorHeaderRow/CreatorsView、R-070/R-077 |
 | R-086 | 2026-09-06 | 博主页 daily 同步条数前10→前15（按钮+自动同步，仍带视频下载转写） | ✅ 已完成 | M68（已完成） | R-085、run_sync、CreatorHeaderRow |
+| R-087 | 2026-09-06 | SSE 事件推送：GET /api/events + 通知/任务进度/完成即时推送（NotificationBell、素材卡进度接入） | ✅ 已完成 | M69（已完成） | 架构·events.py、tasks、NotificationBell/VideosView |

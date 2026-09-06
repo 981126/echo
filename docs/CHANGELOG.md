@@ -515,3 +515,8 @@
 
 ## [M68 / R-086] 2026-09-06 — daily 同步前15条
 - run_sync daily 默认 top_n 10→15；博主页按钮「同步前10条」→「同步前15条」；每日自动同15条并带视频下载+转写。
+
+## [M69 / R-087] 2026-09-06 — SSE 事件推送一期
+- 后端新增进程内事件总线 + GET /api/events（SSE，15s 心跳）；task.update（进度/完成/失败）与 notification.new 实时广播。
+- 前端 lib/eventbus + lib/sse（fetch 流带鉴权、5s 自动重连）；通知铃与素材卡进度改事件驱动，原轮询降为兜底。
+- 采用 SSE（单向推送），未引入 WebSocket。verify.sh 全绿。

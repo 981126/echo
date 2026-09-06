@@ -9,6 +9,7 @@ import threading
 from .db import SessionLocal
 from .models.notification import Notification
 from .models.task import BackgroundTask
+from .services.events import publish
 
 KIND_LABELS = {
     "import_video": "素材转写",
@@ -56,22 +57,26 @@ def _notify(db, *, kind: str, payload: dict, status: str, result=None, error: st
     else:
         title = f"{label}失败"
         message = f"{title}：{(error or '未知错误')[:200]}"
-    db.add(
-        Notification(
-            kind=kind,
-            status=status,
-            title=title,
-            message=message,
-            target=_target(kind, payload, result),
-        )
+    nt = Notification(
+        kind=kind,
+        status=status,
+        title=title,
+        message=message,
+        target=_target(kind, payload, result),
     )
+    db.add(nt)
     db.commit()
+    db.refresh(nt)
+    publish("notification.new", {"id": nt.id, "kind": nt.kind, "status": nt.status, "title": nt.title, "message": nt.message, "target": nt.target or ""})
 
 
 def push_notification(db, *, kind: str, status: str, title: str, message: str, target: str = "") -> None:
-    """统一通知写入（R-061 B 二期：避免各处手拼 Notification）。"""
-    db.add(Notification(kind=kind, status=status, title=title, message=message, target=target))
+    """统一通知写入（R-061 B 二期：避免各处手拼 Notification）；写后广播（R-087）。"""
+    nt = Notification(kind=kind, status=status, title=title, message=message, target=target)
+    db.add(nt)
     db.commit()
+    db.refresh(nt)
+    publish("notification.new", {"id": nt.id, "kind": nt.kind, "status": nt.status, "title": nt.title, "message": nt.message, "target": nt.target or ""})
 
 
 def start_task(kind: str, payload: dict, fn) -> int:
@@ -101,6 +106,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
         if note:
             task.note = note[:255]
         db.commit()
+        publish("task.update", {"id": task_id, "status": task.status, "progress": task.progress, "note": task.note or ""})
 
     try:
         task = db.get(BackgroundTask, task_id)
@@ -120,6 +126,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             task.progress = 100
             task.note = "完成"
             db.commit()
+            publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成"})
         _notify(db, kind=kind, payload=payload, status="done", result=result)
         if kind == "import_video":
             _maybe_optimize_prompt(db, payload)
@@ -130,6 +137,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             task.status = "failed"
             task.error = str(exc)[:2000]
             db.commit()
+            publish("task.update", {"id": task_id, "status": "failed", "progress": task.progress, "note": task.note or "", "error": task.error[:500]})
         _notify(db, kind=kind, payload=payload, status="failed", error=str(exc))
     finally:
         db.close()
