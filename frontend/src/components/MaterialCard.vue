@@ -2,7 +2,7 @@
   <div class="card-tile" :class="{ picking: mergeMode }" @click="click(item)">
     <div v-if="progress > 0" class="sync-cover" :style="{ height: progress + '%' }" />
     <div v-if="progress > 0" class="sync-status">{{ note || '同步中…' }} · {{ Math.round(progress) }}%</div>
-    <div class="tile-cover" :class="{ has: item.cover_url }" @click.stop="click(item)">
+    <div class="tile-cover" :class="{ has: item.cover_url }" @click.stop="onCoverClick">
       <n-checkbox v-if="mergeMode" class="pick-box" :checked="selected" @click.stop @update:checked="toggle(item)" />
       <img v-if="item.cover_url" :src="item.cover_url" alt="封面" />
       <span v-else>ECHO</span>
@@ -60,7 +60,7 @@
 import { fmt } from '../lib/format'
 import PlatformStats from './PlatformStats.vue'
 
-defineProps({
+const props = defineProps({
   item: { type: Object, required: true },
   mergeMode: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
@@ -69,6 +69,7 @@ defineProps({
   syncingId: { type: String, default: "" },
   syncingPostId: { type: String, default: "" },
   click: { type: Function, required: true },
+  play: { type: Function, default: null },
   toggle: { type: Function, required: true },
   syncLocal: { type: Function, required: true },
   syncPost: { type: Function, required: true },
@@ -77,6 +78,13 @@ defineProps({
   delCloud: { type: Function, required: true },
   split: { type: Function, required: true }
 })
+
+
+function onCoverClick() {
+  if (props.mergeMode) props.toggle(props.item)  // 多选模式点封面=勾选
+  else if (props.play) props.play(props.item)    // 正常模式点封面=播放（无可播放文件时由父级回退原逻辑）
+  else props.click(props.item)
+}
 </script>
 
 <style scoped>

@@ -76,6 +76,8 @@ _settings = get_settings()
 _settings.covers_dir.mkdir(parents=True, exist_ok=True)
 _settings.uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/covers", StaticFiles(directory=str(_settings.covers_dir)), name="covers")
+_settings.videos_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/media/videos", StaticFiles(directory=str(_settings.videos_dir)), name="media_videos")
 app.mount("/uploads", StaticFiles(directory=str(_settings.uploads_dir)), name="uploads")
 
 # 托管前端构建产物（存在时挂载；/api 路由已先行注册，不受影响）

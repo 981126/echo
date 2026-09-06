@@ -13,7 +13,8 @@ export default defineConfig({
       '/api': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/covers': 'http://localhost:8000',
-      '/uploads': 'http://localhost:8000'
+      '/uploads': 'http://localhost:8000',
+      '/media': 'http://localhost:8000'
     }
   }
 })

@@ -46,6 +46,7 @@
         :syncing-post-id="syncingPost"
         :click="onCardClick"
         :toggle="toggleSel"
+        :play="onPlay"
         :sync-local="syncData"
         :sync-post="syncCloudPost"
         :confirm="confirmTags"
@@ -54,6 +55,11 @@
         :split="splitWork"
       />
     </div>
+
+    <n-modal v-model:show="showPlayer" preset="card" :title="playerTitle" style="width: min(760px, 96vw)" :mask-closable="true">
+      <video v-if="playerSrc" :src="playerSrc" controls autoplay playsinline style="width: 100%; max-height: 70vh; border-radius: 8px; background: #000" />
+      <div v-else class="panel empty">暂无视频</div>
+    </n-modal>
 
     <n-modal
       v-model:show="showEdit"
@@ -240,6 +246,9 @@ const batchBusy = ref(false)
 const batchAction = ref('')
 const showEdit = ref(false)
 const tagsText = ref('')
+const showPlayer = ref(false)
+const playerSrc = ref('')
+const playerTitle = ref('')
 
 async function load() {
   loading.value = true
@@ -778,6 +787,40 @@ async function saveCloudMeta() {
 function onCloudFile(f) {
   cloudFile.value = f || null
 }
+
+async function onPlay(it) {
+  // 点封面：有本地视频则播放；否则回退原“点卡片”行为（云端弹详情/转本地、本地进编辑）
+  let vid = it.kind === 'local' ? it.id : (it.local_video_id || 0)
+  if (it.kind === 'cloud' && (!it.local_video_id || !it.hasVideo)) {
+    openItem(it)
+    return
+  }
+  if (!vid) {
+    openItem(it)
+    return
+  }
+  await openPlayer(vid, it.title)
+}
+async function openPlayer(videoId, title) {
+  let v = videos.value.find(x => x.id === Number(videoId))
+  if (!v) {
+    try {
+      v = await api('/api/videos/' + videoId)
+    } catch (e) {
+      message.warning('找不到该视频文件')
+      return
+    }
+  }
+  const fn = v && v.filename
+  if (!fn || String(fn).startsWith('__cloud__')) {
+    message.warning('该素材还没有本地视频文件')
+    return
+  }
+  playerSrc.value = '/media/videos/' + encodeURIComponent(fn)
+  playerTitle.value = title || v.title || '视频播放'
+  showPlayer.value = true
+}
+watch(showPlayer, (val) => { if (!val) playerSrc.value = '' })
 
 async function goLocal(id) {
   let v = videos.value.find(x => x.id === id)
