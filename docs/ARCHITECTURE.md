@@ -74,7 +74,7 @@ echo/
 |---|---|---|
 | 每日 `daily_push_time`（默认 07:00） | 每日流水线 | 热点→选题匹配→生成≥3→入库→（可选邮件） |
 | 每日 `daily_push_time` +1h（默认 08:00） | 指标与留存 | cookie 通道未启用 → 仅 `apply_retention`（热点 30 天清理） |
-| 每日 `platform_sync_times`（默认 07:30 / 18:00） | 平台同步 | 后台任务 `run_sync(scope=daily, with_media=True)`：当前主博主三平台 top10 + 前10条视频下载/转写（R-085）+ 评论采集 |
+| 每日 `platform_sync_times`（默认 07:30 / 18:00） | 平台同步 | 后台任务 `run_sync(scope=daily, with_media=True)`：当前主博主三平台 top15 + 前15条视频下载/转写（R-085）+ 评论采集 |
 | 每日 02:30 | 备份 | `scripts/backup.sh`（SQLite 热备 + requirements/docs 快照，留 10 份） |
 | 每日 04:00 | 清理 | 通知>90 天、后台任务>30 天、sync_jobs>60 天、platform_post_stats>400 天 |
 | 每周日 03:20 | 风格重建 | 基于全量素材画像+加权样本产出生成提示词候选（不启用）+ 通知 |
@@ -106,7 +106,7 @@ background_tasks / sync_jobs / notifications / app_kv
 
 ## 7. 关键数据流
 1. **导入学习**：上传/inbox → videos 行 → 编辑页手动「语音转文字」（抽音轨→OSS→FileTrans→校对稿回填）→ 确认标签 → 进入人设/风格语料
-2. **平台同步**：run_sync（daily top10 带视频下载转写 / weekly 3 / initial 全量）→ 账号并发（每平台独立线程/会话）→ 作品 upsert + 指标按天 upsert + 评论 Top50 → auto_merge 合并 work → daily 再对前10条媒体补齐（下载+转写，R-085）→ 进度实时写 sync_jobs → 完成通知
+2. **平台同步**：run_sync（daily top15 带视频下载转写 / weekly 3 / initial 全量）→ 账号并发（每平台独立线程/会话）→ 作品 upsert + 指标按天 upsert + 评论 Top50 → auto_merge 合并 work → daily 再对前15条媒体补齐（下载+转写，R-085）→ 进度实时写 sync_jobs → 完成通知
 3. **选题/生成**：热点/灵感 → 人设+风格检索加权（TF-IDF/RAG）→ 生成（可双模型讨论）→ 草稿 → 作者改写 → 反馈回流
 4. **复盘**：本地指标 + 平台数据 → 看板增长曲线 → ABCD 复盘报告
 

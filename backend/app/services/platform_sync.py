@@ -437,7 +437,7 @@ def run_sync(
     with_media: bool = False,
 ) -> dict:
     """手动/定时同步入口：
-    - scope=daily：当前主博主全部启用账号 top10（R-085 由前20条改回前10条）+ 评论选题采集；
+    - scope=daily：当前主博主全部启用账号 top15（R-085 定 10，R-086 调为 15）+ 评论选题采集；
       with_media=True 时同步后对前 N 条做视频下载+自动转写（R-085）
     - scope=initial：指定主博主（或当前）全部账号首次全量
     - scope=weekly：对标账号周同步
@@ -468,7 +468,7 @@ def run_sync(
         job = _log_job(db, "initial" if scope == "initial" else "daily", scope, creator_id=owner.id)
 
     try:
-        per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 10)))
+        per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 15)))
         assert owner is not None
         with_comments = True  # 前20条/每周/全量都会按新增作品把评论入库（本地查询）
 
@@ -525,7 +525,7 @@ def run_sync(
             auto_merge_creator(db, owner.id)
         except Exception:  # noqa: BLE001 合并失败不影响同步主体
             db.rollback()
-        # R-085：daily（手动前10/每日自动）同步后，对前 N 条作品做视频下载+自动转写
+        # R-085/R-086：daily（手动前15/每日自动）同步后，对前 N 条作品做视频下载+自动转写
         media = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0}
         if with_media and scope == "daily":
             from .media_ensure import platform_media_task  # 延迟导入避免循环
