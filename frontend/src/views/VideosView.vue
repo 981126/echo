@@ -1223,6 +1223,7 @@ function handleDeepLink() {
   if (editId) {
     const v = videos.value.find(x => x.id === Number(editId))
     if (v) openEdit(v)
+    else goLocal(Number(editId))  // R-090：不在当前博主筛选列表时按 id 拉详情并打开编辑（通知深链跨博主可用）
     router.replace({ path: '/videos' })  // 清掉 query，保证再次点同一素材也能触发
   } else if (postId) {
     const pid = Number(postId)
