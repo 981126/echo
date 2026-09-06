@@ -113,6 +113,7 @@
 
 ## 5. 定时与后台（scheduler.py / tasks.py）
 - 计划见 ARCHITECTURE §4。`_platform_sync_job` 通过 `start_task` 跑 `run_sync(scope=daily)`。
+- R-105：`_benchmark_rerun_job` 每天 06:00 自动「重新对标」（每日生成 07:00 前 1 小时）：无主博主/无对标或已有 benchmark_rerun 任务在跑则跳过；否则 start_task 落后台执行（不阻塞调度线程）。
 - `tasks.py`：`background_tasks` 表 + daemon 线程；progress 0→10→100；完成写 Notification；`import_video` 完成后若语料已≥阈值（每 3 条新素材）自动产出提示词候选并通知（R-022/R-064）。
 - `watcher.py`：10s 轮询 inbox，移入 videos 目录并建 `Video` 行（文件名 uuid 前缀防重），**不自动转写**（R-033，手动按钮触发）。
 

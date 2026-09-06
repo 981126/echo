@@ -35,6 +35,21 @@ def _daily_metrics_job() -> None:
         db.close()
 
 
+def _benchmark_rerun_job() -> None:
+    """R-105：每天 06:00 自动「重新对标」（每日生成脚本 07:00 前 1 小时）。
+
+    无主博主/无对标博主/已有 benchmark_rerun 任务在跑时静默跳过（不产生失败通知）；
+    启动后任务在后台线程执行，不阻塞调度线程。
+    """
+    db = SessionLocal()
+    try:
+        from .services.benchmark import maybe_start_benchmark_rerun
+
+        maybe_start_benchmark_rerun(db)
+    finally:
+        db.close()
+
+
 def _platform_sync_job() -> None:
     """每日两轮平台数据同步（07:30/18:00，配置 ECHO_PLATFORM_SYNC_TIMES）。"""
     from .tasks import start_task
@@ -141,6 +156,14 @@ def setup_scheduler() -> None:
         _daily_metrics_job,
         CronTrigger(hour=hour + 1, minute=0, timezone=settings.tz),
         id="daily_metrics",
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # R-105：每日 06:00 自动「重新对标」（每日生成 07:00 前 1 小时，固定时间）
+    _scheduler.add_job(
+        _benchmark_rerun_job,
+        CronTrigger(hour=6, minute=0, timezone=settings.tz),
+        id="benchmark_rerun_daily",
         misfire_grace_time=3600,
         coalesce=True,
     )

@@ -422,3 +422,43 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None) -> dict:
         "ok_count": ok_count,
         "top3_with_text_total": text_count,
     }
+
+
+def rerun_worker(db: Session, payload: dict, update=None) -> dict:
+    """后台任务体（R-102/R-105）：按 owner_id 重跑当前主博主所有对标（api 与 scheduler 共用）。"""
+    from ..models.platform import Creator
+
+    owner = db.get(Creator, int((payload or {}).get("owner_id") or 0))
+    if owner is None:
+        raise ValueError("主博主不存在，请先创建并切换主博主")
+    return rerun_benchmarks(db, owner, update=update)
+
+
+def maybe_start_benchmark_rerun(db: Session) -> str:
+    """R-105：每日定时自动「重新对标」的守卫 + 启动。
+
+    返回结果：no_owner / no_benchmark / already_running / started:<task_id>。
+    无对标或已有重新对标任务在跑时静默跳过（不产生失败通知）。
+    """
+    from ..models.task import BackgroundTask
+    from .creator_service import get_current_creator
+
+    owner = get_current_creator(db)
+    if owner is None:
+        return "no_owner"
+    if not benchmarks_of_owner(db, owner):
+        return "no_benchmark"
+    running = (
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.kind == "benchmark_rerun",
+            BackgroundTask.status.in_(["pending", "running"]),
+        )
+        .first()
+    )
+    if running is not None:
+        return "already_running"
+    from ..tasks import start_task
+
+    task_id = start_task("benchmark_rerun", {"owner_id": owner.id}, rerun_worker)
+    return f"started:{task_id}"

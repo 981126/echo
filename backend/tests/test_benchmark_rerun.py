@@ -84,3 +84,53 @@ def test_rerun_single_benchmark_failure_does_not_block_others(db, monkeypatch):
     by_name = {r["name"]: r for r in result["summary"]}
     assert by_name["会失败"]["error"]
     assert by_name["会成功"]["error"] == ""
+
+
+def _mk_task(db, status="running"):
+    from app.models.task import BackgroundTask
+
+    t = BackgroundTask(kind="benchmark_rerun", status=status)
+    db.add(t)
+    db.commit()
+    return t
+
+
+def test_maybe_start_no_owner_skips(db):
+    from app.services.benchmark import maybe_start_benchmark_rerun
+
+    assert maybe_start_benchmark_rerun(db) == "no_owner"
+
+
+def test_maybe_start_no_benchmark_skips(db):
+    from app.services.benchmark import maybe_start_benchmark_rerun
+
+    _owner(db)
+    assert maybe_start_benchmark_rerun(db) == "no_benchmark"
+
+
+def test_maybe_start_skips_when_running(db):
+    from app.services.benchmark import maybe_start_benchmark_rerun
+
+    owner = _owner(db)
+    _benchmark(db, owner, "对标A")
+    _mk_task(db, "running")
+    assert maybe_start_benchmark_rerun(db) == "already_running"
+
+
+def test_maybe_start_ok(db, monkeypatch):
+    from app.services.benchmark import maybe_start_benchmark_rerun
+
+    owner = _owner(db)
+    _benchmark(db, owner, "对标A")
+    captured = {}
+
+    def fake_start(kind, payload, fn):
+        captured["kind"] = kind
+        captured["payload"] = payload
+        captured["fn"] = fn
+        return 88
+
+    monkeypatch.setattr("app.tasks.start_task", fake_start)
+    assert maybe_start_benchmark_rerun(db) == "started:88"
+    assert captured["kind"] == "benchmark_rerun"
+    assert captured["payload"] == {"owner_id": owner.id}
