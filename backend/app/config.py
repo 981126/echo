@@ -9,6 +9,27 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_MODE_CHOICES = {
+    "tikhub_mode": {"mock", "real"},
+    "hot_source_mode": {"mock", "real"},
+    "asr_mode": {"mock", "aliyun"},
+}
+_MODE_DEFAULTS = {"tikhub_mode": "mock", "hot_source_mode": "mock", "asr_mode": "mock"}
+
+
+def normalize_mode(value, allowed: set[str], default: str) -> str:
+    """解析模式值：去掉行尾注释黏连/空白；非法值直接抛错（不静默回退 mock，防假数据覆盖真实数据）。
+
+    例：.env 里 `ECHO_TIKHUB_MODE=real# mock | real`（注释黏连）→ real。
+    """
+    raw = str(value or default).split("#", 1)[0].strip().lower()
+    if raw not in allowed:
+        raise ValueError(
+            f"不支持的配置值 {raw!r}，允许：{'/'.join(sorted(allowed))}（检查 .env 对应行是否注释黏连，如 TIKHUB_MODE=real# ...）"
+        )
+    return raw
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ECHO_", env_file=(".env", "../.env"), extra="ignore")
 
@@ -88,6 +109,8 @@ class Settings(BaseSettings):
             self.covers_dir = base / "covers"
         if self.uploads_dir == self._UNSET:
             self.uploads_dir = base / "uploads"
+        for key, allowed in _MODE_CHOICES.items():
+            setattr(self, key, normalize_mode(getattr(self, key), allowed, _MODE_DEFAULTS[key]))
         return self
 
     @property

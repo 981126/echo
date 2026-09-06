@@ -279,3 +279,15 @@ def test_sync_work_syncs_all_platform_posts(db):
     job = db.query(SyncJob).order_by(SyncJob.id.desc()).first()
     assert job.status == "done"
     assert job.scope == "work"
+
+
+def test_mode_normalize_rejects_silent_fallback():
+    """R-068：模式值规范化——去掉注释黏连；非法值抛错，不静默回退 mock 写假数据。"""
+    from app.config import normalize_mode
+
+    assert normalize_mode("real", {"mock", "real"}, "mock") == "real"
+    assert normalize_mode("real# mock | real", {"mock", "real"}, "mock") == "real"
+    assert normalize_mode("  Mock  ", {"mock", "real"}, "mock") == "mock"
+    assert normalize_mode("", {"mock", "real"}, "mock") == "mock"
+    with pytest.raises(ValueError):
+        normalize_mode("banana", {"mock", "real"}, "mock")

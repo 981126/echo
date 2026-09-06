@@ -410,3 +410,10 @@
 - platform_post_comments 增加 likes 列（轻量幂等迁移）；评论读取按点赞降序返回 Top50（text/likes/user_nick）；评论数据 tab 展示点赞数与昵称
 - 自测：verify.sh 全绿（51 后端测试）；HTTP 冒烟通过（本地绑定三平台 + 云端合并卡均返回 3 平台、每平台 50 条评论按点赞降序、幂等不重复入库）
 
+## [M50 / R-068] 2026-09-06 — 修复：模式配置注释黏连导致同步静默走 mock、假数据覆盖真实指标
+- 现象：作者反馈最新视频抖音点赞应 5726，系统显示 10965，怀疑累加
+- 根因（非累加）：.env `ECHO_TIKHUB_MODE=real# mock | real` 注释黏连 → tikhub_mode='real# mock | real' ≠ 'real' → TikHub 客户端静默按 mock 写假数据（10965/6303/3165 恰为该作品 ID 的 mock 确定性值）
+- 修复：.env 改为 ECHO_TIKHUB_MODE=real；config.py 新增 normalize_mode（剥离行尾注释黏连/空白；非法值启动即抛错，杜绝再次静默假数据覆盖）；tikhub/hot_source/asr 三模式统一生效
+- 数据恢复：重启后真实重拉今日 178 条快照（0 条残留假数据）；目标视频抖音 ≈5730（作者查看 5726，自然涨跌）；B站触发单轮 backfill（最多 150 条，耗时约 10 分钟）；小红书首轮读超时后单独重试成功
+- 测试：新增模式规范化测试，共 52 项；verify.sh 全绿
+
