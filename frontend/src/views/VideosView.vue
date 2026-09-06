@@ -585,6 +585,46 @@ const applied = ref({ kw: '', plats: [], tags: [], ad: null, status: null, likes
 const likesMin = ref(null)
 const likesMax = ref(null)
 const videoFilter = ref('')
+const FILTERS_KEY = 'echo:videos:filters.v1'  // R-084：切页/刷新后保留素材库筛选
+
+function saveFilters() {
+  try {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({
+      creatorSel: creatorSel.value,
+      platformSel: platformSel.value || [],
+      tagSel: tagSel.value || [],
+      status: filter.value.status ?? null,
+      ad: adFilter.value ?? null,
+      video: videoFilter.value || '',
+      kw: searchText.value || '',
+      likesMin: likesMin.value ?? null,
+      likesMax: likesMax.value ?? null
+    }))
+  } catch (e) { /* 存储失败忽略 */ }
+}
+
+function loadFilters() {
+  try {
+    const raw = localStorage.getItem(FILTERS_KEY)
+    if (!raw) return
+    const f = JSON.parse(raw) || {}
+    if (typeof f.creatorSel === 'number' && f.creatorSel >= 0) creatorSel.value = f.creatorSel
+    platformSel.value = Array.isArray(f.platformSel) ? f.platformSel : []
+    tagSel.value = Array.isArray(f.tagSel) ? f.tagSel : []
+    filter.value.status = f.status ?? null
+    adFilter.value = f.ad ?? null
+    videoFilter.value = f.video || ''
+    searchText.value = f.kw || ''
+    likesMin.value = f.likesMin ?? null
+    likesMax.value = f.likesMax ?? null
+  } catch (e) { /* 读取失败忽略 */ }
+}
+
+watch(
+  [creatorSel, platformSel, tagSel, filter, adFilter, videoFilter, searchText, likesMin, likesMax],
+  saveFilters,
+  { deep: true }
+)
 
 function applyFilters() {
   applied.value = {
@@ -1197,6 +1237,8 @@ watch(() => [route.query.edit, route.query.post], handleDeepLink)
 
 let activeTasksTimer = null
 onMounted(async () => {
+  loadFilters()  // R-084：恢复上次筛选
+  applyFilters()
   await loadCreatorOptions()
   await initLoad()
   handleDeepLink()
