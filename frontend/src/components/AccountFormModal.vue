@@ -21,10 +21,6 @@
       <n-input :value="form.platform_user_id" placeholder="sec_user_id / user_id / uid" @update:value="$emit('update:userId', $event)" />
     </div>
     <div class="form-item">
-      <label class="form-label">同步频率</label>
-      <n-select :value="form.sync_frequency" :options="freqOptions" @update:value="$emit('update:freq', $event)" />
-    </div>
-    <div class="form-item">
       <label class="form-label">增强配置（JSON，可选：cookie/share_text 等）</label>
       <n-input :value="extraText" type="textarea" :rows="2" placeholder='{"share_text":""}' @update:value="$emit('update:extra', $event)" />
     </div>
@@ -38,7 +34,7 @@
 
 <script setup>
 import { platformName } from '../lib/format'
-import { platformOptions, freqOptions } from '../lib/options'
+import { platformOptions } from '../lib/options'
 
 defineProps({
   show: { type: Boolean, default: false },
@@ -46,5 +42,5 @@ defineProps({
   extraText: { type: String, default: '' },
   parsing: { type: Boolean, default: false }
 })
-defineEmits(['update:show', 'update:platform', 'update:nickname', 'update:homeLink', 'update:userId', 'update:freq', 'update:enabled', 'update:extra', 'parse', 'save'])
+defineEmits(['update:show', 'update:platform', 'update:nickname', 'update:homeLink', 'update:userId', 'update:enabled', 'update:extra', 'parse', 'save'])
 </script>

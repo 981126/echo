@@ -11,13 +11,12 @@
         <div class="row" style="gap: 6px; align-items: center">
           <n-tag size="small" :bordered="false" round>{{ platformName(account.platform) }}</n-tag>
           <b>{{ account.nickname || platformName(account.platform) }}</b>
-          <n-tag v-if="showFreq" size="tiny" :bordered="false" :type="account.enabled ? 'success' : 'default'">{{ freqLabel }}</n-tag>
         </div>
         <div class="row" style="gap: 10px; margin-top: 4px; flex-wrap: wrap">
           <span class="muted mini">粉 {{ fmtNum(account.followers) }}</span>
           <span class="muted mini">作品 {{ fmtNum(account.posts_total) }}</span>
           <span class="mono uid" :title="account.platform_user_id">{{ account.platform_user_id || '未解析 ID' }}</span>
-          <span v-if="showFreq && account.last_sync_at" class="muted mini">同步 {{ fmt(account.last_sync_at) }}</span>
+          <span v-if="account.last_sync_at" class="muted mini">同步 {{ fmt(account.last_sync_at) }}</span>
         </div>
       </div>
       <div class="grow"></div>
@@ -36,13 +35,11 @@ const props = defineProps({
   account: { type: Object, required: true },
   benchmark: { type: Boolean, default: false },
   syncingAcctId: { type: Number, default: -1 },
-  showFreq: { type: Boolean, default: true },
   syncLabel: { type: String, default: '同步' }
 })
 defineEmits(['sync', 'posts', 'edit', 'remove', 'avatar'])
 
 const inputId = `av${props.benchmark ? 'b' : ''}-${props.account.id}`
-const freqLabel = ({ daily: '每日', weekly: '每周', manual: '手动' })[props.account.sync_frequency] || props.account.sync_frequency
 
 function openFile() {
   const el = document.getElementById(inputId)
