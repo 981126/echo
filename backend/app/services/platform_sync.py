@@ -26,6 +26,7 @@ from ..models.platform import (
 )
 from .platform_assets import _cover_path_for, _ensure_account_avatar
 from .platform.budget import BudgetExceeded, _charge, get_budget, set_budget  # noqa: F401
+from .events import publish
 from .creator_service import get_current_creator
 from .platform.base import CommentData, DataSource, make_source
 
@@ -48,6 +49,9 @@ def _job_progress(db: Session, job_id: int | None, *, done: int = 0, total: int 
                 {"d": max(0, int(done)), "t": max(0, int(total)), "n": (note or "")[:200], "id": job_id},
             )
         db.commit()
+        row = db.query(SyncJob).filter(SyncJob.id == job_id).first()
+        if row is not None:
+            _publish_job(db, row)
     except Exception:  # noqa: BLE001
         db.rollback()
 
@@ -303,7 +307,36 @@ def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, 
     return added
 
 
+def _publish_job(db: Session, job: SyncJob) -> None:
+    """R-091：同步任务进度/状态广播 sync.job（素材库据此让对应卡片进入同步动画）。"""
+    try:
+        publish(
+            "sync.job",
+            {
+                "id": job.id,
+                "job_type": job.job_type,
+                "scope": job.scope,
+                "creator_id": job.creator_id,
+                "account_id": job.account_id,
+                "post_id": job.post_id,
+                "status": job.status,
+                "progress_done": int(job.progress_done or 0),
+                "progress_total": int(job.progress_total or 0),
+                "progress_note": job.progress_note or "",
+                "message": job.message or "",
+            },
+        )
+    except Exception:  # noqa: BLE001 广播失败不影响同步
+        pass
+
+
 def _log_job(db: Session, job_type: str, scope: str, *, creator_id=None, account_id=None, post_id=None) -> SyncJob:
+    job = SyncJob(job_type=job_type, scope=scope, creator_id=creator_id, account_id=account_id, post_id=post_id)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    _publish_job(db, job)
+    return job
     job = SyncJob(job_type=job_type, scope=scope, creator_id=creator_id, account_id=account_id, post_id=post_id)
     db.add(job)
     db.commit()
@@ -324,6 +357,7 @@ def _finish_job(db: Session, job: SyncJob, message: str = "", stats: dict | None
             if not failed:
                 acc.last_sync_at = _app_now()
     db.commit()
+    _publish_job(db, job)
 
 
 def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", top_n: int = 20, with_comments: bool = False, job_id: int | None = None) -> dict:

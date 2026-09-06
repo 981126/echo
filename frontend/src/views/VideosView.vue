@@ -219,6 +219,7 @@ const syncing = ref(0)
 const works = ref([])
 const worksLoading = ref(false)
 const creatorSel = ref(0)  // 博主筛选：0=当前主博主（R-076）
+const currentCreatorId = ref(0)  // 当前主博主真实 id（判断同步任务是否属于当前视图，R-091）
 const creatorOptions = ref([])
 const cards = ref([])
 const searchText = ref('')
@@ -977,6 +978,65 @@ function cardKeyForTask(t) {
   }
   return ''
 }
+// R-091：博主页发起的同步任务 → 素材库已有云端卡立即进入同步动画
+const syncJob = reactive({ active: false, job_id: 0, creator_id: 0, note: '同步中…', pct: 0 })
+let syncJobAnim = null
+let syncJobCardKeys = new Set()
+
+function displayedCreatorId() {
+  return creatorSel.value ? Number(creatorSel.value) : Number(currentCreatorId.value || 0)
+}
+function jobMatchesView(job) {
+  return Number(job.creator_id) === displayedCreatorId()
+}
+function clearSyncJobAnim(removeOverlay = true) {
+  if (syncJobAnim) {
+    clearInterval(syncJobAnim)
+    syncJobAnim = null
+  }
+  if (removeOverlay) {
+    for (const k of syncJobCardKeys) {
+      if (!cardTaskIds[k]) clearCardProgress(k)
+    }
+  }
+  syncJobCardKeys = new Set()
+  syncJob.active = false
+  syncJob.job_id = 0
+}
+function applySyncJob(job) {
+  if (!job || !jobMatchesView(job)) return
+  if (job.status === 'done' || job.status === 'failed') {
+    if (syncJob.active) clearSyncJobAnim(true)
+    return
+  }
+  if (!syncJob.active || syncJob.job_id !== Number(job.id)) clearSyncJobAnim(true)
+  syncJob.active = true
+  syncJob.job_id = Number(job.id)
+  syncJob.creator_id = Number(job.creator_id)
+  syncJob.note = job.progress_note || '同步中…'
+  const d = Number(job.progress_done || 0)
+  const t = Number(job.progress_total || 0)
+  syncJob.pct = t > 0 ? Math.min(99, Math.round((d / t) * 100)) : 0
+  if (!syncJobAnim) {
+    let step = 0
+    syncJobAnim = setInterval(() => {
+      if (!syncJob.active) {
+        clearSyncJobAnim(false)
+        return
+      }
+      step += 6
+      const target = syncJob.pct > 0 ? syncJob.pct : 10 + (step % 100) * 0.75
+      const cloudKeys = cards.value.filter(c => c.kind === 'cloud').map(c => c.key)
+      for (const k of cloudKeys) {
+        if (cardTaskIds[k]) continue  // 有独立媒体任务(下载/转写)时交给它自己
+        cardProgress[k] = Math.min(99, Math.round(target))
+        cardNote[k] = syncJob.note
+        syncJobCardKeys.add(k)
+      }
+    }, 700)
+  }
+}
+
 async function refreshActiveCardTasks() {
   let list = []
   try {
@@ -988,6 +1048,22 @@ async function refreshActiveCardTasks() {
     if (cardTaskIds[key] && cardTaskIds[key] !== t.id) continue  // 已有任务在跑，不重复覆盖
     if (!cardTaskIds[key]) showServerTask(key, t.id, true)
   }
+  // R-091：博主页同步任务（daily/initial/weekly）→ 当前视图的云端卡立即进入同步动画
+  try {
+    const jd = await api('/api/platform/jobs?limit=12')
+    const items = (jd && jd.items) || []
+    let foundRunning = false
+    for (const j of items) {
+      if (!j || !['daily', 'initial', 'weekly'].includes(j.scope)) continue
+      if (j.status === 'running' && jobMatchesView(j)) {
+        applySyncJob(j)
+        foundRunning = true
+      } else if ((j.status === 'done' || j.status === 'failed') && Number(j.id) === syncJob.job_id) {
+        clearSyncJobAnim(true)
+      }
+    }
+    if (!foundRunning && syncJob.active) clearSyncJobAnim(true)
+  } catch (e) { /* 忽略 */ }
 }
 
 function applyMediaMsg(r, baseMsg) {
@@ -1236,6 +1312,10 @@ function handleDeepLink() {
 
 async function loadCreatorOptions() {
   try {
+    try {
+      const cur = await api('/api/creators/current')
+      currentCreatorId.value = Number((cur && cur.id) || 0)
+    } catch (e) { /* 拿不到当前 id 不阻塞 */ }
     const cs = await api('/api/creators')
     const opts = (cs || []).map(c => ({
       label: c.name + (c.kind === 'benchmark' ? '（对标）' : '') + (c.is_current ? '（当前主博主）' : ''),
@@ -1250,6 +1330,7 @@ async function loadCreatorOptions() {
 }
 
 async function onCreatorChange() {
+  clearSyncJobAnim(true)  // R-091：切到别的博主时清掉上一个博主的同步动画
   // 切换博主：清空筛选回到该博主全量
   platformSel.value = []
   tagSel.value = []
@@ -1267,6 +1348,7 @@ watch(() => [route.query.edit, route.query.post], handleDeepLink)
 
 let activeTasksTimer = null
 let offTaskBus = null
+let offSyncJobBus = null
 onMounted(async () => {
   loadFilters()  // R-084：恢复上次筛选
   applyFilters()
@@ -1274,15 +1356,18 @@ onMounted(async () => {
   await initLoad()
   handleDeepLink()
   offTaskBus = busOn('task.update', handleTaskEvent)  // R-087：SSE 任务进度/完成事件
+  offSyncJobBus = busOn('sync.job', d => applySyncJob(d))  // R-091：同步任务进度事件
   await refreshActiveCardTasks()
   activeTasksTimer = setInterval(refreshActiveCardTasks, 6000)  // R-081：切页回来/跨页触发的同步进度自动恢复
 })
 onUnmounted(() => {
+  clearSyncJobAnim(false)
   if (activeTasksTimer) {
     clearInterval(activeTasksTimer)
     activeTasksTimer = null
   }
   if (offTaskBus) offTaskBus()
+  if (offSyncJobBus) offSyncJobBus()
 })
 </script>
 
