@@ -29,6 +29,8 @@ from .media_naming import media_stem, unique_path
 from .platform.budget import BudgetExceeded, _charge
 from .platform_sync import _bound_platform_posts
 from ..tasks import start_task
+from ..models.task import BackgroundTask
+from .events import publish
 
 # 下载源平台优先级：抖音单文件最简单，其次小红书，B站最重（需合并）放最后
 _PLATFORM_PRIORITY = ["douyin", "xiaohongshu", "bilibili"]
@@ -348,3 +350,76 @@ def platform_media_task(db: Session, payload: dict, update=None) -> dict:
         "transcribed": transcribed,
         "file": video.filename if video else "",
     }
+
+
+def run_media_seq(db: Session, posts: list[PlatformPost]) -> dict:
+    """顺序执行多条帖子的媒体补齐（R-088）。
+
+    每条帖子注册为一条 platform_media 后台任务行并实时广播 task.update，
+    这样博主页触发的前N条/每日自动同步，素材库对应卡片也能显示覆盖进度、切页可恢复。
+    """
+    import json as _json
+
+    stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0}
+    for post in posts:
+        row = BackgroundTask(
+            kind="platform_media", payload=_json.dumps({"post_id": post.id}, ensure_ascii=False)
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        tid = row.id
+
+        def _up(pct: int | None = None, note: str = "") -> None:
+            t = db.get(BackgroundTask, tid)
+            if t is None:
+                return
+            if pct is not None:
+                t.progress = max(0, min(100, int(pct)))
+            if note:
+                t.note = note[:255]
+            t.status = "running"
+            db.commit()
+            publish(
+                "task.update",
+                {"id": tid, "status": "running", "progress": t.progress, "note": t.note or ""},
+            )
+
+        def _fail(err: str) -> None:
+            t = db.get(BackgroundTask, tid)
+            if t is not None:
+                t.status = "failed"
+                t.error = err[:500]
+                db.commit()
+                publish(
+                    "task.update",
+                    {"id": tid, "status": "failed", "progress": t.progress, "note": t.note or "", "error": err[:500]},
+                )
+
+        _up(5, "准备同步该作品…")
+        try:
+            res = platform_media_task(db, {"post_id": post.id}, _up)
+            t = db.get(BackgroundTask, tid)
+            if t is not None:
+                t.status = "done"
+                t.progress = 100
+                t.note = "完成"
+                db.commit()
+                publish("task.update", {"id": tid, "status": "done", "progress": 100, "note": "完成"})
+            if res.get("status") == "done":
+                if res.get("downloaded"):
+                    stats["downloaded"] += 1
+                if res.get("transcribed"):
+                    stats["transcribed"] += 1
+            else:
+                stats["skipped"] += 1
+        except BudgetExceeded:
+            _fail("预算不足，停止媒体补齐")
+            stats["errors"] += 1
+            db.rollback()
+            break
+        except Exception as exc:  # noqa: BLE001 单条失败不影响其它条
+            db.rollback()
+            _fail(str(exc))
+            stats["errors"] += 1
+    return stats

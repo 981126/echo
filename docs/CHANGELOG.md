@@ -520,3 +520,8 @@
 - 后端新增进程内事件总线 + GET /api/events（SSE，15s 心跳）；task.update（进度/完成/失败）与 notification.new 实时广播。
 - 前端 lib/eventbus + lib/sse（fetch 流带鉴权、5s 自动重连）；通知铃与素材卡进度改事件驱动，原轮询降为兜底。
 - 采用 SSE（单向推送），未引入 WebSocket。verify.sh 全绿。
+
+## [M70 / R-088] 2026-09-06 — 博主页同步进度可恢复 + 卡片级同步进度
+- CreatorsView onMounted 启动任务轮询：切页回来恢复同步进度条。
+- 新增 run_media_seq：博主页前15/每日自动的视频补齐逐条注册为 platform_media 任务并广播 task.update，素材库卡片显示覆盖进度并可恢复；全量/每周仍无媒体。
+- verify.sh 全绿。

@@ -540,7 +540,10 @@ async function saveBudget() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  startProgressPoll()  // R-088：切页回来也恢复博主页同步进度条
+})
 onUnmounted(stopProgressPoll)
 </script>
 

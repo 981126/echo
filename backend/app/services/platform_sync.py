@@ -526,33 +526,22 @@ def run_sync(
         except Exception:  # noqa: BLE001 合并失败不影响同步主体
             db.rollback()
         # R-085/R-086：daily（手动前15/每日自动）同步后，对前 N 条作品做视频下载+自动转写
+        # R-088：每条注册为 platform_media 后台任务并广播 task.update → 素材库卡片可见/可恢复
         media = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0}
         if with_media and scope == "daily":
-            from .media_ensure import platform_media_task  # 延迟导入避免循环
+            from .media_ensure import run_media_seq  # 延迟导入避免循环
 
-            try:
-                for acc in accounts:
-                    q = db.query(PlatformPost).filter(PlatformPost.account_id == acc.id)
-                    limit_n = max(1, _limit_for(acc))
-                    posts = q.order_by(PlatformPost.publish_time.desc()).limit(limit_n).all()
-                    for post in posts:
-                        try:
-                            res = platform_media_task(db, {"post_id": post.id})
-                            if res.get("status") == "done":
-                                if res.get("downloaded"):
-                                    media["downloaded"] += 1
-                                if res.get("transcribed"):
-                                    media["transcribed"] += 1
-                            else:
-                                media["skipped"] += 1
-                        except BudgetExceeded:
-                            media["errors"] += 1
-                            raise
-                        except Exception:  # noqa: BLE001 单条失败不影响其它条
-                            db.rollback()
-                            media["errors"] += 1
-            except BudgetExceeded:
-                pass  # 预算不足：数据同步已完成，停止媒体补齐并在通知中体现
+            media_posts: list[PlatformPost] = []
+            for acc in accounts:
+                limit_n = max(1, _limit_for(acc))
+                media_posts += (
+                    db.query(PlatformPost)
+                    .filter(PlatformPost.account_id == acc.id)
+                    .order_by(PlatformPost.publish_time.desc())
+                    .limit(limit_n)
+                    .all()
+                )
+            media = run_media_seq(db, media_posts)
         msg = f"同步 {len(results)} 个账号，更新作品 {total_posts}，采集评论 {total_comments}"
         if with_media and scope == "daily" and (media["downloaded"] or media["transcribed"] or media["errors"] or media["skipped"]):
             msg += f"；下载视频 {media['downloaded']}，转写 {media['transcribed']}"
