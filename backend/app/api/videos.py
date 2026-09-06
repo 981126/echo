@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..core.topics import normalize_platforms, normalize_topics
 from ..db import get_db
-from ..models.platform import PlatformPost
+from ..models.platform import CreatorAccount, PlatformPost
 from ..models.video import Transcript, Video
 from ..schemas.video import PlatformLinkOut, TagConfirmIn, VideoDetailOut, VideoListOut, VideoOut, VideoUpdate
 from ..services.creator_service import current_creator_id
@@ -126,6 +126,25 @@ def list_videos(
     cid = creator_id or current_creator_id(db)
     if cid:
         q = q.filter(Video.creator_id == cid)
+        # R-107：禁用账号的数据不出现在素材库——排除绑定到禁用账号作品的本地素材
+        off_acc_ids = [
+            r[0]
+            for r in db.query(CreatorAccount.id)
+            .filter(CreatorAccount.creator_id == cid, CreatorAccount.enabled.is_(False))
+            .all()
+        ]
+        if off_acc_ids:
+            off_rows = (
+                db.query(PlatformPost.local_video_id, PlatformPost.platform, PlatformPost.platform_post_id)
+                .filter(PlatformPost.account_id.in_(off_acc_ids))
+                .all()
+            )
+            off_vid_ids = {r.local_video_id for r in off_rows if r.local_video_id}
+            off_keys = {f"{r.platform}:{r.platform_post_id}" for r in off_rows if r.platform_post_id}
+            if off_vid_ids:
+                q = q.filter(~Video.id.in_(off_vid_ids))
+            for k in off_keys:
+                q = q.filter(Video.platform_post_id != k)
     if platform:
         q = q.filter(Video.platforms.like(f'%"{platform}"%'))
     if status:
