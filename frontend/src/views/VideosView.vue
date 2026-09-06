@@ -810,12 +810,27 @@ async function splitWork(w) {
   }
 }
 
-async function syncCloudPost(pst) {
-  syncingPost.value = pst.id
+function syncMessage(r, fallback) {
+  let m = (r && r.message) || fallback || '同步完成'
+  const parts = []
+  if (r && Array.isArray(r.platforms) && r.platforms.length && !/个平台/.test(m)) {
+    parts.push(r.platforms.map(platformName).join('、'))
+  }
+  if (r && r.comments_added != null && r.comments_added > 0) parts.push('评论新增 ' + r.comments_added + ' 条')
+  if (parts.length) m += '（' + parts.join('；') + '）'
+  return m
+}
+
+async function syncCloudPost(it) {
+  if (!it || !(it.cloudPosts || []).length) return
+  syncingPost.value = it.id
   try {
-    await api(`/api/platform/posts/${pst.id}/sync`, { method: 'POST' })
-    message.success('已同步 ' + platformName(pst.platform))
-    loadWorks()
+    // R-067：合并作品卡同步全部平台帖（不再只同步第一个平台），单平台帖走单条同步
+    const r = it.type === 'work'
+      ? await api(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
+      : await api(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
+    message.success(syncMessage(r, '同步完成'))
+    await loadWorks()
   } catch (e) {
     message.error(e.message)
   } finally {
@@ -827,7 +842,9 @@ async function syncData(v) {
   syncing.value = v.id
   try {
     const r = await api(`/api/platform/videos/${v.id}/sync`, { method: 'POST' })
-    message.success(r.message || '同步完成')
+    message.success(syncMessage(r, '同步完成'))
+    await loadQuiet()  // R-067：同步后刷新本地素材卡，避免“只提示没变化”
+    await loadWorksQuiet()
   } catch (e) {
     message.error(e.message)
   } finally {

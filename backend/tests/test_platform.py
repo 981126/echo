@@ -173,3 +173,109 @@ def test_manual_merge_and_split(db):
     split_work(db, r["work_id"])
     assert db.query(Work).count() == 0
     assert db.query(PlatformPost).filter(PlatformPost.work_id.is_(None)).count() == 2
+
+
+# ---------- R-067：卡片同步三平台 + 评论点赞 Top50 ----------
+
+def test_mock_comments_structured_deterministic():
+    from app.services.platform.base import CommentData
+
+    c = make_client("mock")
+    items = c.fetch_comments("douyin", "pid-top50", 50)
+    assert len(items) == 50
+    assert all(isinstance(x, CommentData) for x in items)
+    texts = [x.text for x in items]
+    assert len(set(texts)) == 50  # 唯一文本，可验证 Top50 截断
+    assert any(x.likes > 0 for x in items)
+    again = make_client("mock").fetch_comments("douyin", "pid-top50", 50)
+    assert [x.text for x in again] == texts
+    assert [x.likes for x in again] == [x.likes for x in items]
+
+
+def test_sync_single_post_stores_top50_comments(db):
+    from app.models.platform import PlatformPostComment
+    from app.services.platform_sync import sync_single_post
+
+    owner, acc = _seed_owner(db)
+    p = _post(db, acc.id, "douyin", "dy-single-top", "单条同步评论测试")
+    db.commit()
+    res = sync_single_post(db, p.id)
+    assert res["platforms"] == ["douyin"]
+    assert res["comments_added"] == 50
+    rows = (
+        db.query(PlatformPostComment)
+        .filter(PlatformPostComment.post_id == p.id)
+        .order_by(PlatformPostComment.likes.desc())
+        .all()
+    )
+    assert len(rows) == 50
+    likes = [r.likes for r in rows]
+    assert likes == sorted(likes, reverse=True)
+    assert all(r.text and r.user_nick for r in rows)
+    # 幂等：再同步不重复新增
+    res2 = sync_single_post(db, p.id)
+    assert res2["comments_added"] == 0
+    assert db.query(PlatformPostComment).filter(PlatformPostComment.post_id == p.id).count() == 50
+
+
+def test_sync_local_video_metrics_all_platforms_and_comments(db):
+    from app.models.platform import CreatorAccount, PlatformPostComment
+    from app.models.video import Video
+    from app.services.platform_sync import sync_local_video_metrics
+
+    owner, _ = _seed_owner(db)
+    accs = {}
+    for plat in ("douyin", "bilibili", "xiaohongshu"):
+        a = CreatorAccount(
+            creator_id=owner.id, platform=plat, nickname=plat, platform_user_id=f"u-{plat}",
+            enabled=True, sync_frequency="daily",
+        )
+        db.add(a)
+        db.flush()
+        accs[plat] = a
+    v = Video(title="本地三平台素材", filename="x.mp4", creator_id=owner.id)
+    db.add(v)
+    db.commit()
+    for plat, pid in (("douyin", "dy-loc-1"), ("bilibili", "bi-loc-1"), ("xiaohongshu", "xh-loc-1")):
+        p = _post(db, accs[plat].id, plat, pid, "本地三平台素材")
+        db.add(p)
+        db.flush()
+        p.local_video_id = v.id
+    db.commit()
+    res = sync_local_video_metrics(db, v)
+    assert sorted(res["platforms"]) == ["bilibili", "douyin", "xiaohongshu"]
+    assert res["stats"]["likes"] > 0
+    assert res["comments_added"] == 150  # 每平台 50 条
+    assert db.query(PlatformPostComment).count() == 150
+
+
+def test_sync_work_syncs_all_platform_posts(db):
+    from app.models.platform import CreatorAccount, PlatformPostComment
+    from app.models.work import Work
+    from app.services.platform_sync import sync_work_posts
+    from app.services.works_service import auto_merge_creator
+
+    owner, _ = _seed_owner(db)
+    accs = {}
+    for plat in ("douyin", "bilibili", "xiaohongshu"):
+        a = CreatorAccount(
+            creator_id=owner.id, platform=plat, nickname=plat, platform_user_id=f"w-{plat}",
+            enabled=True, sync_frequency="daily",
+        )
+        db.add(a)
+        db.flush()
+        accs[plat] = a
+    for plat, pid in (("douyin", "dy-w-1"), ("bilibili", "bi-w-1"), ("xiaohongshu", "xh-w-1")):
+        p = _post(db, accs[plat].id, plat, pid, "同一视频三平台")
+        db.add(p)
+    db.commit()
+    auto_merge_creator(db, owner.id)
+    work = db.query(Work).first()
+    assert work is not None
+    res = sync_work_posts(db, work.id)
+    assert sorted(res["platforms"]) == ["bilibili", "douyin", "xiaohongshu"]
+    assert res["comments_added"] == 150
+    assert db.query(PlatformPostComment).count() == 150
+    job = db.query(SyncJob).order_by(SyncJob.id.desc()).first()
+    assert job.status == "done"
+    assert job.scope == "work"

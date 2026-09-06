@@ -26,7 +26,7 @@ from ..models.platform import (
 from .platform_assets import _cover_path_for, _ensure_account_avatar
 from .platform.budget import BudgetExceeded, _charge, get_budget, set_budget  # noqa: F401
 from .creator_service import get_current_creator
-from .platform.base import DataSource, make_source
+from .platform.base import CommentData, DataSource, make_source
 
 
 def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: DataSource) -> None:
@@ -143,34 +143,112 @@ def _write_stat(db: Session, post: PlatformPost, stats: dict) -> None:
     db.commit()
 
 
+def _raw_of(post) -> dict:
+    """平台帖 raw JSON 安全解析。"""
+    try:
+        return json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
+    except json.JSONDecodeError:
+        return {}
+
+
+def _norm_comment_items(items) -> list[CommentData]:
+    """把数据源返回的评论归一化为 CommentData（兼容 str / dict / CommentData）。"""
+    out: list[CommentData] = []
+    for it in items or []:
+        if isinstance(it, CommentData):
+            if (it.text or "").strip():
+                out.append(it)
+        elif isinstance(it, str):
+            t = it.strip()
+            if t:
+                out.append(CommentData(text=t))
+        elif isinstance(it, dict):
+            t = str(it.get("text") or it.get("content") or "").strip()
+            if t:
+                out.append(
+                    CommentData(
+                        text=t,
+                        likes=int(it.get("likes") or it.get("like_count") or it.get("digg_count") or 0),
+                        user_nick=str(it.get("user_nick") or it.get("nickname") or it.get("user") or "")[:100],
+                    )
+                )
+    return out
+
+
+def _upsert_comments(db: Session, post: PlatformPost, comments: list[CommentData], limit: int = 50) -> dict:
+    """按点赞降序保留 Top limit 条入库；同文本去重（点赞取更高值）。返回 {added, updated}。"""
+    items = sorted(
+        (c for c in _norm_comment_items(comments)),
+        key=lambda c: (c.likes, c.text),
+        reverse=True,
+    )[: int(limit or 50)]
+    added = 0
+    updated = 0
+    for c in items:
+        text = c.text.strip()
+        row = (
+            db.query(PlatformPostComment)
+            .filter(PlatformPostComment.post_id == post.id, PlatformPostComment.text == text)
+            .first()
+        )
+        likes = int(c.likes or 0)
+        nick = (c.user_nick or "")[:100]
+        if row is None:
+            db.add(
+                PlatformPostComment(
+                    post_id=post.id,
+                    platform=post.platform,
+                    text=text,
+                    likes=likes,
+                    user_nick=nick,
+                )
+            )
+            added += 1
+        else:
+            if likes > int(row.likes or 0):
+                row.likes = likes
+                updated += 1
+            if nick and nick != (row.user_nick or ""):
+                row.user_nick = nick
+                updated += 1
+    db.commit()
+    return {"added": added, "updated": updated}
+
+
+def sync_post_comments(db: Session, post: PlatformPost, *, limit: int = 50, client: DataSource | None = None, account=None, charge: bool = True) -> dict:
+    """拉取单帖评论并入库（点赞 Top limit；R-067）。charge=True 时计一次预算。"""
+    client = client or make_source(post.platform)
+    comments = client.fetch_comments(
+        post.platform, post.platform_post_id, max(1, int(limit)), account, raw=_raw_of(post)
+    )
+    if charge:
+        _charge(db)
+    return _upsert_comments(db, post, comments, limit=limit)
+
+
 def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, posts: list[PlatformPost], per_post: int = 20) -> int:
-    """抓取评论区进选题池（R-028）。"""
+    """抓取评论区进选题池（R-028）：评论入库（含点赞）+ 选题池去重新增。"""
     added = 0
     date_key = today_key()
     for post in posts[:]:
         try:
-            raw = {}
-            try:
-                raw = json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
-            except json.JSONDecodeError:
-                raw = {}
-            comments = client.fetch_comments(account.platform, post.platform_post_id, per_post, account, raw=raw)
+            comments = _norm_comment_items(
+                client.fetch_comments(account.platform, post.platform_post_id, per_post, account, raw=_raw_of(post))
+            )
             _charge(db)
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001 单个作品评论失败不中断
             continue
-        for text in comments:
-            text = (text or "").strip()
+        try:
+            _upsert_comments(db, post, comments, limit=per_post)
+        except Exception:  # noqa: BLE001 入库失败不中断
+            db.rollback()
+            continue
+        for c in comments:
+            text = (c.text or "").strip()
             if not text or len(text) < 4:
                 continue
-            dup_c = (
-                db.query(PlatformPostComment)
-                .filter(PlatformPostComment.post_id == post.id, PlatformPostComment.text == text)
-                .first()
-            )
-            if dup_c is None:
-                db.add(PlatformPostComment(post_id=post.id, platform=account.platform, text=text))
             exists = (
                 db.query(TopicIdea)
                 .filter(
@@ -409,48 +487,110 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
         raise
 
 
+def _sync_one_post(db: Session, post: PlatformPost) -> dict:
+    """同步单条平台帖：最新指标 + 评论（点赞 Top50）入库。失败抛错。"""
+    account = db.get(CreatorAccount, post.account_id)
+    client = make_source(post.platform)
+    stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
+    _charge(db)
+    _write_stat(db, post, stats)
+    cres = {"added": 0, "updated": 0}
+    try:
+        cres = sync_post_comments(db, post, limit=50, client=client, account=account, charge=True)
+    except Exception:  # noqa: BLE001 评论失败不影响主同步
+        db.rollback()
+    return {
+        "platform": post.platform,
+        "post_id": post.id,
+        "stats": stats,
+        "comments_added": cres["added"],
+        "comments_updated": cres["updated"],
+    }
+
+
 def sync_single_post(db: Session, post_id: int) -> dict:
-    """单条作品即时同步（素材/云端作品"同步数据"按钮）。"""
+    """单条作品即时同步（云端作品"同步数据"按钮，R-067：指标 + 评论点赞 Top50）。"""
     post = db.get(PlatformPost, post_id)
     if post is None:
         raise ValueError("云端作品不存在")
     account = db.get(CreatorAccount, post.account_id)
     job = _log_job(db, "single", "post", creator_id=account.creator_id if account else None, account_id=post.account_id, post_id=post.id)
     try:
-        client = make_source(post.platform)
-        stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
-        _charge(db)
-        _write_stat(db, post, stats)
-        # 同步数据同时把评论入库（本地查询）
-        added_comments = 0
-        try:
-            raw = {}
-            try:
-                raw = json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
-            except json.JSONDecodeError:
-                raw = {}
-            texts = client.fetch_comments(post.platform, post.platform_post_id, 20, account, raw=raw)
-            for c in texts:
-                c = (c or "").strip()
-                if not c:
-                    continue
-                dup = (
-                    db.query(PlatformPostComment)
-                    .filter(PlatformPostComment.post_id == post.id, PlatformPostComment.text == c)
-                    .first()
-                )
-                if dup is None:
-                    db.add(PlatformPostComment(post_id=post.id, platform=post.platform, text=c))
-                    added_comments += 1
-            db.commit()
-        except Exception:  # noqa: BLE001 评论失败不影响主同步
-            db.rollback()
-        _finish_job(db, job, f"单条同步完成（新增评论 {added_comments}）", {"post_id": post.id, "stats": stats, "comments_added": added_comments})
-        return {"job_id": job.id, "message": "单条同步完成", "stats": stats, "comments_added": added_comments}
+        res = _sync_one_post(db, post)
+        stats = res["stats"]
+        added = int(res["comments_added"])
+        _finish_job(
+            db, job,
+            f"单条同步完成（评论新增 {added} 条）",
+            {"post_id": post.id, "stats": stats, "comments_added": added, "comments_updated": res["comments_updated"]},
+        )
+        return {
+            "job_id": job.id,
+            "message": "单条同步完成",
+            "platforms": [post.platform],
+            "stats": stats,
+            "comments_added": added,
+            "comments_updated": res["comments_updated"],
+        }
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         _finish_job(db, job, str(exc), failed=True)
         raise
+
+
+def sync_work_posts(db: Session, work_id: int) -> dict:
+    """云端合并作品卡「同步数据」（R-067）：遍历 work 下全部平台帖同步指标+评论。
+
+    修复：之前卡片只同步 cloudPosts[0]（第一个平台）；现合并作品全部平台帖逐个同步，
+    单平台失败不中断其它平台。
+    """
+    from ..models.work import Work
+
+    work = db.get(Work, work_id)
+    if work is None:
+        raise ValueError("云端合并作品不存在")
+    posts = db.query(PlatformPost).filter(PlatformPost.work_id == work_id).all()
+    if not posts:
+        raise ValueError("该合并作品下没有平台帖子")
+    job = _log_job(db, "single", "work", creator_id=work.creator_id)
+    results: list[dict] = []
+    for post in posts:
+        try:
+            results.append(_sync_one_post(db, post))
+        except Exception as exc:  # noqa: BLE001 单平台失败不影响其它平台
+            db.rollback()
+            results.append({"platform": post.platform, "post_id": post.id, "error": str(exc)[:300]})
+    totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0, "shares": 0}
+    for r in results:
+        st = r.get("stats") or {}
+        for field in totals:
+            totals[field] += int(st.get(field) or 0)
+    synced = [r["platform"] for r in results if r.get("platform") and "error" not in r]
+    added = sum(int(r.get("comments_added") or 0) for r in results)
+    updated = sum(int(r.get("comments_updated") or 0) for r in results)
+    fails = [f"{r.get('platform')}({str(r.get('error'))[:80]})" for r in results if r.get("error")]
+    msg = f"同步完成（{len(synced)} 个平台，评论新增 {added} 条）"
+    if fails:
+        msg += "；失败：" + "、".join(fails)
+    stats_payload = {
+        "platforms": synced,
+        "posts": results,
+        "stats": totals,
+        "comments_added": added,
+        "comments_updated": updated,
+    }
+    if not synced:
+        _finish_job(db, job, msg, stats_payload, failed=True)
+        raise ValueError(msg)
+    _finish_job(db, job, msg, stats_payload)
+    return {
+        "job_id": job.id,
+        "message": msg,
+        "platforms": synced,
+        "stats": totals,
+        "comments_added": added,
+        "comments_updated": updated,
+    }
 
 
 
@@ -476,27 +616,40 @@ def _bound_platform_posts(db: Session, video) -> list[PlatformPost]:
 
 
 def sync_local_video_metrics(db: Session, video) -> dict:
-    """本地素材的"同步数据"：基于编辑页填写的平台链接，同步其绑定的各平台数据。
+    """本地素材的"同步数据"（R-067）：同步其绑定的各平台最新数据 + 每平台评论点赞 Top50。
 
     一个本地素材可绑定抖音/B站/小红书多条作品，逐个拉取最新数据写入
-    平台作品表与指标快照（当天多平台聚合），供看板/复盘使用。
+    平台作品表与指标快照（当天多平台聚合），供看板/复盘使用；单平台失败不中断其它平台。
     """
     posts = _bound_platform_posts(db, video)
     if not posts:
         raise ValueError("该素材未绑定平台作品（请先在编辑页填写平台链接并保存）")
     totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0, "shares": 0}
     synced: list[str] = []
+    errors: list[str] = []
+    added = 0
+    updated = 0
     for post in posts:
+        account = db.get(CreatorAccount, post.account_id)
         client = make_source(post.platform)
         try:
-            stats = client.fetch_post_stats(post.platform, post.platform_post_id)
+            stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
             _charge(db)
-        except Exception as exc:  # noqa: BLE001
-            raise ValueError(f"{post.platform} 同步失败: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 单平台失败不中断
+            errors.append(f"{post.platform}: {exc}")
+            continue
         _write_stat(db, post, stats)
         for field in totals:
             totals[field] += int(stats.get(field) or 0)
         synced.append(post.platform)
+        try:
+            cres = sync_post_comments(db, post, limit=50, client=client, account=account, charge=True)
+            added += int(cres["added"])
+            updated += int(cres["updated"])
+        except BudgetExceeded:
+            raise
+        except Exception:  # noqa: BLE001 评论失败不影响该平台指标
+            db.rollback()
     # 同步写回本地指标快照（当天多平台聚合），供现有看板/复盘复用
     from ..models.metrics import MetricsSnapshot
 
@@ -527,4 +680,16 @@ def sync_local_video_metrics(db: Session, video) -> dict:
         row.comments = totals["comments"]
         row.source = "tikhub"
     db.commit()
-    return {"message": f"同步完成（{len(synced)} 个平台）", "platforms": synced, "stats": totals}
+    if not synced and errors:
+        raise ValueError("；".join(errors))
+    msg = f"同步完成（{len(synced)} 个平台，评论新增 {added} 条）"
+    if errors:
+        msg += "；部分失败：" + "；".join(errors)
+    return {
+        "message": msg,
+        "platforms": synced,
+        "stats": totals,
+        "errors": errors,
+        "comments_added": added,
+        "comments_updated": updated,
+    }

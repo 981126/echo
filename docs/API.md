@@ -348,7 +348,7 @@ List Posts
 
 ### GET /api/platform/posts/{post_id}/comments
 
-Post Comments
+Post Comments（R-067：返回 [{text, likes, user_nick}]，按点赞降序 Top50）
 
 | 参数 | 位置 | 必填 | 类型 | 说明 |
 |---|---|---|---|---|
@@ -361,7 +361,7 @@ Post Comments
 
 ### POST /api/platform/posts/{post_id}/comments/refresh
 
-Refresh Post Comments
+Refresh Post Comments（R-067：拉取点赞 Top50 落库后按点赞降序返回）
 
 | 参数 | 位置 | 必填 | 类型 | 说明 |
 |---|---|---|---|---|
@@ -389,6 +389,17 @@ Sync Post
 | 参数 | 位置 | 必填 | 类型 | 说明 |
 |---|---|---|---|---|
 | `post_id` | path | 是 | integer |  |
+| `x-access-token` | header | 否 | string |  |
+
+**返回 200**：`object`
+
+### POST /api/platform/works/{work_id}/sync
+
+Sync Work（R-067：云端合并作品卡「同步数据」，同步全部平台帖指标 + 评论点赞 Top50）
+
+| 参数 | 位置 | 必填 | 类型 | 说明 |
+|---|---|---|---|---|
+| `work_id` | path | 是 | integer |  |
 | `x-access-token` | header | 否 | string |  |
 
 **返回 200**：`object`

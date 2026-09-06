@@ -39,6 +39,15 @@ class ProfileData:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class CommentData:
+    """平台评论（R-067：入库需带点赞数，才能按“每平台点赞 Top50”筛选展示）。"""
+
+    text: str
+    likes: int = 0
+    user_nick: str = ""
+
+
 class DataSource(Protocol):
     """平台数据源统一接口（每个实现需满足；TikHubClient 即默认实现）。"""
 
@@ -54,7 +63,7 @@ class DataSource(Protocol):
 
     def fetch_comments(
         self, platform: str, post_id: str, count: int = 20, account=None, raw: dict | None = None
-    ) -> list[str]: ...
+    ) -> list[CommentData]: ...
 
     def get_balance(self) -> dict: ...
 

@@ -27,6 +27,7 @@ from ..services.platform_sync import (
     run_sync,
     sync_local_video_metrics,
     sync_single_post,
+    sync_work_posts,
 )
 from ..tasks import start_task
 
@@ -154,6 +155,37 @@ def bind_video_links(video_id: int, payload: dict, db: Session = Depends(get_db)
     return {"ok": True, "bound": bound, "errors": errors}
 
 
+def _read_comments(db: Session, post_id: int, limit: int = 50) -> list[dict]:
+    """读本地评论：按点赞降序（同赞按新到旧），文本去重，最多 200 条供分页截断。"""
+    from ..models.platform import PlatformPostComment
+
+    rows = (
+        db.query(PlatformPostComment)
+        .filter(PlatformPostComment.post_id == post_id)
+        .order_by(PlatformPostComment.likes.desc(), PlatformPostComment.id.desc())
+        .all()
+    )
+    seen: set[str] = set()
+    items: list[dict] = []
+    for r in rows:
+        if r.text in seen:
+            continue
+        seen.add(r.text)
+        items.append({"text": r.text, "likes": int(r.likes or 0), "user_nick": r.user_nick or ""})
+        if len(items) >= max(1, min(int(limit or 50), 200)):
+            break
+    return items
+
+
+@router.post("/works/{work_id}/sync", response_model=dict)
+def sync_work(work_id: int, db: Session = Depends(get_db)):
+    """云端合并作品卡「同步数据」（R-067）：同步该作品全部平台帖指标 + 评论点赞 Top50。"""
+    try:
+        return sync_work_posts(db, work_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/posts/{post_id}/sync", response_model=dict)
 def sync_post(post_id: int, db: Session = Depends(get_db)):
     try:
@@ -194,11 +226,11 @@ def post_to_material(post_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/posts/{post_id}/comments/refresh", response_model=dict)
-def refresh_post_comments(post_id: int, limit: int = 30, db: Session = Depends(get_db)):
-    """点“加载评论”：实时调第三方拉取 → 去重落库 → 返回（下次直接读本地）。"""
+def refresh_post_comments(post_id: int, limit: int = 50, db: Session = Depends(get_db)):
+    """点“加载评论”：实时调第三方拉取（点赞 Top50）→ 去重落库 → 返回（下次直接读本地）。"""
     import json as _json
 
-    from ..models.platform import PlatformPostComment
+    from ..services.platform_sync import _upsert_comments
 
     post = db.get(PlatformPost, post_id)
     if post is None:
@@ -210,40 +242,27 @@ def refresh_post_comments(post_id: int, limit: int = 30, db: Session = Depends(g
     except _json.JSONDecodeError:
         raw = {}
     client = make_source(post.platform)
+    want = max(1, min(int(limit or 50), 50))
     try:
-        texts = client.fetch_comments(post.platform, post.platform_post_id, max(1, min(limit, 50)), acc, raw=raw)
+        items = client.fetch_comments(post.platform, post.platform_post_id, want, acc, raw=raw)
     except Exception:  # noqa: BLE001
-        texts = []
-    added = 0
-    for c in texts:
-        c = (c or "").strip()
-        if not c:
-            continue
-        dup = (
-            db.query(PlatformPostComment)
-            .filter(PlatformPostComment.post_id == post_id, PlatformPostComment.text == c)
-            .first()
-        )
-        if dup is None:
-            db.add(PlatformPostComment(post_id=post_id, platform=post.platform, text=c))
-            added += 1
-    db.commit()
-    rows = (
-        db.query(PlatformPostComment)
-        .filter(PlatformPostComment.post_id == post_id)
-        .order_by(PlatformPostComment.id.desc())
-        .limit(200)
-        .all()
-    )
-    return {"post_id": post_id, "platform": post.platform, "items": [r.text for r in rows], "added": added}
+        items = []
+    cres = _upsert_comments(db, post, items, limit=want)
+    return {
+        "post_id": post_id,
+        "platform": post.platform,
+        "items": _read_comments(db, post_id, 200),
+        "added": cres["added"],
+        "updated": cres["updated"],
+    }
 
 
 @router.get("/posts/{post_id}/comments", response_model=dict)
 def post_comments(post_id: int, limit: int = 50, refresh: int = 0, db: Session = Depends(get_db)):
-    """评论：默认读本地库；refresh=1 时实时调第三方并把新评论去重落库后再返回。"""
+    """评论：默认读本地库（按点赞降序）；refresh=1 时实时调第三方（点赞 Top50）落库后再返回。"""
     import json as _json
 
-    from ..models.platform import PlatformPostComment
+    from ..services.platform_sync import _upsert_comments
 
     post = db.get(PlatformPost, post_id)
     if post is None:
@@ -257,39 +276,15 @@ def post_comments(post_id: int, limit: int = 50, refresh: int = 0, db: Session =
             raw = {}
         try:
             client = make_source(post.platform)
-            texts = client.fetch_comments(post.platform, post.platform_post_id, 50, acc, raw=raw)
+            items = client.fetch_comments(post.platform, post.platform_post_id, 50, acc, raw=raw)
         except Exception:  # noqa: BLE001 拉取失败不阻断
-            texts = []
-        added = 0
-        for t in texts:
-            t = (t or "").strip()
-            if not t:
-                continue
-            dup = (
-                db.query(PlatformPostComment)
-                .filter(PlatformPostComment.post_id == post_id, PlatformPostComment.text == t)
-                .first()
-            )
-            if dup is None:
-                db.add(PlatformPostComment(post_id=post_id, platform=post.platform, text=t))
-                added += 1
-        db.commit()
-    rows = (
-        db.query(PlatformPostComment)
-        .filter(PlatformPostComment.post_id == post_id)
-        .order_by(PlatformPostComment.id)
-        .all()
-    )
-    seen = set()
-    items = []
-    for r in rows:
-        if r.text in seen:
-            continue
-        seen.add(r.text)
-        items.append(r.text)
-        if len(items) >= max(1, min(limit, 200)):
-            break
-    return {"post_id": post_id, "platform": post.platform, "items": items}
+            items = []
+        _upsert_comments(db, post, items, limit=50)
+    return {
+        "post_id": post_id,
+        "platform": post.platform,
+        "items": _read_comments(db, post_id, limit),
+    }
 
 
 

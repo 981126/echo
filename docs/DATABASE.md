@@ -354,6 +354,7 @@ AI 消息
 | `post_id` | INTEGER |  | 否 |  |  |
 | `platform` | VARCHAR(20) |  | 否 |  |  |
 | `text` | TEXT |  | 否 |  |  |
+| `likes` | INTEGER |  | 否 | 0 | 评论点赞数（R-067：点赞 Top50 入库/展示） |
 | `user_nick` | VARCHAR(100) |  | 否 |  |  |
 | `created_at` | DATETIME |  | 否 | CallableColumnDefault(<function datetime.utcnow at 0x107e04460>) |  |
 

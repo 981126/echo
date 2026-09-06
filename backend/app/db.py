@@ -114,6 +114,14 @@ def _migrate_feedback_dims() -> None:
             conn.exec_driver_sql(f"ALTER TABLE feedback ADD COLUMN {ddl}")
 
 
+def _migrate_comment_likes() -> None:
+    """R-067：platform_post_comments 增加评论点赞数列（按点赞 Top50 入库/展示）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(platform_post_comments)").fetchall()}
+        if "likes" not in cols:
+            conn.exec_driver_sql("ALTER TABLE platform_post_comments ADD COLUMN likes INTEGER NOT NULL DEFAULT 0")
+
+
 def _migrate_creator_scope() -> None:
     """M13（R-029）：drafts / persona_tags 增加 creator_id（素材 creator_id 已在 _migrate_videos）。"""
     with engine.begin() as conn:
@@ -313,6 +321,7 @@ def init_db() -> None:
     _migrate_account_avatars()
     _migrate_feedback_dims()
     _migrate_chat()
+    _migrate_comment_likes()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults

@@ -155,6 +155,7 @@ class PlatformPostComment(Base):
     post_id: Mapped[int] = mapped_column(ForeignKey("platform_posts.id"), index=True)
     platform: Mapped[str] = mapped_column(String(20), default="")
     text: Mapped[str] = mapped_column(Text, default="")
+    likes: Mapped[int] = mapped_column(Integer, default=0)  # 评论点赞数（R-067：点赞 Top50 入库/展示）
     user_nick: Mapped[str] = mapped_column(String(100), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 

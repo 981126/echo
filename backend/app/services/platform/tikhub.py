@@ -21,7 +21,7 @@ import httpx
 
 from ...config import get_settings
 from ...core.timeutil import now as _app_now
-from .base import PostData, ProfileData  # noqa: E402,F401
+from .base import CommentData, PostData, ProfileData  # noqa: E402,F401
 from .link_utils import parse_link, parse_post_id  # noqa: F401  re-export：保持旧导入路径
 
 PLATFORMS = ["douyin", "xiaohongshu", "bilibili"]
@@ -545,40 +545,84 @@ class TikHubClient:
             },
         }
 
-    # ---------- 评论（R-028 选题池） ----------
-    def fetch_comments(self, platform: str, post_id: str, count: int = 20, account=None, raw: dict | None = None) -> list[str]:
+    # ---------- 评论（R-028 选题池 / R-067 点赞 Top50 入库） ----------
+    def fetch_comments(self, platform: str, post_id: str, count: int = 20, account=None, raw: dict | None = None) -> list[CommentData]:
+        """拉取评论（含点赞数/昵称）。mock 返回确定性造数；real 尽力解析各平台字段。"""
         if self.mode == "real":
-            return self._real_comments(platform, post_id, raw)
+            return self._real_comments(platform, post_id, max(3, count), raw)
+        return self._mock_comments(platform, post_id, max(3, count))
+
+    def _mock_comments(self, platform: str, post_id: str, count: int) -> list[CommentData]:
         rnd = random.Random(_seed_id(post_id, "comments"))
         pool = _COMMENT_POOL[:]
-        rnd.shuffle(pool)
-        return pool[: max(3, count)]
+        out: list[CommentData] = []
+        seq = 0
+        # 需要超过池子条数（如 Top50 验收）时，用确定性后缀补足唯一评论
+        while len(out) < count:
+            for base in pool:
+                if len(out) >= count:
+                    break
+                if seq == 0:
+                    text = base
+                else:
+                    text = f"{base}（追问{seq}）"
+                likes = int(rnd.random() ** 2 * 3000) + seq * 7
+                out.append(
+                    CommentData(
+                        text=text,
+                        likes=likes,
+                        user_nick=f"用户{rnd.randint(1000, 9999)}",
+                    )
+                )
+            seq += 1
+        return out
 
-    def _real_comments(self, platform: str, post_id: str, raw: dict | None = None) -> list[str]:
-        texts: list[str] = []
+    def _real_comments(self, platform: str, post_id: str, count: int, raw: dict | None = None) -> list[CommentData]:
+        out: list[CommentData] = []
         if platform == "douyin":
-            data = self._get("/douyin/app/v3/fetch_video_comments", {"aweme_id": post_id, "count": 20})
+            data = self._get("/douyin/app/v3/fetch_video_comments", {"aweme_id": post_id, "count": min(count, 50)})
             for c in ((data.get("data") or {}).get("comments") or []):
                 txt = ((c.get("text") or "") or "").strip()
-                if txt:
-                    texts.append(txt)
+                if not txt:
+                    continue
+                out.append(
+                    CommentData(
+                        text=txt,
+                        likes=int(c.get("digg_count") or c.get("like_count") or 0),
+                        user_nick=(((c.get("user") or {}).get("nickname")) or "")[:100],
+                    )
+                )
         elif platform == "xiaohongshu":
             data = self._get("/xiaohongshu/app_v2/get_note_comments", {"note_id": post_id, "cursor": ""})
             inner = ((data.get("data") or {}).get("data")) or {}
             for c in (inner.get("comments") or []):
                 txt = (c.get("content") or "").strip()
-                if txt:
-                    texts.append(txt)
+                if not txt:
+                    continue
+                out.append(
+                    CommentData(
+                        text=txt,
+                        likes=int(c.get("like_count") or c.get("likes") or 0),
+                        user_nick=(((c.get("user_info") or {}).get("nickname")) or "")[:100],
+                    )
+                )
         else:
             bvid = (raw or {}).get("bvid") or (post_id.split(":", 1)[1] if post_id.startswith("bvid:") else "")
             if bvid:
                 data = self._get("/bilibili/web/fetch_video_comments", {"bv_id": bvid})
                 inner = (data.get("data") or {}).get("data") or data.get("data") or {}
                 for c in (inner.get("replies") or []):
-                    txt = ((c.get("content") or {}).get("message")) or ""
-                    if txt and txt.strip():
-                        texts.append(txt.strip())
-        return texts[:20]
+                    txt = (((c.get("content") or {}).get("message")) or "").strip()
+                    if not txt:
+                        continue
+                    out.append(
+                        CommentData(
+                            text=txt,
+                            likes=int(c.get("like") or 0),
+                            user_nick=(((c.get("member") or {}).get("uname")) or "")[:100],
+                        )
+                    )
+        return out[:count]
 
 
 def _ts(value) -> datetime | None:

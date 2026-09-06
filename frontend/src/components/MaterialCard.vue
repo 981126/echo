@@ -46,7 +46,7 @@
       <PlatformStats :posts="item.cloudPosts || []" />
       <p v-if="item.pub" class="tile-meta">发布时间 {{ item.pub }}</p>
       <div class="row-actions" @click.stop>
-        <n-button size="tiny" secondary :loading="syncingPostId === item.cloudPosts[0].id" @click="syncPost(item.cloudPosts[0])">同步数据</n-button>
+        <n-button size="tiny" secondary :loading="syncingPostId === item.id" @click="syncPost(item)">同步数据</n-button>
         <n-button v-if="item.merged >= 2" size="tiny" quaternary type="warning" @click="split(item)">拆分</n-button>
         <n-button size="tiny" quaternary type="error" @click="delCloud(item)">删除</n-button>
       </div>

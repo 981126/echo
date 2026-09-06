@@ -400,3 +400,13 @@
 - 新增 core/timeutil（now/today/tz，默认 Asia/Shanghai，ECHO_TIMEZONE 可覆盖）；全部模型与写时间点改用统一 now
 - db.py 一次性迁移：历史 UTC 时间列 +8h → 北京时间（幂等，app_tz_migrated_v1，先于新写入执行）
 - 验证：通知 03:18 → 11:18（北京），与当前一致
+
+## [M49 / R-067] 2026-09-06 — 素材库卡片「同步数据」修复：三平台全同步 + 评论点赞 Top50
+- 根因 1：云端合并卡（同一作品三平台合并）的「同步数据」只同步 cloudPosts[0]（第一个平台），其余平台不更新，提示也只报单个平台
+- 修复：新增 POST /api/platform/works/{work_id}/sync（合并作品下全部平台帖逐个同步，单平台失败不中断）；卡片按钮按 work/post 分流
+- 根因 2：本地已绑定素材卡同步后不刷新、且同步链路从不拉评论；评论接口不返回点赞数无法按 Top50 筛选
+- 修复：本地卡 sync 后前端静默刷新；sync_local_video_metrics / sync_single_post / sync_work_posts 统一拉各平台评论（点赞 Top50）入库
+- 评论结构化：DataSource.fetch_comments 返回 CommentData(text/likes/user_nick)；TikHub mock 确定性造数（可 ≥50 条）、real 解析抖音 digg_count / 小红书 like_count / B站 like
+- platform_post_comments 增加 likes 列（轻量幂等迁移）；评论读取按点赞降序返回 Top50（text/likes/user_nick）；评论数据 tab 展示点赞数与昵称
+- 自测：verify.sh 全绿（51 后端测试）；HTTP 冒烟通过（本地绑定三平台 + 云端合并卡均返回 3 平台、每平台 50 条评论按点赞降序、幂等不重复入库）
+
