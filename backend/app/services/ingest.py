@@ -13,7 +13,7 @@ from ..models.video import Transcript, Video
 from .llm import LLMError
 from .persona import PersonaService
 from .prompt_service import get_prompt
-from .transcription import Transcriber
+from .transcription import Transcriber, TranscriptionError
 from .creator_service import current_creator_id
 
 
@@ -98,7 +98,20 @@ def import_video_task(db, payload: dict) -> None:
     ):
         path = settings.videos_dir / video.filename
         transcriber = Transcriber(settings)
-        text = transcriber.transcribe(path)
+        try:
+            text = transcriber.transcribe(path)
+        except TranscriptionError as exc:
+            # R-094：转写失败也落 asr_status=failed，并给可读原因
+            if video.transcript is None:
+                video.transcript = Transcript(video_id=video.id, asr_status="failed")
+                db.add(video.transcript)
+            else:
+                video.transcript.asr_status = "failed"
+            db.commit()
+            msg = str(exc) or "转写失败"
+            if "识别结果为空" in msg:
+                msg += "（未识别到有效语音：视频可能无声/只有背景音乐/音量过低或音轨异常，可检查该视频音轨后重试）"
+            raise TranscriptionError(msg) from exc
         corrected = correct_transcript(text)
         if video.transcript is None:
             db.add(

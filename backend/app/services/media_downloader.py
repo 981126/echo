@@ -40,13 +40,17 @@ def _headers(platform: str) -> dict:
 
 
 def _stream_to(url: str, headers: dict, dest: Path) -> None:
+    """R-094：单文件整体超时兜底，卡住不再无限等待。"""
+    deadline = time.monotonic() + 480  # 8 分钟无整体进展视为卡住
     try:
-        with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(30.0, read=600.0)) as client:
+        with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(connect=20, read=300, write=60, pool=20)) as client:
             with client.stream("GET", url, headers=headers) as resp:
                 if resp.status_code not in (200, 206):
                     raise MediaDownloadError(f"HTTP {resp.status_code} 下载失败: {url[:140]}")
                 with dest.open("wb") as f:
                     for chunk in resp.iter_bytes(chunk_size=65536):
+                        if time.monotonic() > deadline:
+                            raise MediaDownloadError("下载超时（长时间无进展），已中断，请重试")
                         f.write(chunk)
     except MediaDownloadError:
         dest.unlink(missing_ok=True)

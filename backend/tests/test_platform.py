@@ -688,6 +688,7 @@ def test_import_video_task_auto_confirms_tags(db, monkeypatch):
 # ---------- R-085：daily 默认前10条；with_media 同步后做视频补齐（mock 无源不落盘） ----------
 
 def test_run_sync_daily_with_media_mock_leaves_no_video(db):
+    from app.models.notification import Notification
     from app.models.task import BackgroundTask
     from app.models.video import Video
     from app.services.platform_sync import run_sync
@@ -703,3 +704,5 @@ def test_run_sync_daily_with_media_mock_leaves_no_video(db):
     assert all(r.status in ("done", "failed") for r in qrows)
     # mock 模式无真实视频源：不产生本地视频行（失败被隔离）
     assert db.query(Video).count() == 0
+    # R-094：非正常结果必须走通知
+    assert db.query(Notification).filter(Notification.kind == "card_sync", Notification.status == "failed").count() >= 1

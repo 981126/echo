@@ -99,3 +99,4 @@
 | R-091 | 2026-09-06 | 博主页同步开始即让素材库已有素材进入动画（sync.job 事件 + 云端卡覆盖层） | ✅ 已完成 | M73（已完成） | platform_sync、VideosView、R-070/081/087 |
 | R-092 | 2026-09-06 | 同步文案整体化（不再“xx：完成99%”）+ 素材卡动画不闪没（不误清/最高98%） | ✅ 已完成 | M74（已完成） | platform_sync、VideosView、R-091 |
 | R-093 | 2026-09-06 | 博主页同步改逐素材队列：分页发现即入队，素材库卡片实时动画；取消整片 job 覆盖 | ✅ 已完成 | M75（已完成） | platform_sync、media_ensure、tasks、VideosView |
+| R-094 | 2026-09-06 | 下载超时兜底+转写识别为空原因/失败通知+合并卡只下单个平台视频 | ✅ 已完成 | M76（已完成） | media_downloader/ingest/run_card_sync_queue |

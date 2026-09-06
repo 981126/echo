@@ -28,7 +28,7 @@ from .media_downloader import (
 from .media_naming import media_stem, unique_path
 from .platform.budget import BudgetExceeded, _charge
 from .platform_sync import _bound_platform_posts
-from ..tasks import start_task
+from ..tasks import push_notification, start_task
 from ..models.task import BackgroundTask
 from .events import publish
 
@@ -354,16 +354,26 @@ def platform_media_task(db: Session, payload: dict, update=None) -> dict:
 
 
 def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: bool = True) -> dict:
-    """R-093：逐素材异步队列（顺序执行）。
+    """R-093/R-094：逐素材异步队列（顺序执行）。
 
-    items = [(post_id, task_id)]：task 为账号分页阶段注册的 card_sync 行；
-    每条先采集评论/素材数据，再（daily 带媒体时）下载视频+自动转写；
-    全程用 task.update 更新该条卡片进度/说明（排队→处理→下载/转写→完成）。
+    - 先按平台优先级（抖音→小红书→B站）排序，同一合并作品的多个平台帖只处理一次（避免重复下载/评论费用）；
+    - 每条：采集评论/素材数据 →（daily 带媒体）缺视频下载/自动转写 → 完成/失败；
+    - 任何非正常结束（失败/超时/无有效语音）都会 push 通知。
     """
     stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0}
+    prio = {"douyin": 0, "xiaohongshu": 1, "bilibili": 2}
+    ordered = []
+    for post_id, tid in items:
+        post = db.get(PlatformPost, post_id)
+        ordered.append((prio.get(post.platform, 9) if post else 9, post_id, tid))
+    ordered.sort(key=lambda x: x[0])
+    items = [(a, b) for _, a, b in ordered]
+    done_work: set[int] = set()  # 同一合并作品只处理一次（R-094）
     total = len(items)
     for idx, (post_id, task_id) in enumerate(items, start=1):
         row = db.get(BackgroundTask, task_id)
+        post = db.get(PlatformPost, post_id)
+        title = (post.title if post else "") or "素材"
 
         def _up(pct: int | None = None, note: str = "") -> None:
             t = db.get(BackgroundTask, task_id)
@@ -390,13 +400,39 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
                     "task.update",
                     {"id": task_id, "status": "failed", "progress": t.progress or 0, "note": t.note or "", "error": err[:500], "payload": {"post_id": post_id}},
                 )
+            # R-094：非正常结果必通知
+            try:
+                push_notification(
+                    db, kind="card_sync", status="failed",
+                    title="素材同步失败",
+                    message=f"「{title[:60]}」：{err[:200]}",
+                    target="/videos",
+                )
+            except Exception:  # noqa: BLE001 通知失败不影响
+                db.rollback()
+
+        def _done(note: str = "完成") -> None:
+            t = db.get(BackgroundTask, task_id)
+            if t is not None:
+                t.status = "done"
+                t.progress = 100
+                t.note = note
+                db.commit()
+                publish(
+                    "task.update",
+                    {"id": task_id, "status": "done", "progress": 100, "note": note, "payload": {"post_id": post_id}},
+                )
 
         try:
-            post = db.get(PlatformPost, post_id)
             if post is None:
                 raise MediaDownloadError("作品不存在")
-            _up(max(row.progress if row else 0, 10), f"正在同步素材数据/评论（{idx}/{total}）…")
-            # 评论 Top50（R-067 语义）
+            if post.work_id and post.work_id in done_work:
+                # R-094：同一合并作品已由前一个平台帖下载，跳过重复下载/评论
+                _up(max(row.progress if row else 0, 8), "同合并作品已处理，跳过…")
+                _done("跳过（同合并作品的视频已下载）")
+                stats["skipped"] += 1
+                continue
+            _up(max(row.progress if row else 0, 12), f"正在同步素材数据/评论（{idx}/{total}）…")
             from .platform_sync import sync_post_comments  # 延迟导入避免循环
 
             cres = sync_post_comments(db, post, limit=50, charge=True)
@@ -410,22 +446,15 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
                         stats["transcribed"] += 1
                 else:
                     stats["skipped"] += 1
-            t = db.get(BackgroundTask, task_id)
-            if t is not None:
-                t.status = "done"
-                t.progress = 100
-                t.note = "完成"
-                db.commit()
-                publish(
-                    "task.update",
-                    {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": {"post_id": post_id}},
-                )
+            if post.work_id:
+                done_work.add(post.work_id)
+            _done()
         except BudgetExceeded:
             _fail("预算不足，停止素材队列")
             stats["errors"] += 1
             db.rollback()
             break
-        except Exception as exc:  # noqa: BLE001 单条失败不影响后续
+        except Exception as exc:  # noqa: BLE001 单条失败不影响后续（已通知）
             db.rollback()
             _fail(str(exc))
             stats["errors"] += 1
