@@ -20,6 +20,7 @@ KIND_LABELS = {
     "platform_sync": "平台数据同步",
     "platform_sync_single": "素材数据同步",
     "platform_media": "素材媒体补齐",
+    "card_sync": "素材同步",
 }
 
 

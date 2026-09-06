@@ -352,26 +352,21 @@ def platform_media_task(db: Session, payload: dict, update=None) -> dict:
     }
 
 
-def run_media_seq(db: Session, posts: list[PlatformPost]) -> dict:
-    """顺序执行多条帖子的媒体补齐（R-088）。
 
-    每条帖子注册为一条 platform_media 后台任务行并实时广播 task.update，
-    这样博主页触发的前N条/每日自动同步，素材库对应卡片也能显示覆盖进度、切页可恢复。
+def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: bool = True) -> dict:
+    """R-093：逐素材异步队列（顺序执行）。
+
+    items = [(post_id, task_id)]：task 为账号分页阶段注册的 card_sync 行；
+    每条先采集评论/素材数据，再（daily 带媒体时）下载视频+自动转写；
+    全程用 task.update 更新该条卡片进度/说明（排队→处理→下载/转写→完成）。
     """
-    import json as _json
-
-    stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0}
-    for post in posts:
-        row = BackgroundTask(
-            kind="platform_media", payload=_json.dumps({"post_id": post.id}, ensure_ascii=False)
-        )
-        db.add(row)
-        db.commit()
-        db.refresh(row)
-        tid = row.id
+    stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0}
+    total = len(items)
+    for idx, (post_id, task_id) in enumerate(items, start=1):
+        row = db.get(BackgroundTask, task_id)
 
         def _up(pct: int | None = None, note: str = "") -> None:
-            t = db.get(BackgroundTask, tid)
+            t = db.get(BackgroundTask, task_id)
             if t is None:
                 return
             if pct is not None:
@@ -382,43 +377,55 @@ def run_media_seq(db: Session, posts: list[PlatformPost]) -> dict:
             db.commit()
             publish(
                 "task.update",
-                {"id": tid, "status": "running", "progress": t.progress, "note": t.note or "", "payload": {"post_id": post.id}},
+                {"id": task_id, "status": "running", "progress": t.progress, "note": t.note or "", "payload": {"post_id": post_id}},
             )
 
         def _fail(err: str) -> None:
-            t = db.get(BackgroundTask, tid)
+            t = db.get(BackgroundTask, task_id)
             if t is not None:
                 t.status = "failed"
                 t.error = err[:500]
                 db.commit()
                 publish(
                     "task.update",
-                    {"id": tid, "status": "failed", "progress": t.progress, "note": t.note or "", "error": err[:500], "payload": {"post_id": post.id}},
+                    {"id": task_id, "status": "failed", "progress": t.progress or 0, "note": t.note or "", "error": err[:500], "payload": {"post_id": post_id}},
                 )
 
-        _up(5, "准备同步该作品…")
         try:
-            res = platform_media_task(db, {"post_id": post.id}, _up)
-            t = db.get(BackgroundTask, tid)
+            post = db.get(PlatformPost, post_id)
+            if post is None:
+                raise MediaDownloadError("作品不存在")
+            _up(max(row.progress if row else 0, 10), f"正在同步素材数据/评论（{idx}/{total}）…")
+            # 评论 Top50（R-067 语义）
+            from .platform_sync import sync_post_comments  # 延迟导入避免循环
+
+            cres = sync_post_comments(db, post, limit=50, charge=True)
+            stats["comments"] += int(cres.get("added") or 0) + int(cres.get("updated") or 0)
+            if with_media:
+                res = platform_media_task(db, {"post_id": post_id}, _up)
+                if res.get("status") == "done":
+                    if res.get("downloaded"):
+                        stats["downloaded"] += 1
+                    if res.get("transcribed"):
+                        stats["transcribed"] += 1
+                else:
+                    stats["skipped"] += 1
+            t = db.get(BackgroundTask, task_id)
             if t is not None:
                 t.status = "done"
                 t.progress = 100
                 t.note = "完成"
                 db.commit()
-                publish("task.update", {"id": tid, "status": "done", "progress": 100, "note": "完成", "payload": {"post_id": post.id}})
-            if res.get("status") == "done":
-                if res.get("downloaded"):
-                    stats["downloaded"] += 1
-                if res.get("transcribed"):
-                    stats["transcribed"] += 1
-            else:
-                stats["skipped"] += 1
+                publish(
+                    "task.update",
+                    {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": {"post_id": post_id}},
+                )
         except BudgetExceeded:
-            _fail("预算不足，停止媒体补齐")
+            _fail("预算不足，停止素材队列")
             stats["errors"] += 1
             db.rollback()
             break
-        except Exception as exc:  # noqa: BLE001 单条失败不影响其它条
+        except Exception as exc:  # noqa: BLE001 单条失败不影响后续
             db.rollback()
             _fail(str(exc))
             stats["errors"] += 1

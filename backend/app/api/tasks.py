@@ -19,7 +19,9 @@ def list_tasks(limit: int = 50, status: str = "", kind: str = "", db: Session = 
     if status:
         q = q.filter(BackgroundTask.status == status)
     if kind:
-        q = q.filter(BackgroundTask.kind == kind)
+        kinds = [k.strip() for k in kind.split(",") if k.strip()]
+        if kinds:
+            q = q.filter(BackgroundTask.kind.in_(kinds))
     return q.order_by(BackgroundTask.id.desc()).limit(min(limit, 500)).all()
 
 

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..core.pipeline import today_key
 from ..models.hot_topic import TopicIdea
+from ..models.task import BackgroundTask
 from ..models.platform import (
     Creator,
     CreatorAccount,
@@ -355,10 +356,20 @@ def _finish_job(db: Session, job: SyncJob, message: str = "", stats: dict | None
     _publish_job(db, job)
 
 
-def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", top_n: int = 20, with_comments: bool = False, job_id: int | None = None) -> dict:
+def sync_account(
+    db: Session,
+    account: CreatorAccount,
+    *,
+    scope: str = "daily",
+    top_n: int = 20,
+    with_comments: bool = False,
+    job_id: int | None = None,
+    queue_rows: bool = False,
+) -> dict:
     """同步单个账号：主页快照 + 作品列表 + 指标；scope=initial 拉更多作品。
 
     job_id（R-070）：传入 run_sync 的 SyncJob id 时，实时累加进度（作品数 + 阶段说明）。
+    queue_rows（R-093）：分页发现已存在的作品时，立即注册 card_sync 队列任务（素材库卡片排队/动画）。
     """
     if not account.enabled:
         return {"account_id": account.id, "skipped": "disabled"}
@@ -369,6 +380,7 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
     account.sync_status = "running"
     db.commit()
     stats: dict = {"posts": 0, "comments": 0}
+    queued: list[tuple[int, int]] = []  # (post_id, task_id)
     _job_progress(db, job_id, note=f"{label}：拉取主页与作品列表…")
     _upsert_profile_snapshot(db, account, client)
     posts_data = client.fetch_user_posts(account.platform, account.platform_user_id, top_n, account=account)
@@ -396,6 +408,20 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
                 new_posts.append(post)
             stats["posts"] += 1
             _job_progress(db, job_id, done=1, note=f"{label}：已同步 {i}/{total} 条")
+            if queue_rows:
+                qrow = BackgroundTask(
+                    kind="card_sync",
+                    payload=json.dumps({"post_id": post.id, "job_id": job_id}, ensure_ascii=False),
+                )
+                db.add(qrow)
+                db.commit()
+                db.refresh(qrow)
+                qrow.status = "running"
+                qrow.progress = 4
+                qrow.note = "排队中…"
+                db.commit()
+                publish("task.update", {"id": qrow.id, "status": "running", "progress": 4, "note": "排队中…", "payload": {"post_id": post.id}})
+                queued.append((post.id, qrow.id))
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001
@@ -409,7 +435,11 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
     if account.platform == "bilibili":
         # B站列表不含赞/藏/评，全量时逐条详情太重；这里每轮补全最多 BACKFILL 条
         stats["backfilled"] = _backfill_bili_stats(db, account, client, job_id=job_id)
-    _job_progress(db, job_id, note=f"{label}：完成")
+    if queue_rows:
+        stats["queue"] = queued
+        _job_progress(db, job_id, note=f"{label}：完成，{len(queued)} 条进入素材队列")
+    else:
+        _job_progress(db, job_id, note=f"{label}：完成")
     return stats
 
 
@@ -499,7 +529,9 @@ def run_sync(
     try:
         per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 15)))
         assert owner is not None
-        with_comments = True  # 前20条/每周/全量都会按新增作品把评论入库（本地查询）
+        # R-093：daily 带媒体时改“逐素材队列”（发现即入队+素材库动画），评论也由队列逐条采集
+        queue_mode = bool(with_media and scope == "daily")
+        with_comments = not queue_mode
 
         def _limit_for(acc) -> int:
             if scope == "weekly":
@@ -517,7 +549,7 @@ def run_sync(
                 plat = acc.platform
                 acc.sync_status = "running"
                 s.commit()
-                st = sync_account(s, acc, scope=scope, top_n=_limit_for(acc), with_comments=with_comments, job_id=job.id)
+                st = sync_account(s, acc, scope=scope, top_n=_limit_for(acc), with_comments=with_comments, job_id=job.id, queue_rows=queue_mode)
                 acc = s.get(CreatorAccount, acc_id)
                 if acc is not None:
                     acc.sync_status = "done"
@@ -547,6 +579,13 @@ def run_sync(
                 results.append(fut.result())
         total_posts = sum(int(r.get("posts") or 0) for r in results)
         total_comments = sum(int(r.get("comments") or 0) for r in results)
+        # R-093：账号分页阶段注册的逐素材队列（post_id, task_id）
+        queue_items: list[tuple[int, int]] = []
+        if queue_mode:
+            for r in results:
+                for item in r.get("queue") or []:
+                    if len(item) >= 2:
+                        queue_items.append((int(item[0]), int(item[1])))
         # 跨平台同作品自动合并（同创作者 + 规范化标题相同）
         from .works_service import auto_merge_creator
 
@@ -559,28 +598,18 @@ def run_sync(
             _job_progress(db, job.id, note="数据同步完成，正在下载/转写视频…" if (with_media and scope == "daily") else "同步完成，正在汇总…")
         except Exception:  # noqa: BLE001
             db.rollback()
-        # R-085/R-086：daily（手动前15/每日自动）同步后，对前 N 条作品做视频下载+自动转写
-        # R-088：每条注册为 platform_media 后台任务并广播 task.update → 素材库卡片可见/可恢复
+        # R-093：逐素材队列依次处理（每条：评论采集 → 缺视频下载/转写），素材库卡片全程显示状态
         media = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0}
-        if with_media and scope == "daily":
-            from .media_ensure import run_media_seq  # 延迟导入避免循环
+        if queue_mode:
+            from .media_ensure import run_card_sync_queue  # 延迟导入避免循环
 
-            media_posts: list[PlatformPost] = []
-            for acc in accounts:
-                limit_n = max(1, _limit_for(acc))
-                media_posts += (
-                    db.query(PlatformPost)
-                    .filter(PlatformPost.account_id == acc.id)
-                    .order_by(PlatformPost.publish_time.desc())
-                    .limit(limit_n)
-                    .all()
-                )
-            media = run_media_seq(db, media_posts)
+            media = run_card_sync_queue(db, queue_items, with_media=True)
+            total_comments += int(media.get("comments") or 0)
         msg = f"同步 {len(results)} 个账号，更新作品 {total_posts}，采集评论 {total_comments}"
-        if with_media and scope == "daily" and (media["downloaded"] or media["transcribed"] or media["errors"] or media["skipped"]):
-            msg += f"；下载视频 {media['downloaded']}，转写 {media['transcribed']}"
+        if queue_mode and (media["downloaded"] or media["transcribed"] or media["errors"] or media["skipped"] or media.get("comments")):
+            msg += f"；入队 {len(queue_items)} 条，下载视频 {media['downloaded']}，转写 {media['transcribed']}"
             if media["errors"]:
-                msg += f"，媒体失败/跳过 {media['errors'] + media['skipped']}"
+                msg += f"，素材失败/跳过 {media['errors'] + media['skipped']}"
         fails = [f"{r.get('platform')}({str(r.get('error'))[:60]})" for r in results if r.get("error")]
         if fails:
             msg += "；失败账号：" + "、".join(fails) + "（可单独重试该账号）"

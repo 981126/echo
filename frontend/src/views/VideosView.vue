@@ -1004,47 +1004,14 @@ function clearSyncJobAnim(removeOverlay = true) {
   syncJob.job_id = 0
 }
 function applySyncJob(job) {
-  if (!job || !jobMatchesView(job)) return
-  if (job.status === 'done' || job.status === 'failed') {
-    if (syncJob.active) clearSyncJobAnim(true)
-    return
-  }
-  if (!syncJob.active || syncJob.job_id !== Number(job.id)) clearSyncJobAnim(true)
-  syncJob.active = true
-  syncJob.job_id = Number(job.id)
-  syncJob.creator_id = Number(job.creator_id)
-  let note = job.progress_note || '同步中…'
-  if (job.status === 'running' && /(抖音|小红书|B站)[：:]完成$/.test(note)) {
-    note = '部分平台已完成，正在继续同步…'  // R-092：避免“xx：完成 99%”误导
-  }
-  syncJob.note = note
-  const d = Number(job.progress_done || 0)
-  const t = Number(job.progress_total || 0)
-  syncJob.pct = t > 0 ? Math.min(98, Math.round((d / t) * 100)) : 0
-  if (!syncJobAnim) {
-    let step = 0
-    syncJobAnim = setInterval(() => {
-      if (!syncJob.active) {
-        clearSyncJobAnim(false)
-        return
-      }
-      step += 6
-      const target = syncJob.pct > 0 ? syncJob.pct : 10 + (step % 100) * 0.75
-      const cloudKeys = cards.value.filter(c => c.kind === 'cloud').map(c => c.key)
-      for (const k of cloudKeys) {
-        if (cardTaskIds[k]) continue  // 有独立媒体任务(下载/转写)时交给它自己
-        cardProgress[k] = Math.min(99, Math.round(target))
-        cardNote[k] = syncJob.note
-        syncJobCardKeys.add(k)
-      }
-    }, 700)
-  }
+  // R-093：素材卡动画改由逐素材 card_sync/媒体任务驱动，不再整片 job 覆盖
+  void job
 }
 
 async function refreshActiveCardTasks() {
   let list = []
   try {
-    list = await api('/api/tasks?status=running&kind=platform_media&limit=100')
+    list = await api('/api/tasks?status=running&kind=platform_media,card_sync&limit=200')
   } catch (e) { return }
   for (const t of (list || [])) {
     const key = cardKeyForTask(t)
