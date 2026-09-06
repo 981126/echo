@@ -7,12 +7,19 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 import httpx
 
 from .media_tools import _ffmpeg_exe
 from .platform_assets import _cdn_headers
+
+try:  # yt-dlp 为 B站直连兜底通道（R-078），缺失时仅 B站回落不可用
+    import yt_dlp as _yt_dlp
+except Exception:  # noqa: BLE001
+    _yt_dlp = None
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -101,3 +108,78 @@ def download_platform_video(source: dict, platform: str, dest: Path) -> None:
             a_tmp.unlink(missing_ok=True)
         return
     raise MediaDownloadError(f"未知视频源类型: {kind or '空'}")
+
+
+# ---------- B站 yt-dlp 直连兜底（R-078） ----------
+
+def _ffmpeg_dir_with_binary() -> str:
+    """返回内含名为 ffmpeg 可执行文件的目录（imageio-ffmpeg 二进制名带平台后缀，
+    yt-dlp 只认 ffmpeg/ffprobe，故用软链目录兜底）。"""
+    exe = Path(_ffmpeg_exe())
+    if exe.name == "ffmpeg" and exe.is_file():
+        return str(exe.parent)
+    link_dir = Path(tempfile.gettempdir()) / "echo-ffmpeg"
+    link_dir.mkdir(parents=True, exist_ok=True)
+    link = link_dir / "ffmpeg"
+    if not link.exists():
+        try:
+            link.symlink_to(exe)
+        except OSError:
+            return str(exe.parent)
+    return str(link_dir)
+
+
+def download_bilibili_via_ytdlp(bvid: str, dest: Path, cookie: str = "") -> None:
+    """用 yt-dlp 直连 B站：下载低清完整视频+音频并合并成 mp4 到 dest。
+
+    失败（含 B站瞬时风控 412）会重试一次；仍失败抛 MediaDownloadError。
+    """
+    if _yt_dlp is None:
+        raise MediaDownloadError("yt-dlp 未安装（pip install yt-dlp），B站兜底通道不可用")
+    if not bvid:
+        raise MediaDownloadError("缺少 BV 号，无法用 yt-dlp 下载")
+    url = f"https://www.bilibili.com/video/{bvid}"
+    stem = dest.with_suffix("")
+    headers = {"User-Agent": _UA}
+    if cookie:
+        headers["Cookie"] = cookie
+    opts = {
+        "format": "bv*[height<=480]+ba/b",  # 480P 视频 + 音频，免登录；失败退整段
+        "merge_output_format": "mp4",
+        "outtmpl": str(stem),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "ffmpeg_location": _ffmpeg_dir_with_binary(),
+        "http_headers": headers,
+        "socket_timeout": 30,
+    }
+    last: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            with _yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            last = None
+            break
+        except Exception as exc:  # noqa: BLE001 yt-dlp 抛错类型繁杂，统一捕获重试
+            last = exc
+            if attempt == 1:
+                time.sleep(4)
+    if last is not None:
+        raise MediaDownloadError(f"yt-dlp B站下载失败: {str(last)[:300]}")
+    produced: Path | None = None
+    for cand in stem.parent.glob(stem.name + ".*"):
+        if not cand.is_file() or cand.name.startswith("."):
+            continue
+        if cand.suffix.lower() in (".part", ".ytdl", ".tmp") or ".f" in cand.name:
+            continue
+        if produced is None or cand.stat().st_size > produced.stat().st_size:
+            produced = cand
+    if produced is None:
+        raise MediaDownloadError("yt-dlp 未产出文件")
+    if produced != dest:
+        produced.rename(dest)
+    if not dest.is_file() or dest.stat().st_size < 1024:
+        dest.unlink(missing_ok=True)
+        raise MediaDownloadError("B站下载文件为空或过小")

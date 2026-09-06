@@ -565,3 +565,54 @@ def test_fetch_video_source_mock_returns_none():
     assert make_client("mock").fetch_video_source("douyin", "x") is None
     assert make_client("mock").fetch_video_source("xiaohongshu", "x") is None
     assert make_client("mock").fetch_video_source("bilibili", "aid:x") is None
+
+
+# ---------- R-078：B站 TikHub 404 时回落 yt-dlp 直连下载 ----------
+
+def test_bilibili_falls_back_to_ytdlp_when_no_tikhub_source(db, monkeypatch):
+    import json as _json
+
+    from app.config import get_settings
+    from app.services import media_ensure as me
+
+    owner, acc = _seed_owner(db)
+    p = _post(db, acc.id, "bilibili", "aid:1204035381", "B站ytdlp兜底测试")
+    p.raw = _json.dumps({"bvid": "BV1Df421m7xF"})
+    db.commit()
+
+    def fake_yt(bvid, dest, cookie=""):
+        assert bvid == "BV1Df421m7xF"
+        settings = get_settings()
+        settings.videos_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"fake-ytdlp-mp4")
+
+    monkeypatch.setattr(me, "download_bilibili_via_ytdlp", fake_yt)
+    file_name, hit = me._download_pick(db, [p])
+    assert file_name.endswith(".mp4")
+    assert hit.id == p.id
+    assert (get_settings().videos_dir / file_name).is_file()
+
+
+def test_bilibili_without_bvid_raises_no_source(db):
+    from app.services import media_ensure as me
+    from app.services.media_downloader import MediaDownloadError
+
+    owner, acc = _seed_owner(db)
+    p = _post(db, acc.id, "bilibili", "aid:999", "无BV号")
+    db.commit()
+    with pytest.raises(MediaDownloadError):
+        me._download_pick(db, [p])
+
+
+def test_bvid_of_parses_raw_and_data_wrapper():
+    import json as _json
+
+    from app.services import media_ensure as me
+
+    class Fake:
+        raw = _json.dumps({"data": {"bvid": "BV1xxx"}, "bvid": ""})
+
+    assert me._bvid_of(Fake()) == "BV1xxx"
+    class Fake2:
+        raw = _json.dumps({"bvid": "BV2yyy"})
+    assert me._bvid_of(Fake2()) == "BV2yyy"

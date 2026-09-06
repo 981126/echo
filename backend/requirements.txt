@@ -15,3 +15,6 @@ mypy>=1.10
 oss2>=2.19
 aliyun-python-sdk-core>=2.16
 imageio-ffmpeg>=0.4
+
+# B站 yt-dlp 直连下载兜底（R-078）
+yt-dlp>=2025.6

@@ -4,6 +4,7 @@
   - 已有本地视频文件 + 已完成转写 → skip（不下载、不转写）
   - 缺视频或缺转写 → 投递后台任务 platform_media（下载/转写完成后右上角通知）
 - 后台任务按平台优先级（抖音→小红书→B站）逐条尝试解析视频源并下载；
+  B站 TikHub 取不到流时回落 yt-dlp 直连下载低清视频+音频（R-078）；
   下载成功才建本地素材行；尚无转写稿时复用现有转写流水线 import_video_task。
 - mock/无真实视频源（如图文笔记）→ 不下载不编造，明确告知原因。
 """
@@ -19,7 +20,11 @@ from ..config import get_settings
 from ..models.platform import CreatorAccount, PlatformPost
 from ..models.video import Video
 from .creator_service import current_creator_id
-from .media_downloader import MediaDownloadError, download_platform_video
+from .media_downloader import (
+    MediaDownloadError,
+    download_bilibili_via_ytdlp,
+    download_platform_video,
+)
 from .media_naming import media_stem, unique_path
 from .platform.budget import BudgetExceeded, _charge
 from .platform_sync import _bound_platform_posts
@@ -190,7 +195,20 @@ def submit_media_task(
     return {"status": "started", "action": info["action"], "task_id": task_id, "video_id": info["video_id"]}
 
 
+def _bvid_of(post: PlatformPost) -> str:
+    """从 B站平台帖 raw（列表接口 archives 自带 bvid）取 BV 号；兼容 data 包装。"""
+    try:
+        raw = json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
+    except json.JSONDecodeError:
+        raw = {}
+    bvid = raw.get("bvid") or ""
+    if not bvid and isinstance(raw.get("data"), dict):
+        bvid = (raw.get("data") or {}).get("bvid") or ""
+    return str(bvid or "").strip()
+
+
 def _pick_source_posts(posts: list[PlatformPost]) -> list[PlatformPost]:
+
     return sorted(
         [p for p in posts if p.platform in _PLATFORM_PRIORITY],
         key=lambda p: _PLATFORM_PRIORITY.index(p.platform),
@@ -216,13 +234,23 @@ def _download_pick(db: Session, posts: list[PlatformPost]) -> tuple[str, Platfor
             )
             if getattr(client, "mode", "") == "real":
                 _charge(db)  # real 解析请求计入每日预算
-            if not source:
-                continue
             title = post.title or post.platform_post_id
             stem = media_stem(post.platform, title, "视频")
-            dest = unique_path(settings.videos_dir, stem, ".mp4")
-            download_platform_video(source, post.platform, dest)
-            return dest.name, post
+            if source:
+                dest = unique_path(settings.videos_dir, stem, ".mp4")
+                download_platform_video(source, post.platform, dest)
+                return dest.name, post
+            # B站：TikHub 当前拿不到流（404）→ yt-dlp 直连兜底（R-078，低清视频+音频）
+            if post.platform == "bilibili":
+                bvid = _bvid_of(post)
+                if not bvid:
+                    last_error = f"{post.platform}: 缺少 BV 号（raw 未存 bvid）"
+                    continue
+                dest = unique_path(settings.videos_dir, stem, ".mp4")
+                cookie = (account.extra() if account else {}).get("cookie") or ""
+                download_bilibili_via_ytdlp(bvid, dest, cookie=cookie)
+                return dest.name, post
+            continue
         except BudgetExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 单平台失败尝试下一个

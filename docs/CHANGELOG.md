@@ -473,3 +473,8 @@
 - 三个「同步数据」端点同步后自动预判：已有本地视频+转写则跳过；否则投递后台任务下载低清视频（缺）→ 自动 ASR 转写（缺）。
 - 新增 services/media_ensure.py、services/media_downloader.py；tasks 增加「素材媒体补齐」通知；前端提示+轮询刷新。
 - 抖音/小红书真实下载冒烟通过；B站 TikHub 播放流端点 404 暂不可用（代码预留）。顺带修复小红书单条详情统计解析。
+
+## [M60 / R-078] 2026-09-06 — B站 yt-dlp 直连下载兜底
+- B站素材卡「同步数据」补齐媒体：TikHub 播放流接口 404 时回落 yt-dlp 直连下载 480P 视频 + m4a 音轨，ffmpeg 合并 mp4（含音轨）后自动转写；瞬时风控重试一次。
+- 新增依赖 yt-dlp（backend/requirements.txt）；复用 imageio-ffmpeg（标准名软链目录）。
+- 真实作品 BV1Df421m7xF 实测下载成功（14.9MB mp4 含 Video+Audio）；verify.sh 全绿（67 项）。
