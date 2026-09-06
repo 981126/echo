@@ -40,6 +40,7 @@
         :item="it"
         :merge-mode="mergeMode"
         :selected="selected.has(it.key)"
+        :progress="cardProgress[it.key] || 0"
         :syncing-id="syncing"
         :syncing-post-id="syncingPost"
         :click="onCardClick"
@@ -175,7 +176,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { api, uploadVideo, uploadVideoFile, uploadCover, getToken } from '../api'
@@ -821,9 +822,39 @@ async function splitWork(w) {
   }
 }
 
-// R-077：同步数据后的“媒体补齐”提示与完成后自动刷新
+// R-080：卡片同步覆盖进度（透明蓝自下而上慢慢覆盖整卡）
+const cardProgress = reactive({})
+const cardProgressTimers = {}
+function stopCardProgress(key, done = true) {
+  clearInterval(cardProgressTimers[key])
+  delete cardProgressTimers[key]
+  if (done) {
+    cardProgress[key] = 100
+    setTimeout(() => { delete cardProgress[key] }, 520)
+  } else {
+    delete cardProgress[key]
+  }
+}
+function startCardProgress(key) {
+  stopCardProgress(key, false)
+  cardProgress[key] = 6
+  cardProgressTimers[key] = setInterval(() => {
+    const cur = cardProgress[key] ?? 0
+    cardProgress[key] = cur < 90 ? cur + Math.max(0.4, (90 - cur) * 0.05) : cur + 0.15
+  }, 160)
+}
+function creepCardProgress(key) {
+  // 媒体补齐在后台下载/转写：覆盖层缓慢推进到 ~98，任务结束再补满
+  clearInterval(cardProgressTimers[key])
+  delete cardProgressTimers[key]
+  cardProgressTimers[key] = setInterval(() => {
+    const cur = cardProgress[key] ?? 0
+    cardProgress[key] = cur < 98 ? cur + Math.max(0.15, (98 - cur) * 0.02) : 98
+  }, 600)
+}
+
 const mediaTimers = {}
-function pollMediaTask(taskId) {
+function pollMediaTask(taskId, key = '') {
   clearTimeout(mediaTimers[taskId])
   let tries = 0
   const tick = async () => {
@@ -832,6 +863,7 @@ function pollMediaTask(taskId) {
       const t = await api('/api/tasks/' + taskId)
       if (t && (t.status === 'done' || t.status === 'failed')) {
         delete mediaTimers[taskId]
+        stopCardProgress(key, t.status === 'done')
         if (t.status === 'done') message.success('视频补齐完成，已刷新')
         else message.warning('视频补齐失败：' + (t.error || '请查看通知') + '')
         await loadQuiet()
@@ -839,7 +871,7 @@ function pollMediaTask(taskId) {
         return
       }
     } catch (e) { /* 轮询抖动继续 */ }
-    if (tries < 240) mediaTimers[taskId] = setTimeout(tick, 5000)
+    if (tries < 360) mediaTimers[taskId] = setTimeout(tick, 3000)
   }
   tick()
 }
@@ -847,11 +879,40 @@ function applyMediaMsg(r, baseMsg) {
   const m = r && r.media
   if (!m) return baseMsg
   if (m.status === 'skip') return baseMsg + '（已有视频与转写，跳过下载/转写）'
-  if (m.status === 'started') {
-    if (m.task_id) pollMediaTask(m.task_id)
-    return baseMsg + '（缺视频/转写，已开始下载并自动转写）'
-  }
+  if (m.status === 'started') return baseMsg + '（缺视频/转写，已开始下载并自动转写）'
   return baseMsg
+}
+
+// R-077/R-080：单卡「同步」统一入口（数据同步 + 覆盖进度 + 媒体补齐轮询）
+async function runCardSync(it) {
+  const key = it.key
+  startCardProgress(key)
+  try {
+    let r
+    if (it.kind === 'local') {
+      syncing.value = key
+      r = await api(`/api/platform/videos/${it.id}/sync`, { method: 'POST' })
+    } else {
+      syncingPost.value = key
+      r = it.type === 'work'
+        ? await api(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
+        : await api(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
+    }
+    const m = r && r.media
+    if (m && m.status === 'started' && m.task_id) {
+      creepCardProgress(key)
+      pollMediaTask(m.task_id, key)
+    } else {
+      stopCardProgress(key)
+    }
+    return r
+  } catch (e) {
+    stopCardProgress(key, false)
+    throw e
+  } finally {
+    syncing.value = ''
+    syncingPost.value = ''
+  }
 }
 
 function syncMessage(r, fallback) {
@@ -867,32 +928,24 @@ function syncMessage(r, fallback) {
 
 async function syncCloudPost(it) {
   if (!it || !(it.cloudPosts || []).length) return
-  syncingPost.value = it.key
   try {
     // R-067：合并作品卡同步全部平台帖（不再只同步第一个平台），单平台帖走单条同步
-    const r = it.type === 'work'
-      ? await api(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
-      : await api(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
+    const r = await runCardSync(it)
     message.success(applyMediaMsg(r, syncMessage(r, '同步完成')))
     await loadWorks()
   } catch (e) {
     message.error(e.message)
-  } finally {
-    syncingPost.value = ''
   }
 }
 
 async function syncData(v) {
-  syncing.value = v.key
   try {
-    const r = await api(`/api/platform/videos/${v.id}/sync`, { method: 'POST' })
+    const r = await runCardSync(v)
     message.success(applyMediaMsg(r, syncMessage(r, '同步完成')))
     await loadQuiet()  // R-067：同步后刷新本地素材卡，避免“只提示没变化”
     await loadWorksQuiet()
   } catch (e) {
     message.error(e.message)
-  } finally {
-    syncing.value = ''
   }
 }
 
@@ -951,14 +1004,7 @@ async function doBatchSync() {
   let mediaStarted = 0
   for (const it of list) {
     try {
-      let r
-      if (it.kind === 'local') {
-        r = await api(`/api/platform/videos/${it.id}/sync`, { method: 'POST' })
-      } else if (it.type === 'work') {
-        r = await api(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
-      } else {
-        r = await api(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
-      }
+      const r = await runCardSync(it)
       ok += 1
       if (r && r.media && r.media.status === 'started') mediaStarted += 1
     } catch (e) {

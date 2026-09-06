@@ -1,5 +1,6 @@
 <template>
   <div class="card-tile" :class="{ picking: mergeMode }" @click="click(item)">
+    <div v-if="progress > 0" class="sync-cover" :style="{ height: progress + '%' }" />
     <div class="tile-cover" :class="{ has: item.cover_url }" @click.stop="click(item)">
       <n-checkbox v-if="mergeMode" class="pick-box" :checked="selected" @click.stop @update:checked="toggle(item)" />
       <img v-if="item.cover_url" :src="item.cover_url" alt="封面" />
@@ -62,6 +63,7 @@ defineProps({
   item: { type: Object, required: true },
   mergeMode: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
+  progress: { type: Number, default: 0 },
   syncingId: { type: String, default: "" },
   syncingPostId: { type: String, default: "" },
   click: { type: Function, required: true },
@@ -77,6 +79,25 @@ defineProps({
 
 <style scoped>
 .card-tile { display: flex; flex-direction: column; height: 100%; position: relative; }
+.sync-cover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: rgba(38, 132, 255, 0.16);
+  transition: height 0.16s linear;
+}
+.sync-cover::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(38, 132, 255, 0.65);
+}
 .card-tile.picking { cursor: pointer; }
 .tile-cover { position: relative; }
 .pick-box {
