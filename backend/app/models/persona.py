@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class PersonaTag(Base):
@@ -21,4 +22,4 @@ class PersonaTag(Base):
     source: Mapped[str] = mapped_column(String(20), default="ai")  # ai | manual
     status: Mapped[str] = mapped_column(String(20), default="suggested")  # suggested|confirmed|rejected
     version: Mapped[int] = mapped_column(Integer, default=1)  # 档案版本
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

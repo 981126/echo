@@ -9,6 +9,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class Draft(Base):
@@ -25,9 +26,9 @@ class Draft(Base):
     original_script: Mapped[str] = mapped_column(Text, default="")  # AI 原稿（改稿差异分析用）
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|used|archived
     version: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=_app_now, onupdate=_app_now
     )
 
     def shells_dict(self) -> dict:

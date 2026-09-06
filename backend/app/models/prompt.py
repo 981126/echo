@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class AiPrompt(Base):
@@ -20,4 +21,4 @@ class AiPrompt(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="enabled")  # enabled | candidate | archived
     note: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

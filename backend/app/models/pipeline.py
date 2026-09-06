@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class PipelineRun(Base):
@@ -19,7 +20,7 @@ class PipelineRun(Base):
     candidates_count: Mapped[int] = mapped_column(Integer, default=0)
     generated_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=_app_now, onupdate=_app_now
     )

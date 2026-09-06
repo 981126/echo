@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from ..core.timeutil import now as _app_now
 
 from sqlalchemy.orm import Session
 
@@ -210,14 +210,14 @@ def _finish_job(db: Session, job: SyncJob, message: str = "", stats: dict | None
     job.status = "failed" if failed else "done"
     job.message = (message or "")[:2000]
     job.stats = json.dumps(stats or {}, ensure_ascii=False)
-    job.finished_at = datetime.utcnow()
+    job.finished_at = _app_now()
     if job.account_id:
         acc = db.get(CreatorAccount, job.account_id)
         if acc:
             acc.sync_status = "failed" if failed else "done"
             acc.sync_message = (message or "")[:500]
             if not failed:
-                acc.last_sync_at = datetime.utcnow()
+                acc.last_sync_at = _app_now()
     db.commit()
 
 
@@ -361,7 +361,7 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
                 acc = s.get(CreatorAccount, acc_id)
                 if acc is not None:
                     acc.sync_status = "done"
-                    acc.last_sync_at = datetime.utcnow()
+                    acc.last_sync_at = _app_now()
                     s.commit()
                 return {"account_id": acc_id, "platform": plat, **st}
             except Exception as exc:  # noqa: BLE001 单平台失败不影响其它平台

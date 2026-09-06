@@ -259,6 +259,49 @@ def _fix_platform_timezone() -> None:
         session.close()
 
 
+def _fix_app_utc_columns() -> None:
+    """一次性迁移：历史用 datetime.utcnow 写入的应用时间列（通知/任务/素材/草稿…）是 UTC，
+    统一 +8h 迁移为北京时间。范围=ORM 中 default 为本应用 now 的 DateTime 列 + 手动赋值列。"""
+    from sqlalchemy import DateTime
+
+    from .models.kv import Kv
+
+    session = SessionLocal()
+    try:
+        row = session.get(Kv, "app_tz_migrated_v1")
+        if row is not None and row.value == "1":
+            return
+        targets: set[tuple[str, str]] = set()
+        for meta in Base.metadata.sorted_tables:
+            for col in meta.columns:
+                if not isinstance(col.type, DateTime):
+                    continue
+                d = col.default
+                # SQLAlchemy 会包装 default 函数（非同一对象），按模块/名字识别本应用 now
+                if d is not None:
+                    fn = getattr(d, "arg", None)
+                    if getattr(fn, "__module__", "") == "app.core.timeutil" and getattr(fn, "__name__", "") == "now":
+                        targets.add((meta.name, col.name))
+        # 手动赋值（无 default）的应用时间列
+        targets.update({("sync_jobs", "finished_at"), ("creator_accounts", "last_sync_at")})
+        with engine.begin() as conn:
+            for tname, cname in targets:
+                try:
+                    conn.exec_driver_sql(
+                        f"UPDATE {tname} SET {cname} = datetime({cname}, '+8 hours') "
+                        f"WHERE {cname} IS NOT NULL"
+                    )
+                except Exception:  # noqa: BLE001 单列迁移失败不阻断启动
+                    pass
+        if row is None:
+            session.add(Kv(key="app_tz_migrated_v1", value="1"))
+        else:
+            row.value = "1"
+        session.commit()
+    finally:
+        session.close()
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  确保模型已注册
 
@@ -270,6 +313,7 @@ def init_db() -> None:
     _migrate_account_avatars()
     _migrate_feedback_dims()
     _migrate_chat()
+    _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults
 

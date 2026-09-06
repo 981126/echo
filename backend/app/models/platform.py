@@ -15,6 +15,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class Creator(Base):
@@ -30,7 +31,7 @@ class Creator(Base):
     name: Mapped[str] = mapped_column(String(100), default="")
     note: Mapped[str] = mapped_column(Text, default="")  # 风格备注（对标风格卡也存这里，作者手写部分）
     is_current: Mapped[bool] = mapped_column(default=False, index=True)  # 仅 owner 可为当前
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
 
 class CreatorAccount(Base):
@@ -52,7 +53,7 @@ class CreatorAccount(Base):
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sync_status: Mapped[str] = mapped_column(String(20), default="idle")  # idle|running|done|failed
     sync_message: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
     @property
     def avatar(self) -> str | None:
@@ -86,7 +87,7 @@ class CreatorAccountSnapshot(Base):
     posts_total: Mapped[int] = mapped_column(Integer, default=0)
     following: Mapped[int] = mapped_column(Integer, default=0)
     raw: Mapped[str] = mapped_column(Text, default="{}")  # 原始 JSON（D-027 全存）
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
 
 class PlatformPost(Base):
@@ -115,9 +116,9 @@ class PlatformPost(Base):
     work_id: Mapped[int | None] = mapped_column(
         ForeignKey("works.id"), nullable=True, index=True
     )  # 跨平台同作品合并（M13+）
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=_app_now, onupdate=_app_now
     )
 
     @property
@@ -142,7 +143,7 @@ class PlatformPostStat(Base):
     comments: Mapped[int] = mapped_column(Integer, default=0)
     extra: Mapped[str] = mapped_column(Text, default="{}")  # 平台特有字段（投币/弹幕等）JSON
     source: Mapped[str] = mapped_column(String(20), default="tikhub")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
 
 class PlatformPostComment(Base):
@@ -155,7 +156,7 @@ class PlatformPostComment(Base):
     platform: Mapped[str] = mapped_column(String(20), default="")
     text: Mapped[str] = mapped_column(Text, default="")
     user_nick: Mapped[str] = mapped_column(String(100), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
 
 class SyncJob(Base):
@@ -172,6 +173,6 @@ class SyncJob(Base):
     status: Mapped[str] = mapped_column(String(20), default="running")  # running|done|failed
     message: Mapped[str] = mapped_column(Text, default="")
     stats: Mapped[str] = mapped_column(Text, default="{}")  # 计数 JSON
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class HotTopic(Base):
@@ -21,7 +22,7 @@ class HotTopic(Base):
     url: Mapped[str] = mapped_column(String(500), default="")
     raw: Mapped[str] = mapped_column(Text, default="{}")
     topic_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
 
 class TopicCandidate(Base):
@@ -35,7 +36,7 @@ class TopicCandidate(Base):
     score: Mapped[int] = mapped_column(Integer, default=0)
     reason: Mapped[str] = mapped_column(Text, default="")
     draft_id: Mapped[int | None] = mapped_column(ForeignKey("drafts.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
 
 class TopicIdea(Base):
@@ -53,4 +54,4 @@ class TopicIdea(Base):
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("creators.id"), nullable=True, index=True)
     snapshot_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
     used: Mapped[bool] = mapped_column(default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

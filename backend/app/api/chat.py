@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, get_db
+from ..core.timeutil import now as _app_now
 from ..models.chat import ChatConversation, ChatMessage
 from ..schemas.chat import (
     ChatIn,
@@ -137,7 +137,7 @@ def chat_stream(payload: ChatStreamIn):
             if conversation_id is not None:
                 conv = db.get(ChatConversation, conversation_id)
                 if conv:
-                    conv.updated_at = datetime.utcnow()
+                    conv.updated_at = _app_now()
                     db.commit()
 
             yield f"event: start\ndata: {json.dumps({'message_id': msg.id}, ensure_ascii=False)}\n\n"

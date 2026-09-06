@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from ...config import get_settings
+from ...core.timeutil import now as _app_now
 from .base import PostData, ProfileData  # noqa: E402,F401
 from .link_utils import parse_link, parse_post_id  # noqa: F401  re-export：保持旧导入路径
 
@@ -385,7 +386,7 @@ class TikHubClient:
         rnd = random.Random(_seed_id(user_id, platform))
         pool = _TITLE_POOL.get(platform, _TITLE_POOL["douyin"])
         out: list[PostData] = []
-        now = datetime.utcnow()
+        now = _app_now()
         limit = 60 if count <= 0 else min(count, 60)  # count<=0 = 全量（mock 取满样本）
         for i in range(limit):
             idx = (rnd.randint(0, 10**6) + i) % len(pool)

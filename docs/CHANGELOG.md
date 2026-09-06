@@ -394,3 +394,9 @@
 - 修复：real 模式优先走 TikHub 热搜（抖音热搜榜/B站热搜榜/小红书搜索联想词），无 key 退回公开接口
 - 顺手修复 .env 该行注释黏连（ECHO_HOT_SOURCE_MODE=real#... → 分行）
 - 实测一次抓取：抖音 51 + B站 50 + 小红书 60 = 161 条
+
+## [M48 / R-066] 2026-09-06 — 系统时间统一为北京时间
+- 原因：通知/任务/草稿等时间列用 datetime.utcnow 存 UTC，展示差 8 小时
+- 新增 core/timeutil（now/today/tz，默认 Asia/Shanghai，ECHO_TIMEZONE 可覆盖）；全部模型与写时间点改用统一 now
+- db.py 一次性迁移：历史 UTC 时间列 +8h → 北京时间（幂等，app_tz_migrated_v1，先于新写入执行）
+- 验证：通知 03:18 → 11:18（北京），与当前一致

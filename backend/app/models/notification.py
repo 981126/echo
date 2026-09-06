@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class Notification(Base):
@@ -20,4 +21,4 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(Text, default="")
     target: Mapped[str] = mapped_column(String(255), default="/home")  # 前端 hash 路径
     read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

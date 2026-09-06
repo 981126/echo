@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class MetricsSnapshot(Base):
@@ -23,7 +24,7 @@ class MetricsSnapshot(Base):
     comments: Mapped[int] = mapped_column(Integer, default=0)
     followers_gained: Mapped[int] = mapped_column(Integer, default=0)
     source: Mapped[str] = mapped_column(String(20), default="manual")  # manual|import|cookie
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
 
 class ReviewReport(Base):
@@ -33,4 +34,4 @@ class ReviewReport(Base):
     run_date: Mapped[str] = mapped_column(String(10), index=True)
     report_type: Mapped[str] = mapped_column(String(20), default="full")  # full|radar
     content: Mapped[str] = mapped_column(Text, default="{}")  # JSON
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

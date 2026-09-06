@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class DraftDiscussion(Base):
@@ -19,4 +20,4 @@ class DraftDiscussion(Base):
     actor: Mapped[str] = mapped_column(String(20))  # deepseek | kimi | system
     kind: Mapped[str] = mapped_column(String(20))  # draft | critique | revise
     content: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

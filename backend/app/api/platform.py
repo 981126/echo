@@ -143,10 +143,10 @@ def bind_video_links(video_id: int, payload: dict, db: Session = Depends(get_db)
     # 存在真实平台链接 => 已发布
     if bound:
         video.status = "published"
-        from datetime import datetime
+        from ..core.timeutil import now as _app_now
 
         if not video.published_at:
-            video.published_at = datetime.utcnow()
+            video.published_at = _app_now()
     db.commit()
     if errors and not bound:
         raise HTTPException(status_code=400, detail="；".join(errors))

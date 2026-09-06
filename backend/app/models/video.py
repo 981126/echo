@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class Video(Base):
@@ -29,7 +30,7 @@ class Video(Base):
     main_topics: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组 求职/面试/赚钱/知识/其他
     tags: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组（自定义标签）
     tags_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # AI 预打标签是否经作者确认
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
     @property
     def cover_url(self) -> str | None:
@@ -50,6 +51,6 @@ class Transcript(Base):
     transcript_text: Mapped[str] = mapped_column(Text, default="")  # ASR 转写稿
     corrected_text: Mapped[str] = mapped_column(Text, default="")  # AI 校对后（分析以此为准）
     asr_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|done|failed
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
     video: Mapped[Video] = relationship(back_populates="transcript")

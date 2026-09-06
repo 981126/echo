@@ -13,6 +13,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class Work(Base):
@@ -24,7 +25,7 @@ class Work(Base):
     )
     title: Mapped[str] = mapped_column(String(500), default="")
     cover_path: Mapped[str] = mapped_column(String(255), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=_app_now, onupdate=_app_now
     )

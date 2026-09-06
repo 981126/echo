@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
+from ..core.timeutil import now as _app_now
 
 
 class Feedback(Base):
@@ -22,4 +23,4 @@ class Feedback(Base):
     pace_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 内容节奏 1-5
     ending_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 结尾引导 1-5
     style_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 像不像作者 1-5
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

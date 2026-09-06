@@ -57,6 +57,7 @@ class Settings(BaseSettings):
 
     # 热点源
     hot_source_mode: str = "mock"  # mock | real
+    timezone: str = "Asia/Shanghai"  # 应用统一时区（通知/任务/各类时间戳），可用 ECHO_TIMEZONE 覆盖
 
     # 平台数据同步（M13，R-027/R-029）：TikHub 第三方聚合
     tikhub_api_key: str = ""
