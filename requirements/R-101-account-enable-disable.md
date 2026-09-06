@@ -19,3 +19,8 @@
 
 ## 原文（作者原话，未改动）
 > 博主管理 1.账号管理里面每个账户 添加一个启用禁用按钮，如果禁用了，不再自动同步，并且素材库，博主对标等等功能就不会再展示、或者对标这个账号些数据
+
+## 修复记录（M84）
+- R-101 首发后端漏实现 POST /api/creators/accounts/{id}/enabled（只有前端开关），页面点击启用/禁用报 Method Not Allowed。
+- 已补后端接口（设置 enabled 幂等、404 保护）+ 回归测试 tests/test_creators_accounts.py；docs/API.md 同步。
+

@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 90 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 91 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -938,6 +938,23 @@ Remove Account
 - `account_id`（path）integer，必填
 - `x-access-token`（header）string
 **返回 200**：application/json → object
+
+### POST /api/creators/accounts/{account_id}/enabled
+
+Set Account Enabled
+
+R-101：启用/禁用账号——禁用后不再自动同步，素材库/对标隐藏该账号数据。
+
+**参数**
+
+- `account_id`（path）integer，必填
+- `x-access-token`（header）string
+**请求体**（application/json，`AccountEnabledIn`）
+
+字段：
+  - `enabled` boolean（必填）
+
+**返回 200**：application/json → AccountOut
 
 ### POST /api/creators/accounts/{account_id}/avatar
 

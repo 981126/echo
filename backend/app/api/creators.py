@@ -177,6 +177,22 @@ def remove_account(account_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+class AccountEnabledIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/accounts/{account_id}/enabled", response_model=AccountOut)
+def set_account_enabled(account_id: int, payload: AccountEnabledIn, db: Session = Depends(get_db)):
+    """R-101：启用/禁用账号——禁用后不再自动同步，素材库/对标隐藏该账号数据。"""
+    a = db.get(CreatorAccount, account_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    a.enabled = payload.enabled
+    db.commit()
+    db.refresh(a)
+    return a
+
+
 @router.post("/accounts/{account_id}/avatar", response_model=dict)
 def upload_account_avatar(account_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """手动上传账号头像（jpg/png，存 covers/，之后自动同步不再覆盖）。"""
