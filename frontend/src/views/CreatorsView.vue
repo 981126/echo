@@ -20,16 +20,6 @@
         </span>
         <n-button size="small" secondary @click="load">刷新</n-button>
       </div>
-      <div v-if="summary.items && summary.items.length" class="row wrap" style="gap: 18px; margin-top: 12px; font-size: 13px">
-        <template v-for="it in summary.items" :key="it.creator.id">
-          <div>
-            <b>{{ it.creator.name }}</b>
-            <span class="muted">（{{ it.creator.kind === 'owner' ? '我' : '对标' }}）</span>
-            <span class="muted" style="margin-left: 8px">粉丝 {{ fmtNum(it.totals.followers) }}</span>
-            <span class="muted" style="margin-left: 8px">作品 {{ it.totals.posts }}</span>
-          </div>
-        </template>
-      </div>
     </div>
 
     <div v-if="loading" class="panel empty">加载中…</div>
@@ -182,7 +172,6 @@ const syncing = ref(false)
 const syncingOwner = ref(0)
 const syncingAcct = ref(0)
 const syncingPost = ref(0)
-const summary = ref({ items: [] })
 const activeJobs = ref({}) // R-070：creatorId -> 正在运行的同步任务进度
 let progressTimer = null
 
@@ -222,17 +211,15 @@ function parseExtra(text) {
 async function load() {
   loading.value = true
   try {
-    const [cs, cur, bud, sum] = await Promise.all([
+    const [cs, cur, bud] = await Promise.all([
       api('/api/creators'),
       api('/api/creators/current'),
-      api('/api/platform/budget'),
-      api('/api/platform/creator-summary')
+      api('/api/platform/budget')
     ])
     creators.value = cs
     current.value = cur
     budget.value = bud
     budgetLimit.value = bud.limit
-    summary.value = sum
     accountsBy.value = {}
     await Promise.all(creators.value.map(async (c) => {
       accountsBy.value[c.id] = await api(`/api/creators/${c.id}/accounts`)
