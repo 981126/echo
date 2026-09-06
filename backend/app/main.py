@@ -13,12 +13,14 @@ from .api import chat, creators, drafts, events, works, metrics, notifications, 
 from .config import get_settings
 from .db import init_db
 from .scheduler import setup_scheduler
+from .tasks import mark_interrupted_tasks_on_startup
 from .watcher import start_inbox_watcher
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    mark_interrupted_tasks_on_startup()  # R-089：重启后清理遗留 running 任务
     setup_scheduler()
     start_inbox_watcher()
     yield

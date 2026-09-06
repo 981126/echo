@@ -171,3 +171,16 @@ def _maybe_optimize_prompt(db, payload: dict) -> None:
         db.commit()
     except Exception:  # noqa: BLE001 自动优化失败不影响导入主流程
         db.rollback()
+
+
+def mark_interrupted_tasks_on_startup() -> int:
+    """服务重启时，把遗留的 pending/running 任务标记为失败（线程已随进程消失）。"""
+    db = SessionLocal()
+    try:
+        n = db.query(BackgroundTask).filter(BackgroundTask.status.in_(["pending", "running"])).update(
+            {"status": "failed", "error": "服务重启，任务中断", "note": "任务中断"}, synchronize_session=False
+        )
+        db.commit()
+        return int(n or 0)
+    finally:
+        db.close()
