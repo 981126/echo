@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { platformName } from '../lib/format'
@@ -76,6 +76,7 @@ const preparingId = ref(0)
 const rerunning = ref(false)
 const rerunPct = ref(0)
 const rerunNote = ref('')
+let pollAlive = false
 const analyzingKey = ref('')
 const rewritingKey = ref('')
 const analysisMap = ref({})
@@ -127,28 +128,52 @@ async function rerunAll() {
 }
 
 async function waitTask(taskId) {
+  pollAlive = true
   for (;;) {
     await new Promise(r => setTimeout(r, 2000))
+    if (!pollAlive) return
     let t
     try {
       t = await api('/api/tasks/' + taskId)
     } catch (e) {
-      message.error(e.message)
+      if (pollAlive) message.error(e.message)
+      rerunning.value = false
       return
     }
+    if (!pollAlive) return
     rerunPct.value = t.progress || 0
     rerunNote.value = t.note && t.note !== '完成' ? t.note : '进行中…'
     if (t.status === 'done') {
       rerunNote.value = ''
-      message.success('再次对标完成，Top3 已刷新')
-      await load()
+      rerunning.value = false
+      if (pollAlive) {
+        message.success('再次对标完成，Top3 已刷新')
+        await load()
+      }
       return
     }
     if (t.status === 'failed') {
       rerunNote.value = ''
-      message.error(t.error || '再次对标失败')
+      rerunning.value = false
+      if (pollAlive) message.error(t.error || '再次对标失败')
       return
     }
+  }
+}
+
+async function resumeRunning() {
+  // R-103：切页回来时若后台仍在“再次对标”，恢复进度显示与轮询
+  try {
+    const list = await api('/api/tasks?status=running&kind=benchmark_rerun&limit=5')
+    const task = (list || []).find(t => t.kind === 'benchmark_rerun')
+    if (task && !rerunning.value) {
+      rerunning.value = true
+      rerunPct.value = task.progress || 0
+      rerunNote.value = task.note && task.note !== '完成' ? task.note : '进行中…'
+      waitTask(task.id)
+    }
+  } catch (e) {
+    /* 恢复失败不打扰，任务完成仍会走通知 */
   }
 }
 
@@ -192,7 +217,13 @@ async function copyScript() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  resumeRunning()
+})
+onUnmounted(() => {
+  pollAlive = false
+})
 </script>
 
 <style scoped>

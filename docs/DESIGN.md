@@ -59,7 +59,7 @@
 - `review.py`：ABCD 复盘：A 报表（按视频/赛道/平台）、B 归因（启发式+LLM）、C 建议、D 赛道方向；`_radar` 赛道雷达（按互动率）。
 - `metrics.py`：`upsert_snapshot/import_snapshots/fetch_daily/series_for_video/_platform_breakdown/summary`；`apply_retention`（热点 30 天清理）。
 - `chat_service.py`：只读工具集 + 流式问答；工具：search_videos/get_video_detail/get_persona/list_requirements/get_metrics_summary/get_today_topics/get_review_report/get_radar/search_drafts/generate_draft（写操作需明确同意）。SSE 由 api/chat 组装。
-- `benchmark.py`：对标聚合（最新10条按互动分 Top3；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `ensure_top3_with_text`（缺文案自动下载转写、无文案顺延）+ `rerun_benchmarks`（R-102：逐个对标重捞最新10条 → 自动补 Top3 文案，供后台任务回调进度）。
+- `benchmark.py`：对标聚合（最新10条按互动分 Top3；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `ensure_top3_with_text`（缺文案自动下载转写、无文案顺延；有文案后 AI 识别广告/商单并落库排除，R-103）+ `rerun_benchmarks`（R-102：逐个对标重捞最新10条 → 自动补 Top3 文案，供后台任务回调进度）。
 - `platform_sync.py`：见 §4。
 - `works_service.py`：标题规范化（去话题/标点/空白/小写）+ 自动合并 + 手动合并/拆分 + `list_works`（合并作品含各平台）+ `post_item`（作品序列化）。
 - `creator_service.py`：当前博主/切换/账号元数据/全网粉丝汇总/删除保护。

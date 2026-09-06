@@ -135,6 +135,38 @@ def score_unit(db: Session, unit: dict, stats_map: dict[int, dict]) -> float:
     return score
 
 
+def _flag_unit_ad(db: Session, unit: dict) -> None:
+    """把作品单元（含跨平台成员）标为广告，落库后 candidates() 自动排除。"""
+    posts = unit.get("members") or [unit["post"]]
+    changed = False
+    for p in posts:
+        if not p.is_ad:
+            p.is_ad = True
+            changed = True
+    if changed:
+        db.commit()
+
+
+def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
+    """判断对标作品单元是否为广告/商单：已标记的直接命中；有转写文案则用 AI 预打标复用判断。
+
+    平台列表接口不带广告标记（抖音 raw commerce_info.is_ad 恒 false），只能靠文案内容判断；
+    LLM 不可用时宁可不排除（不误杀），转写文案之外的帖子无法判断。
+    """
+    posts = unit.get("members") or [unit["post"]]
+    if any(p.is_ad for p in posts):
+        return True
+    if not (text or "").strip():
+        return False
+    try:
+        from .persona import PersonaService
+
+        res = PersonaService().suggest_video_tags((text or "")[:3000])
+        return bool(res.get("is_ad", False))
+    except Exception:  # noqa: BLE001 LLM 不可用不误杀
+        return False
+
+
 def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 10) -> list[dict]:
     """最新 N 条按互动分排序，逐条补齐转写；取前 3 条“有文案”的。
 
@@ -157,6 +189,9 @@ def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 10) 
                 continue
             text = _unit_text(db, unit)
         if not text:
+            continue
+        if _unit_is_ad(db, unit, text):
+            _flag_unit_ad(db, unit)  # R-103：广告/商单不进对标，顺延下一条
             continue
         unit["text"] = text
         unit["score"] = score_unit(db, unit, stats_map)
