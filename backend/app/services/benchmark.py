@@ -44,6 +44,14 @@ def benchmarks_of_owner(db: Session, owner: Creator) -> list[Creator]:
     )
 
 
+def _norm_title(title: str) -> str:
+    """规范化标题：去 #话题、统一小写去空白，用于跨平台同款广告过滤（R-100）。"""
+    import re
+
+    t = re.sub(r"[#＃][^\s#＃，,。！？!?、]*", "", title or "")
+    return re.sub(r"[^\w\u4e00-\u9fa5]", "", t).lower()
+
+
 def candidates(db: Session, bm: Creator, limit: int = 10) -> list[dict]:
     """对标博主最新 limit 个“作品单元”（跨平台合并 work；未合并单帖）。"""
     acc_ids = [
@@ -51,13 +59,15 @@ def candidates(db: Session, bm: Creator, limit: int = 10) -> list[dict]:
     ]
     if not acc_ids:
         return []
-    posts = (
+    rows = (
         db.query(PlatformPost)
         .filter(PlatformPost.account_id.in_(acc_ids))
         .order_by(PlatformPost.publish_time.desc())
         .all()
     )
-    posts = [p for p in posts if not p.is_ad]  # R-099：广告素材不对标
+    # R-099/R-100：广告不对标；同款跨平台漏标(标题相同)也一并排除
+    ad_norms = {_norm_title(x.title) for x in rows if x.is_ad}
+    posts = [x for x in rows if not x.is_ad and _norm_title(x.title) not in ad_norms]
     # 按 work 聚合（work_id 相同的算同一作品）
     work_map: dict[int, list[PlatformPost]] = {}
     singles: list[PlatformPost] = []
@@ -164,6 +174,9 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
     comments = sum(int((stats_map.get(p.id) or {}).get("comments") or 0) for p in posts)
     plays = sum(int((stats_map.get(p.id) or {}).get("plays") or 0) for p in posts)
     post = unit["post"]
+    text = unit.get("text")
+    if text is None:
+        text = _unit_text(db, unit)  # R-100：首屏也把已有 ASR 转写文案带出来
     return {
         "key": f"w{unit['work_id']}" if unit.get("work_id") else f"p{post.id}",
         "work_id": unit.get("work_id"),
@@ -177,8 +190,8 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
         "comments": comments,
         "plays": plays,
         "score": likes * W_LIKE + fav * W_FAV + comments * W_COMMENT,
-        "has_text": bool(unit.get("text")),
-        "text": unit.get("text") or "",
+        "has_text": bool(text),
+        "text": text or "",
     }
 
 

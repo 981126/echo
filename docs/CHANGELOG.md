@@ -569,3 +569,6 @@
 
 ## [M81 / R-099] 2026-09-06 — 对标只取ASR文案 + 广告不对标
 - benchmark candidates 过滤 is_ad；_unit_text 只用 ASR 转写稿（去掉 desc/title 兜底）。
+
+## [M82 / R-100] 2026-09-06 — 对标文案/广告修复
+- GET/top 带出已有 ASR 文案；按规范化标题过滤同款跨平台广告（防漏标）。
