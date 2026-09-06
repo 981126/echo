@@ -114,6 +114,21 @@ def _migrate_feedback_dims() -> None:
             conn.exec_driver_sql(f"ALTER TABLE feedback ADD COLUMN {ddl}")
 
 
+def _migrate_sync_progress() -> None:
+    """R-070：sync_jobs 增加进度列（done/total/note），供博主页进度条轮询。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sync_jobs)").fetchall()}
+        adds = []
+        if "progress_total" not in cols:
+            adds.append("progress_total INTEGER NOT NULL DEFAULT 0")
+        if "progress_done" not in cols:
+            adds.append("progress_done INTEGER NOT NULL DEFAULT 0")
+        if "progress_note" not in cols:
+            adds.append("progress_note VARCHAR(255) NOT NULL DEFAULT ''")
+        for ddl in adds:
+            conn.exec_driver_sql(f"ALTER TABLE sync_jobs ADD COLUMN {ddl}")
+
+
 def _migrate_comment_likes() -> None:
     """R-067：platform_post_comments 增加评论点赞数列（按点赞 Top50 入库/展示）。"""
     with engine.begin() as conn:
@@ -322,6 +337,7 @@ def init_db() -> None:
     _migrate_feedback_dims()
     _migrate_chat()
     _migrate_comment_likes()
+    _migrate_sync_progress()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
     from .services.prompt_service import ensure_defaults

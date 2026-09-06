@@ -174,6 +174,9 @@ class SyncJob(Base):
     status: Mapped[str] = mapped_column(String(20), default="running")  # running|done|failed
     message: Mapped[str] = mapped_column(Text, default="")
     stats: Mapped[str] = mapped_column(Text, default="{}")  # 计数 JSON
+    progress_total: Mapped[int] = mapped_column(Integer, default=0)  # R-070 进度：总单位（作品数）
+    progress_done: Mapped[int] = mapped_column(Integer, default=0)  # R-070 进度：已完成单位
+    progress_note: Mapped[str] = mapped_column(String(255), default="")  # R-070 进度：当前阶段说明
     started_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

@@ -51,7 +51,9 @@
         @addAccount="openAccountModal"
         @addBenchmark="openBenchmarkModal"
         @remove="delCreator"
-      /><CreatorAccountRow
+      />
+      <SyncProgressBar v-if="jobFor(c)" :job="jobFor(c)" />
+      <CreatorAccountRow
         v-for="a in accountsOf(c)"
         :key="a.id"
         :account="a"
@@ -59,7 +61,7 @@
         :syncing-acct-id="syncingAcct"
         :show-freq="true"
         sync-label="同步"
-        @sync="a => runSync('daily', a.id)"
+        @sync="a => runSync('daily', a.id, c.id)"
         @posts="openPosts"
         @edit="a => openAccountModal(c, a)"
         @remove="delAccount"
@@ -75,7 +77,9 @@
         @edit="openOwnerModal"
         @addAccount="openAccountModal"
         @remove="delCreator"
-      /><CreatorAccountRow
+      />
+      <SyncProgressBar v-if="jobFor(bm)" :job="jobFor(bm)" />
+      <CreatorAccountRow
         v-for="a in accountsOf(bm)"
         :key="a.id"
         :account="a"
@@ -83,7 +87,7 @@
         :syncing-acct-id="syncingAcct"
         :show-freq="false"
         sync-label="每周同步"
-        @sync="a => runSync('weekly', a.id)"
+        @sync="a => runSync('weekly', a.id, bm.id)"
         @posts="openPosts"
         @edit="a => openAccountModal(bm, a)"
         @remove="delAccount"
@@ -161,9 +165,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, getToken } from '../api'
+import SyncProgressBar from '../components/SyncProgressBar.vue'
 import { fmtNum, platformName } from '../lib/format'
 
 const message = useMessage()
@@ -181,6 +186,8 @@ const syncingOwner = ref(0)
 const syncingAcct = ref(0)
 const syncingPost = ref(0)
 const summary = ref({ items: [] })
+const activeJobs = ref({}) // R-070：creatorId -> 正在运行的同步任务进度
+let progressTimer = null
 
 const owners = computed(() => creators.value.filter(c => c.kind === 'owner'))
 const ownerOptions = computed(() => owners.value.map(c => ({ label: c.name, value: c.id })))
@@ -238,6 +245,37 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function pollJobs() {
+  try {
+    const d = await api('/api/platform/jobs?limit=12')
+    const map = {}
+    // jobs 已按最新在前返回
+    for (const j of d.items || []) {
+      if (j.status === 'running' && j.creator_id && ['daily', 'initial', 'weekly'].includes(j.scope) && !(j.creator_id in map)) {
+        map[j.creator_id] = j
+      }
+    }
+    activeJobs.value = map
+    if (!Object.keys(map).length && progressTimer) {
+      clearInterval(progressTimer)
+      progressTimer = null
+    }
+  } catch (e) { /* 轮询失败不打断 */ }
+}
+function startProgressPoll() {
+  pollJobs()
+  if (!progressTimer) progressTimer = setInterval(pollJobs, 1000)
+}
+function stopProgressPoll() {
+  if (progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
+function jobFor(c) {
+  return activeJobs.value[c.id] || null
 }
 
 function openOwnerModal(c) {
@@ -406,6 +444,7 @@ async function startCreatorSync(c, scope) {
   try {
     await api('/api/platform/sync', { method: 'POST', body: JSON.stringify({ scope, creator_id: c.id }) })
     message.success('已开始同步「' + c.name + '」，完成后右上角通知')
+    startProgressPoll()
     load()
   } catch (e) {
     message.error(e.message)
@@ -414,12 +453,15 @@ async function startCreatorSync(c, scope) {
   }
 }
 
-async function runSync(scope, accountId) {
+async function runSync(scope, accountId, creatorId) {
   if (accountId) syncingAcct.value = accountId
   else syncing.value = true
   try {
-    await api('/api/platform/sync', { method: 'POST', body: JSON.stringify({ scope, account_id: accountId || null }) })
+    const body = { scope, account_id: accountId || null }
+    if (creatorId) body.creator_id = creatorId
+    await api('/api/platform/sync', { method: 'POST', body: JSON.stringify(body) })
     message.success('同步任务已开始，完成后右上角通知')
+    startProgressPoll()
     load()
   } catch (e) {
     message.error(e.message)
@@ -515,6 +557,7 @@ async function saveBudget() {
 }
 
 onMounted(load)
+onUnmounted(stopProgressPoll)
 </script>
 
 <style scoped>

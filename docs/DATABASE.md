@@ -446,6 +446,9 @@ AI 消息
 | `status` | VARCHAR(20) |  | 否 | running |  |
 | `message` | TEXT |  | 否 |  |  |
 | `stats` | TEXT |  | 否 | {} |  |
+| `progress_total` | INTEGER |  | 否 | 0 | 进度总单位（作品数，R-070） |
+| `progress_done` | INTEGER |  | 否 | 0 | 进度已完成单位（R-070） |
+| `progress_note` | VARCHAR(255) |  | 否 |  | 进度阶段说明（R-070） |
 | `started_at` | DATETIME |  | 否 | CallableColumnDefault(<function datetime.utcnow at 0x107e04a90>) |  |
 | `finished_at` | DATETIME |  | 是 |  |  |
 | `created_at` | DATETIME |  | 否 | CallableColumnDefault(<function datetime.utcnow at 0x107e04bf0>) |  |

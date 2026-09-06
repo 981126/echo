@@ -353,7 +353,7 @@ def _start_sync(payload: dict, scope: str = "daily"):
 
 @router.post("/sync", response_model=dict)
 def trigger_sync(payload: SyncRequest, db: Session = Depends(get_db)):
-    """手动同步：initial=首次全量；daily=top10；weekly=对标每周；可限定 account/creator。"""
+    """手动同步：initial=首次全量；daily=top20（R-070）；weekly=对标每周；可限定 account/creator。"""
     task_id = _start_sync(
         {
             "scope": payload.scope,
@@ -390,6 +390,11 @@ def list_jobs(limit: int = 30, db: Session = Depends(get_db)):
                 "status": r.status,
                 "message": r.message,
                 "stats": json.loads(r.stats or "{}"),
+                "creator_id": r.creator_id,
+                "account_id": r.account_id,
+                "progress_done": r.progress_done or 0,
+                "progress_total": r.progress_total or 0,
+                "progress_note": r.progress_note or "",
                 "started_at": r.started_at.isoformat() if r.started_at else None,
                 "finished_at": r.finished_at.isoformat() if r.finished_at else None,
             }

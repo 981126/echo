@@ -423,3 +423,10 @@
 - 修复：素材库「同步中」状态改按卡片唯一 key（w1/p1/v1…）判断，本地卡/云端卡统一；MaterialCard 与 VideosView 同步调整
 - 自测：前端 lint/build 通过，verify.sh 全绿
 
+## [M52 / R-070] 2026-09-06 — 同步前10条改前20条 + 前20条/全量同步加实时进度条
+- 同步范围：run_sync daily 默认 topN 10 → 20（博主页按钮文案、每日 07:30/18:00 自动同步、单账号同步统一生效）
+- 进度：sync_jobs 新增 progress_done/progress_total/progress_note（幂等迁移）；同步中按作品条数原子累加，note 实时显示“抖音：已同步 x/20 条 / B站：补全中 x/150”等
+- GET /api/platform/jobs 增加 creator_id/account_id/进度字段
+- 前端：博主管理页新增 SyncProgressBar，点「同步前20条」「全量同步」后 1 秒轮询，在对应博主卡片下显示实时进度；全量拉列表阶段（总数未知）显示流动动画“进行中”
+- 测试：新增同步进度记录测试（53 项）；verify.sh 全绿
+

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from ..core.timeutil import now as _app_now
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..core.pipeline import today_key
@@ -27,6 +28,28 @@ from .platform_assets import _cover_path_for, _ensure_account_avatar
 from .platform.budget import BudgetExceeded, _charge, get_budget, set_budget  # noqa: F401
 from .creator_service import get_current_creator
 from .platform.base import CommentData, DataSource, make_source
+
+_PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
+
+
+def _job_progress(db: Session, job_id: int | None, *, done: int = 0, total: int = 0, note: str | None = None) -> None:
+    """R-070：累加写同步任务进度（done/total 原子累加），进度更新失败不影响同步主体。"""
+    if not job_id:
+        return
+    try:
+        if note is None:
+            db.execute(
+                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t WHERE id = :id"),
+                {"d": max(0, int(done)), "t": max(0, int(total)), "id": job_id},
+            )
+        else:
+            db.execute(
+                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t, progress_note = :n WHERE id = :id"),
+                {"d": max(0, int(done)), "t": max(0, int(total)), "n": (note or "")[:200], "id": job_id},
+            )
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
 
 
 def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: DataSource) -> None:
@@ -299,22 +322,30 @@ def _finish_job(db: Session, job: SyncJob, message: str = "", stats: dict | None
     db.commit()
 
 
-def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", top_n: int = 10, with_comments: bool = False) -> dict:
-    """同步单个账号：主页快照 + 作品列表 + 指标；scope=initial 拉更多作品。"""
+def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", top_n: int = 20, with_comments: bool = False, job_id: int | None = None) -> dict:
+    """同步单个账号：主页快照 + 作品列表 + 指标；scope=initial 拉更多作品。
+
+    job_id（R-070）：传入 run_sync 的 SyncJob id 时，实时累加进度（作品数 + 阶段说明）。
+    """
     if not account.enabled:
         return {"account_id": account.id, "skipped": "disabled"}
     if not account.platform_user_id:
         raise ValueError(f"账号 {account.nickname or account.id} 未配置平台用户 ID（先解析主页链接）")
+    label = _PLATFORM_LABEL.get(account.platform, account.platform)
     client = make_source(account.platform)
     account.sync_status = "running"
     db.commit()
     stats: dict = {"posts": 0, "comments": 0}
+    _job_progress(db, job_id, note=f"{label}：拉取主页与作品列表…")
     _upsert_profile_snapshot(db, account, client)
     posts_data = client.fetch_user_posts(account.platform, account.platform_user_id, top_n, account=account)
     _charge(db)
+    if posts_data:
+        _job_progress(db, job_id, total=len(posts_data), note=f"{label}：拉取到 {len(posts_data)} 条作品")
     synced: list[PlatformPost] = []
     new_posts: list[PlatformPost] = []
-    for pd in posts_data:
+    total = len(posts_data)
+    for i, pd in enumerate(posts_data, start=1):
         if not pd.platform_post_id:
             continue
         existed = (
@@ -331,6 +362,7 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
             if existed is None:
                 new_posts.append(post)
             stats["posts"] += 1
+            _job_progress(db, job_id, done=1, note=f"{label}：已同步 {i}/{total} 条")
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001
@@ -339,15 +371,20 @@ def sync_account(db: Session, account: CreatorAccount, *, scope: str = "daily", 
         # 增量：评论只抓新增作品；无新增时刷新最新 3 条（省额度）
         targets = (new_posts or synced)[:10] if new_posts else synced[:3]
         if targets:
+            _job_progress(db, job_id, note=f"{label}：拉取评论…")
             stats["comments"] = _collect_comments(db, account, client, targets)
     if account.platform == "bilibili":
         # B站列表不含赞/藏/评，全量时逐条详情太重；这里每轮补全最多 BACKFILL 条
-        stats["backfilled"] = _backfill_bili_stats(db, account, client)
+        stats["backfilled"] = _backfill_bili_stats(db, account, client, job_id=job_id)
+    _job_progress(db, job_id, note=f"{label}：完成")
     return stats
 
 
-def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSource, limit: int = 150) -> int:
-    """B站：给“最新指标里 likes=0”的作品拉单条详情补全赞/藏/评（每轮限量，重复同步会补完）。"""
+def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSource, limit: int = 150, job_id: int | None = None) -> int:
+    """B站：给“最新指标里 likes=0”的作品拉单条详情补全赞/藏/评（每轮限量，重复同步会补完）。
+
+    job_id（R-070）：补全过程逐条累加进度。
+    """
     from ..models.platform import PlatformPostStat
 
     posts = (
@@ -369,12 +406,15 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
         if len(missing) >= limit:
             break
     done = 0
-    for post in missing:
+    total = len(missing)
+    _job_progress(db, job_id, total=total, note=f"B站：补全 {len(missing)} 条缺失指标…")
+    for i, post in enumerate(missing, start=1):
         try:
             stats = client.fetch_post_stats("bilibili", post.platform_post_id)
             _charge(db)
             _write_stat(db, post, stats)
             done += 1
+            _job_progress(db, job_id, done=1, note=f"B站：补全中 {i}/{total}")
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001
@@ -385,8 +425,8 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
 
 def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None, creator_id: int | None = None, top_n: int | None = None) -> dict:
     """手动/定时同步入口：
-    - scope=daily：当前主博主全部启用账号 top10 + 评论选题采集
-    - scope=initial：指定主博主（或当前）全部账号首次全量（主 50/对标 20）
+    - scope=daily：当前主博主全部启用账号 top20（R-070 由前10条改为前20条）+ 评论选题采集
+    - scope=initial：指定主博主（或当前）全部账号首次全量
     - scope=weekly：对标账号周同步
     """
     owner = None
@@ -415,9 +455,9 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
         job = _log_job(db, "initial" if scope == "initial" else "daily", scope, creator_id=owner.id)
 
     try:
-        per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 10)))
+        per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 20)))
         assert owner is not None
-        with_comments = True  # 前10条/每周/全量都会按新增作品把评论入库（本地查询）
+        with_comments = True  # 前20条/每周/全量都会按新增作品把评论入库（本地查询）
 
         def _limit_for(acc) -> int:
             if scope == "weekly":
@@ -435,7 +475,7 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
                 plat = acc.platform
                 acc.sync_status = "running"
                 s.commit()
-                st = sync_account(s, acc, scope=scope, top_n=_limit_for(acc), with_comments=with_comments)
+                st = sync_account(s, acc, scope=scope, top_n=_limit_for(acc), with_comments=with_comments, job_id=job.id)
                 acc = s.get(CreatorAccount, acc_id)
                 if acc is not None:
                     acc.sync_status = "done"

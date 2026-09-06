@@ -12,7 +12,7 @@
         <span class="muted fans" style="font-size: 12px">全网粉丝 {{ fmtNum(creator.followers_total) }}</span>
       </template>
       <span class="muted grow" style="font-size: 12px">{{ creator.note || (benchmark ? '' : '（无备注）') }}</span>
-      <n-button size="small" secondary :loading="syncingOwnerId === creator.id" @click="$emit('daily', creator)">同步前10条</n-button>
+      <n-button size="small" secondary :loading="syncingOwnerId === creator.id" @click="$emit('daily', creator)">同步前20条</n-button>
       <n-button size="small" secondary :disabled="syncingOwnerId === creator.id" @click="$emit('initial', creator)">全量同步</n-button>
       <n-button v-if="!benchmark && canSwitch" size="tiny" secondary @click="$emit('switch', creator)">切换到此博主</n-button>
       <n-button size="tiny" secondary @click="$emit('edit', creator)">编辑</n-button>
