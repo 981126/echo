@@ -171,8 +171,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
+import { useRoute, useRouter } from 'vue-router'
 import { api, uploadVideo, uploadVideoFile, uploadCover, getToken } from '../api'
 import MediaComments from '../components/MediaComments.vue'
 import UploadVideoBar from '../components/UploadVideoBar.vue'
@@ -194,6 +195,9 @@ import { platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 
 const message = useMessage()
 const dialog = useDialog()
+const route = useRoute()
+const router = useRouter()
+let dataReady = false  // 深链等数据就绪后再打开弹窗
 const videos = ref([])
 const filter = ref({ status: null })
 const adFilter = ref(null)
@@ -545,6 +549,7 @@ async function initLoad() {
   } finally {
     loading.value = false
     worksLoading.value = false
+    dataReady = true
   }
 }
 
@@ -912,19 +917,29 @@ function delCloud(it) {
   })
 }
 
-onMounted(async () => {
-  await initLoad()
-  const m = location.hash.match(/edit=(\d+)/)
-  const pm = location.hash.match(/post=(\d+)/)
-  if (m) {
-    const v = videos.value.find(x => x.id === Number(m[1]))
+// 深链处理：数据就绪后按 query 打开编辑/云端作品弹窗
+function handleDeepLink() {
+  if (!dataReady) return
+  const editId = String(route.query.edit || '')
+  const postId = String(route.query.post || '')
+  if (editId) {
+    const v = videos.value.find(x => x.id === Number(editId))
     if (v) openEdit(v)
-  } else if (pm) {
-    const pid = Number(pm[1])
+    router.replace({ path: '/videos' })  // 清掉 query，保证再次点同一素材也能触发
+  } else if (postId) {
+    const pid = Number(postId)
     const card = cards.value.find(c => c.kind === 'cloud' && (c.cloudPosts || []).some(x => x.id === pid))
     if (card) openCloud(card)
     else message.info('未在当前素材库找到该云端作品（可能属于对标博主）')
+    router.replace({ path: '/videos' })
   }
+}
+
+watch(() => [route.query.edit, route.query.post], handleDeepLink)
+
+onMounted(async () => {
+  await initLoad()
+  handleDeepLink()
 })
 </script>
 
