@@ -5,6 +5,7 @@
     <UploadVideoBar :uploading="uploading" @upload="doUpload" />
 
     <div class="toolbar">
+      <n-select v-model:value="creatorSel" :options="creatorOptions" placeholder="博主（默认当前主博主）" style="width: 210px" @update:value="onCreatorChange" />
       <n-select multiple filterable v-model:value="platformSel" :options="platformOptions" placeholder="平台（可多选/输入过滤）" clearable style="width: 210px" />
       <n-select v-model:value="filter.status" :options="statusOptions" placeholder="状态" clearable style="width: 120px" />
       <n-select v-model:value="videoFilter" :options="videoOptions" placeholder="视频" clearable style="width: 120px" />
@@ -211,6 +212,8 @@ const orig = ref(null)
 const syncing = ref(0)
 const works = ref([])
 const worksLoading = ref(false)
+const creatorSel = ref(0)  // 博主筛选：0=当前主博主（R-076）
+const creatorOptions = ref([])
 const cards = ref([])
 const searchText = ref('')
 const showCloud = ref(false)
@@ -232,7 +235,7 @@ const tagsText = ref('')
 async function load() {
   loading.value = true
   try {
-    videos.value = await fetchVideos()
+    videos.value = await fetchVideos(creatorSel.value)
     buildCards()
   } catch (e) {
     message.error(e.message)
@@ -243,7 +246,7 @@ async function load() {
 
 async function loadQuiet() {
   try {
-    videos.value = await fetchVideos()
+    videos.value = await fetchVideos(creatorSel.value)
     buildCards()
   } catch (e) {
     /* 静默：后台刷新失败不打断当前编辑 */
@@ -252,7 +255,7 @@ async function loadQuiet() {
 
 async function loadWorksQuiet() {
   try {
-    works.value = await fetchWorks()
+    works.value = await fetchWorks(creatorSel.value)
     buildCards()
   } catch (e) {
     /* 静默 */
@@ -540,7 +543,7 @@ async function initLoad() {
   loading.value = true
   worksLoading.value = true
   try {
-    const [vs, ws] = await Promise.all([fetchVideos(), fetchWorks()])
+    const [vs, ws] = await Promise.all([fetchVideos(creatorSel.value), fetchWorks(creatorSel.value)])
     videos.value = vs
     works.value = ws
     buildCards()
@@ -556,7 +559,7 @@ async function initLoad() {
 async function loadWorks() {
   worksLoading.value = true
   try {
-    works.value = await fetchWorks()
+    works.value = await fetchWorks(creatorSel.value)
     buildCards()
   } catch (e) {
     works.value = []
@@ -952,9 +955,39 @@ function handleDeepLink() {
   }
 }
 
+async function loadCreatorOptions() {
+  try {
+    const cs = await api('/api/creators')
+    const opts = (cs || []).map(c => ({
+      label: c.name + (c.kind === 'benchmark' ? '（对标）' : '') + (c.is_current ? '（当前主博主）' : ''),
+      value: c.is_current ? 0 : c.id,
+      current: !!c.is_current
+    }))
+    opts.sort((a, b) => Number(b.current) - Number(a.current))
+    creatorOptions.value = opts
+  } catch (e) {
+    /* 拉取失败不阻塞素材库 */
+  }
+}
+
+async function onCreatorChange() {
+  // 切换博主：清空筛选回到该博主全量
+  platformSel.value = []
+  tagSel.value = []
+  adFilter.value = null
+  filter.value = { status: null }
+  likesMin.value = null
+  likesMax.value = null
+  videoFilter.value = ''
+  searchText.value = ''
+  applyFilters()
+  await initLoad()
+}
+
 watch(() => [route.query.edit, route.query.post], handleDeepLink)
 
 onMounted(async () => {
+  await loadCreatorOptions()
   await initLoad()
   handleDeepLink()
 })

@@ -73,12 +73,14 @@ def list_videos(
     platform: str = "",
     status: str = "",
     main_topic: str = "",
+    creator_id: int = 0,
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
 ):
+    """素材列表（R-076）：creator_id>0 查指定博主；0 或不传=当前主博主。"""
     q = db.query(Video)
-    cid = current_creator_id(db)
+    cid = creator_id or current_creator_id(db)
     if cid:
         q = q.filter(Video.creator_id == cid)
     if platform:
