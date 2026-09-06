@@ -55,7 +55,10 @@ def _norm_title(title: str) -> str:
 def candidates(db: Session, bm: Creator, limit: int = 10) -> list[dict]:
     """对标博主最新 limit 个“作品单元”（跨平台合并 work；未合并单帖）。"""
     acc_ids = [
-        a.id for a in db.query(CreatorAccount).filter(CreatorAccount.creator_id == bm.id).all()
+        a.id
+        for a in db.query(CreatorAccount).filter(
+            CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True)  # R-101
+        ).all()
     ]
     if not acc_ids:
         return []

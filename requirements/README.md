@@ -106,3 +106,4 @@
 | R-098 | 2026-09-06 | 菜单改「博主管理」；非当前博主可一键设为/取消对标（kind 转换） | ✅ 已完成 | M80（已完成） | CreatorsView、creators API、R-097/D-028 |
 | R-099 | 2026-09-06 | 对标文案只用ASR转写稿 + 广告素材过滤不对标 | ✅ 已完成 | M81（已完成） | benchmark.service、R-097 |
 | R-100 | 2026-09-06 | 对标首屏带出已有ASR文案；同款跨平台广告漏标也过滤 | ✅ 已完成 | M82（已完成） | benchmark.service、R-097/099 |
+| R-101 | 2026-09-06 | 账号启用/禁用开关：禁停自动同步，素材库/对标隐藏该账号数据 | ✅ 已完成 | M83（已完成） | CreatorAccountRow、creators API、works/benchmark |

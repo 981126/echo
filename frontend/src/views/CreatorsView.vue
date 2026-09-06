@@ -59,6 +59,7 @@
         @edit="a => openAccountModal(c, a)"
         @remove="delAccount"
         @avatar="onAvatar"
+        @enable="toggleAccountEnabled"
       />
       <div v-for="bm in benchmarksOf(c)" :key="bm.id" class="bm-card">
         <CreatorHeaderRow
@@ -88,6 +89,7 @@
         @edit="a => openAccountModal(bm, a)"
         @remove="delAccount"
         @avatar="onAvatar"
+        @enable="toggleAccountEnabled"
       />
       </div>
     </div>
@@ -486,6 +488,16 @@ async function runSync(scope, accountId, creatorId) {
 }
 
 
+
+async function toggleAccountEnabled(a, on) {
+  try {
+    await api('/api/creators/accounts/' + a.id + '/enabled', { method: 'POST', body: JSON.stringify({ enabled: on }) })
+    message.success(on ? '已启用该账号' : '已禁用该账号（不再自动同步，素材库/对标不再展示）')
+    load()
+  } catch (e) {
+    message.error(e.message)
+  }
+}
 
 async function openPosts(acct) {
   currentAcct.value = acct

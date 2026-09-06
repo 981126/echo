@@ -1,5 +1,5 @@
 <template>
-  <div class="acct-row">
+  <div class="acct-row" :class="{ disabled: account.enabled === false }">
     <div class="row wrap" style="gap: 10px; align-items: center">
       <div class="av-wrap" @click="openFile">
         <img v-if="account.avatar" class="av" :src="account.avatar" alt="头像" />
@@ -20,6 +20,10 @@
         </div>
       </div>
       <div class="grow"></div>
+      <div class="row" style="gap: 6px; align-items: center">
+        <span class="muted mini">{{ account.enabled === false ? '已禁用' : '启用' }}</span>
+        <n-switch size="small" :value="account.enabled !== false" @update:value="v => $emit('enable', account, v)" />
+      </div>
       <n-button size="tiny" secondary :loading="syncingAcctId === account.id" @click="$emit('sync', account)">{{ syncLabel }}</n-button>
       <n-button size="tiny" secondary @click="$emit('posts', account)">作品</n-button>
       <n-button size="tiny" secondary @click="$emit('edit', account)">编辑</n-button>
@@ -37,7 +41,7 @@ const props = defineProps({
   syncingAcctId: { type: Number, default: -1 },
   syncLabel: { type: String, default: '同步' }
 })
-defineEmits(['sync', 'posts', 'edit', 'remove', 'avatar'])
+defineEmits(['sync', 'posts', 'edit', 'remove', 'avatar', 'enable'])
 
 const inputId = `av${props.benchmark ? 'b' : ''}-${props.account.id}`
 
@@ -49,6 +53,7 @@ function openFile() {
 
 <style scoped>
 .acct-row { margin-top: 8px; padding: 8px 10px; background: #f7f3ec; border-radius: 8px; }
+.acct-row.disabled { opacity: 0.55; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .wrap { flex-wrap: wrap; }
 .av { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex: none; }

@@ -193,7 +193,7 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
     """素材库云端作品列表：已合并作品在前（含各平台数据），未合并单条在后。"""
     q = db.query(PlatformPost)
     if creator_id:
-        acc_ids = [a.id for a in db.query(CreatorAccount).filter(CreatorAccount.creator_id == creator_id).all()]
+        acc_ids = [a.id for a in db.query(CreatorAccount).filter(CreatorAccount.creator_id == creator_id, CreatorAccount.enabled.is_(True)).all()]
         q = q.filter(PlatformPost.account_id.in_(acc_ids)) if acc_ids else q.filter(PlatformPost.id < 0)
     posts = q.order_by(PlatformPost.publish_time.desc().nullslast(), PlatformPost.id.desc()).all()
 
