@@ -63,7 +63,7 @@ const navs = [
   { to: '/benchmark', label: '博主对标' },
   { to: '/requirements', label: '需求管理' },
   { to: '/prompts', label: 'AI 提示词' },
-  { to: '/creators', label: '博主' }
+  { to: '/creators', label: '博主管理' }
 ]
 
 const themeOverrides = {

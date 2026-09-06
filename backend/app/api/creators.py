@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -215,3 +216,32 @@ def parse_account_link(payload: dict, db: Session = Depends(get_db)):
     if not uid:
         raise HTTPException(status_code=400, detail="未能从链接解析出账号 ID（请直接粘贴主页分享链接，或手动填写平台用户 ID）")
     return {"platform": platform, "platform_user_id": uid}
+
+
+class BenchmarkToggleIn(BaseModel):
+    on: bool
+
+
+@router.post("/{creator_id}/benchmark", response_model=dict)
+def toggle_benchmark(creator_id: int, payload: BenchmarkToggleIn, db: Session = Depends(get_db)):
+    """R-098：把某个博主标为当前主博主的对标（on），或恢复为独立主博主（off）。"""
+    target = db.get(Creator, creator_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="博主不存在")
+    owner_id = current_creator_id(db)
+    owner = db.get(Creator, owner_id) if owner_id else None
+    if owner is None:
+        raise HTTPException(status_code=400, detail="请先创建并切换到主博主")
+    if target.id == owner.id:
+        raise HTTPException(status_code=400, detail="当前主博主不能标为对标")
+    if payload.on:
+        target.kind = "benchmark"
+        target.parent_id = owner.id
+        target.is_current = False
+    else:
+        target.kind = "owner"
+        target.parent_id = None
+        target.is_current = False
+    db.commit()
+    db.refresh(target)
+    return {"ok": True, "id": target.id, "kind": target.kind, "parent_id": target.parent_id}

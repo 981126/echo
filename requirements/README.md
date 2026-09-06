@@ -103,3 +103,4 @@
 | R-095 | 2026-09-06 | 素材库点封面播放视频（/media/videos 静态挂载 + 播放弹窗），点卡片其它区域仍进编辑 | ✅ 已完成 | M77（已完成） | main.py、VideosView/MaterialCard |
 | R-096 | 2026-09-06 | 封面播放小图标 + 纯音频素材只显示音频进度轨（media-meta 探测） | ✅ 已完成 | M78（已完成） | VideosView/MaterialCard、api/videos |
 | R-097 | 2026-09-06 | 移除数据看板(前后端) + 博主对标页：最新10互动分Top3、AI可讲判断、按人设洗稿存草稿 | ✅ 已完成 | M79（已完成） | D-028、LLM、benchmark |
+| R-098 | 2026-09-06 | 菜单改「博主管理」；非当前博主可一键设为/取消对标（kind 转换） | ✅ 已完成 | M80（已完成） | CreatorsView、creators API、R-097/D-028 |

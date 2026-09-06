@@ -42,6 +42,10 @@
         @addBenchmark="openBenchmarkModal"
         @remove="delCreator"
       />
+      <div v-if="!c.is_current" class="row" style="justify-content: flex-end; gap: 8px; padding: 4px 0">
+        <span class="muted" style="font-size: 12px">对标博主</span>
+        <n-switch size="small" :value="false" @update:value="v => askBenchmark(c, v)" />
+      </div>
       <SyncProgressBar v-if="jobFor(c)" :job="jobFor(c)" />
       <CreatorAccountRow
         v-for="a in accountsOf(c)"
@@ -67,6 +71,10 @@
         @addAccount="openAccountModal"
         @remove="delCreator"
       />
+      <div class="row" style="justify-content: flex-end; gap: 8px; padding: 4px 0">
+        <span class="muted" style="font-size: 12px">恢复为独立主博主</span>
+        <n-switch size="small" :value="true" @update:value="v => askBenchmark(bm, v)" />
+      </div>
       <SyncProgressBar v-if="jobFor(bm)" :job="jobFor(bm)" />
       <CreatorAccountRow
         v-for="a in accountsOf(bm)"
@@ -292,6 +300,28 @@ async function saveCreator() {
   } catch (e) {
     message.error(e.message)
   }
+}
+
+function askBenchmark(c, on) {
+  const title = on ? '设为对标博主' : '恢复为独立主博主'
+  const content = on
+    ? `把「${c.name}」设为「${current.value && current.value.name || ''}」的对标博主？它的内容只做对标分析与洗稿参考，不进你当前主博主的人设学习语料；之后可随时恢复为独立主博主。`
+    : `把「${c.name}」恢复为独立主博主？它的数据会重新作为独立博主展示。`
+  dialog.warning({
+    title,
+    content,
+    positiveText: '确定',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await api('/api/creators/' + c.id + '/benchmark', { method: 'POST', body: JSON.stringify({ on }) })
+        message.success(on ? '已设为对标博主' : '已恢复为独立主博主')
+        load()
+      } catch (e) {
+        message.error(e.message)
+      }
+    }
+  })
 }
 
 function askSwitch(c) {
