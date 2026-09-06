@@ -427,9 +427,18 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
     return done
 
 
-def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None, creator_id: int | None = None, top_n: int | None = None) -> dict:
+def run_sync(
+    db: Session,
+    *,
+    scope: str = "daily",
+    account_id: int | None = None,
+    creator_id: int | None = None,
+    top_n: int | None = None,
+    with_media: bool = False,
+) -> dict:
     """手动/定时同步入口：
-    - scope=daily：当前主博主全部启用账号 top20（R-070 由前10条改为前20条）+ 评论选题采集
+    - scope=daily：当前主博主全部启用账号 top10（R-085 由前20条改回前10条）+ 评论选题采集；
+      with_media=True 时同步后对前 N 条做视频下载+自动转写（R-085）
     - scope=initial：指定主博主（或当前）全部账号首次全量
     - scope=weekly：对标账号周同步
     """
@@ -459,7 +468,7 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
         job = _log_job(db, "initial" if scope == "initial" else "daily", scope, creator_id=owner.id)
 
     try:
-        per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 20)))
+        per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 10)))
         assert owner is not None
         with_comments = True  # 前20条/每周/全量都会按新增作品把评论入库（本地查询）
 
@@ -516,11 +525,46 @@ def run_sync(db: Session, *, scope: str = "daily", account_id: int | None = None
             auto_merge_creator(db, owner.id)
         except Exception:  # noqa: BLE001 合并失败不影响同步主体
             db.rollback()
+        # R-085：daily（手动前10/每日自动）同步后，对前 N 条作品做视频下载+自动转写
+        media = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0}
+        if with_media and scope == "daily":
+            from .media_ensure import platform_media_task  # 延迟导入避免循环
+
+            try:
+                for acc in accounts:
+                    q = db.query(PlatformPost).filter(PlatformPost.account_id == acc.id)
+                    limit_n = max(1, _limit_for(acc))
+                    posts = q.order_by(PlatformPost.publish_time.desc()).limit(limit_n).all()
+                    for post in posts:
+                        try:
+                            res = platform_media_task(db, {"post_id": post.id})
+                            if res.get("status") == "done":
+                                if res.get("downloaded"):
+                                    media["downloaded"] += 1
+                                if res.get("transcribed"):
+                                    media["transcribed"] += 1
+                            else:
+                                media["skipped"] += 1
+                        except BudgetExceeded:
+                            media["errors"] += 1
+                            raise
+                        except Exception:  # noqa: BLE001 单条失败不影响其它条
+                            db.rollback()
+                            media["errors"] += 1
+            except BudgetExceeded:
+                pass  # 预算不足：数据同步已完成，停止媒体补齐并在通知中体现
         msg = f"同步 {len(results)} 个账号，更新作品 {total_posts}，采集评论 {total_comments}"
+        if with_media and scope == "daily" and (media["downloaded"] or media["transcribed"] or media["errors"] or media["skipped"]):
+            msg += f"；下载视频 {media['downloaded']}，转写 {media['transcribed']}"
+            if media["errors"]:
+                msg += f"，媒体失败/跳过 {media['errors'] + media['skipped']}"
         fails = [f"{r.get('platform')}({str(r.get('error'))[:60]})" for r in results if r.get("error")]
         if fails:
             msg += "；失败账号：" + "、".join(fails) + "（可单独重试该账号）"
-        _finish_job(db, job, msg, {"accounts": results, "posts": total_posts, "comments": total_comments, "failed": len(fails)})
+        payload = {"accounts": results, "posts": total_posts, "comments": total_comments, "failed": len(fails)}
+        if with_media and scope == "daily":
+            payload["media"] = media
+        _finish_job(db, job, msg, payload)
         return {"job_id": job.id, "message": msg, "accounts": results}
     except BudgetExceeded as exc:
         _finish_job(db, job, str(exc), failed=True)

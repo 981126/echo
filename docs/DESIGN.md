@@ -99,8 +99,8 @@
 - 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；`GET /api/platform/jobs` 输出进度供前端轮询。
 
 ### 编排（run_sync）
-- 入口：手动（博主页 前20条/全量/每周/单账号）、定时（07:30/18:00）、单条（posts/videos/works 同步）。
-- `scope=daily`：每平台 top20（R-070）；`weekly`：对标每账号 top3；`initial`：`count<=0 → _real_posts_all` 翻页全量。
+- 入口：手动（博主页 全量/前10条/每周/单账号）、定时（07:30/18:00，daily 带视频下载转写 R-085）、单条（posts/videos/works 同步）。
+- `scope=daily`：每平台 top10（R-085 由前20改回前10）；`weekly`：对标每账号 top3；`initial`：`count<=0 → _real_posts_all` 翻页全量。daily 且 with_media=True 时同步后对前 N 条跑媒体补齐（下载视频+自动转写）。
 - 并发：`ThreadPoolExecutor(max_workers=3)` 每账号独立 SQLAlchemy session（account 级隔离，单平台失败不拖垮其它）。
 - 结束：`auto_merge_creator` 合并同标题跨平台帖 → `works`；写 SyncJob stats/message + 账号 sync_status；通知中心收到完成。
 - 本地素材卡片同步 `sync_local_video_metrics`：遍历 `_bound_platform_posts`（local_video_id + work_id + platform_post_id 三路去重）拉各平台指标 + 评论 Top50，并写 `metrics_snapshots`（当天多平台聚合）；单平台失败不中断，全部失败才报错。

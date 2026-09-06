@@ -682,3 +682,18 @@ def test_import_video_task_auto_confirms_tags(db, monkeypatch):
     assert v.tags_confirmed is True
     assert "产品" in (v.tags or "")
     assert "求职" in (v.main_topics or "")
+
+
+# ---------- R-085：daily 默认前10条；with_media 同步后做视频补齐（mock 无源不落盘） ----------
+
+def test_run_sync_daily_with_media_mock_leaves_no_video(db):
+    from app.models.video import Video
+    from app.services.platform_sync import run_sync
+
+    owner, _ = _seed_owner(db)
+    res = run_sync(db, scope="daily", top_n=2, with_media=True)
+    assert res["job_id"]
+    job = db.query(SyncJob).filter(SyncJob.id == res["job_id"]).first()
+    assert job.status == "done"
+    # mock 模式无真实视频源：不产生本地视频行（失败被隔离）
+    assert db.query(Video).count() == 0

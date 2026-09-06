@@ -113,8 +113,8 @@
       @save="saveAccount"
     />
 
-    <!-- 云端作品 -->
-    <n-modal v-model:show="showPosts" preset="card" :title="'云端作品 · ' + (currentAcct ? platformName(currentAcct.platform) + ' ' + (currentAcct.nickname || '') : '')" style="width: min(960px, 96vw)">
+    <!-- 作品 -->
+    <n-modal v-model:show="showPosts" preset="card" :title="'作品 · ' + (currentAcct ? platformName(currentAcct.platform) + ' ' + (currentAcct.nickname || '') : '')" style="width: min(960px, 96vw)">
       <div style="max-height: 70vh; overflow-y: auto">
         <div v-if="postsLoading" class="panel empty">加载中…</div>
         <div v-else-if="!posts.items.length" class="panel empty">暂无作品，先点“同步”拉取</div>
@@ -394,7 +394,7 @@ async function saveAccount() {
 function delAccount(a) {
   dialog.warning({
     title: '删除账号',
-    content: '删除该平台账号配置？（云端作品会一并删除）',
+    content: '删除该平台账号配置？（作品会一并删除）',
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {

@@ -352,6 +352,7 @@ def _start_sync(payload: dict, scope: str = "daily"):
             account_id=pl.get("account_id"),
             creator_id=pl.get("creator_id"),
             top_n=pl.get("top_n"),
+            with_media=(pl.get("scope", scope) == "daily"),  # R-085：前10条同步带视频下载+转写
         )
 
     return start_task("platform_sync", payload, fn)

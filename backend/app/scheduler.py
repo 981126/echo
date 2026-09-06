@@ -41,7 +41,7 @@ def _platform_sync_job() -> None:
     from .services.platform_sync import run_sync
 
     def fn(db, payload):
-        return run_sync(db, scope="daily")
+        return run_sync(db, scope="daily", with_media=True)  # R-085：自动每日同步带视频下载+转写
 
     try:
         start_task("platform_sync", {"scope": "daily", "source": "scheduler"}, fn)

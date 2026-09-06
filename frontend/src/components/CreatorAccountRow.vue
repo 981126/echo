@@ -21,7 +21,7 @@
       </div>
       <div class="grow"></div>
       <n-button size="tiny" secondary :loading="syncingAcctId === account.id" @click="$emit('sync', account)">{{ syncLabel }}</n-button>
-      <n-button size="tiny" secondary @click="$emit('posts', account)">云端作品</n-button>
+      <n-button size="tiny" secondary @click="$emit('posts', account)">作品</n-button>
       <n-button size="tiny" secondary @click="$emit('edit', account)">编辑</n-button>
       <n-button size="tiny" quaternary type="error" @click="$emit('remove', account)">删除</n-button>
     </div>
