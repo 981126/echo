@@ -1,7 +1,7 @@
 <template>
-  <div class="card-tile" :class="{ picking: mergeMode && item.kind === 'cloud' }" @click="click(item)">
+  <div class="card-tile" :class="{ picking: mergeMode }" @click="click(item)">
     <div class="tile-cover" :class="{ has: item.cover_url }" @click.stop="click(item)">
-      <n-checkbox v-if="mergeMode && item.kind === 'cloud'" class="pick-box" :checked="selected" @click.stop @update:checked="toggle(item)" />
+      <n-checkbox v-if="mergeMode" class="pick-box" :checked="selected" @click.stop @update:checked="toggle(item)" />
       <img v-if="item.cover_url" :src="item.cover_url" alt="封面" />
       <span v-else>ECHO</span>
     </div>
@@ -30,7 +30,7 @@
       </p>
       <div class="row-actions" @click.stop>
         <n-tag v-if="item.platform_post_id" size="tiny" type="success" :bordered="false" round>已绑定作品</n-tag>
-        <n-button v-if="item.platform_post_id" size="tiny" secondary :loading="syncingId === item.key" @click="syncLocal(item)">同步数据</n-button>
+        <n-button v-if="item.platform_post_id" size="tiny" secondary :loading="syncingId === item.key" @click="syncLocal(item)">同步</n-button>
         <n-button v-if="!item.tags_confirmed" size="tiny" secondary @click="confirm(item)">确认标签</n-button>
         <n-button size="tiny" quaternary type="error" @click="delLocal(item)">删除</n-button>
       </div>
@@ -46,7 +46,7 @@
       <PlatformStats :posts="item.cloudPosts || []" />
       <p v-if="item.pub" class="tile-meta">发布时间 {{ item.pub }}</p>
       <div class="row-actions" @click.stop>
-        <n-button size="tiny" secondary :loading="syncingPostId === item.key" @click="syncPost(item)">同步数据</n-button>
+        <n-button size="tiny" secondary :loading="syncingPostId === item.key" @click="syncPost(item)">同步</n-button>
         <n-button v-if="item.merged >= 2" size="tiny" quaternary type="warning" @click="split(item)">拆分</n-button>
         <n-button size="tiny" quaternary type="error" @click="delCloud(item)">删除</n-button>
       </div>

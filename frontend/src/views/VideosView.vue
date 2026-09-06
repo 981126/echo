@@ -21,10 +21,13 @@
 
 
     <div class="merge-float">
-      <n-button v-if="!mergeMode" size="small" type="primary" secondary @click="mergeMode = true">合并</n-button>
+      <n-button v-if="!mergeMode" size="small" type="primary" secondary @click="mergeMode = true">多选</n-button>
       <template v-else>
-        <n-button size="small" type="primary" :disabled="selected.size < 2" @click="doMergeCloud">合并所选（{{ selected.size }}）</n-button>
-        <n-button size="small" secondary @click="cancelMerge">取消</n-button>
+        <span class="muted tl-hint">已选 {{ selected.size }} 项</span>
+        <n-button size="small" type="primary" :disabled="batchBusy || cloudCount < 2" :loading="batchBusy && batchAction === 'merge'" @click="doMergeCloud">合并所选</n-button>
+        <n-button size="small" secondary :disabled="batchBusy || !selected.size" :loading="batchBusy && batchAction === 'sync'" @click="doBatchSync">同步所选</n-button>
+        <n-button size="small" type="error" secondary :disabled="batchBusy || !selected.size" :loading="batchBusy && batchAction === 'delete'" @click="doBatchDelete">删除所选</n-button>
+        <n-button size="small" secondary :disabled="batchBusy" @click="cancelMerge">取消</n-button>
       </template>
     </div>
 
@@ -229,6 +232,8 @@ const mergeMode = ref(false)
 const selected = ref(new Set())
 const syncingPost = ref(0)
 const autoMerging = ref(false)
+const batchBusy = ref(false)
+const batchAction = ref('')
 const showEdit = ref(false)
 const tagsText = ref('')
 
@@ -693,7 +698,7 @@ function openItem(it) {
 }
 
 function onCardClick(it) {
-  if (mergeMode.value && it.kind === 'cloud') toggleSel(it)
+  if (mergeMode.value) toggleSel(it)
   else openItem(it)
 }
 
@@ -797,6 +802,9 @@ function toggleSel(w) {
   else next.add(key)
   selected.value = next
 }
+
+const selectedCards = computed(() => cards.value.filter(c => selected.value.has(c.key)))
+const cloudCount = computed(() => selectedCards.value.filter(c => c.kind === 'cloud').length)
 
 function cancelMerge() {
   mergeMode.value = false
@@ -910,26 +918,103 @@ async function autoMergeAll() {
 }
 
 async function doMergeCloud() {
-  const keys = [...selected.value]
+  const clouds = selectedCards.value.filter(c => c.kind === 'cloud')
   const ids = []
-  cards.value.forEach(c => {
-    if (c.kind === 'cloud' && keys.includes(c.key)) {
-      (c.cloudPosts || []).forEach(x => ids.push(x.id))
-    }
-  })
+  clouds.forEach(c => (c.cloudPosts || []).forEach(x => ids.push(x.id)))
   const uniq = [...new Set(ids)]
   if (uniq.length < 2) {
     message.warning('请选择至少 2 个云端素材')
     return
   }
+  batchBusy.value = true
+  batchAction.value = 'merge'
   try {
     await api('/api/works/merge', { method: 'POST', body: JSON.stringify({ platform_post_ids: uniq }) })
-    message.success('已合并为同一作品')
+    message.success(`已合并 ${uniq.length} 条为同一作品`)
     cancelMerge()
     await loadWorks()
   } catch (e) {
     message.error(e.message)
+  } finally {
+    batchBusy.value = false
+    batchAction.value = ''
   }
+}
+
+async function doBatchSync() {
+  const list = selectedCards.value
+  if (!list.length) return
+  batchBusy.value = true
+  batchAction.value = 'sync'
+  let ok = 0
+  const fails = []
+  let mediaStarted = 0
+  for (const it of list) {
+    try {
+      let r
+      if (it.kind === 'local') {
+        r = await api(`/api/platform/videos/${it.id}/sync`, { method: 'POST' })
+      } else if (it.type === 'work') {
+        r = await api(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
+      } else {
+        r = await api(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
+      }
+      ok += 1
+      if (r && r.media && r.media.status === 'started') mediaStarted += 1
+    } catch (e) {
+      fails.push((it.title || it.filename || '素材') + '：' + (e.message || '同步失败'))
+    }
+  }
+  batchBusy.value = false
+  batchAction.value = ''
+  let msg = `已同步 ${ok} 张` + (fails.length ? `，失败 ${fails.length} 张` : '')
+  if (mediaStarted) msg += `；其中 ${mediaStarted} 张开始下载/转写（完成后右上角提醒）`
+  message[ok && !fails.length ? 'success' : 'warning'](msg)
+  cancelMerge()
+  await loadQuiet()
+  await loadWorksQuiet()
+  if (fails.length) fails.slice(0, 3).forEach(f => message.error(f))
+}
+
+async function doBatchDelete() {
+  const list = selectedCards.value
+  if (!list.length) return
+  const locals = list.filter(c => c.kind === 'local')
+  const clouds = list.filter(c => c.kind === 'cloud')
+  const cloudNote = clouds.some(c => c.type === 'work') ? '，云端合并作品会连同其全部平台记录删除' : ''
+  dialog.warning({
+    title: '删除所选素材',
+    content: `确定删除选中的 ${list.length} 个素材？本地 ${locals.length} 个会连同本地文件删除；云端 ${clouds.length} 个${cloudNote}。不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      batchBusy.value = true
+      batchAction.value = 'delete'
+      let ok = 0
+      const fails = []
+      for (const it of list) {
+        try {
+          if (it.kind === 'local') {
+            await api(`/api/videos/${it.id}`, { method: 'DELETE' })
+          } else {
+            const kind = it.type === 'work' ? 'work' : 'post'
+            await api(`/api/works/${it.id}?kind=${kind}`, { method: 'DELETE' })
+          }
+          ok += 1
+        } catch (e) {
+          fails.push((it.title || it.filename || '素材') + '：' + (e.message || '删除失败'))
+        }
+      }
+      batchBusy.value = false
+      batchAction.value = ''
+      const msg = `已删除 ${ok} 个` + (fails.length ? `，失败 ${fails.length} 个` : '')
+      message[ok && !fails.length ? 'success' : 'warning'](msg)
+      cancelMerge()
+      await load()
+      await loadWorks()
+      if (fails.length) fails.slice(0, 3).forEach(f => message.error(f))
+    }
+  })
 }
 
 function delLocal(it) {

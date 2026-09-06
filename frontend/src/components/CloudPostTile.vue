@@ -19,7 +19,7 @@
       <n-tag v-if="post.local_video_id" size="tiny" type="success" :bordered="false">已转素材</n-tag>
     </div>
     <div class="row" style="gap: 6px; margin-top: 8px">
-      <n-button size="tiny" secondary :loading="syncingPostId === post.id" @click="$emit('sync', post)">同步数据</n-button>
+      <n-button size="tiny" secondary :loading="syncingPostId === post.id" @click="$emit('sync', post)">同步</n-button>
       <n-button v-if="!post.local_video_id" size="tiny" secondary @click="$emit('toMaterial', post)">转素材</n-button>
       <n-button v-else size="tiny" secondary @click="$emit('openMaterial', post.local_video_id)">打开素材</n-button>
     </div>
