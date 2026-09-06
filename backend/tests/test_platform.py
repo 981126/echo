@@ -386,3 +386,182 @@ def test_daily_candidates_compose_three_slots(db, monkeypatch):
     # 热榜槽：命中“应届生/校招”的求职热榜，而不是无关游戏热榜
     assert "应届生" in by["hot"]["title"] or "秋招" in by["hot"]["title"]
     assert by["ai"]["title"].startswith("面试被问职业规划")
+
+
+# ---------- R-077：同步数据后媒体补齐（缺视频下载 / 缺转写自动转写） ----------
+
+def _mk_video_file(db, name="已有素材.mp4"):
+    from app.config import get_settings
+    from app.models.video import Video
+
+    settings = get_settings()
+    settings.videos_dir.mkdir(parents=True, exist_ok=True)
+    (settings.videos_dir / name).write_bytes(b"fake-video")
+    v = Video(filename=name, title="已有", creator_id=1)
+    db.add(v)
+    db.commit()
+    return v
+
+
+def test_media_ensure_skip_when_file_and_transcript(db):
+    from app.models.video import Transcript
+    from app.services import media_ensure as me
+
+    v = _mk_video_file(db)
+    v.transcript = Transcript(transcript_text="转写好了", corrected_text="转写好了", asr_status="done")
+    db.commit()
+    info = me.inspect_media(db, video_id=v.id)
+    assert info["action"] == "skip"
+    res = me.submit_media_task(db, video_id=v.id)
+    assert res["status"] == "skip"
+
+
+def test_media_ensure_file_without_transcript_submits_transcribe(db):
+    from app.services import media_ensure as me
+
+    v = _mk_video_file(db)
+    info = me.inspect_media(db, video_id=v.id)
+    assert info["action"] == "transcribe"
+    res = me.submit_media_task(db, video_id=v.id)
+    assert res["status"] == "started"
+    assert res["action"] == "transcribe"
+    assert res["task_id"] > 0
+
+
+def test_platform_media_task_downloads_then_transcribes_cloud_post(db, monkeypatch):
+    from app.config import get_settings
+    from app.models.video import Video
+    from app.services import media_ensure as me
+
+    owner, acc = _seed_owner(db)
+    p = _post(db, acc.id, "douyin", "dy-r077-1", "媒体补齐测试")
+    db.commit()
+
+    def fake_pick(_db, posts):
+        settings = get_settings()
+        settings.videos_dir.mkdir(parents=True, exist_ok=True)
+        dest = settings.videos_dir / "R077_媒体补齐测试_视频.mp4"
+        dest.write_bytes(b"fake-download")
+        return dest.name, posts[0]
+
+    monkeypatch.setattr(me, "_download_pick", fake_pick)
+    res = me.platform_media_task(db, {"post_id": p.id})
+    assert res["status"] == "done"
+    assert res["downloaded"] is True
+    assert res["transcribed"] is True
+    v = db.query(Video).first()
+    assert v is not None
+    assert v.filename == "R077_媒体补齐测试_视频.mp4"
+    db.refresh(p)
+    assert p.local_video_id == v.id
+    assert v.transcript is not None
+    assert v.transcript.transcript_text and v.transcript.asr_status == "done"
+
+
+def test_platform_media_task_no_source_leaves_no_video(db):
+    from app.models.video import Video
+    from app.services import media_ensure as me
+    from app.services.media_downloader import MediaDownloadError
+
+    owner, acc = _seed_owner(db)
+    p = _post(db, acc.id, "douyin", "dy-r077-none", "无视频源")
+    db.commit()
+    with pytest.raises(MediaDownloadError):
+        me.platform_media_task(db, {"post_id": p.id})
+    assert db.query(Video).count() == 0  # 下载失败不留占位死行
+
+
+# ---------- R-077：TikHub real 视频源解析（离线 monkeypatch _get） ----------
+
+def test_fetch_video_source_douyin_prefers_low_bitrate(monkeypatch):
+    from app.services.platform.tikhub import TikHubClient
+
+    client = TikHubClient(mode="real", api_key="k", base_url="http://x")
+    data = {
+        "data": {
+            "aweme_detail": {
+                "video": {
+                    "play_addr": {"url_list": ["https://default/play.mp4"]},
+                    "bit_rate": [
+                        {"bit_rate": 2000000, "play_addr": {"url_list": ["https://high/1.mp4"]}},
+                        {"bit_rate": 500000, "play_addr": {"url_list": ["https://low/1.mp4"]}},
+                    ],
+                }
+            }
+        }
+    }
+    monkeypatch.setattr(client, "_get", lambda path, params=None: data)
+    src = client.fetch_video_source("douyin", "123")
+    assert src is not None and src["kind"] == "mp4"
+    assert src["urls"][0] == "https://low/1.mp4"  # 低清优先
+    assert "https://default/play.mp4" in src["urls"]
+
+
+def test_fetch_video_source_xhs_picks_h264_master_url(monkeypatch):
+    from app.services.platform.tikhub import TikHubClient
+
+    client = TikHubClient(mode="real", api_key="k", base_url="http://x")
+    data = {
+        "data": {
+            "data": [
+                {
+                    "id": "note1",
+                    "video_info_v2": {
+                        "media": {
+                            "stream": {
+                                "h264": [
+                                    {
+                                        "master_url": "http://sns-v28.rednotecdn.com/stream/1/110/258/x_258.mp4",
+                                        "video_bitrate": 1363779,
+                                        "backup_urls": ["http://sns-v28.rednotecdn.com/backup1.mp4"],
+                                    }
+                                ],
+                                "h265": [
+                                    {"master_url": "http://sns-v28.rednotecdn.com/stream/1/110/309/y_309.mp4", "video_bitrate": 736175}
+                                ],
+                            }
+                        }
+                    },
+                }
+            ]
+        }
+    }
+    monkeypatch.setattr(client, "_get", lambda path, params=None: data)
+    src = client.fetch_video_source("xiaohongshu", "note1")
+    assert src is not None and src["kind"] == "mp4"
+    assert src["urls"][0] == "https://sns-v28.rednotecdn.com/stream/1/110/258/x_258.mp4"
+    assert len(src["urls"]) == 2
+
+
+def test_fetch_video_source_bilibili_dash(monkeypatch):
+    from app.services.platform.tikhub import TikHubClient
+
+    client = TikHubClient(mode="real", api_key="k", base_url="http://x")
+
+    def fake_get(path, params=None):
+        if "fetch_video_detail" in path:
+            return {"data": {"data": {"View": {"pages": [{"cid": 123}]}}}}
+        return {
+            "data": {
+                "data": {
+                    "dash": {
+                        "video": [{"id": 16, "baseUrl": "https://cdn/v.m4s"}],
+                        "audio": [{"id": 30216, "baseUrl": "https://cdn/a.m4s"}],
+                    }
+                }
+            }
+        }
+
+    monkeypatch.setattr(client, "_get", fake_get)
+    src = client.fetch_video_source("bilibili", "aid:456")
+    assert src is not None and src["kind"] == "dash"
+    assert src["video_url"] == "https://cdn/v.m4s"
+    assert src["audio_url"] == "https://cdn/a.m4s"
+
+
+def test_fetch_video_source_mock_returns_none():
+    from app.services.platform.tikhub import make_client
+
+    assert make_client("mock").fetch_video_source("douyin", "x") is None
+    assert make_client("mock").fetch_video_source("xiaohongshu", "x") is None
+    assert make_client("mock").fetch_video_source("bilibili", "aid:x") is None

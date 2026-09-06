@@ -17,12 +17,17 @@ KIND_LABELS = {
     "generate_draft": "AI 文案生成",
     "platform_sync": "平台数据同步",
     "platform_sync_single": "素材数据同步",
+    "platform_media": "素材媒体补齐",
 }
 
 
 def _target(kind: str, payload: dict, result) -> str:
     if kind == "import_video":
         return f"/videos?edit={payload.get('video_id', '')}"
+    if kind == "platform_media":
+        if isinstance(result, dict) and result.get("video_id"):
+            return f"/videos?edit={result['video_id']}"
+        return "/videos"
     if kind == "persona_init":
         return "/persona"
     if kind == "daily_pipeline":
@@ -45,6 +50,8 @@ def _notify(db, *, kind: str, payload: dict, status: str, result=None, error: st
         message = title
         if isinstance(result, dict) and result.get("title"):
             message = f"{title}：{result['title']}"
+        elif isinstance(result, dict) and result.get("message"):
+            message = f"{title}：{result['message']}"
     else:
         title = f"{label}失败"
         message = f"{title}：{(error or '未知错误')[:200]}"

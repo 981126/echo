@@ -21,6 +21,7 @@ from ..models.platform import (
 from ..models.video import Video
 from ..schemas.platform import SyncRequest
 from ..services.creator_service import current_creator_id
+from ..services.media_ensure import inspect_media, submit_media_task
 from ..services.platform.base import make_source
 from ..services.platform.budget import get_budget, set_budget
 from ..services.platform_sync import (
@@ -179,19 +180,24 @@ def _read_comments(db: Session, post_id: int, limit: int = 50) -> list[dict]:
 
 @router.post("/works/{work_id}/sync", response_model=dict)
 def sync_work(work_id: int, db: Session = Depends(get_db)):
-    """云端合并作品卡「同步数据」（R-067）：同步该作品全部平台帖指标 + 评论点赞 Top50。"""
+    """云端合并作品卡「同步数据」（R-067/R-077）：同步全部平台帖指标+评论 Top50；缺视频/转写则补齐。"""
     try:
-        return sync_work_posts(db, work_id)
+        res = sync_work_posts(db, work_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    res["media"] = submit_media_task(db, work_id=work_id)  # R-077
+    return res
 
 
 @router.post("/posts/{post_id}/sync", response_model=dict)
 def sync_post(post_id: int, db: Session = Depends(get_db)):
+    """云端单条作品卡「同步数据」（R-067/R-077）：指标+评论 Top50；缺视频/转写则补齐。"""
     try:
-        return sync_single_post(db, post_id)
+        res = sync_single_post(db, post_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    res["media"] = submit_media_task(db, post_id=post_id)  # R-077
+    return res
 
 
 @router.post("/posts/{post_id}/to-material", response_model=dict)
@@ -368,14 +374,24 @@ def trigger_sync(payload: SyncRequest, db: Session = Depends(get_db)):
 
 @router.post("/videos/{video_id}/sync", response_model=dict)
 def sync_video_data(video_id: int, db: Session = Depends(get_db)):
-    """素材库单条"同步数据"（本地素材需已绑定发布链接）。"""
+    """素材库本地卡"同步数据"（R-067/R-077）：同步绑定平台指标+评论 Top50；缺转写则自动补齐。
+
+    未绑定平台帖时不再硬报错：有本地视频缺转写仍会触发转写（数据同步部分跳过）。
+    """
     video = db.get(Video, video_id)
     if video is None:
         raise HTTPException(status_code=404, detail="素材不存在")
     try:
-        return sync_local_video_metrics(db, video)
+        res = sync_local_video_metrics(db, video)
+    except ValueError as exc:
+        info = inspect_media(db, video_id=video.id)
+        if info["action"] == "skip":  # 已完整则无需处理，维持原提示
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        res = {"message": "该素材未绑定平台作品，已跳过数据同步", "platforms": []}
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    res["media"] = submit_media_task(db, video_id=video.id)  # R-077
+    return res
 
 
 @router.get("/jobs", response_model=dict)

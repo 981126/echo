@@ -157,3 +157,8 @@
 ## D-037：API/DATABASE 文档自动生成（R-071，2026-09-06）
 - **决策**：`docs/API.md` 由 FastAPI OpenAPI 生成（92 路由）、`docs/DATABASE.md` 由 SQLAlchemy 模型元数据生成（26 表 + 人工注释），改接口/表结构后重新生成，不手改结构部分
 - **配套**：全量重写 AGENTS/README/PRD/PRODUCT/ARCHITECTURE/DESIGN/milestones/WORKFLOW/QUICKSTART/GLOSSARY/FAQ，以代码为准消除过期/错误表述
+
+## D-038：素材卡「同步数据」补齐视频+转写（R-077，2026-09-06）
+- **决策**：卡片「同步数据」在原有指标/评论同步后，检查该卡是否有本地视频文件与已完成转写；缺视频按平台优先级（抖音→小红书→B站）下载低清视频（下载成功才建本地素材行，不留死占位），缺转写则自动跑现有 ASR 流水线（import_video_task）；全部后台任务 + 通知，前端提示并轮询刷新。
+- **范围**：不区分博主，所有素材卡一致；常规平台同步（D-027）仍不自动下载。
+- **现状（受第三方限制）**：抖音（bit_rate 低档直链）、小红书（video_info_v2.media.stream.h264 master_url）实测可下载；B站 TikHub `fetch_video_playurl` 等端点当前线上 404（key 未开通/服务端下线），代码已按 SDK 参数接好，接口恢复即用；纯 B站作品会明确提示「无可用视频源」，不做假下载。

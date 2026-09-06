@@ -435,7 +435,7 @@ async function syncEditLinks() {
   try {
     await applyLinks()
     const r = await api(`/api/platform/videos/${editing.value.id}/sync`, { method: 'POST' })
-    message.success(r.message || '同步完成')
+    message.success(applyMediaMsg(r, r.message || '同步完成'))
     await loadQuiet()
     await loadWorksQuiet()
   } catch (e) {
@@ -813,6 +813,39 @@ async function splitWork(w) {
   }
 }
 
+// R-077：同步数据后的“媒体补齐”提示与完成后自动刷新
+const mediaTimers = {}
+function pollMediaTask(taskId) {
+  clearTimeout(mediaTimers[taskId])
+  let tries = 0
+  const tick = async () => {
+    tries += 1
+    try {
+      const t = await api('/api/tasks/' + taskId)
+      if (t && (t.status === 'done' || t.status === 'failed')) {
+        delete mediaTimers[taskId]
+        if (t.status === 'done') message.success('视频补齐完成，已刷新')
+        else message.warning('视频补齐失败：' + (t.error || '请查看通知') + '')
+        await loadQuiet()
+        await loadWorksQuiet()
+        return
+      }
+    } catch (e) { /* 轮询抖动继续 */ }
+    if (tries < 240) mediaTimers[taskId] = setTimeout(tick, 5000)
+  }
+  tick()
+}
+function applyMediaMsg(r, baseMsg) {
+  const m = r && r.media
+  if (!m) return baseMsg
+  if (m.status === 'skip') return baseMsg + '（已有视频与转写，跳过下载/转写）'
+  if (m.status === 'started') {
+    if (m.task_id) pollMediaTask(m.task_id)
+    return baseMsg + '（缺视频/转写，已开始下载并自动转写）'
+  }
+  return baseMsg
+}
+
 function syncMessage(r, fallback) {
   let m = (r && r.message) || fallback || '同步完成'
   const parts = []
@@ -832,7 +865,7 @@ async function syncCloudPost(it) {
     const r = it.type === 'work'
       ? await api(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
       : await api(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
-    message.success(syncMessage(r, '同步完成'))
+    message.success(applyMediaMsg(r, syncMessage(r, '同步完成')))
     await loadWorks()
   } catch (e) {
     message.error(e.message)
@@ -845,7 +878,7 @@ async function syncData(v) {
   syncing.value = v.key
   try {
     const r = await api(`/api/platform/videos/${v.id}/sync`, { method: 'POST' })
-    message.success(syncMessage(r, '同步完成'))
+    message.success(applyMediaMsg(r, syncMessage(r, '同步完成')))
     await loadQuiet()  // R-067：同步后刷新本地素材卡，避免“只提示没变化”
     await loadWorksQuiet()
   } catch (e) {

@@ -124,6 +124,65 @@ class TikHubError(RuntimeError):
     pass
 
 
+
+
+
+def _first_url(items) -> str:
+    for u in items or []:
+        if u and isinstance(u, str):
+            return u
+    return ""
+
+
+def _note_payload(data: dict) -> dict | None:
+    """从小红书 get_video_note_detail 响应里取出笔记 dict（兼容不同层级/包装）。"""
+    node = (data.get("data") or {}).get("data")
+    if isinstance(node, list):
+        return node[0] if node and isinstance(node[0], dict) else None
+    if isinstance(node, dict):
+        if "note" in node and isinstance(node["note"], dict):
+            return node["note"]
+        # 本身即是笔记（含 video_info_v2/id 等）
+        if "video_info_v2" in node or "id" in node:
+            return node
+    return None
+
+
+def _first_media_url(item: dict) -> str:
+    """dash 流地址：baseUrl 可能是字符串或数组，backupUrl 兜底。"""
+    base = item.get("baseUrl") or ""
+    if isinstance(base, str) and base:
+        return base
+    if isinstance(base, list):
+        u = _first_url(base)
+        if u:
+            return u
+    return _first_url(item.get("backupUrl") or [])
+
+
+def _find_urls_like(obj, needles) -> list[str]:
+    """深度遍历 dict/list，收集值里疑似媒体直链的字符串（含任一 needle）。"""
+    out: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+        elif (
+            isinstance(node, str)
+            and node.startswith("http")
+            and len(node) > 12
+            and any(n in node for n in needles)
+        ):
+            out.append(node)
+
+    walk(obj)
+    return out
+
+
 class TikHubClient:
     """三平台统一客户端。mock 返回确定性数据；real 走 REST（无 key 时抛错）。"""
 
@@ -527,7 +586,15 @@ class TikHubClient:
             stat = (((data.get("data") or {}).get("aweme_detail") or {}).get("statistics")) or {}
         elif platform == "xiaohongshu":
             data = self._get("/xiaohongshu/app_v2/get_video_note_detail", {"note_id": post_id})
-            stat = ((((data.get("data") or {}).get("note") or {}).get("interact_info")) or {})
+            note = _note_payload(data) or {}
+            # App V2：笔记字段直接平铺（liked_count/comments_count/...），旧 interact_info 兜底
+            stat = note.get("interact_info") or {
+                "play_count": note.get("pre_view_count"),
+                "digg_count": note.get("liked_count") or note.get("likes"),
+                "collected_count": note.get("collected_count"),
+                "share_count": note.get("share_count"),
+                "comment_count": note.get("comments_count"),
+            }
         else:  # bilibili 单条详情（View.stat 全量）
             aid = post_id.split(":", 1)[1] if post_id.startswith("aid:") else post_id
             data = self._get("/bilibili/web/fetch_video_detail", {"aid": aid})
@@ -544,6 +611,120 @@ class TikHubClient:
                 "coin": int(stat.get("coin") or 0),
             },
         }
+
+    # ---------- 视频下载地址（R-077） ----------
+    def fetch_video_source(
+        self, platform: str, post_id: str, account=None, prefer_url: str = ""
+    ) -> dict | None:
+        """解析可下载的视频源（低清优先），无视频/不可下载返回 None。
+
+        返回结构：
+        - 抖音/小红书：{"kind": "mp4", "urls": [...]}（单文件含音轨）
+        - B站：{"kind": "dash", "video_url": ..., "audio_url": ...}（需 ffmpeg 合并）
+        mock 模式或无真实地址返回 None（不下载、不编造）。
+        """
+        if self.mode != "real":
+            return None
+        try:
+            if platform == "douyin":
+                return self._douyin_video_source(post_id, prefer_url)
+            if platform == "xiaohongshu":
+                return self._xiaohongshu_video_source(post_id)
+            if platform == "bilibili":
+                return self._bilibili_video_source(post_id)
+        except TikHubError:
+            return None
+        return None
+
+    def _douyin_video_source(self, post_id: str, prefer_url: str = "") -> dict | None:
+        # 低清优先：bit_rate 升序里挑有地址的最低档；再补默认 play_addr / 已存直链
+        urls: list[str] = []
+        seen: set[str] = set()
+
+        def _add(u: str) -> None:
+            if u and u not in seen:
+                seen.add(u)
+                urls.append(u)
+
+        if prefer_url:
+            _add(prefer_url)
+        data = self._get("/douyin/app/v3/fetch_one_video_v2", {"aweme_id": post_id})
+        video = ((data.get("data") or {}).get("aweme_detail") or {}).get("video") or {}
+        default = _first_url((video.get("play_addr") or {}).get("url_list") or [])
+        try:
+            bit_rates = sorted(
+                (video.get("bit_rate") or []),
+                key=lambda br: int(br.get("bit_rate") or 0) or 10**9,
+            )
+        except (TypeError, ValueError):
+            bit_rates = video.get("bit_rate") or []
+        for br in bit_rates:
+            _add(_first_url(((br.get("play_addr") or {}).get("url_list")) or []))
+        if default:
+            _add(default)
+        return {"kind": "mp4", "urls": urls} if urls else None
+
+    def _xiaohongshu_video_source(self, post_id: str) -> dict | None:
+        data = self._get("/xiaohongshu/app_v2/get_video_note_detail", {"note_id": post_id})
+        note = _note_payload(data)
+        if not note:
+            return None
+        media = ((note.get("video_info_v2") or {}).get("media")) or {}
+        stream = media.get("stream") or {}
+        # 优先 h264（兼容性最好），其次 h265/h266/av1；同组内挑最低码率那档
+        for codec in ("h264", "h265", "h266", "av1"):
+            items = [it for it in (stream.get(codec) or []) if it.get("master_url")]
+            if not items:
+                continue
+            best = min(items, key=lambda it: int(it.get("video_bitrate") or 0) or 10**9)
+            urls: list[str] = []
+
+            def _https(u: str) -> str:
+                return u if u.startswith("https://") else "https://" + u[len("http://"):]
+
+            urls.append(_https(best["master_url"]))
+            for bu in (best.get("backup_urls") or [])[:3]:
+                if bu:
+                    urls.append(_https(bu))
+            return {"kind": "mp4", "urls": urls}
+        return None
+
+    def _bilibili_video_source(self, post_id: str) -> dict | None:
+        aid = post_id.split(":", 1)[1] if post_id.startswith("aid:") else post_id
+        detail = self._get("/bilibili/web/fetch_video_detail", {"aid": aid})
+        view = (((detail.get("data") or {}).get("data")) or {}).get("View") or {}
+        pages = view.get("pages") or []
+        cid = (pages[0] or {}).get("cid") or 0
+        if not cid:
+            return None
+        bvid = view.get("bvid") or ""
+        # TikHub SDK 签名：fetch_video_playurl(bv_id, cid)；端点在线上不可用时 404 → 抛错返回 None
+        play = self._get(
+            "/bilibili/web/fetch_video_playurl",
+            {"bv_id": bvid, "cid": cid},
+        )
+        inner = (play.get("data") or {}).get("data") or play.get("data") or {}
+        dash = inner.get("dash") or {}
+        vitems = dash.get("video") or []
+        aitems = dash.get("audio") or []
+
+        def _pick(items) -> str:
+            best = ""
+            for it in sorted(items, key=lambda x: int(x.get("id") or 10**9)):
+                u = _first_media_url(it)
+                if u:
+                    best = u
+                    break
+            return best
+
+        vurl = _pick(vitems)
+        aurl = _pick(aitems)
+        if vurl and aurl:
+            return {"kind": "dash", "video_url": vurl, "audio_url": aurl}
+        durls = inner.get("durl") or []
+        if durls:
+            return {"kind": "mp4", "urls": [d.get("url") for d in durls if d.get("url")]}
+        return None
 
     # ---------- 评论（R-028 选题池 / R-067 点赞 Top50 入库） ----------
     def fetch_comments(self, platform: str, post_id: str, count: int = 20, account=None, raw: dict | None = None) -> list[CommentData]:
