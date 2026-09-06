@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models.platform import Creator
 from ..services.benchmark import (
     _stats_map,
+    _unit_text,
     benchmarks_of_owner,
     candidates,
     ensure_top3_with_text,
@@ -41,7 +42,12 @@ def benchmark_top(db: Session = Depends(get_db)):
         units = candidates(db, bm, limit=10)
         stats_map = _stats_map(db, units)
         ranked = sorted(units, key=lambda u: score_unit(db, u, stats_map), reverse=True)
-        items = [unit_payload(db, u, stats_map) for u in ranked[:3]]
+        # R-106：有文案（含转写）的优先占位；空文案/空转写由下一条有文案的顶上，
+        # 仍不足 3 条时才用分数最高的无文案项补位展示（提示“暂无文案”）
+        with_text = [u for u in ranked if _unit_text(db, u)]
+        without_text = [u for u in ranked if not _unit_text(db, u)]
+        ordered = with_text + without_text
+        items = [unit_payload(db, u, stats_map) for u in ordered[:3]]
         out.append({"benchmark_id": bm.id, "name": bm.name, "note": bm.note or "", "items": items})
     return {"owner_id": owner.id, "owner_name": owner.name, "benchmarks": out}
 

@@ -68,9 +68,21 @@ def candidates(db: Session, bm: Creator, limit: int = 10) -> list[dict]:
         .order_by(PlatformPost.publish_time.desc())
         .all()
     )
-    # R-099/R-100：广告不对标；同款跨平台漏标(标题相同)也一并排除
-    ad_norms = {_norm_title(x.title) for x in rows if x.is_ad}
-    posts = [x for x in rows if not x.is_ad and _norm_title(x.title) not in ad_norms]
+    # R-099/R-100/R-106：广告不对标；绑定了“已标广告本地视频”的帖也算广告；
+    # 同款跨平台漏标(标题相同)也一并排除
+    _ad_vid_ids: set[int] = set()
+    _linked = [p.local_video_id for p in rows if p.local_video_id]
+    if _linked:
+        _ad_vid_ids = {
+            v.id
+            for v in db.query(Video).filter(Video.is_ad.is_(True), Video.id.in_(_linked)).all()
+        }
+
+    def _is_ad_post(p: PlatformPost) -> bool:
+        return bool(p.is_ad or (p.local_video_id and p.local_video_id in _ad_vid_ids))
+
+    ad_norms = {_norm_title(x.title) for x in rows if _is_ad_post(x)}
+    posts = [x for x in rows if not _is_ad_post(x) and _norm_title(x.title) not in ad_norms]
     # 按 work 聚合（work_id 相同的算同一作品）
     work_map: dict[int, list[PlatformPost]] = {}
     singles: list[PlatformPost] = []
@@ -147,11 +159,20 @@ def _flag_unit_ad(db: Session, unit: dict) -> None:
         db.commit()
 
 
-def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
-    """判断对标作品单元是否为广告/商单：已标记的直接命中；有转写文案则用 AI 预打标复用判断。
+_AD_JUDGE_SYSTEM = (
+    "你是内容审核。判断这条视频口播是否属于「广告/商单/带货/引流」：包括明示广告、品牌商单、"
+    "付费推广、卖课/训练营/社群/私域引流、推广自己或第三方的产品/工具/软件/小程序/App 等。"
+    "普通知识内容里顺带提到某个工具、案例或书籍不算广告。只输出 JSON："
+    '{"is_ad":true或false,"reason":"简短原因"}'
+)
 
-    平台列表接口不带广告标记（抖音 raw commerce_info.is_ad 恒 false），只能靠文案内容判断；
-    LLM 不可用时宁可不排除（不误杀），转写文案之外的帖子无法判断。
+
+def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
+    """判断对标作品单元是否为广告/软广（R-103/R-106）：已标记的直接命中；有文案则用 LLM 严格审核。
+
+    平台列表接口不带广告标记（抖音 raw commerce_info.is_ad 恒 false），普通预打标也常把
+    “推自家小程序/卖课/引流”判为非广告，故对标用更严格的独立审核；
+    LLM 不可用时宁可不排除（不误杀），无文案的帖子无法判断。
     """
     posts = unit.get("members") or [unit["post"]]
     if any(p.is_ad for p in posts):
@@ -159,10 +180,17 @@ def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
     if not (text or "").strip():
         return False
     try:
-        from .persona import PersonaService
-
-        res = PersonaService().suggest_video_tags((text or "")[:3000])
-        return bool(res.get("is_ad", False))
+        title = (unit["post"].title or "")[:200]
+        llm = _llm()
+        data = llm.chat_json(
+            [
+                {"role": "system", "content": _AD_JUDGE_SYSTEM},
+                {"role": "user", "content": f"标题：{title}\n\n口播文案：\n{(text or '')[:3000]}"},
+            ],
+            temperature=0.1,
+            max_tokens=300,
+        )
+        return bool((data or {}).get("is_ad", False))
     except Exception:  # noqa: BLE001 LLM 不可用不误杀
         return False
 
