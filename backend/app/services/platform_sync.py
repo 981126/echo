@@ -337,11 +337,6 @@ def _log_job(db: Session, job_type: str, scope: str, *, creator_id=None, account
     db.refresh(job)
     _publish_job(db, job)
     return job
-    job = SyncJob(job_type=job_type, scope=scope, creator_id=creator_id, account_id=account_id, post_id=post_id)
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-    return job
 
 
 def _finish_job(db: Session, job: SyncJob, message: str = "", stats: dict | None = None, failed: bool = False) -> None:
@@ -558,6 +553,11 @@ def run_sync(
         try:
             auto_merge_creator(db, owner.id)
         except Exception:  # noqa: BLE001 合并失败不影响同步主体
+            db.rollback()
+        # R-092：数据同步收尾给整体说明，避免显示“xx平台：完成”却被当作整体 99%
+        try:
+            _job_progress(db, job.id, note="数据同步完成，正在下载/转写视频…" if (with_media and scope == "daily") else "同步完成，正在汇总…")
+        except Exception:  # noqa: BLE001
             db.rollback()
         # R-085/R-086：daily（手动前15/每日自动）同步后，对前 N 条作品做视频下载+自动转写
         # R-088：每条注册为 platform_media 后台任务并广播 task.update → 素材库卡片可见/可恢复

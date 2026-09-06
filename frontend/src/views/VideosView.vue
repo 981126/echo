@@ -1013,10 +1013,14 @@ function applySyncJob(job) {
   syncJob.active = true
   syncJob.job_id = Number(job.id)
   syncJob.creator_id = Number(job.creator_id)
-  syncJob.note = job.progress_note || '同步中…'
+  let note = job.progress_note || '同步中…'
+  if (job.status === 'running' && /(抖音|小红书|B站)[：:]完成$/.test(note)) {
+    note = '部分平台已完成，正在继续同步…'  // R-092：避免“xx：完成 99%”误导
+  }
+  syncJob.note = note
   const d = Number(job.progress_done || 0)
   const t = Number(job.progress_total || 0)
-  syncJob.pct = t > 0 ? Math.min(99, Math.round((d / t) * 100)) : 0
+  syncJob.pct = t > 0 ? Math.min(98, Math.round((d / t) * 100)) : 0
   if (!syncJobAnim) {
     let step = 0
     syncJobAnim = setInterval(() => {
@@ -1062,7 +1066,11 @@ async function refreshActiveCardTasks() {
         clearSyncJobAnim(true)
       }
     }
-    if (!foundRunning && syncJob.active) clearSyncJobAnim(true)
+    if (!foundRunning && syncJob.active) {
+      // R-092：找不到运行中任务不急着清（瞬时空窗会闪没）；同 id 已结束才清
+      const mine = items.find(x => Number(x.id) === syncJob.job_id)
+      if (mine && (mine.status === 'done' || mine.status === 'failed')) clearSyncJobAnim(true)
+    }
   } catch (e) { /* 忽略 */ }
 }
 

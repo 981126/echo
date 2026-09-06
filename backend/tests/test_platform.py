@@ -296,13 +296,14 @@ def test_mode_normalize_rejects_silent_fallback():
 def test_daily_sync_records_progress(db):
     """R-070：run_sync 在 SyncJob 上记录实时进度（done/total/note）。"""
     owner, _ = _seed_owner(db)
-    result = run_sync(db, scope="daily")  # 默认前 20 条（mock）
+    result = run_sync(db, scope="daily")  # 默认前 15 条（mock）
     job = db.query(SyncJob).first()
     assert job is not None and job.status == "done"
     assert job.progress_total > 0
     assert job.progress_done >= 1
     assert job.progress_done <= job.progress_total
-    assert "抖音" in (job.progress_note or "")
+    # R-092：收尾会写整体性说明（可能含 抖音 阶段说明，也可能已整体化）
+    assert ("抖音" in (job.progress_note or "")) or ("同步" in (job.progress_note or ""))
     assert result["accounts"][0]["posts"] > 0
 
 
