@@ -27,6 +27,49 @@ VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v", ".ts"}
 COVER_EXTS = {".jpg", ".jpeg", ".png"}
 
 
+_MEDIA_KIND_CACHE: dict[int, str] = {}
+
+
+def _probe_media_kind(path: Path) -> str:
+    """用 ffmpeg 读流头判断是 video 还是纯 audio（R-096，进程内缓存）。"""
+    import subprocess
+    try:
+        import imageio_ffmpeg
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        proc = subprocess.run([ff, "-i", str(path)], capture_output=True, text=True, timeout=30)
+        info = proc.stderr or ""
+        if "Video:" in info:
+            return "video"
+        if "Audio:" in info:
+            return "audio"
+    except Exception:  # noqa: BLE001 探测失败不影响
+        pass
+    return "unknown"
+
+
+def _media_kind(video) -> str:
+    vid = int(video.id)
+    cached = _MEDIA_KIND_CACHE.get(vid)
+    if cached:
+        return cached
+    from ..config import get_settings as _gs
+    path = _gs().videos_dir / (video.filename or "")
+    kind = _probe_media_kind(path) if path.is_file() else "none"
+    if len(_MEDIA_KIND_CACHE) > 300:
+        _MEDIA_KIND_CACHE.clear()
+    _MEDIA_KIND_CACHE[vid] = kind
+    return kind
+
+
+@router.get("/{video_id}/media-meta", response_model=dict)
+def video_media_meta(video_id: int, db: Session = Depends(get_db)):
+    """R-096：判断素材是视频还是纯音频（前端决定显示视频播放器还是音频进度轨）。"""
+    video = db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    return {"kind": _media_kind(video), "exists": bool(video.filename and not video.filename.startswith("__cloud__"))}
+
+
 @router.post("/upload", response_model=VideoOut)
 def upload_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
     settings = get_settings()

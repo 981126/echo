@@ -57,7 +57,10 @@
     </div>
 
     <n-modal v-model:show="showPlayer" preset="card" :title="playerTitle" style="width: min(760px, 96vw)" :mask-closable="true">
-      <video v-if="playerSrc" :src="playerSrc" controls autoplay playsinline style="width: 100%; max-height: 70vh; border-radius: 8px; background: #000" />
+      <video v-if="playerKind === 'video' && playerSrc" :src="playerSrc" controls autoplay playsinline style="width: 100%; max-height: 70vh; border-radius: 8px; background: #000" />
+      <div v-else-if="playerKind === 'audio' && playerSrc" class="audio-player">
+        <audio :src="playerSrc" controls autoplay class="audio-ctl" />
+      </div>
       <div v-else class="panel empty">暂无视频</div>
     </n-modal>
 
@@ -249,6 +252,7 @@ const tagsText = ref('')
 const showPlayer = ref(false)
 const playerSrc = ref('')
 const playerTitle = ref('')
+const playerKind = ref('video')
 
 async function load() {
   loading.value = true
@@ -818,9 +822,14 @@ async function openPlayer(videoId, title) {
   }
   playerSrc.value = '/media/videos/' + encodeURIComponent(fn)
   playerTitle.value = title || v.title || '视频播放'
+  playerKind.value = 'video'
+  try {  // R-096：纯音频素材只显示音频进度轨
+    const meta = await api('/api/videos/' + videoId + '/media-meta')
+    if (meta && meta.kind === 'audio') playerKind.value = 'audio'
+  } catch (e) { /* 探测失败按视频处理 */ }
   showPlayer.value = true
 }
-watch(showPlayer, (val) => { if (!val) playerSrc.value = '' })
+watch(showPlayer, (val) => { if (!val) { playerSrc.value = ''; playerKind.value = 'video' } })
 
 async function goLocal(id) {
   let v = videos.value.find(x => x.id === id)
@@ -1389,6 +1398,15 @@ onUnmounted(() => {
 })
 </script>
 
+<style scoped>
+.audio-player {
+  display: flex;
+  align-items: center;
+  padding: 18px 4px;
+}
+.audio-ctl {
+  width: 100%;
+}
 <style scoped>
 .work-grid {
   display: grid;

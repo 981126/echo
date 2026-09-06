@@ -101,3 +101,4 @@
 | R-093 | 2026-09-06 | 博主页同步改逐素材队列：分页发现即入队，素材库卡片实时动画；取消整片 job 覆盖 | ✅ 已完成 | M75（已完成） | platform_sync、media_ensure、tasks、VideosView |
 | R-094 | 2026-09-06 | 下载超时兜底+转写识别为空原因/失败通知+合并卡只下单个平台视频 | ✅ 已完成 | M76（已完成） | media_downloader/ingest/run_card_sync_queue |
 | R-095 | 2026-09-06 | 素材库点封面播放视频（/media/videos 静态挂载 + 播放弹窗），点卡片其它区域仍进编辑 | ✅ 已完成 | M77（已完成） | main.py、VideosView/MaterialCard |
+| R-096 | 2026-09-06 | 封面播放小图标 + 纯音频素材只显示音频进度轨（media-meta 探测） | ✅ 已完成 | M78（已完成） | VideosView/MaterialCard、api/videos |

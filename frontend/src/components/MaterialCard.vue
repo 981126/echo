@@ -4,6 +4,9 @@
     <div v-if="progress > 0" class="sync-status">{{ note || '同步中…' }} · {{ Math.round(progress) }}%</div>
     <div class="tile-cover" :class="{ has: item.cover_url }" @click.stop="onCoverClick">
       <n-checkbox v-if="mergeMode" class="pick-box" :checked="selected" @click.stop @update:checked="toggle(item)" />
+      <svg v-if="item.hasVideo && !mergeMode" class="play-badge" viewBox="0 0 24 24" width="24" height="24" aria-label="播放">
+        <path fill="#fff" d="M8 5v14l11-7z" />
+      </svg>
       <img v-if="item.cover_url" :src="item.cover_url" alt="封面" />
       <span v-else>ECHO</span>
     </div>
@@ -129,6 +132,16 @@ function onCoverClick() {
 }
 .card-tile.picking { cursor: pointer; }
 .tile-cover { position: relative; }
+.play-badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  opacity: 0.9;
+  filter: drop-shadow(0 1px 4px rgba(0,0,0,0.5));
+  pointer-events: none;
+}
 .pick-box {
   position: absolute;
   top: 6px;
