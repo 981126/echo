@@ -18,6 +18,8 @@ class DraftOut(BaseModel):
     script: str = ""
     platform_shells: dict = {}
     source: str = "manual"
+    original_script: str = ""
+    source_ref: dict = {}
     status: str = "draft"
     version: int = 1
     created_at: datetime
@@ -26,6 +28,19 @@ class DraftOut(BaseModel):
     @field_validator("platform_shells", mode="before")
     @classmethod
     def _parse_shells(cls, value):
+        if isinstance(value, str):
+            import json
+
+            try:
+                data = json.loads(value)
+                return data if isinstance(data, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return value or {}
+
+    @field_validator("source_ref", mode="before")
+    @classmethod
+    def _parse_source_ref(cls, value):
         if isinstance(value, str):
             import json
 
