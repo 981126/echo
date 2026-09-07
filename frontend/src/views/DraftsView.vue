@@ -95,6 +95,9 @@
           <n-select v-model:value="editing.video_id" :options="videoOptions" placeholder="选择一个素材视频" clearable />
         </div>
 
+        <div v-if="editing.source_ref && editing.source_ref.source_title" class="source-banner">
+          来源素材：{{ editing.source_ref.source_title }}<template v-if="editing.source_ref.benchmark_name"> · 对标「{{ editing.source_ref.benchmark_name }}」</template>
+        </div>
         <n-tabs v-model:value="editTab" type="line" animated>
           <n-tab-pane name="edit" tab="编辑">
             <div class="form-item">
@@ -160,10 +163,18 @@
             </div>
           </n-tab-pane>
 
-          <n-tab-pane name="source" tab="原文案">
+          <n-tab-pane name="compare" tab="原文对照">
             <div v-if="editing.original_script" class="source-box">
-              <div class="muted" style="margin-bottom: 6px">该草稿由对标素材改写而来，以下为原文案：</div>
-              <pre class="source-pre">{{ editing.original_script }}</pre>
+              <div class="cmp-grid">
+                <div class="cmp-col">
+                  <div class="cmp-h">原文案（红 = 被改写/删除）</div>
+                  <div class="diff-body"><template v-for="(seg, i) in draftDiff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
+                </div>
+                <div class="cmp-col">
+                  <div class="cmp-h">洗稿后（绿 = 新增/修改）</div>
+                  <div class="diff-body"><template v-for="(seg, i) in draftDiff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
+                </div>
+              </div>
             </div>
             <div v-else class="empty" style="padding: 30px 0">暂无原文案（仅对标洗稿会记录）</div>
           </n-tab-pane>
@@ -180,6 +191,7 @@ import { api, uploadImage } from '../api'
 import { fetchVideos } from '../composables/media'
 import { fmt } from '../lib/format'
 import { renderMd } from '../md'
+import { buildDiff } from '../lib/diff'
 
 const drafts = ref([])
 const videos = ref([])
@@ -198,6 +210,7 @@ const showEdit = ref(false)
 const checkInfo = ref(null)
 const reworking = ref(false)
 const editTab = ref('edit')
+const draftDiff = computed(() => buildDiff(editing.value?.original_script || '', editing.value?.script || ''))
 const discussions = ref([])
 const discussionsMap = ref({})
 const debateStatus = ref('')
@@ -277,6 +290,7 @@ function open(d, isNew = false) {
   editing.value = { ...d, video_id: d.video_id ?? null }
   preview.value = false
   showEdit.value = true
+  editTab.value = (d.original_script && d.source_ref && d.source_ref.source_title) ? 'compare' : 'edit'
   discussions.value = discussionsMap.value[d.id] || []
   if (!isNew && editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
   if (editing.value.id) runCheck(editing.value.id)
@@ -473,4 +487,11 @@ onUnmounted(() => {
 <style scoped>
 .source-box { margin: 8px 0; }
 .source-pre { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; }
+.source-banner { margin: 4px 0 10px; padding: 8px 10px; background: #fdf6ef; border: 1px solid #f0dfc8; border-radius: 8px; color: #8a5a2b; font-size: 13px; }
+.cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cmp-h { font-size: 12px; color: #a34f2c; font-weight: 600; margin-bottom: 4px; }
+.diff-body { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; line-height: 1.7; }
+.diff-body .del { background: #ffe3e3; color: #c0392b; border-radius: 3px; }
+.diff-body .add { background: #dcf5dc; color: #1a7f37; border-radius: 3px; }
+@media (max-width: 640px) { .cmp-grid { grid-template-columns: 1fr; } }
 </style>
