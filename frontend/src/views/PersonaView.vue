@@ -11,6 +11,8 @@
     <div class="section-title">
       像我金句库
       <n-button size="tiny" secondary style="margin-left: 10px" :loading="phraseLoading" @click="suggestPhrases">从高表现素材提取</n-button>
+      <n-button v-if="phrases.length" size="tiny" type="primary" secondary style="margin-left: 8px" :loading="phraseAccepting" @click="acceptAllPhrases">一键接受</n-button>
+      <n-button v-if="phrases.length" size="tiny" type="error" secondary style="margin-left: 8px" @click="rejectAllPhrases">一键拒绝</n-button>
       <span class="muted" style="font-size: 12px">确认后的句子会作为风格锚点强注入生成</span>
     </div>
     <div v-if="!phrases.length" class="panel empty">先点「从高表现素材提取」生成候选（需已有素材转写稿）</div>
@@ -20,6 +22,7 @@
         <span class="muted" style="font-size: 12px">{{ ph.source_title || '素材' }}</span>
       </div>
       <n-button size="tiny" type="primary" @click="adoptPhrase(ph)">收为锚点</n-button>
+      <n-button size="tiny" secondary @click="rejectPhrase(ph)">拒绝</n-button>
     </div>
 
     <div class="section-title">
@@ -145,6 +148,7 @@ const showEdit = ref(false)
 const editForm = ref({ id: null, label: '', description: '', category: 'style' })
 const phrases = ref([])
 const phraseLoading = ref(false)
+const phraseAccepting = ref(false)
 const confirmingAll = ref(false)
 const rejectingAll = ref(false)
 const multiMode = ref(false)
@@ -383,14 +387,91 @@ async function suggestPhrases() {
   }
 }
 
+function phraseLabel(ph) {
+  return ((ph && ph.text) || '').trim().slice(0, 100)
+}
+
+function existingPhraseLabels() {
+  return new Set((confirmed.value || []).filter(t => t.category === 'phrase').map(t => (t.label || '').trim()))
+}
+
 async function adoptPhrase(ph) {
-  await api('/api/persona/tags', {
-    method: 'POST',
-    body: JSON.stringify({ label: ph.text.slice(0, 100), description: '风格锚点：来自「' + (ph.source_title || '高表现素材') + '」', category: 'phrase' })
-  })
-  message.success('已收为金句锚点（生成时会注入）')
+  const label = phraseLabel(ph)
+  if (!label) return
+  if (existingPhraseLabels().has(label)) {
+    message.info('该句子已是锚点')
+    phrases.value = phrases.value.filter(x => x !== ph)
+    return
+  }
+  try {
+    await api('/api/persona/tags', {
+      method: 'POST',
+      body: JSON.stringify({ label, description: '风格锚点：来自「' + (ph.source_title || '高表现素材') + '」', category: 'phrase' })
+    })
+    message.success('已收为金句锚点（生成时会注入）')
+    phrases.value = phrases.value.filter(x => x !== ph)
+    await load()
+  } catch (e) {
+    message.error(e.message)
+  }
+}
+
+function rejectPhrase(ph) {
   phrases.value = phrases.value.filter(x => x !== ph)
-  load()
+  message.success('已拒绝该候选')
+}
+
+async function acceptAllPhrases() {
+  const remain = [...phrases.value]
+  if (!remain.length) return
+  phraseAccepting.value = true
+  let ok = 0
+  let dup = 0
+  let fail = 0
+  const seen = existingPhraseLabels()
+  const accepted = []
+  try {
+    for (const ph of remain) {
+      const label = phraseLabel(ph)
+      if (!label || seen.has(label)) {
+        dup += 1
+        continue
+      }
+      seen.add(label)
+      try {
+        await api('/api/persona/tags', {
+          method: 'POST',
+          body: JSON.stringify({ label, description: '风格锚点：来自「' + (ph.source_title || '高表现素材') + '」', category: 'phrase' })
+        })
+        ok += 1
+        accepted.push(ph)
+      } catch (e) {
+        fail += 1
+      }
+    }
+    phrases.value = phrases.value.filter(x => !accepted.includes(x))
+    await load()
+    if (ok) message.success(`已收为金句锚点 ${ok} 条` + (dup + fail ? `（跳过 ${dup + fail} 条）` : ''))
+    else if (fail && !dup) message.error(`接收失败 ${fail} 条，请稍后重试`)
+    else if (dup) message.info('候选都已是锚点，无需重复接收')
+  } finally {
+    phraseAccepting.value = false
+  }
+}
+
+function rejectAllPhrases() {
+  const n = phrases.value.length
+  if (!n) return
+  dialog.warning({
+    title: '一键拒绝金句候选',
+    content: `确定清空这 ${n} 条金句候选？（只是丢弃本次候选，不影响已收锚点）`,
+    positiveText: '拒绝',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      phrases.value = []
+      message.success('已拒绝本次全部候选')
+    }
+  })
 }
 
 onMounted(async () => {
