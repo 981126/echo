@@ -283,7 +283,7 @@ async function watchAnalyze(taskId, key) {
 async function rewrite(b, it) {
   rewritingKey.value = it.key
   try {
-    const d = await api('/api/benchmark/rewrite', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key, benchmark_name: b.name, post_id: it.post_id, work_id: it.work_id }) })
+    const d = await api('/api/benchmark/rewrite', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key, benchmark_name: b.name, post_id: it.post_id, work_id: it.work_id, tags: it.tags || [] }) })
     watchRewrite(d.task_id, it.key)
   } catch (e) {
     rewritingKey.value = ''

@@ -80,6 +80,7 @@ class TextIn(BaseModel):
     benchmark_name: str = ""
     post_id: int | None = None
     work_id: int | None = None
+    tags: list[str] = []
 
 
 @router.post("/analyze", response_model=dict)
@@ -106,6 +107,7 @@ def benchmark_rewrite(payload: TextIn, db: Session = Depends(get_db)):
             "benchmark_name": payload.benchmark_name,
             "post_id": payload.post_id,
             "work_id": payload.work_id,
+            "tags": payload.tags,
         },
         rewrite_worker,
     )

@@ -267,6 +267,16 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
         stats_map = _stats_map(db, [unit])
     posts = unit.get("members") or [unit["post"]]
     platforms = sorted({p.platform for p in posts})
+    tags: list[str] = []
+    for _p in posts:
+        try:
+            _ptags = json.loads(_p.tags or "[]")
+            if isinstance(_ptags, list):
+                for _t in _ptags:
+                    if _t and _t not in tags:
+                        tags.append(_t)
+        except (TypeError, ValueError):
+            pass
     likes = sum(int((stats_map.get(p.id) or {}).get("likes") or 0) for p in posts)
     fav = sum(int((stats_map.get(p.id) or {}).get("favorites") or 0) for p in posts)
     comments = sum(int((stats_map.get(p.id) or {}).get("comments") or 0) for p in posts)
@@ -290,6 +300,7 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
         "score": likes * W_LIKE + fav * W_FAV + comments * W_COMMENT,
         "has_text": bool(text),
         "text": text or "",
+        "tags": tags,
         "analysis": get_analysis(db, owner_id, f"w{unit['work_id']}" if unit.get("work_id") else f"p{post.id}"),
     }
 

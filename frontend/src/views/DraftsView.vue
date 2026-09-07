@@ -94,9 +94,16 @@
           <label class="form-label">关联素材视频（可选）</label>
           <n-select v-model:value="editing.video_id" :options="videoOptions" placeholder="选择一个素材视频" clearable />
         </div>
+        <div class="form-item" style="margin-bottom: 10px">
+          <label class="form-label">素材标签（逗号分隔）</label>
+          <n-input v-model:value="tagsText" placeholder="如：求职, 面试, 赚钱" />
+        </div>
 
         <div v-if="editing.source_ref && editing.source_ref.source_title" class="source-banner">
-          来源素材：{{ editing.source_ref.source_title }}<template v-if="editing.source_ref.benchmark_name"> · 对标「{{ editing.source_ref.benchmark_name }}」</template>
+          来源素材：
+          <a v-if="editing.source_ref.post_id" :href="'#/videos?post=' + editing.source_ref.post_id" class="source-link">{{ editing.source_ref.source_title }}</a>
+          <span v-else>{{ editing.source_ref.source_title }}</span>
+          <template v-if="editing.source_ref.benchmark_name"> · 对标「{{ editing.source_ref.benchmark_name }}」</template>
         </div>
         <n-tabs v-model:value="editTab" type="line" animated>
           <n-tab-pane name="edit" tab="编辑">
@@ -211,6 +218,10 @@ const checkInfo = ref(null)
 const reworking = ref(false)
 const editTab = ref('edit')
 const draftDiff = computed(() => buildDiff(editing.value?.original_script || '', editing.value?.script || ''))
+const tagsText = computed({
+  get: () => (editing.value?.tags || []).join(', '),
+  set: (v) => { if (editing.value) editing.value.tags = (v || '').split(/[,，]/).map(x => x.trim()).filter(Boolean) }
+})
 const discussions = ref([])
 const discussionsMap = ref({})
 const debateStatus = ref('')
@@ -416,6 +427,7 @@ async function save() {
     title: editing.value.title,
     cover_text: editing.value.cover_text,
     script: editing.value.script,
+    tags: editing.value.tags || [],
     video_id: editing.value.video_id ?? null
   }
   await api(`/api/drafts/${editing.value.id}`, { method: 'PATCH', body: JSON.stringify(body) })
@@ -488,6 +500,8 @@ onUnmounted(() => {
 .source-box { margin: 8px 0; }
 .source-pre { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; }
 .source-banner { margin: 4px 0 10px; padding: 8px 10px; background: #fdf6ef; border: 1px solid #f0dfc8; border-radius: 8px; color: #8a5a2b; font-size: 13px; }
+.source-link { color: #a34f2c; text-decoration: none; font-weight: 600; }
+.source-link:hover { text-decoration: underline; }
 .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cmp-h { font-size: 12px; color: #a34f2c; font-weight: 600; margin-bottom: 4px; }
 .diff-body { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; line-height: 1.7; }

@@ -284,6 +284,8 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
     data = payload.model_dump(exclude_unset=True)
     if "platform_shells" in data:
         data["platform_shells"] = json.dumps(data["platform_shells"] or {}, ensure_ascii=False)
+    if "tags" in data:
+        data["tags"] = json.dumps(data["tags"] or [], ensure_ascii=False)
     for field, value in data.items():
         setattr(draft, field, value)
     db.commit()

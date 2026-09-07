@@ -226,6 +226,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     if not source_text.strip():
         raise LLMError("该素材还没有可用文案（先转写补齐）")
 
+    source_tags = [str(t) for t in (payload.get("tags") or []) if t]
     source_ref = {
         "kind": "benchmark",
         "key": payload.get("key") or "",
@@ -233,6 +234,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "benchmark_name": payload.get("benchmark_name") or "",
         "post_id": payload.get("post_id"),
         "work_id": payload.get("work_id"),
+        "tags": source_tags,
     }
 
     persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
@@ -243,12 +245,14 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
 
     draft = Draft(
         creator_id=owner.id,
-        title=source_title[:60],
+        title="",
+        cover_text="",
         script="",
         original_script=source_text,
         source="ai",
         status="draft",
         source_ref=json.dumps(source_ref, ensure_ascii=False),
+        tags=json.dumps(source_tags, ensure_ascii=False),
     )
     db.add(draft)
     db.commit()
@@ -256,7 +260,9 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
 
     rewrite_system = (
         "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；"
-        "不逐字抄袭、保留核心信息与结构，语言自然像本人说话。只输出脚本正文，不要标题、不要解释。"
+        "不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"
+        "只输出 JSON：{\"title\": string, \"cover_text\": string, \"script\": string}；"
+        "title 必须是与素材原标题不同的新标题；cover_text 是 3-8 字封面字（与 title 不同）；script 是脚本正文。"
     )
     rewrite_user = f"作者人设：\n{persona}\n\n参考素材标题：{source_title}\n参考素材原文：\n{source_text[:4000]}"
 
@@ -264,7 +270,14 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
         _status(db, draft.id, f"{name.upper()} 正在初稿洗稿…")
         try:
-            latest = _chat_once(llm, rewrite_system, rewrite_user, 0.7, 4200)
+            data = llm.chat_json(
+                [{"role": "system", "content": rewrite_system}, {"role": "user", "content": rewrite_user}],
+                temperature=0.7,
+                max_tokens=4200,
+            )
+            latest = str(data.get("script", "")).strip()
+            draft.title = str(data.get("title", "")).strip() or ""
+            draft.cover_text = str(data.get("cover_text", "")).strip()
             break
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, 0, f"{name} 初稿失败：{str(exc)[:200]}；切换下一位")
@@ -272,6 +285,9 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         _clear_status(db, draft.id)
         raise LLMError("DeepSeek 与 Kimi 洗稿初稿均失败")
 
+    # 标题不得与素材原标题一致（模型偶发偷懒时兜底）
+    if not draft.title or draft.title.strip() == source_title.strip():
+        draft.title = (source_title[:30] + "·口播稿") if source_title else "对标洗稿"
     draft.script = latest
     db.commit()
     _add(db, draft.id, 0, gen, "draft", latest)
@@ -327,9 +343,11 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     return {
         "draft_id": draft.id,
         "title": draft.title,
+        "cover_text": draft.cover_text,
         "script": latest,
         "original_script": source_text,
         "source_ref": source_ref,
         "benchmark_name": payload.get("benchmark_name") or "",
+        "tags": source_tags,
     }
 

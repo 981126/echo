@@ -20,6 +20,7 @@ class DraftOut(BaseModel):
     source: str = "manual"
     original_script: str = ""
     source_ref: dict = {}
+    tags: list[str] = []
     status: str = "draft"
     version: int = 1
     created_at: datetime
@@ -51,6 +52,19 @@ class DraftOut(BaseModel):
                 return {}
         return value or {}
 
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _parse_tags(cls, value):
+        if isinstance(value, str):
+            import json
+
+            try:
+                data = json.loads(value)
+                return [str(x) for x in data] if isinstance(data, list) else []
+            except json.JSONDecodeError:
+                return []
+        return value or []
+
 
 class DraftCreate(BaseModel):
     video_id: Optional[int] = None
@@ -67,4 +81,5 @@ class DraftUpdate(BaseModel):
     cover_text: Optional[str] = None
     script: Optional[str] = None
     platform_shells: Optional[dict] = None
+    tags: Optional[list[str]] = None
     status: Optional[str] = Field(default=None, pattern="^(draft|used|archived|deleted)$")
