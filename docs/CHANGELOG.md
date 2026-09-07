@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-108 补充2] 2026-09-07 — 默认模型切回 Qwen/Qwen3-ASR-1.7B（官方定价页标注免费）
+- 官方定价页确认 Qwen/Qwen3-ASR-1.7B 当前免费（¥0/分钟，实测可用无 402）；默认模型由 SenseVoiceSmall 切回 Qwen3-ASR-1.7B（config/.env/.env.example）。
+- SenseVoice 事件标记清理保留（对 Qwen3 输出无影响）。
+
 ## [R-108 补充] 2026-09-07 — 硅基流动 ASR 换免费模型 SenseVoiceSmall
 - 默认模型 `Qwen/Qwen3-ASR-1.7B` → `FunAudioLLM/SenseVoiceSmall`（硅基流动免费，实测真实出稿，不再受余额限制）；`.env`/`.env.example`/config 默认同步。
 - 顺带清理 SenseVoice 输出的事件标记（🎼、情绪表情、`<|...|>` 标签），转写稿更干净。

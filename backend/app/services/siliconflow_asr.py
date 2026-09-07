@@ -21,8 +21,9 @@ from .transcription import TranscriptionError
 
 MAX_FILE_MB = 50  # 硅基流动单文件上限 50MB
 MAX_DURATION_SECONDS = 3600  # 硅基流动单次时长上限 1 小时
-DEFAULT_MODEL = "FunAudioLLM/SenseVoiceSmall"  # 硅基流动免费 ASR（R-108 二次切换）
-# SenseVoice 输出自带事件标记（音乐/情绪表情、<|...|> 标签），对纯口播转写无意义，入库前清掉
+DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"  # 硅基流动免费 ASR（R-108 二次切换后切回）
+# SenseVoice 输出自带事件标记（音乐/情绪表情、<|...|> 标签），对纯口播转写无意义，入库前清掉；
+# Qwen3-ASR 无此类标记，清理不影响其输出
 _SENSEVOICE_EVENTS = ("🎼", "🎵", "🎶", "♪", "♫", "🎙️", "🎤", "😀", "😂", "😅", "😐", "😮", "😢", "🥲")
 
 

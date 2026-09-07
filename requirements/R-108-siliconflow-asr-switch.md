@@ -3,7 +3,7 @@
 - **日期**: 2026-09-07
 - **提出渠道**: 对话
 - **原文摘要**: ASR 接入硅基流动 API；添加开关可切换使用阿里云或硅基流动。
-- **状态**: ✅ 已完成（2026-09-07 二次切换为免费模型 SenseVoiceSmall，真实出稿验证通过）
+- **状态**: ✅ 已完成（2026-09-07 三次调整：默认模型切回 Qwen/Qwen3-ASR-1.7B——官方定价页标注免费，实测可用无 402）
 - **排期**: M91（已完成）
 - **关联**: config.py（asr_mode 白名单）、services/transcription.py、services/aliyun_filetrans.py、services/ingest.import_video_task（统一转写入口）、.env / .env.example；与 R-068（模式护栏：非法配置启动报错）、R-094（转写失败可读原因+通知）、R-032/R-033（阿里云 ASR 真实接入）相关。
 
@@ -37,3 +37,8 @@
 ## 变更（2026-09-07 二次）：模型换免费 SenseVoiceSmall
 - 作者要求「硅基流动切换到免费的 ASR 模型」：默认模型由 `Qwen/Qwen3-ASR-1.7B` 改为 **`FunAudioLLM/SenseVoiceSmall`**（硅基流动免费，实测真实出稿，不再报 402 余额不足）；config 默认 + `.env`/`.env.example` 同步。
 - 顺带清理 SenseVoice 输出的事件标记（🎼、情绪表情、`<|...|>` 标签）后再入库，转写稿更干净。
+
+## 变更（2026-09-07 第三次）：默认模型切回 Qwen/Qwen3-ASR-1.7B
+- 官方定价页（siliconflow.cn/pricing）确认 Qwen/Qwen3-ASR-1.7B 当前标注「免费」；实测真实调用成功、无 402。
+- 默认模型由 SenseVoiceSmall 切回 `Qwen/Qwen3-ASR-1.7B`（config 默认 + `.env`/`.env.example`）；SenseVoice 事件标记清理保留（对 Qwen3 输出无影响）。
+- 作者指示用 Qwen3-ASR-1.7B 覆盖重转此前 SenseVoiceSmall 转写的素材（视频 79），待执行。

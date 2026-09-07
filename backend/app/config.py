@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     # 硅基流动 ASR（R-108，asr_mode=siliconflow 时使用）：POST /v1/audio/transcriptions
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
-    siliconflow_asr_model: str = "FunAudioLLM/SenseVoiceSmall"  # 免费 ASR 模型；可在 .env 覆盖（ECHO_SILICONFLOW_ASR_MODEL）
+    siliconflow_asr_model: str = "Qwen/Qwen3-ASR-1.7B"  # 免费 ASR 模型（官方定价页标注免费）；可在 .env 覆盖（ECHO_SILICONFLOW_ASR_MODEL）
 
     # QQ 邮箱 SMTP
     smtp_host: str = "smtp.qq.com"

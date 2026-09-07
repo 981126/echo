@@ -55,7 +55,7 @@ echo/
 | TikHub | 平台数据源（抖音/B站/小红书） | `services/platform/tikhub.py`（实现 `base.DataSource`） | `TIKHUB_API_KEY/BASE_URL/MODE/DAILY_BUDGET` |
 | 阿里云 OSS | ASR 文件中转（临时预签名） | `aliyun_oss.py` | `ALIYUN_OSS_BUCKET/REGION` |
 | 阿里云 FileTrans | 录音文件识别 4.0 | `aliyun_filetrans.py` | `ALIYUN_ASR_ACCESS_KEY_ID/SECRET/APP_KEY`、`ASR_MODE=aliyun` |
-| 硅基流动 | 音频直传转写（FunAudioLLM/SenseVoiceSmall，免费，R-108） | `siliconflow_asr.py` | `SILICONFLOW_API_KEY/BASE_URL/ASR_MODEL`、`ASR_MODE=siliconflow` |
+| 硅基流动 | 音频直传转写（Qwen/Qwen3-ASR-1.7B，免费，R-108） | `siliconflow_asr.py` | `SILICONFLOW_API_KEY/BASE_URL/ASR_MODEL`、`ASR_MODE=siliconflow` |
 | QQ SMTP | 邮件推送 | `services/notify.py` | `SMTP_HOST/PORT/USER/AUTH_CODE/MAIL_TO` |
 
 **数据源适配器（R-062）**：`services/platform/base.py` 定义 `DataSource` Protocol

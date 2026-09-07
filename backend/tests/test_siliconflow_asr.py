@@ -22,7 +22,7 @@ def _settings(**overrides: object) -> MagicMock:
         asr_mode="siliconflow",
         siliconflow_api_key="sf-test-key",
         siliconflow_base_url="https://api.siliconflow.cn/v1",
-        siliconflow_asr_model="FunAudioLLM/SenseVoiceSmall",
+        siliconflow_asr_model="Qwen/Qwen3-ASR-1.7B",
         asr_poll_timeout=30,
     )
     base.update(overrides)
@@ -84,7 +84,7 @@ def test_transcribe_audio_skips_extraction(tmp_path, monkeypatch):
     assert post.last_kwargs is not None
     files = post.last_kwargs["files"]
     assert files["file"][0] == "demo.wav"  # 传的是原文件
-    assert post.last_kwargs["data"] == {"model": "FunAudioLLM/SenseVoiceSmall"}
+    assert post.last_kwargs["data"] == {"model": "Qwen/Qwen3-ASR-1.7B"}
     assert post.last_kwargs["headers"]["Authorization"] == "Bearer sf-test-key"
     assert path.exists()  # 原文件未被删除
 
