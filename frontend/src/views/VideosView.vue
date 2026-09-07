@@ -694,12 +694,45 @@ const filteredCards = computed(() => {
   })
 })
 
+function hasRealFile(v) {
+  const f = v && v.filename
+  return !!f && !f.startsWith('__cloud__')
+}
+
+// 云端作品条目(works 列表项) → 素材卡；深链跨博主打开时复用同一口径（R-122）
+function cloudWorkToCard(w, videoById) {
+  const anyLocal = (w.posts || []).find(x => x.local_video_id)
+  const boundVideo = anyLocal ? videoById.get(anyLocal.local_video_id) : null
+  const tags = []
+  const wPosts = w.posts || []
+  wPosts.forEach(x => {
+    const xTags = x.tags || []
+    xTags.forEach(t => { if (t && !tags.includes(t)) tags.push(t) })
+  })
+  return {
+    key: (w.type === 'work' ? 'w' : 'p') + w.id,
+    kind: 'cloud',
+    id: w.id,
+    type: w.type,
+    title: w.title || '（无标题）',
+    cover_url: w.cover || '',
+    tags,
+    platforms: w.platforms || [],
+    main_topics: [],
+    status: 'published',
+    is_ad: (w.posts || []).some(x => x.is_ad) || !!(boundVideo && boundVideo.is_ad),
+    ad_price: (() => { const arr = (w.posts || []).filter(x => x.ad_price != null).map(x => Number(x.ad_price)); if (boundVideo && boundVideo.ad_price != null) arr.push(Number(boundVideo.ad_price)); return arr.length ? Math.max(...arr) : null })(),
+    merged: w.type === 'work' ? (w.posts || []).length : 0,
+    cloudPosts: w.posts || [],
+    local_video_id: anyLocal ? anyLocal.local_video_id : null,
+    hasVideo: hasRealFile(videoById.get(anyLocal ? anyLocal.local_video_id : null)),
+    pub: ((w.posts || [])[0] && (w.posts[0].publish_time || '')).slice(0, 10) || '',
+    date: (((w.posts || [])[0] && (w.posts[0].publish_time || '')) || '').slice(0, 10)
+  }
+}
+
 function buildCards() {
   const videoById = new Map((videos.value || []).map(v => [v.id, v]))
-  const realFile = (v) => {
-    const f = v && v.filename
-    return !!f && !f.startsWith('__cloud__')
-  }
 
   // 云端已绑定本地素材(转素材后)的记录不重复展示，避免合并后多个素材
   const linkedLocal = new Set()
@@ -725,39 +758,10 @@ function buildCards() {
     filename: v.filename,
     tags_confirmed: v.tags_confirmed,
     platform_post_id: v.platform_post_id,
-    hasVideo: realFile(v),
+    hasVideo: hasRealFile(v),
     date: (v.published_at || v.planned_publish_at || v.created_at || '').slice(0, 10)
   }))
-  const cloud = (works.value || []).map(w => {
-    const anyLocal = (w.posts || []).find(x => x.local_video_id)
-    const boundVideo = anyLocal ? videoById.get(anyLocal.local_video_id) : null
-    const tags = []
-    const wPosts = w.posts || []
-    wPosts.forEach(x => {
-      const xTags = x.tags || []
-      xTags.forEach(t => { if (t && !tags.includes(t)) tags.push(t) })
-    })
-    return {
-      key: (w.type === 'work' ? 'w' : 'p') + w.id,
-      kind: 'cloud',
-      id: w.id,
-      type: w.type,
-      title: w.title || '（无标题）',
-      cover_url: w.cover || '',
-      tags,
-      platforms: w.platforms || [],
-      main_topics: [],
-      status: 'published',
-      is_ad: (w.posts || []).some(x => x.is_ad) || !!(boundVideo && boundVideo.is_ad),
-      ad_price: (() => { const arr = (w.posts || []).filter(x => x.ad_price != null).map(x => Number(x.ad_price)); if (boundVideo && boundVideo.ad_price != null) arr.push(Number(boundVideo.ad_price)); return arr.length ? Math.max(...arr) : null })(),
-      merged: w.type === 'work' ? (w.posts || []).length : 0,
-      cloudPosts: w.posts || [],
-      local_video_id: anyLocal ? anyLocal.local_video_id : null,
-      hasVideo: realFile(videoById.get(anyLocal ? anyLocal.local_video_id : null)),
-      pub: ((w.posts || [])[0] && (w.posts[0].publish_time || '')).slice(0, 10) || '',
-      date: (((w.posts || [])[0] && (w.posts[0].publish_time || '')) || '').slice(0, 10)
-    }
-  })
+  const cloud = cloudWorks.map(w => cloudWorkToCard(w, videoById))
   cards.value = [...local, ...cloud].sort((a, b) => (b.date < a.date ? -1 : 1))
 }
 
@@ -1349,9 +1353,29 @@ function handleDeepLink() {
     const pid = Number(postId)
     const card = cards.value.find(c => c.kind === 'cloud' && (c.cloudPosts || []).some(x => x.id === pid))
     if (card) openCloud(card)
-    else message.info('未在当前素材库找到该云端作品（可能属于对标博主）')
+    else openCloudPost(pid)  // R-122：来源素材/通知深链可能属于其它博主（如对标），按 id 反查直接打开
     router.replace({ path: '/videos' })
   }
+}
+
+// R-122：云端 post= 深链在当前筛选博主列表找不到时，按平台作品 id 拉其所属云端条目直接打开回显；
+// 已转本地（local_video_id）则打开本地编辑；确实不存在才提示。
+async function openCloudPost(pid) {
+  let item = null
+  try {
+    item = await api(`/api/works/by-post/${pid}`)
+  } catch (e) {
+    message.info((e && e.message) || '云端素材不存在或已删除')
+    return
+  }
+  if (!item || !(item.posts || []).length) {
+    message.info('云端素材不存在或已删除')
+    return
+  }
+  const card = cloudWorkToCard(item, new Map((videos.value || []).map(v => [v.id, v])))
+  if (!card) return
+  if (card.local_video_id) goLocal(card.local_video_id)
+  else openCloud(card)
 }
 
 async function loadCreatorOptions() {

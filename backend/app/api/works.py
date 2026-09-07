@@ -153,6 +153,26 @@ def get_works(creator_id: int = 0, db: Session = Depends(get_db)):
     return {"total": len(items), "items": items}
 
 
+@router.get("/by-post/{post_id}", response_model=dict)
+def get_work_by_post(post_id: int, db: Session = Depends(get_db)):
+    """按平台作品 id 返回其所属云端条目（可跨博主，素材库深链/来源素材跳转用，R-122）。
+
+    与素材库列表同口径：按该作品所属博主取 list_works，命中即返回包含它的合并作品或单条；
+    找不到（已删除/账号禁用）返回 404，前端提示而不是静默打不开。
+    """
+    from ..models.platform import CreatorAccount, PlatformPost
+
+    p = db.get(PlatformPost, post_id)
+    if p is None or not p.account_id:
+        raise HTTPException(status_code=404, detail="云端素材不存在或已删除")
+    acc = db.get(CreatorAccount, p.account_id)
+    if acc is None:
+        raise HTTPException(status_code=404, detail="云端素材不存在或已删除")
+    for item in list_works(db, acc.creator_id):
+        if any(x.get("id") == p.id for x in (item.get("posts") or [])):
+            return item
+    raise HTTPException(status_code=404, detail="云端素材不存在或已删除")
+
 
 class MetaIn(BaseModel):
     work_id: int | None = None

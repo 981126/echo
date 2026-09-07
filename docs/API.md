@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 92 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 93 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -1285,6 +1285,18 @@ Get Works
 **参数**
 
 - `creator_id`（query）integer
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/works/by-post/{post_id}
+
+Get Work By Post
+
+按平台作品 id 返回其所属云端条目（可跨博主，素材库深链/来源素材跳转用，R-122）。
+
+**参数**
+
+- `post_id`（path）integer
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 
