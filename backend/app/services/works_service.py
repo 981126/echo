@@ -12,6 +12,7 @@ import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from ..core.platform_links import build_platform_page_url
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.work import Work
 
@@ -79,6 +80,7 @@ def post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
         "is_ad": p.is_ad,
         "ad_price": p.ad_price,
         "platform_post_id": p.platform_post_id,
+        "page_url": build_platform_page_url(p.platform, p.platform_post_id, p.raw or ""),
         "title": p.title,
         "desc": p.desc,
         "cover": p.cover_url_local,

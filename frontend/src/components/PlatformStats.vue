@@ -2,7 +2,8 @@
   <div class="plat-zone">
     <div v-for="p in order" :key="p" class="plat-line" :class="{ missing: !postOf(p) }">
       <template v-if="postOf(p)">
-        <b>{{ platformName(p) }}</b>
+        <a v-if="postOf(p).page_url" class="plat-link" :href="postOf(p).page_url" target="_blank" rel="noopener noreferrer" @click.stop>{{ platformName(p) }}</a>
+        <b v-else>{{ platformName(p) }}</b>
         <template v-if="postOf(p).latest_stat">
           <span>播放 {{ postOf(p).latest_stat.plays ? fmtNum(postOf(p).latest_stat.plays) : '—' }}</span>
           <span>赞 {{ fmtNum(postOf(p).latest_stat.likes) }}</span>
@@ -55,6 +56,8 @@ function fmtNum(n) {
   color: #6f675c;
 }
 .plat-line b { color: #a34f2c; font-weight: 600; }
+.plat-link { color: #a34f2c; font-weight: 600; text-decoration: none; cursor: pointer; }
+.plat-link:hover { text-decoration: underline; }
 .plat-line span { overflow: hidden; text-overflow: ellipsis; }
 .plat-line.missing { color: #bdb4a8; }
 .plat-line.missing b { color: #bdb4a8; font-weight: 400; }

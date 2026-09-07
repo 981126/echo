@@ -16,6 +16,7 @@
           <span class="muted mini">粉 {{ fmtNum(account.followers) }}</span>
           <span class="muted mini">作品 {{ fmtNum(account.posts_total) }}</span>
           <span class="mono uid" :title="account.platform_user_id">{{ account.platform_user_id || '未解析 ID' }}</span>
+          <a v-if="homeUrl" class="mini home-link" :href="homeUrl" target="_blank" rel="noopener noreferrer" @click.stop>主页 ↗</a>
           <span v-if="account.last_sync_at" class="muted mini">同步 {{ fmt(account.last_sync_at) }}</span>
         </div>
       </div>
@@ -33,6 +34,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { fmt, fmtNum, platformName } from '../lib/format'
 
 const props = defineProps({
@@ -42,6 +44,18 @@ const props = defineProps({
   syncLabel: { type: String, default: '同步' }
 })
 defineEmits(['sync', 'posts', 'edit', 'remove', 'avatar', 'enable'])
+
+const homeUrl = computed(() => {
+  const link = (props.account.home_link || '').trim()
+  if (link) return link
+  const uid = (props.account.platform_user_id || '').trim()
+  if (!uid) return ''
+  const p = props.account.platform
+  if (p === 'douyin') return `https://www.douyin.com/user/${uid}`
+  if (p === 'bilibili') return `https://space.bilibili.com/${uid}`
+  if (p === 'xiaohongshu') return `https://www.xiaohongshu.com/user/profile/${uid}`
+  return ''
+})
 
 const inputId = `av${props.benchmark ? 'b' : ''}-${props.account.id}`
 
@@ -63,4 +77,6 @@ function openFile() {
 .av-wrap:hover .av-edit { opacity: 1; }
 .mini { font-size: 12px; white-space: nowrap; }
 .uid { font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-link { color: #a34f2c; text-decoration: none; font-weight: 600; }
+.home-link:hover { text-decoration: underline; }
 </style>
