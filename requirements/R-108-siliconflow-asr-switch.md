@@ -41,4 +41,6 @@
 ## 变更（2026-09-07 第三次）：默认模型切回 Qwen/Qwen3-ASR-1.7B
 - 官方定价页（siliconflow.cn/pricing）确认 Qwen/Qwen3-ASR-1.7B 当前标注「免费」；实测真实调用成功、无 402。
 - 默认模型由 SenseVoiceSmall 切回 `Qwen/Qwen3-ASR-1.7B`（config 默认 + `.env`/`.env.example`）；SenseVoice 事件标记清理保留（对 Qwen3 输出无影响）。
-- 作者指示用 Qwen3-ASR-1.7B 覆盖重转此前 SenseVoiceSmall 转写的素材（视频 79），待执行。
+- 作者指示用 Qwen3-ASR-1.7B 覆盖重转此前 SenseVoiceSmall 转写的素材（视频 79），已执行：
+  - 任务 366（`import_video`，video 79）于 2026-09-07 17:17 完成，稿子落库（transcript id 236，514 字，asr_status=done），SenseVoiceSmall 旧稿已删除由 Qwen3 结果覆盖；接口 `GET /api/videos/79` 返回正常。
+  - 价格核算：视频 79 音轨 87.47 秒 ≈ 1.46 分钟；Qwen/Qwen3-ASR-1.7B 官方定价免费（¥0/分钟），本次转写费用 ¥0，无 402。
