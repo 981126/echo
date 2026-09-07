@@ -61,7 +61,10 @@
       <n-button size="small" secondary @click="decide(t, 'rejected')">拒绝</n-button>
     </div>
 
-    <div class="section-title">已确认档案</div>
+    <div class="section-title">
+      已确认档案
+      <n-button size="tiny" type="primary" secondary style="margin-left: 10px" @click="startAdd">新增</n-button>
+    </div>
     <div v-if="!confirmed.length" class="panel empty">暂无已确认人设</div>
     <template v-else>
       <div class="merge-float">
@@ -100,29 +103,10 @@
       </div>
     </template>
 
-    <div class="section-title">手动添加</div>
-    <div class="panel">
-      <div class="form-grid">
-        <div class="form-item">
-          <label class="form-label">标签</label>
-          <n-input v-model:value="form.label" placeholder="如：犀利敢说" />
-        </div>
-        <div class="form-item">
-          <label class="form-label">描述</label>
-          <n-input v-model:value="form.description" placeholder="一句话描述" />
-        </div>
-        <div class="form-item full">
-          <label class="form-label">类别</label>
-          <n-select v-model:value="form.category" :options="categoryOptions" />
-        </div>
-      </div>
-      <n-button type="primary" @click="addTag">添加</n-button>
-    </div>
-
     <n-modal
       v-model:show="showEdit"
       preset="card"
-      title="编辑人设标签"
+      :title="editForm.id ? '编辑人设标签' : '新增风格档案'"
       style="width: min(460px, 92vw)"
       :mask-closable="false"
       @close="closeEdit"
@@ -140,7 +124,7 @@
         <n-select v-model:value="editForm.category" :options="categoryOptions" />
       </div>
       <div class="row">
-        <n-button type="primary" @click="saveEdit">保存</n-button>
+        <n-button type="primary" @click="saveEdit">{{ editForm.id ? '保存' : '新增' }}</n-button>
         <n-button secondary @click="closeEdit">取消</n-button>
       </div>
     </n-modal>
@@ -157,7 +141,6 @@ const confirmed = ref([])
 const running = ref(false)
 const message = useMessage()
 const dialog = useDialog()
-const form = ref({ label: '', description: '', category: 'style' })
 const showEdit = ref(false)
 const editForm = ref({ id: null, label: '', description: '', category: 'style' })
 const phrases = ref([])
@@ -321,6 +304,11 @@ function startEdit(t) {
   showEdit.value = true
 }
 
+function startAdd() {
+  editForm.value = { id: null, label: '', description: '', category: 'style' }
+  showEdit.value = true
+}
+
 function closeEdit() {
   showEdit.value = false
 }
@@ -331,29 +319,25 @@ async function saveEdit() {
     message.warning('标签不能为空')
     return
   }
-  await api(`/api/persona/tags/${f.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ label: f.label.trim(), description: f.description, category: f.category })
-  })
-  message.success('已保存')
-  closeEdit()
-  load()
+  const body = JSON.stringify({ label: f.label.trim(), description: f.description, category: f.category })
+  try {
+    if (f.id) {
+      await api(`/api/persona/tags/${f.id}`, { method: 'PATCH', body })
+      message.success('已保存')
+    } else {
+      await api('/api/persona/tags', { method: 'POST', body })
+      message.success('已新增')
+    }
+    closeEdit()
+    await load()
+  } catch (e) {
+    message.error(e.message)
+  }
 }
 
 async function removeTag(t) {
   await api(`/api/persona/tags/${t.id}`, { method: 'DELETE' })
   message.success('已删除')
-  load()
-}
-
-async function addTag() {
-  if (!form.value.label.trim()) {
-    message.warning('请填写标签')
-    return
-  }
-  await api('/api/persona/tags', { method: 'POST', body: JSON.stringify(form.value) })
-  form.value = { label: '', description: '', category: 'style' }
-  message.success('已添加')
   load()
 }
 
