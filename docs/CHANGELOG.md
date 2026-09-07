@@ -1,5 +1,9 @@
 # 变更记录
 
+## [M99 / R-116] 2026-09-07 — 对标页进行中状态切页保留
+- AI分析/洗稿/转写补齐的 loading 与结果改为模块级共享状态，切页返回不丢。
+
+
 ## [M98 / R-115] 2026-09-07 — AI 分析 JSON 解析健壮化
 - _parse_json 支持代码围栏/推理前后缀，并扫描第一个合法 JSON 对象。
 - 实测 kimi-k2.6 为推理模型：答案在 content、推理在 reasoning_content；analyze max_tokens 800→2000，避免推理吃光 token 导致 content 为空。

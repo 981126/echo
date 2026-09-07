@@ -64,22 +64,31 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, toRef, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { platformName } from '../lib/format'
 
 const message = useMessage()
+
+// R-114/R-116：跨页面共享的进行中状态（切页组件卸载不丢，返回后动画/结果仍在）
+const ui = reactive({
+  preparingId: 0,
+  analyzingKey: '',
+  rewritingKey: '',
+  analysisMap: {}
+})
+
 const loading = ref(true)
 const benchmarks = ref([])
-const preparingId = ref(0)
+const preparingId = toRef(ui, 'preparingId')
 const rerunning = ref(false)
 const rerunPct = ref(0)
 const rerunNote = ref('')
 let pollAlive = false
-const analyzingKey = ref('')
-const rewritingKey = ref('')
-const analysisMap = ref({})
+const analyzingKey = toRef(ui, 'analyzingKey')
+const rewritingKey = toRef(ui, 'rewritingKey')
+const analysisMap = toRef(ui, 'analysisMap')
 const showScript = ref(false)
 const scriptText = ref('')
 const draftId = ref(0)
@@ -89,8 +98,7 @@ async function load() {
   try {
     const d = await api('/api/benchmark/top')
     benchmarks.value = d.benchmarks || []
-    analysisMap.value = {}
-    // R-114：恢复已保存的「AI分析」结果，切页不丢
+    // R-114/R-116：合并已保存的「AI分析」结果（不清空进行中状态），切页不丢
     for (const bm of benchmarks.value) {
       for (const it of bm.items || []) {
         if (it.analysis) analysisMap.value[it.key] = it.analysis
@@ -191,7 +199,7 @@ async function analyze(b, it) {
   analyzingKey.value = it.key
   try {
     const d = await api('/api/benchmark/analyze', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key }) })
-    analysisMap.value = { ...analysisMap.value, [it.key]: d }
+    analysisMap.value[it.key] = d
   } catch (e) {
     message.error(e.message)
   } finally {
