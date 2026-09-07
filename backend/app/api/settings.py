@@ -23,6 +23,13 @@ class RoundsIn(BaseModel):
     rounds: int = Field(default=5, ge=1, le=10)
 
 
+@router.get("/asr", response_model=dict)
+def get_asr_config():
+    """当前 ASR 服务商与模型（供前端展示真实来源，R-112）。"""
+    st = get_settings()
+    return {"mode": st.asr_mode, "model": st.siliconflow_asr_model}
+
+
 @router.get("/generation-model", response_model=dict)
 def get_mode(db: Session = Depends(get_db)):
     row = db.get(Kv, "generation_model")

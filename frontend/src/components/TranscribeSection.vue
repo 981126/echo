@@ -1,6 +1,6 @@
 <template>
   <div class="form-item full">
-    <label class="form-label">语音转文字（阿里云 ASR）</label>
+    <label class="form-label" :title="asrLabel">{{ asrLabel }}</label>
     <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
       <n-button v-if="!transcriptText" secondary :loading="transcribing" @click="$emit('start')">
         {{ transcribing ? '识别中…' : '开始转写' }}
@@ -13,9 +13,28 @@
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
+import { api } from '../api'
+
 defineProps({
   transcriptText: { type: String, default: '' },
   transcribing: { type: Boolean, default: false }
 })
 defineEmits(['start'])
+
+const asrLabel = ref('语音转文字')
+onMounted(async () => {
+  try {
+    const r = await api('/api/settings/asr')
+    if (r && r.mode === 'siliconflow') {
+      asrLabel.value = r.model ? `语音转文字（硅基流动 ASR · ${r.model}）` : '语音转文字（硅基流动 ASR）'
+    } else if (r && r.mode === 'aliyun') {
+      asrLabel.value = '语音转文字（阿里云 ASR）'
+    } else if (r && r.mode === 'mock') {
+      asrLabel.value = '语音转文字（模拟）'
+    }
+  } catch {
+    /* 后端暂不可用时保持默认文案 */
+  }
+})
 </script>

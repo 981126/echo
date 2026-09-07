@@ -33,10 +33,12 @@
             :class="{ unread: !n.read }"
             @click="go(n)"
           >
-            <div class="row" style="gap: 6px">
+            <div class="row" style="gap: 6px; align-items: center">
               <span v-if="!n.read" class="notif-dot" />
               <strong style="font-size: 13px">{{ n.title }}</strong>
               <n-tag v-if="n.status === 'failed'" size="tiny" :bordered="false" round type="error">失败</n-tag>
+              <div class="grow"></div>
+              <n-button size="tiny" quaternary @click.stop="copyText(n)">复制</n-button>
             </div>
             <p class="muted" style="margin: 2px 0 0">{{ n.message }}</p>
             <span class="muted" style="font-size: 11px">{{ fmt(n.created_at) }}</span>
@@ -100,6 +102,27 @@ async function go(n) {
   load(false)
 }
 
+async function copyText(n) {
+  const text = `${n.title}\n${n.message}`
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    message.success('已复制')
+  } catch {
+    message.error('复制失败')
+  }
+}
+
 async function readAll() {
   await api('/api/notifications/read', { method: 'POST', body: JSON.stringify({}) })
   load(false)
@@ -110,7 +133,7 @@ async function clearAll() {
   notifs.value = []
 }
 
-function onDocClick(e) {
+function onDocPointerDown(e) {
   if (e.target && e.target.closest && e.target.closest('.notif-wrap')) return
   open.value = false
 }
@@ -120,13 +143,13 @@ onMounted(() => {
   connectEvents()  // R-087：SSE 长连接，收到新通知即时刷新
   offNotif = busOn('notification.new', () => load(true))
   timer = setInterval(() => load(true), 15000)  // 兜底轮询（SSE 断线时仍能补上）
-  document.addEventListener('click', onDocClick)
+  document.addEventListener('pointerdown', onDocPointerDown)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
   if (offNotif) offNotif()
   disconnectEvents()
-  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('pointerdown', onDocPointerDown)
 })
 </script>

@@ -714,6 +714,7 @@ function buildCards() {
   }))
   const cloud = (works.value || []).map(w => {
     const anyLocal = (w.posts || []).find(x => x.local_video_id)
+    const boundVideo = anyLocal ? videoById.get(anyLocal.local_video_id) : null
     const tags = []
     const wPosts = w.posts || []
     wPosts.forEach(x => {
@@ -731,8 +732,8 @@ function buildCards() {
       platforms: w.platforms || [],
       main_topics: [],
       status: 'published',
-      is_ad: (w.posts || []).some(x => x.is_ad),
-      ad_price: (() => { const arr = (w.posts || []).filter(x => x.ad_price != null).map(x => x.ad_price); return arr.length ? Math.max(...arr) : null })(),
+      is_ad: (w.posts || []).some(x => x.is_ad) || !!(boundVideo && boundVideo.is_ad),
+      ad_price: (() => { const arr = (w.posts || []).filter(x => x.ad_price != null).map(x => Number(x.ad_price)); if (boundVideo && boundVideo.ad_price != null) arr.push(Number(boundVideo.ad_price)); return arr.length ? Math.max(...arr) : null })(),
       merged: w.type === 'work' ? (w.posts || []).length : 0,
       cloudPosts: w.posts || [],
       local_video_id: anyLocal ? anyLocal.local_video_id : null,
