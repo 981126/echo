@@ -1,8 +1,8 @@
 # 变更记录
 
-## [M96 / R-113] 2026-09-07 — 转写来源入库（per-transcript asr_provider）
-- transcripts 增加 asr_provider 并在转写时落库；迁移回填历史（09-07 前 aliyun，之后 siliconflow）。
-- 编辑页「语音转文字」按每条素材实际来源显示，不再用全局模式一刀切。
+## [M96 / R-113] 2026-09-07 — 转写来源与模型入库（per-transcript）
+- transcripts 增加 asr_provider / asr_model 并在转写时落库；迁移回填历史（09-07 前 aliyun 且模型为空；之后 siliconflow 模型 Qwen/Qwen3-ASR-1.7B）。
+- 编辑页「语音转文字」按每条素材实际来源与模型显示；阿里云模型未知显示为空。
 - 修复 test_parse_link 网络依赖，离线确定性通过。
 
 

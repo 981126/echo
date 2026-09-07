@@ -102,12 +102,14 @@ def import_video_task(db, payload: dict) -> None:
             text = transcriber.transcribe(path)
         except TranscriptionError as exc:
             # R-094：转写失败也落 asr_status=failed，并给可读原因
+            model = settings.siliconflow_asr_model if settings.asr_mode == "siliconflow" else ""
             if video.transcript is None:
-                video.transcript = Transcript(video_id=video.id, asr_status="failed", asr_provider=settings.asr_mode)
+                video.transcript = Transcript(video_id=video.id, asr_status="failed", asr_provider=settings.asr_mode, asr_model=model)
                 db.add(video.transcript)
             else:
                 video.transcript.asr_status = "failed"
                 video.transcript.asr_provider = settings.asr_mode
+                video.transcript.asr_model = model
             db.commit()
             msg = str(exc) or "转写失败"
             if "识别结果为空" in msg:
@@ -122,6 +124,7 @@ def import_video_task(db, payload: dict) -> None:
                     corrected_text=corrected,
                     asr_status="done",
                     asr_provider=settings.asr_mode,
+                    asr_model=settings.siliconflow_asr_model if settings.asr_mode == "siliconflow" else "",
                 )
             )
         else:
@@ -129,6 +132,7 @@ def import_video_task(db, payload: dict) -> None:
             video.transcript.corrected_text = corrected
             video.transcript.asr_status = "done"
             video.transcript.asr_provider = settings.asr_mode
+            video.transcript.asr_model = settings.siliconflow_asr_model if settings.asr_mode == "siliconflow" else ""
         db.commit()
         db.refresh(video)
 

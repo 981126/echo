@@ -52,6 +52,7 @@ class TranscriptOut(BaseModel):
     corrected_text: str = ""
     asr_status: str = "pending"
     asr_provider: str = ""
+    asr_model: str = ""
 
 
 class PlatformLinkOut(BaseModel):

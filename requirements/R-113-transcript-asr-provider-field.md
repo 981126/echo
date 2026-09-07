@@ -18,3 +18,8 @@
 - 老素材编辑页显示「阿里云 ASR」，硅基流动转写的（79/256 等）显示「硅基流动 ASR · Qwen/Qwen3-ASR-1.7B」。
 - `GET /api/videos/{id}` 返回 transcript.asr_provider。
 - `scripts/verify.sh` 全绿。
+
+## 补充（同日）：模型也入库
+- `transcripts` 再增 `asr_model`：硅基流动转写时存 `settings.siliconflow_asr_model`；阿里云/模拟未知 → 空。
+- 回填：23 条硅基流动历史转写 model=Qwen/Qwen3-ASR-1.7B；阿里云 233 条 model 为空。
+- 前端编辑页显示该条素材实际模型（阿里云为空时不显示模型）。

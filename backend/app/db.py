@@ -199,6 +199,19 @@ def _migrate_chat() -> None:
 
 
 
+
+def _migrate_transcript_asr_model() -> None:
+    """R-113 补充：transcripts 增加 asr_model，并回填历史硅基流动所用模型（Qwen3）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(transcripts)").fetchall()}
+        if "asr_model" not in cols:
+            conn.exec_driver_sql("ALTER TABLE transcripts ADD COLUMN asr_model VARCHAR(100) NOT NULL DEFAULT ''")
+        model = get_settings().siliconflow_asr_model or "Qwen/Qwen3-ASR-1.7B"
+        conn.exec_driver_sql(
+            "UPDATE transcripts SET asr_model = ? WHERE asr_provider = 'siliconflow' AND asr_model = ''",
+            (model,),
+        )
+
 def _migrate_transcript_asr_provider() -> None:
     """R-112：transcripts 增加 asr_provider（mock|aliyun|siliconflow），并回填历史来源。
 
@@ -437,6 +450,7 @@ def init_db() -> None:
     _migrate_topic_candidate_slot()
     _migrate_task_note()
     _migrate_transcript_asr_provider()
+    _migrate_transcript_asr_model()
     _fix_video_creator_binding()
     _auto_confirm_tags()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间

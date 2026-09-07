@@ -19,7 +19,8 @@ import { api } from '../api'
 const props = defineProps({
   transcriptText: { type: String, default: '' },
   transcribing: { type: Boolean, default: false },
-  asrProvider: { type: String, default: '' }
+  asrProvider: { type: String, default: '' },
+  asrModel: { type: String, default: '' }
 })
 defineEmits(['start'])
 
@@ -40,7 +41,8 @@ const asrLabel = computed(() => {
   if (props.transcriptText && !props.asrProvider) return '语音转文字'
   const mode = props.asrProvider || currentMode.value
   if (mode === 'siliconflow') {
-    return currentModel.value ? `语音转文字（硅基流动 ASR · ${currentModel.value}）` : '语音转文字（硅基流动 ASR）'
+    const m = props.asrModel || currentModel.value
+    return m ? `语音转文字（硅基流动 ASR · ${m}）` : '语音转文字（硅基流动 ASR）'
   }
   if (mode === 'aliyun') return '语音转文字（阿里云 ASR）'
   if (mode === 'mock') return '语音转文字（模拟）'
