@@ -80,7 +80,13 @@
           <n-input v-model:value="editing.title" placeholder="视频标题（选题标题）" />
         </div>
         <PlatformLinksInput :links="editing.links" @update:links="v => (editing.links = v)" />
-        <CoverEditor :cover-url="editing.coverUrl" @change="onCover" @remove="removeCover" />
+        <CoverEditor
+          :cover-url="editing.coverUrl"
+          :can-play="!!editing.filename && !isPlaceholderFile(editing.filename)"
+          @change="onCover"
+          @remove="removeCover"
+          @play="playEditVideo"
+        />
         <LocalVideoControl
           :has-file="!!editing.filename && !isPlaceholderFile(editing.filename)"
           :file-name="editing.filename"
@@ -349,6 +355,10 @@ async function onRemoveVideo() {
   } catch (e) {
     message.error(e.message)
   }
+}
+
+function playEditVideo() {
+  if (editing.value && editing.value.id) openPlayer(editing.value.id, editing.value.title)
 }
 
 async function removeCover() {
