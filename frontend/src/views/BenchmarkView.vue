@@ -76,7 +76,10 @@ const ui = reactive({
   preparingId: 0,
   analyzingKey: '',
   rewritingKey: '',
-  analysisMap: {}
+  analysisMap: {},
+  showScript: false,
+  scriptText: '',
+  draftId: 0
 })
 
 const loading = ref(true)
@@ -89,9 +92,9 @@ let pollAlive = false
 const analyzingKey = toRef(ui, 'analyzingKey')
 const rewritingKey = toRef(ui, 'rewritingKey')
 const analysisMap = toRef(ui, 'analysisMap')
-const showScript = ref(false)
-const scriptText = ref('')
-const draftId = ref(0)
+const showScript = toRef(ui, 'showScript')
+const scriptText = toRef(ui, 'scriptText')
+const draftId = toRef(ui, 'draftId')
 
 async function load() {
   loading.value = true
