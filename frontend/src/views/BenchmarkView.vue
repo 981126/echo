@@ -90,6 +90,12 @@ async function load() {
     const d = await api('/api/benchmark/top')
     benchmarks.value = d.benchmarks || []
     analysisMap.value = {}
+    // R-114：恢复已保存的「AI分析」结果，切页不丢
+    for (const bm of benchmarks.value) {
+      for (const it of bm.items || []) {
+        if (it.analysis) analysisMap.value[it.key] = it.analysis
+      }
+    }
   } catch (e) {
     message.error(e.message)
   } finally {
@@ -184,7 +190,7 @@ async function analyze(b, it) {
   }
   analyzingKey.value = it.key
   try {
-    const d = await api('/api/benchmark/analyze', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text }) })
+    const d = await api('/api/benchmark/analyze', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key }) })
     analysisMap.value = { ...analysisMap.value, [it.key]: d }
   } catch (e) {
     message.error(e.message)

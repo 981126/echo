@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy.orm import Session
 
 from ..core.pipeline import today_key  # noqa: F401 保留：未来可扩展
+from ..models.kv import Kv
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video import Video
 
@@ -229,7 +232,36 @@ def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 15) 
     return picked
 
 
-def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = None) -> dict:
+def _analysis_key(owner_id: int, unit_key: str) -> str:
+    return f"ba:{owner_id}:{unit_key}"
+
+
+def get_analysis(db: Session, owner_id: int | None, unit_key: str) -> dict | None:
+    """读取已保存的“能不能讲”分析结果（R-114：切页不丢）。"""
+    if not owner_id:
+        return None
+    row = db.get(Kv, _analysis_key(owner_id, unit_key))
+    if row is None or not row.value:
+        return None
+    try:
+        data = json.loads(row.value)
+        return data if isinstance(data, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def set_analysis(db: Session, owner_id: int, unit_key: str, data: dict) -> None:
+    key = _analysis_key(owner_id, unit_key)
+    row = db.get(Kv, key)
+    value = json.dumps(data, ensure_ascii=False)
+    if row is None:
+        db.add(Kv(key=key, value=value))
+    else:
+        row.value = value
+    db.commit()
+
+
+def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = None, owner_id: int | None = None) -> dict:
     """作品单元序列化（含分数/文案/统计，供对标页展示与分析）。"""
     if stats_map is None:
         stats_map = _stats_map(db, [unit])
@@ -258,6 +290,7 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
         "score": likes * W_LIKE + fav * W_FAV + comments * W_COMMENT,
         "has_text": bool(text),
         "text": text or "",
+        "analysis": get_analysis(db, owner_id, f"w{unit['work_id']}" if unit.get("work_id") else f"p{post.id}"),
     }
 
 

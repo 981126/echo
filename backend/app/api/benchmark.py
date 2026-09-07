@@ -19,6 +19,7 @@ from ..services.benchmark import (
     analyze_text,
     rerun_worker,
     rewrite_text,
+    set_analysis,
 )
 from ..services.creator_service import get_current_creator
 from ..tasks import start_task
@@ -47,7 +48,7 @@ def benchmark_top(db: Session = Depends(get_db)):
         with_text = [u for u in ranked if _unit_text(db, u)]
         without_text = [u for u in ranked if not _unit_text(db, u)]
         ordered = with_text + without_text
-        items = [unit_payload(db, u, stats_map) for u in ordered[:3]]
+        items = [unit_payload(db, u, stats_map, owner_id=owner.id) for u in ordered[:3]]
         out.append({"benchmark_id": bm.id, "name": bm.name, "note": bm.note or "", "items": items})
     return {"owner_id": owner.id, "owner_name": owner.name, "benchmarks": out}
 
@@ -69,13 +70,14 @@ def benchmark_prepare(payload: PrepareIn, db: Session = Depends(get_db)):
     picked = ensure_top3_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
     items = []
     for u in picked:
-        items.append(unit_payload(db, u))
+        items.append(unit_payload(db, u, owner_id=owner.id))
     return {"benchmark_id": bm.id, "name": bm.name, "items": items}
 
 
 class TextIn(BaseModel):
     title: str = ""
     text: str = ""
+    key: str = ""
 
 
 @router.post("/analyze", response_model=dict)
@@ -83,6 +85,17 @@ def benchmark_analyze(payload: TextIn, db: Session = Depends(get_db)):
     owner = _owner(db)
     res = analyze_text(db, owner, payload.text)
     res["ok"] = not res.get("reason", "").startswith("AI 分析暂不可用")
+    if payload.key:
+        set_analysis(
+            db,
+            owner.id,
+            payload.key,
+            {
+                "can": bool(res.get("can")),
+                "reason": str(res.get("reason") or ""),
+                "suggestion": str(res.get("suggestion") or ""),
+            },
+        )
     return res
 
 

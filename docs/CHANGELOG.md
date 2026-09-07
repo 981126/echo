@@ -1,5 +1,9 @@
 # 变更记录
 
+## [M97 / R-114] 2026-09-07 — 对标页「AI分析」结果切页保留
+- AI分析结果落 app_kv（ba:{owner}:{key}）；/top、/prepare 返回 analysis，前端 load 回填，切页不丢。
+
+
 ## [M96 / R-113] 2026-09-07 — 转写来源与模型入库（per-transcript）
 - transcripts 增加 asr_provider / asr_model 并在转写时落库；迁移回填历史（09-07 前 aliyun 且模型为空；之后 siliconflow 模型 Qwen/Qwen3-ASR-1.7B）。
 - 编辑页「语音转文字」按每条素材实际来源与模型显示；阿里云模型未知显示为空。
