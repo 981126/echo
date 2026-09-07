@@ -130,8 +130,22 @@ def suggest_phrases(limit: int = 12, db: Session = Depends(get_db)):
 
 @router.post("/init")
 def init_persona(db: Session = Depends(get_db)):
-    """用全部历史转写稿初始化/刷新人设档案（后台任务，建议非广告视频转写完成后调用）。"""
-    task_id = start_task("persona_init", {"creator_id": current_creator_id(db)}, persona_init_task)
+    """用全部历史转写稿初始化/刷新人设档案（后台任务，建议非广告视频转写完成后调用）。
+
+    R-125：已有进行中(pending/running)的 persona_init 时拒绝重复入队，防连点/重复点击重复生成。
+    """
+    from ..models.task import BackgroundTask
+
+    dup = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "persona_init", BackgroundTask.status.in_(["pending", "running"]))
+        .order_by(BackgroundTask.id.desc())
+        .first()
+    )
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="已有「用历史转写稿初始化人设」任务进行中，请稍候再试")
+    cid = current_creator_id(db)
+    task_id = start_task("persona_init", {"creator_id": cid}, persona_init_task)
     return {"task_id": task_id}
 
 

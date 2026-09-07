@@ -132,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api } from '../api'
 
@@ -281,15 +281,44 @@ async function saveStyle() {
   }
 }
 
+let initPoll = null
+let initDisposed = false
+
+// R-125：初始化是后台任务，按钮 loading 不能只覆盖“提交请求”那一下；
+// 进入页面/任务期间轮询 running 的 persona_init，任务真正结束前按钮保持禁用，杜绝重复入队。
+async function refreshInitRunning() {
+  if (initDisposed) return
+  try {
+    const tasks = await api('/api/tasks?status=running&kind=persona_init&limit=10')
+    running.value = !!(tasks && tasks.length)
+  } catch (e) {
+    /* 轮询失败不打断页面 */
+  }
+  if (!running.value && initPoll) {
+    clearInterval(initPoll)
+    initPoll = null
+  }
+}
+
+function ensureInitPoll() {
+  if (initDisposed || initPoll) return
+  if (running.value) initPoll = setInterval(refreshInitRunning, 4000)
+}
+
 async function initPersona() {
+  if (running.value) {
+    message.info('已有初始化任务进行中，请稍候')
+    return
+  }
   running.value = true
   try {
     const r = await api('/api/persona/init', { method: 'POST', body: '{}' })
-    message.success(`初始化任务已启动（task #${r.task_id}），可稍后在素材库查看`)
+    message.success(`初始化任务已启动（task #${r.task_id}），完成后右上角会通知`)
   } catch (e) {
-    message.error(e.message)
+    message.error(e.message || '启动失败')
   } finally {
-    running.value = false
+    await refreshInitRunning()  // 即使接口报错(如已在跑返回409)，也按真实任务状态回填禁用态
+    ensureInitPoll()
   }
 }
 
@@ -364,7 +393,20 @@ async function adoptPhrase(ph) {
   load()
 }
 
-onMounted(() => { load(); loadStyle() })
+onMounted(async () => {
+  load()
+  loadStyle()
+  await refreshInitRunning()  // 切页回来/刷新时恢复“初始化中…”禁用态
+  ensureInitPoll()
+})
+
+onUnmounted(() => {
+  initDisposed = true
+  if (initPoll) {
+    clearInterval(initPoll)
+    initPoll = null
+  }
+})
 </script>
 <style scoped>
 .merge-float {

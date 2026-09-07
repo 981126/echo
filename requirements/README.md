@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-125 | 2026-09-08 | 人设「用历史转写稿初始化人设」防抖（禁止重复入队）；并澄清其分析范围（当前主博主全部非广告有转写稿素材） | ✅ 已完成 | M107（已完成） | PersonaView、persona API、ingest.persona_init_task |
 | R-124 | 2026-09-07 | 人设档案：移除页底「手动添加」UI；已确认档案旁加「新增」按钮；新增/编辑复用同一弹窗 | ✅ 已完成 | M106（已完成） | PersonaView、persona API |
 | R-123 | 2026-09-07 | 人设档案：待确认建议加「一键拒绝」；已确认档案多选删除（悬浮按钮同素材库样式） | ✅ 已完成 | M105（已完成） | PersonaView、persona API |
 | R-122 | 2026-09-07 | 脚本工作台「来源素材」链接跳素材库直接打开并回显（含对标博主云端作品，不再提示未找到） | ✅ 已完成 | M104（已完成） | VideosView、works API、R-046/R-090/R-120 |
