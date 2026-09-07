@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _MODE_CHOICES = {
     "tikhub_mode": {"mock", "real"},
     "hot_source_mode": {"mock", "real"},
-    "asr_mode": {"mock", "aliyun"},
+    "asr_mode": {"mock", "aliyun", "siliconflow"},  # R-108：ASR 服务商可切硅基流动
 }
 _MODE_DEFAULTS = {"tikhub_mode": "mock", "hot_source_mode": "mock", "asr_mode": "mock"}
 
@@ -50,18 +50,25 @@ class Settings(BaseSettings):
     generation_model: str = "deepseek"
     debate_rounds: int = 5
 
-    # 阿里云 ASR（mode=mock 时无需密钥，用于开发/测试）
+    # ASR（R-108）：asr_mode = mock（开发/测试假转写）| aliyun | siliconflow
+    asr_mode: str = "mock"  # mock | aliyun | siliconflow（.env 配置用哪家，重启生效）
+    asr_poll_interval: int = 15  # 阿里云 FileTrans 结果轮询间隔（秒）
+    asr_poll_timeout: int = 3600  # 转写最长等待（秒），超时任务标记失败可重试
+
+    # 阿里云 ASR（asr_mode=aliyun 时使用）
     aliyun_asr_access_key_id: str = ""
     aliyun_asr_access_key_secret: str = ""
     aliyun_asr_app_key: str = ""
-    asr_mode: str = "mock"  # mock | aliyun
     aliyun_asr_region: str = "cn-shanghai"  # FileTrans 服务地域（域名前缀，如 cn-shanghai）
-    asr_poll_interval: int = 15  # FileTrans 结果轮询间隔（秒）
-    asr_poll_timeout: int = 3600  # 单任务最长等待（秒），超时任务标记失败可重试
     # 阿里云 OSS（R-032：FileTrans 要求公网 URL，视频临时上传 OSS 再删除）
     aliyun_oss_bucket: str = ""
     aliyun_oss_region: str = "oss-cn-shanghai"  # 形如 oss-cn-shanghai
     aliyun_oss_url_expire: int = 7 * 24 * 3600  # 预签名 URL 有效期（覆盖最长排队，秒）
+
+    # 硅基流动 ASR（R-108，asr_mode=siliconflow 时使用）：POST /v1/audio/transcriptions
+    siliconflow_api_key: str = ""
+    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
+    siliconflow_asr_model: str = "Qwen/Qwen3-ASR-1.7B"  # 可在 .env 覆盖（ECHO_SILICONFLOW_ASR_MODEL）
 
     # QQ 邮箱 SMTP
     smtp_host: str = "smtp.qq.com"

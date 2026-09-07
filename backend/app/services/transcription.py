@@ -1,4 +1,4 @@
-"""ASR 转写适配器：mock（开发/测试）或阿里云 FileTrans。"""
+"""ASR 转写适配器：mock（开发/测试）| 阿里云 FileTrans | 硅基流动（R-108）。"""
 
 from __future__ import annotations
 
@@ -27,8 +27,11 @@ class Transcriber:
         if mode == "aliyun":
             from .aliyun_filetrans import AliyunFileTrans  # 延迟导入，避免循环
 
-            client = AliyunFileTrans(settings=self.settings)
-            return client.transcribe_file(path)
+            return AliyunFileTrans(settings=self.settings).transcribe_file(path)
+        if mode == "siliconflow":
+            from .siliconflow_asr import SiliconFlowASR  # 延迟导入，避免循环
+
+            return SiliconFlowASR(settings=self.settings).transcribe_file(path)
         raise TranscriptionError(f"未知 asr_mode: {mode}")
 
     def _mock_transcript(self, path: Path) -> str:

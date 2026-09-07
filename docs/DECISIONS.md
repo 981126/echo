@@ -158,6 +158,10 @@
 - **决策**：`docs/API.md` 由 FastAPI OpenAPI 生成（92 路由）、`docs/DATABASE.md` 由 SQLAlchemy 模型元数据生成（26 表 + 人工注释），改接口/表结构后重新生成，不手改结构部分
 - **配套**：全量重写 AGENTS/README/PRD/PRODUCT/ARCHITECTURE/DESIGN/milestones/WORKFLOW/QUICKSTART/GLOSSARY/FAQ，以代码为准消除过期/错误表述
 
+## D-039：ASR 服务商 .env 切换（R-108，2026-09-07）
+- **决策**：`ECHO_ASR_MODE` 扩为 `mock|aliyun|siliconflow`（沿用 R-068 白名单校验）；`siliconflow_asr.py` 直传 `POST /v1/audio/transcriptions`（模型 `Qwen/Qwen3-ASR-1.7B`，实测可用），视频沿用抽 16k 单声道音轨逻辑、纯音频直传；平台限制单文件 ≤50MB / ≤1 小时，超限明确报错并走现有失败通知，**不自动切换其它服务商**。
+- **原因**：作者指定用 .env 配置切换（不做页面开关）、不加来源记录列；超限自动回退会引入隐性依赖/成本，明确报错更可控。
+
 ## D-038：素材卡「同步数据」补齐视频+转写（R-077，2026-09-06）
 - **决策**：卡片「同步数据」在原有指标/评论同步后，检查该卡是否有本地视频文件与已完成转写；缺视频按平台优先级（抖音→小红书→B站）下载低清视频（下载成功才建本地素材行，不留死占位），缺转写则自动跑现有 ASR 流水线（import_video_task）；全部后台任务 + 通知，前端提示并轮询刷新。
 - **范围**：不区分博主，所有素材卡一致；常规平台同步（D-027）仍不自动下载。

@@ -12,7 +12,7 @@
 
 ### backend/app/config.py
 - pydantic-settings，env 前缀 `ECHO_`，读取根目录 `.env`（`env_file=(".env","../.env")`，从 backend 启动时解析项目根）。
-- `normalize_mode(value, allowed, default)`：`TIKHUB_MODE/HOT_SOURCE_MODE/ASR_MODE` 先按 `#` 剥离行尾注释再 trim/lower，非法值**抛错**（R-068）。取值：`tikhub_mode ∈ mock|real`、`hot_source_mode ∈ mock|real`、`asr_mode ∈ mock|aliyun`。
+- `normalize_mode(value, allowed, default)`：`TIKHUB_MODE/HOT_SOURCE_MODE/ASR_MODE` 先按 `#` 剥离行尾注释再 trim/lower，非法值**抛错**（R-068）。取值：`tikhub_mode ∈ mock|real`、`hot_source_mode ∈ mock|real`、`asr_mode ∈ mock|aliyun|siliconflow`（R-108）。
 - 路径：未显式给 `ECHO_DB_PATH/*_DIR` 时由 `ECHO_DATA_DIR` 派生（db=数据根/echo.db，inbox/videos/covers/uploads 同名子目录）。
 - `get_settings()` lru_cache：改 `.env` 需重启进程。
 
@@ -48,8 +48,9 @@
 
 ## 2. 服务层（backend/app/services/）
 - `ingest.py`：`import_video_task`（转写+校对+预打标签+人设建议+自动优化提示词触发）、`correct_transcript`、`persona_init_task`（全量初始化）、`suggest_persona_updates`（增量建议，需作者确认）。
-- `transcription.py`：`Transcriber.transcribe`：mock 假转写（离线）/ aliyun 真实（`aliyun_filetrans` 泛化调用提交+轮询）。
+- `transcription.py`：`Transcriber.transcribe` 按 `asr_mode` 路由：mock 假转写（离线）/ aliyun（`aliyun_filetrans` 泛化调用提交+轮询）/ siliconflow（`siliconflow_asr` 直传，R-108）。
 - `aliyun_filetrans.py / aliyun_oss.py`：FileTrans 4.0（CommonRequest）与 OSS 上传/预签名 URL；上传前由 `media_tools`/`media_naming` 用 ffmpeg 抽 16k 单声道 wav。
+- `siliconflow_asr.py`（R-108）：`POST {base}/audio/transcriptions` 直传音频转写（multipart file+model，无需 OSS 中转）；视频先抽音轨、纯音频直传；平台限制单文件 ≤50MB / ≤1 小时（`media_tools.probe_duration_seconds` 探测），超限明确报错走失败通知、**不自动切换其它服务商**。
 - `generation.py`：生成草稿（DeepSeek/Kimi/random/alternate）；上下文 = 人设(tags+红线+禁词) + 风格画像 + 检索到的最高分样本（TF-IDF，表现加权+时间衰减）+ 金句/最佳实践 + 对标风格卡。`_all_texts`（全量素材加权语料）供优化与每周重建（R-064）。
 - `debate.py`：双模型 5 轮讨论定稿，写入 `draft_discussions`；失败降级单模型。
 - `topic_mining.py`：热点源类（mock/公开接口/Bilibili、Douyin、Xiaohongshu/TikHub 热搜实现）；`get_sources` 按 `hot_source_mode` 选择；`fetch_and_store` 入库去重（platform+title+date）。

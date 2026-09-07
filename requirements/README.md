@@ -113,4 +113,4 @@
 | R-105 | 2026-09-06 | 定时任务：每天06:00 自动「重新对标」（每日生成脚本前1小时，无对标/已在跑则跳过） | ✅ 已完成 | M88（已完成） | scheduler、benchmark.service、R-102~104 |
 | R-106 | 2026-09-06 | 对标页修复：软广/自家小程序推广严格识别排除；无文案/空转写的高分项被下一条有文案的顶掉 | ✅ 已完成 | M89（已完成） | benchmark.service、/top、R-103 |
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
-| R-108 | 2026-09-07 | ASR 接入硅基流动（Qwen/Qwen3-ASR-1.7B）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | 已确认 | M91（待实施） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
+| R-108 | 2026-09-07 | ASR 接入硅基流动（Qwen/Qwen3-ASR-1.7B）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（平台余额 402，充值后出稿） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |

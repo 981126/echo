@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -70,3 +71,22 @@ def extract_audio_to_wav(video_path: Path | str) -> Path:
     except Exception as exc:  # noqa: BLE001
         tmp_path.unlink(missing_ok=True)
         raise TranscriptionError(f"音频抽离异常: {exc}") from exc
+
+
+_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+
+
+def probe_duration_seconds(path: Path | str) -> float:
+    """用 ffmpeg 探测媒体时长（秒）。R-108：硅基流动限制单文件 ≤1 小时，先探测再上传。"""
+    src = Path(path)
+    if not src.is_file():
+        raise TranscriptionError(f"媒体文件不存在: {src}")
+    proc = subprocess.run(
+        [_ffmpeg_exe(), "-i", str(src)], capture_output=True, timeout=120
+    )
+    text = (proc.stderr or b"").decode("utf-8", errors="ignore")
+    m = _DURATION_RE.search(text)
+    if not m:
+        raise TranscriptionError(f"无法读取媒体时长: {src.name}")
+    hours, minutes, seconds = int(m.group(1)), int(m.group(2)), float(m.group(3))
+    return hours * 3600 + minutes * 60 + seconds

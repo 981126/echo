@@ -293,6 +293,18 @@ def test_mode_normalize_rejects_silent_fallback():
         normalize_mode("banana", {"mock", "real"}, "mock")
 
 
+def test_mode_normalize_asr_siliconflow():
+    """R-108：asr_mode 白名单新增 siliconflow；非法值仍抛错。"""
+    from app.config import normalize_mode
+
+    allowed = {"mock", "aliyun", "siliconflow"}
+    assert normalize_mode("siliconflow", allowed, "mock") == "siliconflow"
+    assert normalize_mode("aliyun", allowed, "mock") == "aliyun"
+    assert normalize_mode("siliconflow# mock | aliyun | siliconflow", allowed, "mock") == "siliconflow"
+    with pytest.raises(ValueError):
+        normalize_mode("glm", allowed, "mock")
+
+
 def test_daily_sync_records_progress(db):
     """R-070：run_sync 在 SyncJob 上记录实时进度（done/total/note）。"""
     owner, _ = _seed_owner(db)

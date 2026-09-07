@@ -55,6 +55,7 @@ echo/
 | TikHub | 平台数据源（抖音/B站/小红书） | `services/platform/tikhub.py`（实现 `base.DataSource`） | `TIKHUB_API_KEY/BASE_URL/MODE/DAILY_BUDGET` |
 | 阿里云 OSS | ASR 文件中转（临时预签名） | `aliyun_oss.py` | `ALIYUN_OSS_BUCKET/REGION` |
 | 阿里云 FileTrans | 录音文件识别 4.0 | `aliyun_filetrans.py` | `ALIYUN_ASR_ACCESS_KEY_ID/SECRET/APP_KEY`、`ASR_MODE=aliyun` |
+| 硅基流动 | 音频直传转写（Qwen/Qwen3-ASR-1.7B，R-108） | `siliconflow_asr.py` | `SILICONFLOW_API_KEY/BASE_URL/ASR_MODEL`、`ASR_MODE=siliconflow` |
 | QQ SMTP | 邮件推送 | `services/notify.py` | `SMTP_HOST/PORT/USER/AUTH_CODE/MAIL_TO` |
 
 **数据源适配器（R-062）**：`services/platform/base.py` 定义 `DataSource` Protocol
@@ -105,7 +106,7 @@ background_tasks / sync_jobs / notifications / app_kv
 - 时间列统一北京时间（core/timeutil.now，R-066）
 
 ## 7. 关键数据流
-1. **导入学习**：上传/inbox → videos 行 → 编辑页手动「语音转文字」（抽音轨→OSS→FileTrans→校对稿回填）→ 确认标签 → 进入人设/风格语料
+1. **导入学习**：上传/inbox → videos 行 → 编辑页手动「语音转文字」（抽音轨→按 .env 选 阿里云 FileTrans(OSS 中转) 或 硅基流动直传，R-108→校对稿回填）→ 确认标签 → 进入人设/风格语料
 2. **平台同步**：run_sync（daily top15 带视频下载转写 / weekly 3 / initial 全量）→ 账号并发（每平台独立线程/会话）→ 作品 upsert + 指标按天 upsert + 评论 Top50 → auto_merge 合并 work → daily 再对前15条媒体补齐（下载+转写，R-085）→ 进度实时写 sync_jobs → 完成通知
 3. **选题/生成**：热点/灵感 → 人设+风格检索加权（TF-IDF/RAG）→ 生成（可双模型讨论）→ 草稿 → 作者改写 → 反馈回流
 4. **复盘**：本地指标 + 平台数据 → 看板增长曲线 → ABCD 复盘报告

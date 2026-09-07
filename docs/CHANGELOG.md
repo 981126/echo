@@ -1,5 +1,12 @@
 # 变更记录
 
+## [M91 / R-108] 2026-09-07 — ASR 接入硅基流动（.env 切换阿里云/硅基流动）
+- config：`ECHO_ASR_MODE` 合法值扩为 `mock|aliyun|siliconflow`（R-068 白名单护栏不变）；新增 `ECHO_SILICONFLOW_API_KEY/BASE_URL/ASR_MODEL`（默认 `Qwen/Qwen3-ASR-1.7B`）。
+- 新增 `services/siliconflow_asr.py`：`POST {base}/audio/transcriptions` 直传音频转写（multipart file+model，无需 OSS 中转）；视频先抽 16k 单声道 wav（复用 media_tools），纯音频直传；平台限制单文件 ≤50MB / ≤1 小时（新增 `media_tools.probe_duration_seconds` 探测），超限明确报错并走现有失败通知、不自动切换其它服务商。
+- `transcription.py` 路由增加 siliconflow；所有转写入口（手动/每日同步/对标补齐，均经 `import_video_task`）随 `.env` 切换生效（改后重启）。
+- Key 只写本地 `.env`（gitignored），`.env.example` 只加占位模板。
+- 测试：新增 `test_siliconflow_asr.py` 8 项（配置缺失/直传/抽轨清理/空结果/HTTP/网络错误/超限/时长超限/路由），门禁全绿（97 项）。
+
 ## [M90 / R-107] 2026-09-06 — 素材库不显示禁用账号数据
 - /api/videos 排除绑定到禁用账号作品的本地素材（platform_post_id 或 post.local_video_id 命中）；启用账号与未绑定素材不受影响。
 
