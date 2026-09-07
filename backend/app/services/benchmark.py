@@ -52,8 +52,8 @@ def _norm_title(title: str) -> str:
     return re.sub(r"[^\w\u4e00-\u9fa5]", "", t).lower()
 
 
-def candidates(db: Session, bm: Creator, limit: int = 10) -> list[dict]:
-    """对标博主最新 limit 个“作品单元”（跨平台合并 work；未合并单帖）。"""
+def candidates(db: Session, bm: Creator, limit: int = 15) -> list[dict]:
+    """对标博主最新 limit 个“作品单元”（跨平台合并 work；未合并单帖）。R-109：10 → 15。"""
     acc_ids = [
         a.id
         for a in db.query(CreatorAccount).filter(
@@ -195,7 +195,7 @@ def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
         return False
 
 
-def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 10) -> list[dict]:
+def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -> list[dict]:  # R-109：10 → 15
     """最新 N 条按互动分排序，逐条补齐转写；取前 3 条“有文案”的。
 
     转写后仍无文案（识别为空/无声等）→ 顺延下一条顶上（R-097 Q3）。
@@ -384,9 +384,11 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str) -> dict:
     return {"title": new_title, "script": script, "draft_id": draft.id}
 
 
-def rerun_benchmarks(db: Session, owner: Creator, update=None) -> dict:
-    """R-102：一键重跑当前主博主所有对标——逐个重捞最新10条 + 自动补 Top3 文案。
+def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = True) -> dict:
+    """R-102/R-109：重跑当前主博主所有对标——逐账号重捞最新15条 + 自动补 Top3 文案。
 
+    refetch=True（手动「重新对标」）：重捞最新 15 条后重算 Top3；
+    refetch=False（R-109 每日同步完成后自动触发）：不重复拉取，仅基于已同步数据重算 Top3/补缺转写。
     update(pct, note) 可选：由后台任务运行器注入，实时回写进度（R-081 同款）。
     """
     from ..core.timeutil import now as _app_now
@@ -410,28 +412,29 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None) -> dict:
     for i, bm in enumerate(bms, start=1):
         name = bm.name or f"对标#{bm.id}"
         try:
-            _up(0, "捞数据中…")
+            _up(0, "捞数据中…" if refetch else "重算 Top3 中…")
             accounts = (
                 db.query(CreatorAccount)
                 .filter(CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True))
                 .order_by(CreatorAccount.id)
                 .all()
             )
-            for acc in accounts:
-                try:
-                    sync_account(db, acc, scope="benchmark", top_n=10, with_comments=False)
-                    acc2 = db.get(CreatorAccount, acc.id)
-                    if acc2 is not None:
-                        acc2.sync_status = "done"
-                        acc2.sync_message = ""
-                        acc2.last_sync_at = _app_now()
-                        db.commit()
-                except BudgetExceeded:
-                    raise
-                except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
-                    db.rollback()
+            if refetch:
+                for acc in accounts:
+                    try:
+                        sync_account(db, acc, scope="benchmark", top_n=15, with_comments=False)  # R-109：10 → 15
+                        acc2 = db.get(CreatorAccount, acc.id)
+                        if acc2 is not None:
+                            acc2.sync_status = "done"
+                            acc2.sync_message = ""
+                            acc2.last_sync_at = _app_now()
+                            db.commit()
+                    except BudgetExceeded:
+                        raise
+                    except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
+                        db.rollback()
             _up(55, "计算 Top3 并补齐文案…")
-            picked = ensure_top3_with_text(db, bm, limit_candidates=10)
+            picked = ensure_top3_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
             n = len(picked)
             ok_count += 1
             text_count += n
@@ -453,17 +456,22 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None) -> dict:
 
 
 def rerun_worker(db: Session, payload: dict, update=None) -> dict:
-    """后台任务体（R-102/R-105）：按 owner_id 重跑当前主博主所有对标（api 与 scheduler 共用）。"""
+    """后台任务体（R-102/R-105/R-109）：按 owner_id 重跑当前主博主所有对标。
+
+    refetch=True（默认，手动「重新对标」）重捞最新 15 条；
+    refetch=False（R-109：每日同步完成后自动触发）不重复拉取、只重算 Top3。
+    """
     from ..models.platform import Creator
 
     owner = db.get(Creator, int((payload or {}).get("owner_id") or 0))
     if owner is None:
         raise ValueError("主博主不存在，请先创建并切换主博主")
-    return rerun_benchmarks(db, owner, update=update)
+    refetch = bool((payload or {}).get("refetch", True))
+    return rerun_benchmarks(db, owner, update=update, refetch=refetch)
 
 
-def maybe_start_benchmark_rerun(db: Session) -> str:
-    """R-105：每日定时自动「重新对标」的守卫 + 启动。
+def maybe_start_benchmark_rerun(db: Session, refetch: bool = True) -> str:
+    """「重新对标」守卫 + 启动（R-109：每日同步完成后自动触发，refetch=False 不重捞）。
 
     返回结果：no_owner / no_benchmark / already_running / started:<task_id>。
     无对标或已有重新对标任务在跑时静默跳过（不产生失败通知）。
@@ -488,5 +496,5 @@ def maybe_start_benchmark_rerun(db: Session) -> str:
         return "already_running"
     from ..tasks import start_task
 
-    task_id = start_task("benchmark_rerun", {"owner_id": owner.id}, rerun_worker)
+    task_id = start_task("benchmark_rerun", {"owner_id": owner.id, "refetch": refetch}, rerun_worker)
     return f"started:{task_id}"

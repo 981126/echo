@@ -16,11 +16,6 @@ export const adOptions = [
   { label: '非广告', value: 'no' }
 ]
 
-export const freqOptions = [
-  { label: '每日自动（主博主）', value: 'daily' },
-  { label: '每周（对标）', value: 'weekly' },
-  { label: '手动', value: 'manual' }
-]
 
 
 export const videoOptions = [

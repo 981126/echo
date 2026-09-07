@@ -3,8 +3,8 @@
 - **日期**: 2026-09-07
 - **提出渠道**: 对话
 - **原文摘要**: 博主页对标博主【每周同步】按钮文字改为【同步】；对标账号与主博主同时间每日定时同步（06:00/17:00 两轮），主博主与对标博主素材都下载视频+转写、每账号同步 15 条；取消 06:00 自动「重新对标」定时任务，同步完成后自动触发「重新对标」；清理“每周”遗留死代码。
-- **状态**: 已确认（口径已定，待作者回复「继续」后实施 M92）
-- **排期**: M92（待实施）
+- **状态**: ✅ 已完成
+- **排期**: M92（已完成）
 - **关联**: frontend CreatorsView（对标账号按钮 sync-label）、lib/options.js（freqOptions 死代码）、backend scheduler（platform_sync 时间/benchmark_rerun_daily）、services/platform_sync.run_sync（daily 范围扩展）、services/benchmark（rerun 触发）、config.py（platform_sync_times 默认值）、R-085/R-086（top15+媒体）、R-101（禁用账号不同步）、R-105（原 06:00 自动重新对标，本次取消定时、改为同步后触发）。
 
 ## 反问与确认结论（2026-09-07，作者逐项回复）
@@ -14,6 +14,13 @@
 4. **与 R-105 的关系**：**取消**原「每天 06:00 自动重新对标」定时任务；**每轮平台同步完成后自动触发一次「重新对标」**（刷新 Top3/补缺文案），对标页手动「重新对标」按钮保留。
 5. **清理**：清理“每周（对标）”等遗留死代码/叫法（freqOptions 无用选项、按钮文案等），口径统一为每日同步。
 6. 禁用账号不自动同步（延续 R-101）；无主博主/无对标账号等边界静默跳过；TikHub 额度护栏与失败通知沿用。
+
+## 实施与自测（2026-09-07）
+1. 每日平台同步时间默认 `07:30/18:00` → **`06:00/17:00`**（config 默认 + `.env` 显式 `ECHO_PLATFORM_SYNC_TIMES`）。
+2. 新增 `platform_sync.run_daily_sync_all`：定时任务改为它编排——先主博主 daily（with_media=True），再逐个对标博主 daily（creator_id=对标, with_media=True），即主博主与对标每账号都同步最新 15 条 + 下载视频 + 自动转写（已下载/已转写自动跳过）；同步完成后自动 `maybe_start_benchmark_rerun(refetch=False)`。
+3. scheduler 移除原独立 06:00 自动「重新对标」（R-105 定时取消）；`rerun_benchmarks(db, owner, update, refetch)`：refetch=True（手动按钮）重捞最新 15 条；refetch=False（同步后自动）不重复拉取、只重算 Top3/补缺转写。Top3 候选 /top、/prepare 均由 10 → 15。
+4. 清理：对标账号按钮「每周同步」→「同步」且手动同步改 daily 口径（15 条+下载转写）；删除无用 `freqOptions`（每周（对标））；新建对标账号 `sync_frequency` 统一 daily；mock 对标识别改为按 `creator.kind`（兼容历史 weekly 行）。
+5. 质量门禁全绿（ruff/mypy/pytest/前端 lint/build）；新增用例：`run_daily_sync_all` 覆盖主博主+对标且 with_media、无主博主报错、rerun refetch=False 不调 sync_account、refetch=True 重捞 top_n=15。
 
 ## 原文（作者原话，未改动）
 > 1.博主页面 对标博主【每周同步】文字改为【同步】，并且确实也是每天按照定时任务同步

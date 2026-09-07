@@ -133,4 +133,36 @@ def test_maybe_start_ok(db, monkeypatch):
     monkeypatch.setattr("app.tasks.start_task", fake_start)
     assert maybe_start_benchmark_rerun(db) == "started:88"
     assert captured["kind"] == "benchmark_rerun"
-    assert captured["payload"] == {"owner_id": owner.id}
+    assert captured["payload"] == {"owner_id": owner.id, "refetch": True}
+
+
+def test_rerun_refetch_false_skips_sync(db, monkeypatch):
+    """R-109：每日同步后自动触发「重新对标」用 refetch=False——不重复拉取 TikHub。"""
+    owner = _owner(db)
+    _benchmark(db, owner, "对标A")
+    sync_calls = {"n": 0}
+
+    def _sync(*_a, **_k):
+        sync_calls["n"] += 1
+        return {"posts": 0}
+
+    monkeypatch.setattr("app.services.platform_sync.sync_account", _sync)
+    result = rerun_benchmarks(db, owner, refetch=False)
+    assert sync_calls["n"] == 0
+    assert result["ok_count"] == 1
+
+
+def test_rerun_refetch_true_syncs_top15(db, monkeypatch):
+    """R-109：手动「重新对标」refetch=True——每账号重捞最新 15 条（原 10 → 15）。"""
+    owner = _owner(db)
+    _benchmark(db, owner, "对标A")
+    captured: dict = {}
+
+    def _sync(_db, _acc, **kw):
+        captured.update(kw)
+        return {"posts": 0}
+
+    monkeypatch.setattr("app.services.platform_sync.sync_account", _sync)
+    rerun_benchmarks(db, owner)
+    assert captured.get("scope") == "benchmark"
+    assert captured.get("top_n") == 15

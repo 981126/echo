@@ -83,8 +83,8 @@
         :account="a"
         :benchmark="true"
         :syncing-acct-id="syncingAcct"
-        sync-label="每周同步"
-        @sync="a => runSync('weekly', a.id, bm.id)"
+        sync-label="同步"
+        @sync="a => runSync('daily', a.id, bm.id)"
         @posts="openPosts"
         @edit="a => openAccountModal(bm, a)"
         @remove="delAccount"
@@ -366,7 +366,8 @@ function openAccountModal(creator, acct) {
   acctFor.value = creator
   acctForm.value = acct
     ? { ...acct, extra_config: {} }
-    : { id: null, platform: 'douyin', nickname: '', home_link: '', platform_user_id: '', sync_frequency: creator.kind === 'benchmark' ? 'weekly' : 'daily', enabled: true }
+    // R-109：主博主/对标统一每日同步，不再区分 weekly
+    : { id: null, platform: 'douyin', nickname: '', home_link: '', platform_user_id: '', sync_frequency: 'daily', enabled: true }
   acctExtraText.value = acct ? JSON.stringify(acct.extra_config || {}, null, 0) : '{}'
   showAccountModal.value = true
 }

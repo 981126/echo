@@ -35,28 +35,19 @@ def _daily_metrics_job() -> None:
         db.close()
 
 
-def _benchmark_rerun_job() -> None:
-    """R-105：每天 06:00 自动「重新对标」（每日生成脚本 07:00 前 1 小时）。
-
-    无主博主/无对标博主/已有 benchmark_rerun 任务在跑时静默跳过（不产生失败通知）；
-    启动后任务在后台线程执行，不阻塞调度线程。
-    """
-    db = SessionLocal()
-    try:
-        from .services.benchmark import maybe_start_benchmark_rerun
-
-        maybe_start_benchmark_rerun(db)
-    finally:
-        db.close()
 
 
 def _platform_sync_job() -> None:
-    """每日两轮平台数据同步（07:30/18:00，配置 ECHO_PLATFORM_SYNC_TIMES）。"""
+    """每日两轮平台数据同步（06:00/17:00，配置 ECHO_PLATFORM_SYNC_TIMES；R-109）。
+
+    主博主 + 全部对标博主统一同步（每账号最新 15 条 + 下载视频 + 自动转写），
+    同步完成后自动触发一次「重新对标」（refetch=False，不重复拉取 TikHub）。
+    """
     from .tasks import start_task
-    from .services.platform_sync import run_sync
+    from .services.platform_sync import run_daily_sync_all
 
     def fn(db, payload):
-        return run_sync(db, scope="daily", with_media=True)  # R-085：自动每日同步带视频下载+转写
+        return run_daily_sync_all(db)
 
     try:
         start_task("platform_sync", {"scope": "daily", "source": "scheduler"}, fn)
@@ -129,8 +120,8 @@ def setup_scheduler() -> None:
     settings = get_settings()
     hour, minute = (int(x) for x in settings.daily_push_time.split(":"))
     _scheduler = BackgroundScheduler(timezone=settings.tz)
-    # M13（R-027）：每日平台数据同步两轮（默认 07:30/18:00）
-    for time_str in (settings.platform_sync_times or "07:30,18:00").split(","):
+    # M13（R-027）/R-109：每日平台数据同步两轮（默认 06:00/17:00，含对标）
+    for time_str in (settings.platform_sync_times or "06:00,17:00").split(","):
         time_str = time_str.strip()
         if ":" not in time_str:
             continue
@@ -156,14 +147,6 @@ def setup_scheduler() -> None:
         _daily_metrics_job,
         CronTrigger(hour=hour + 1, minute=0, timezone=settings.tz),
         id="daily_metrics",
-        misfire_grace_time=3600,
-        coalesce=True,
-    )
-    # R-105：每日 06:00 自动「重新对标」（每日生成 07:00 前 1 小时，固定时间）
-    _scheduler.add_job(
-        _benchmark_rerun_job,
-        CronTrigger(hour=6, minute=0, timezone=settings.tz),
-        id="benchmark_rerun_daily",
         misfire_grace_time=3600,
         coalesce=True,
     )

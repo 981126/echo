@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
 from ..core.timeutil import now as _app_now
@@ -41,6 +41,7 @@ class CreatorAccount(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     creator_id: Mapped[int] = mapped_column(ForeignKey("creators.id"), index=True)
+    creator: Mapped["Creator"] = relationship(foreign_keys=[creator_id])  # 归属博主（R-109：识别对标用）
     platform: Mapped[str] = mapped_column(String(20), index=True)  # douyin|xiaohongshu|bilibili
     nickname: Mapped[str] = mapped_column(String(100), default="")
     home_link: Mapped[str] = mapped_column(String(500), default="")  # 主页分享链接

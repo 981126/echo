@@ -75,7 +75,7 @@ echo/
 |---|---|---|
 | 每日 `daily_push_time`（默认 07:00） | 每日流水线 | 热点→选题匹配→生成≥3→入库→（可选邮件） |
 | 每日 `daily_push_time` +1h（默认 08:00） | 指标与留存 | cookie 通道未启用 → 仅 `apply_retention`（热点 30 天清理） |
-| 每日 `platform_sync_times`（默认 07:30 / 18:00） | 平台同步 | 后台任务 `run_sync(scope=daily, with_media=True)`：当前主博主三平台 top15 + 前15条视频下载/转写（R-085）+ 评论采集 |
+| 每日 `platform_sync_times`（默认 06:00 / 17:00） | 平台同步 | 后台任务 `run_daily_sync_all`（R-109）：主博主 + 全部对标博主统一同步——每账号三平台 top15 + 前15条视频下载/转写（R-085/R-109）+ 评论采集；同步完成后自动触发一次「重新对标」（refetch=False，不重复拉取） |
 | 每日 02:30 | 备份 | `scripts/backup.sh`（SQLite 热备 + requirements/docs 快照，留 10 份） |
 | 每日 04:00 | 清理 | 通知>90 天、后台任务>30 天、sync_jobs>60 天、platform_post_stats>400 天 |
 | 每周日 03:20 | 风格重建 | 基于全量素材画像+加权样本产出生成提示词候选（不启用）+ 通知 |

@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     tikhub_base_url: str = "https://api.tikhub.io/api/v1"
     tikhub_mode: str = "mock"  # mock | real（real 需 .env 配 ECHO_TIKHUB_API_KEY）
     tikhub_daily_budget: int = 2000  # 每日请求预算上限（页面可覆盖，存 Kv）
-    platform_sync_times: str = "07:30,18:00"  # 每日自动同步时刻（逗号分隔，北京时区）
+    platform_sync_times: str = "06:00,17:00"  # R-109：每日两轮（主博主+对标统一），逗号分隔，北京时区
 
     # 路径：未显式配置时由 data_dir 统一派生（env 可用 ECHO_DB_PATH / ECHO_*_DIR 覆盖）
     _UNSET = Path("@unset@")

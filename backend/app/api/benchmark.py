@@ -35,11 +35,11 @@ def _owner(db: Session) -> Creator:
 
 @router.get("/top", response_model=dict)
 def benchmark_top(db: Session = Depends(get_db)):
-    """每个对标博主：最新10条里按互动分取前3（尚未转写的可先展示占位，需先 prepare）。"""
+    """每个对标博主：最新15条里按互动分取前3（R-109：10 → 15；尚未转写的可先展示占位，需先 prepare）。"""
     owner = _owner(db)
     out = []
     for bm in benchmarks_of_owner(db, owner):
-        units = candidates(db, bm, limit=10)
+        units = candidates(db, bm, limit=15)
         stats_map = _stats_map(db, units)
         ranked = sorted(units, key=lambda u: score_unit(db, u, stats_map), reverse=True)
         # R-106：有文案（含转写）的优先占位；空文案/空转写由下一条有文案的顶上，
@@ -66,7 +66,7 @@ def benchmark_prepare(payload: PrepareIn, db: Session = Depends(get_db)):
     bm = db.get(Creator, payload.benchmark_id)
     if bm is None or bm.kind != "benchmark" or bm.parent_id != owner.id:
         raise HTTPException(status_code=404, detail="对标博主不存在")
-    picked = ensure_top3_with_text(db, bm, limit_candidates=10)
+    picked = ensure_top3_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
     items = []
     for u in picked:
         items.append(unit_payload(db, u))
@@ -99,7 +99,7 @@ def benchmark_rewrite(payload: TextIn, db: Session = Depends(get_db)):
 
 @router.post("/rerun", response_model=dict)
 def benchmark_rerun(db: Session = Depends(get_db)):
-    """R-102/R-104：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新10条 + 自动补 Top3 文案。
+    """R-102/R-104/R-109：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新15条 + 自动补 Top3 文案。
 
     长任务（含同步与转写，可能较久）：落后台任务+进度+完成通知，返回 task_id 供前端轮询。
     """

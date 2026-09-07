@@ -1,5 +1,11 @@
 # 变更记录
 
+## [M92 / R-109] 2026-09-07 — 对标博主统一每日同步（06:00/17:00，15 条+下载转写）
+- 每日平台同步改 06:00/17:00（`ECHO_PLATFORM_SYNC_TIMES` 默认值 + .env），`run_daily_sync_all` 编排：主博主 + 全部对标博主统一同步，每账号最新 15 条 + 下载视频 + 自动转写。
+- 取消原独立 06:00 自动「重新对标」定时（R-105）；每轮同步完成后自动触发一次「重新对标」（`refetch=False` 不重复拉取 TikHub，只重算 Top3/补缺转写）；对标页手动「重新对标」保留并改为重捞最新 15 条（10→15，含 /top 与 prepare 候选）。
+- 前端：对标账号按钮「每周同步」→「同步」且手动同步改 daily 口径；删除无用 freqOptions「每周（对标）」；新建对标账号 sync_frequency 统一 daily；mock 对标识别改按 creator.kind（兼容历史 weekly）。
+- 测试：新增 run_daily_sync_all 编排/无主博主、rerun refetch 语义用例；门禁全绿。
+
 ## [M91 / R-108] 2026-09-07 — ASR 接入硅基流动（.env 切换阿里云/硅基流动）
 - config：`ECHO_ASR_MODE` 合法值扩为 `mock|aliyun|siliconflow`（R-068 白名单护栏不变）；新增 `ECHO_SILICONFLOW_API_KEY/BASE_URL/ASR_MODEL`（默认 `Qwen/Qwen3-ASR-1.7B`）。
 - 新增 `services/siliconflow_asr.py`：`POST {base}/audio/transcriptions` 直传音频转写（multipart file+model，无需 OSS 中转）；视频先抽 16k 单声道 wav（复用 media_tools），纯音频直传；平台限制单文件 ≤50MB / ≤1 小时（新增 `media_tools.probe_duration_seconds` 探测），超限明确报错并走现有失败通知、不自动切换其它服务商。

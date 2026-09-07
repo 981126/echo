@@ -28,6 +28,21 @@ PLATFORMS = ["douyin", "xiaohongshu", "bilibili"]
 PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
 
 # 主页链接解析规则：platform -> (正则组名/顺序)
+def _is_benchmark_account(account) -> bool:
+    """对标账号识别（R-109 统一每日同步后不再靠 weekly 频率）：
+    优先按归属博主 kind；兼容历史 weekly 频率标记；异常时保守返回 False（仅影响 mock 假数据规模）。
+    """
+    if account is None:
+        return False
+    if getattr(account, "sync_frequency", "") == "weekly":
+        return True
+    try:
+        creator = getattr(account, "creator", None)
+    except Exception:  # noqa: BLE001  懒加载/会话关闭等异常保守处理
+        creator = None
+    return bool(creator and getattr(creator, "kind", "") == "benchmark")
+
+
 _LINK_RULES = {
     "douyin": [("douyin.com/user/", "MS4w"), ("v.douyin.com", "")],
     "xiaohongshu": [("xiaohongshu.com/user/profile", "userId"), ("xhslink.com", "")],
@@ -230,7 +245,7 @@ class TikHubClient:
     def _mock_profile(self, platform: str, user_id: str, account=None) -> ProfileData:
         rnd = random.Random(_seed_id(user_id, platform))
         scale = rnd.choice([1, 3, 8, 15, 40]) * 1000
-        is_bench = getattr(account, "sync_frequency", "") == "weekly" if account else False
+        is_bench = _is_benchmark_account(account)
         if is_bench:
             scale = int(scale * 2.2)
         nickname = getattr(account, "nickname", "") or f"{PLATFORM_LABEL.get(platform, platform)}博主"

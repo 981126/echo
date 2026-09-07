@@ -833,3 +833,42 @@ def sync_local_video_metrics(db: Session, video) -> dict:
         "comments_added": added,
         "comments_updated": updated,
     }
+
+
+def run_daily_sync_all(db: Session) -> dict:
+    """R-109：每日定时两轮（06:00/17:00）统一同步——主博主 + 全部对标博主。
+
+    主博主与对标博主同规格：每账号最新 15 条 + 下载视频 + 自动转写
+    （已下载/已转写自动跳过，不重复花 ASR 钱）；同步完成后自动触发一次
+    「重新对标」（refetch=False：不重复拉取 TikHub，只基于刚同步的数据重算
+    Top3/补齐极个别缺转写）。
+    """
+    from .benchmark import benchmarks_of_owner, maybe_start_benchmark_rerun
+
+    owner = get_current_creator(db)
+    if owner is None:
+        raise ValueError("请先创建并切换到主博主")
+    results = [run_sync(db, scope="daily", with_media=True)]  # 主博主
+    benchmarks = benchmarks_of_owner(db, owner)
+    for bm in benchmarks:  # 对标博主：与主博主同规格（15 条 + 下载/转写）
+        results.append(run_sync(db, scope="daily", creator_id=bm.id, with_media=True))
+    rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
+    accounts = [a for res in results for a in (res.get("accounts") or [])]
+    posts = sum(int(r.get("posts") or 0) for r in results)
+    comments = sum(int(r.get("comments") or 0) for r in results)
+    msg = (
+        f"每日同步完成：主博主 + {len(benchmarks)} 个对标，共同步 {len(accounts)} 个账号，"
+        f"更新作品 {posts}，采集评论 {comments}"
+    )
+    if isinstance(rerun, str) and rerun.startswith("started:"):
+        msg += "；已自动触发「重新对标」"
+    elif rerun == "already_running":
+        msg += "；已有「重新对标」在跑，本轮跳过自动触发"
+    return {
+        "job_id": results[-1].get("job_id") if results else None,
+        "message": msg,
+        "accounts": accounts,
+        "posts": posts,
+        "comments": comments,
+        "rerun": rerun,
+    }

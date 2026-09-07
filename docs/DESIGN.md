@@ -60,7 +60,7 @@
 - `review.py`：ABCD 复盘：A 报表（按视频/赛道/平台）、B 归因（启发式+LLM）、C 建议、D 赛道方向；`_radar` 赛道雷达（按互动率）。
 - `metrics.py`：`upsert_snapshot/import_snapshots/fetch_daily/series_for_video/_platform_breakdown/summary`；`apply_retention`（热点 30 天清理）。
 - `chat_service.py`：只读工具集 + 流式问答；工具：search_videos/get_video_detail/get_persona/list_requirements/get_metrics_summary/get_today_topics/get_review_report/get_radar/search_drafts/generate_draft（写操作需明确同意）。SSE 由 api/chat 组装。
-- `benchmark.py`：对标聚合（最新10条按互动分 Top3；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `ensure_top3_with_text`（缺文案自动下载转写、无文案顺延；有文案后严格 AI 审核软广/商单/引流并落库排除，R-103/R-106）+ `rerun_benchmarks`；/top 有文案优先（空文案被下一条顶上，R-106）（R-102：逐个对标重捞最新10条 → 自动补 Top3 文案，供后台任务回调进度）。
+- `benchmark.py`：对标聚合（最新15条按互动分 Top3，R-109：10→15；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `ensure_top3_with_text`（缺文案自动下载转写、无文案顺延；有文案后严格 AI 审核软广/商单/引流并落库排除，R-103/R-106）+ `rerun_benchmarks(db, owner, update, refetch)`（R-102/R-109：refetch=True 手动重捞最新15条；refetch=False 每日同步后自动触发、不重复拉取，只重算 Top3/补缺转写）；/top 有文案优先（空文案被下一条顶上，R-106）。
 - `platform_sync.py`：见 §4。
 - `works_service.py`：标题规范化（去话题/标点/空白/小写）+ 自动合并 + 手动合并/拆分 + `list_works`（合并作品含各平台）+ `post_item`（作品序列化）。
 - `creator_service.py`：当前博主/切换/账号元数据/全网粉丝汇总/删除保护。
@@ -102,7 +102,7 @@
 - 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；`GET /api/platform/jobs` 输出进度供前端轮询。
 
 ### 编排（run_sync）
-- 入口：手动（博主页 全量/前15条/每周/单账号）、定时（07:30/18:00，daily 带视频下载转写 R-085）、单条（posts/videos/works 同步）。
+- 入口：手动（博主页 全量/前15条/对标单账号「同步」/单账号）、定时（06:00/17:00 两轮 `run_daily_sync_all`：主博主+全部对标统一 daily 带视频下载转写，R-109）、单条（posts/videos/works 同步）。
 - `scope=daily`：每平台 top15（R-085/R-086 最终 15）；`weekly`：对标每账号 top3；`initial`：`count<=0 → _real_posts_all` 翻页全量。daily 且 with_media=True 时同步后对前 N 条跑媒体补齐（下载视频+自动转写）。
 - 并发：`ThreadPoolExecutor(max_workers=3)` 每账号独立 SQLAlchemy session（account 级隔离，单平台失败不拖垮其它）。
 - 结束：`auto_merge_creator` 合并同标题跨平台帖 → `works`；写 SyncJob stats/message + 账号 sync_status；通知中心收到完成。
@@ -114,7 +114,7 @@
 
 ## 5. 定时与后台（scheduler.py / tasks.py）
 - 计划见 ARCHITECTURE §4。`_platform_sync_job` 通过 `start_task` 跑 `run_sync(scope=daily)`。
-- R-105：`_benchmark_rerun_job` 每天 06:00 自动「重新对标」（每日生成 07:00 前 1 小时）：无主博主/无对标或已有 benchmark_rerun 任务在跑则跳过；否则 start_task 落后台执行（不阻塞调度线程）。
+- R-109：取消原独立 06:00 自动「重新对标」定时（R-105）；每日两轮同步完成后由 `run_daily_sync_all` 自动触发一次「重新对标」（`maybe_start_benchmark_rerun(refetch=False)`，已有 rerun 在跑则跳过），对标页手动「重新对标」仍 refetch=True 重捞最新 15 条。
 - `tasks.py`：`background_tasks` 表 + daemon 线程；progress 0→10→100；完成写 Notification；`import_video` 完成后若语料已≥阈值（每 3 条新素材）自动产出提示词候选并通知（R-022/R-064）。
 - `watcher.py`：10s 轮询 inbox，移入 videos 目录并建 `Video` 行（文件名 uuid 前缀防重），**不自动转写**（R-033，手动按钮触发）。
 

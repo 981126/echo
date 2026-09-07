@@ -58,5 +58,5 @@ PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh
 ## 7. 常见运维
 - 改 `.env` 后重启后端（配置启动时读取）
 - 数据迁移自动（启动时幂等补列）；重大变更先 `scripts/backup.sh`
-- 定时任务在进程内（APScheduler）；改时间在 `.env`（如 `ECHO_PLATFORM_SYNC_TIMES=07:30,18:00`）
+- 定时任务在进程内（APScheduler）；改时间在 `.env`（如 `ECHO_PLATFORM_SYNC_TIMES=06:00,17:00`，主博主+对标统一每日两轮，R-109）
 - 接口/表结构文档重新生成：见 docs/DATABASE.md 头注（API 用 app.openapi() 生成，模型用 SQLAlchemy metadata 生成）
