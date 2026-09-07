@@ -112,8 +112,6 @@ class OpenAIClient:
     ) -> dict:
         message = self._chat_json(messages, temperature, max_tokens)
         raw = (message.get("content") or "").strip()
-        if not raw:
-            raw = (message.get("reasoning_content") or "").strip()
         result = _parse_json(raw)
         if not isinstance(result, dict):
             raise LLMError("模型未返回合法 JSON")

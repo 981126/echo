@@ -330,7 +330,7 @@ def analyze_talkable(db: Session, owner: Creator, unit: dict) -> dict:
                 {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
             ],
             temperature=0.4,
-            max_tokens=800,
+            max_tokens=2000,
         )
         return {"can": bool(res.get("can")), "reason": str(res.get("reason") or ""), "suggestion": str(res.get("suggestion") or "")}
     except Exception as exc:  # noqa: BLE001
@@ -384,7 +384,7 @@ def analyze_text(db: Session, owner: Creator, text: str) -> dict:
                 {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
             ],
             temperature=0.4,
-            max_tokens=800,
+            max_tokens=2000,
         )
         return {"can": bool(res.get("can")), "reason": str(res.get("reason") or ""), "suggestion": str(res.get("suggestion") or "")}
     except Exception as exc:  # noqa: BLE001

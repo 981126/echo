@@ -1,7 +1,8 @@
 # 变更记录
 
 ## [M98 / R-115] 2026-09-07 — AI 分析 JSON 解析健壮化
-- _parse_json 支持代码围栏/推理前后缀，并扫描第一个合法 JSON 对象；content 为空时回退 reasoning_content。
+- _parse_json 支持代码围栏/推理前后缀，并扫描第一个合法 JSON 对象。
+- 实测 kimi-k2.6 为推理模型：答案在 content、推理在 reasoning_content；analyze max_tokens 800→2000，避免推理吃光 token 导致 content 为空。
 
 
 ## [M97 / R-114] 2026-09-07 — 对标页「AI分析」结果切页保留

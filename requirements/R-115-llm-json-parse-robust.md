@@ -15,3 +15,9 @@
 
 ## 验收
 - `scripts/verify.sh` 全绿；再次点「AI分析」不再因偶发非纯 JSON 而报错。
+
+## 根因确认（实测 kimi-k2.6）
+- kimi-k2.6 是推理模型：真实答案在 `content`，推理过程在 `reasoning_content`。
+- 我们此前对 Kimi 未发 `response_format`（K2 系列不支持 json_object），只靠提示词要 JSON；模型会把 JSON 包在 ```json 代码块里。
+- 更关键：`max_tokens=800` 会被「推理」先吃掉，文案长时可能烧光 token，导致 `content` 为空 → 解析失败。
+- 修复：解析器兼容代码块/前后缀；`analyze` 的 max_tokens 800→2000；不误读 reasoning_content（那是思考过程，不是答案）。
