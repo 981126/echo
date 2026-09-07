@@ -95,6 +95,8 @@ const analysisMap = toRef(ui, 'analysisMap')
 const showScript = toRef(ui, 'showScript')
 const scriptText = toRef(ui, 'scriptText')
 const draftId = toRef(ui, 'draftId')
+let analyzeSeq = 0
+let rewriteSeq = 0
 
 async function load() {
   loading.value = true
@@ -192,6 +194,24 @@ async function resumeRunning() {
   } catch (e) {
     /* 恢复失败不打扰，任务完成仍会走通知 */
   }
+
+  // R-116：AI分析 / 洗稿 落后台任务后，切页回来恢复进行态
+  try {
+    const list = await api('/api/tasks?status=running&kind=benchmark_analyze,benchmark_rewrite&limit=20')
+    for (const t of (list || [])) {
+      let pl = {}
+      try { pl = JSON.parse(t.payload || '{}') } catch { /* ignore */ }
+      if (t.kind === 'benchmark_analyze' && pl.key) {
+        analyzingKey.value = pl.key
+        watchAnalyze(t.id, pl.key)
+      } else if (t.kind === 'benchmark_rewrite' && pl.key) {
+        rewritingKey.value = pl.key
+        watchRewrite(t.id, pl.key)
+      }
+    }
+  } catch (e) {
+    /* 恢复失败不打扰 */
+  }
 }
 
 async function analyze(b, it) {
@@ -202,26 +222,89 @@ async function analyze(b, it) {
   analyzingKey.value = it.key
   try {
     const d = await api('/api/benchmark/analyze', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key }) })
-    analysisMap.value[it.key] = d
+    watchAnalyze(d.task_id, it.key)
   } catch (e) {
-    message.error(e.message)
-  } finally {
     analyzingKey.value = ''
+    message.error(e.message)
+  }
+}
+
+async function watchAnalyze(taskId, key) {
+  const my = ++analyzeSeq
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2000))
+    if (analyzeSeq !== my) return
+    let t
+    try {
+      t = await api('/api/tasks/' + taskId)
+    } catch (e) {
+      if (analyzeSeq === my) {
+        analyzingKey.value = ''
+        message.error(e.message)
+      }
+      return
+    }
+    if (analyzeSeq !== my) return
+    if (t.status === 'done') {
+      analyzingKey.value = ''
+      message.success('AI 分析完成')
+      await load()
+      return
+    }
+    if (t.status === 'failed') {
+      analyzingKey.value = ''
+      message.error(t.error || 'AI 分析失败')
+      return
+    }
   }
 }
 
 async function rewrite(b, it) {
   rewritingKey.value = it.key
   try {
-    const d = await api('/api/benchmark/rewrite', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text }) })
-    scriptText.value = d.script
-    draftId.value = d.draft_id || 0
-    showScript.value = true
-    message.success(`洗稿完成，已存入草稿 #${draftId.value}`)
+    const d = await api('/api/benchmark/rewrite', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key }) })
+    watchRewrite(d.task_id, it.key)
   } catch (e) {
-    message.error(e.message)
-  } finally {
     rewritingKey.value = ''
+    message.error(e.message)
+  }
+}
+
+async function watchRewrite(taskId, key) {
+  const my = ++rewriteSeq
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2000))
+    if (rewriteSeq !== my) return
+    let t
+    try {
+      t = await api('/api/tasks/' + taskId)
+    } catch (e) {
+      if (rewriteSeq === my) {
+        rewritingKey.value = ''
+        message.error(e.message)
+      }
+      return
+    }
+    if (rewriteSeq !== my) return
+    if (t.status === 'done') {
+      rewritingKey.value = ''
+      let res = {}
+      try { res = JSON.parse(t.result || '{}') } catch { /* ignore */ }
+      if (res && res.script) {
+        scriptText.value = res.script
+        draftId.value = res.draft_id || 0
+        showScript.value = true
+        message.success(`洗稿完成，已存入草稿 #${draftId.value}`)
+      } else {
+        message.success('洗稿完成')
+      }
+      return
+    }
+    if (t.status === 'failed') {
+      rewritingKey.value = ''
+      message.error(t.error || '洗稿失败')
+      return
+    }
   }
 }
 
@@ -240,6 +323,8 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   pollAlive = false
+  analyzeSeq++
+  rewriteSeq++
 })
 </script>
 

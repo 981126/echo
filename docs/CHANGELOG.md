@@ -1,7 +1,8 @@
 # 变更记录
 
 ## [M99 / R-116] 2026-09-07 — 对标页进行中状态切页保留
-- AI分析/洗稿/转写补齐的 loading 与结果改为模块级共享状态，切页返回不丢。
+- AI分析/洗稿落后台任务（benchmark_analyze/benchmark_rewrite）并返回 task_id；结果写入 background_tasks.result（新增列）。
+- 前端轮询任务、切页回来按 running 任务恢复 loading 并续轮询，完成后回填结果/弹窗；同时保留模块级共享状态作为同会话快速反馈。
 
 
 ## [M98 / R-115] 2026-09-07 — AI 分析 JSON 解析健壮化

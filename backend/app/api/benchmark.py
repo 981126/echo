@@ -16,10 +16,9 @@ from ..services.benchmark import (
     ensure_top3_with_text,
     score_unit,
     unit_payload,
-    analyze_text,
+    analyze_worker,
     rerun_worker,
-    rewrite_text,
-    set_analysis,
+    rewrite_worker,
 )
 from ..services.creator_service import get_current_creator
 from ..tasks import start_task
@@ -83,31 +82,23 @@ class TextIn(BaseModel):
 @router.post("/analyze", response_model=dict)
 def benchmark_analyze(payload: TextIn, db: Session = Depends(get_db)):
     owner = _owner(db)
-    res = analyze_text(db, owner, payload.text)
-    res["ok"] = not res.get("reason", "").startswith("AI 分析暂不可用")
-    if payload.key:
-        set_analysis(
-            db,
-            owner.id,
-            payload.key,
-            {
-                "can": bool(res.get("can")),
-                "reason": str(res.get("reason") or ""),
-                "suggestion": str(res.get("suggestion") or ""),
-            },
-        )
-    return res
+    task_id = start_task(
+        "benchmark_analyze",
+        {"owner_id": owner.id, "key": payload.key, "title": payload.title, "text": payload.text},
+        analyze_worker,
+    )
+    return {"task_id": task_id}
 
 
 @router.post("/rewrite", response_model=dict)
 def benchmark_rewrite(payload: TextIn, db: Session = Depends(get_db)):
     owner = _owner(db)
-    try:
-        res = rewrite_text(db, owner, payload.title, payload.text)
-        res["ok"] = True
-        return res
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    task_id = start_task(
+        "benchmark_rewrite",
+        {"owner_id": owner.id, "key": payload.key, "title": payload.title, "text": payload.text},
+        rewrite_worker,
+    )
+    return {"task_id": task_id}
 
 
 @router.post("/rerun", response_model=dict)

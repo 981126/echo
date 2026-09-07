@@ -417,6 +417,40 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str) -> dict:
     return {"title": new_title, "script": script, "draft_id": draft.id}
 
 
+def analyze_worker(db: Session, payload: dict, update=None) -> dict:
+    """后台任务：AI 分析（R-116：落后台留痕，切页可恢复）。"""
+    owner = db.get(Creator, int(payload.get("owner_id") or 0))
+    if owner is None:
+        raise ValueError("主博主不存在")
+    res = analyze_text(db, owner, payload.get("text") or "")
+    key = payload.get("key") or ""
+    if key:
+        set_analysis(
+            db,
+            owner.id,
+            key,
+            {
+                "can": bool(res.get("can")),
+                "reason": str(res.get("reason") or ""),
+                "suggestion": str(res.get("suggestion") or ""),
+            },
+        )
+    if update:
+        update(80, "分析完成")
+    return {"key": key, **res}
+
+
+def rewrite_worker(db: Session, payload: dict, update=None) -> dict:
+    """后台任务：洗稿（R-116：落后台留痕，切页可恢复）。"""
+    owner = db.get(Creator, int(payload.get("owner_id") or 0))
+    if owner is None:
+        raise ValueError("主博主不存在")
+    if update:
+        update(20, "正在洗稿…")
+    res = rewrite_text(db, owner, payload.get("title") or "", payload.get("text") or "")
+    return {"key": payload.get("key") or "", **res}
+
+
 def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = True) -> dict:
     """R-102/R-109：重跑当前主博主所有对标——逐账号重捞最新15条 + 自动补 Top3 文案。
 

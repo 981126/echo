@@ -22,6 +22,8 @@ KIND_LABELS = {
     "platform_media": "素材媒体补齐",
     "card_sync": "素材同步",
     "benchmark_rerun": "重新对标",
+    "benchmark_analyze": "AI 分析",
+    "benchmark_rewrite": "洗稿",
 }
 
 
@@ -45,6 +47,8 @@ def _target(kind: str, payload: dict, result) -> str:
     if kind in ("platform_sync", "platform_sync_single"):
         return "/creators"
     if kind == "benchmark_rerun":
+        return "/benchmark"
+    if kind in ("benchmark_analyze", "benchmark_rewrite"):
         return "/benchmark"
     return "/home"
 
@@ -129,6 +133,11 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             task.status = "done"
             task.progress = 100
             task.note = "完成"
+            if result is not None:
+                try:
+                    task.result = json.dumps(result, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    task.result = str(result)
             db.commit()
             publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": payload})
         _notify(db, kind=kind, payload=payload, status="done", result=result)

@@ -228,6 +228,14 @@ def _migrate_transcript_asr_provider() -> None:
             "UPDATE transcripts SET asr_provider = 'siliconflow' WHERE asr_provider = '' AND created_at >= '2026-09-07'"
         )
 
+
+def _migrate_task_result() -> None:
+    """R-116：background_tasks 增加 result（后台任务结果 JSON）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(background_tasks)").fetchall()}
+        if "result" not in cols:
+            conn.exec_driver_sql("ALTER TABLE background_tasks ADD COLUMN result TEXT NOT NULL DEFAULT ''")
+
 def _migrate_task_note() -> None:
     """background_tasks 增加 note（阶段说明），R-081。"""
     with engine.begin() as conn:
@@ -449,6 +457,7 @@ def init_db() -> None:
     _migrate_topic_idea_likes()
     _migrate_topic_candidate_slot()
     _migrate_task_note()
+    _migrate_task_result()
     _migrate_transcript_asr_provider()
     _migrate_transcript_asr_model()
     _fix_video_creator_binding()

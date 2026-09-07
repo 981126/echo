@@ -16,3 +16,9 @@
 ## 验收
 - 点击「AI分析 / 洗稿 / 转写补齐」后切走再回来，按钮仍在 loading；完成后结果/弹窗正常。
 - `scripts/verify.sh` 全绿。
+
+## 补充（后端留痕，真正可靠）
+- 前述「模块级 reactive」并不跨组件实例（在 `<script setup>` 内，每次挂载重建），且刷新页面必丢。
+- 改为后端留痕：`POST /api/benchmark/analyze`、`POST /api/benchmark/rewrite` 落后台任务（kind=benchmark_analyze / benchmark_rewrite），返回 task_id；结果写入 background_tasks.result（新增列）。
+- 前端轮询 `/api/tasks/{id}`；切页回来 `resumeRunning()` 按 `status=running` 找回进行中任务，恢复按钮 loading 并继续轮询；完成后回填结果/弹窗。
+- 迁移 `_migrate_task_result` 为 background_tasks 增列 result；`start_task` 完成后把 result 序列化写入。

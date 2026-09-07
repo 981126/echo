@@ -22,6 +22,7 @@ class BackgroundTask(Base):
     note: Mapped[str] = mapped_column(String(255), default="")  # 阶段说明（R-081：下载中/转写中等）
     payload: Mapped[str] = mapped_column(Text, default="{}")
     error: Mapped[str] = mapped_column(Text, default="")
+    result: Mapped[str] = mapped_column(Text, default="")  # 任务结果 JSON（R-116）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_app_now, onupdate=_app_now
