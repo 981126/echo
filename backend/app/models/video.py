@@ -51,6 +51,7 @@ class Transcript(Base):
     transcript_text: Mapped[str] = mapped_column(Text, default="")  # ASR 转写稿
     corrected_text: Mapped[str] = mapped_column(Text, default="")  # AI 校对后（分析以此为准）
     asr_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|done|failed
+    asr_provider: Mapped[str] = mapped_column(String(20), default="")  # mock|aliyun|siliconflow（转写来源，R-112）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
     video: Mapped[Video] = relationship(back_populates="transcript")

@@ -123,6 +123,7 @@
           <TranscribeSection
             v-if="editing.filename && !isPlaceholderFile(editing.filename)"
             :transcript-text="editing.transcriptText"
+            :asr-provider="editing.asrProvider"
             :transcribing="transcribing"
             @start="startTranscribe"
           />
@@ -389,6 +390,7 @@ async function openEdit(v) {
     adPrice: v.ad_price == null ? null : Number(v.ad_price),
     sourceText: tr?.source_text || '',
     transcriptText: tr?.transcript_text || '',
+    asrProvider: tr?.asr_provider || '',
     platformLinks: detail.platform_links || [],
     platformPosts: detail.platform_links || [],
     plannedTs: parseTs(v.planned_publish_at),
@@ -498,6 +500,7 @@ function pollTranscript() {
       const t = d.transcript
       if (t && t.transcript_text) {
         editing.value.transcriptText = t.transcript_text
+        editing.value.asrProvider = t.asr_provider || ''
         clearTranscribePoll()
         transcribing.value = false
         message.success('语音转文字完成')

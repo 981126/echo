@@ -47,7 +47,10 @@ def _seed_owner(db):
     return c, a
 
 
-def test_parse_link():
+def test_parse_link(monkeypatch):
+    # 离线确定性：本地解析规则不依赖真实网络重定向（有网时 xiaohongshu 会跳走导致不稳定）
+    import app.services.platform.link_utils as _lu
+    monkeypatch.setattr(_lu, "_resolve_redirect", lambda link: link)
     assert parse_link("douyin", "https://www.douyin.com/user/MS4wLjABAAAA_abc") == "MS4wLjABAAAA_abc"
     assert parse_link("douyin", "https://www.douyin.com/user/MS4wLjABAAAA_abc?from_tab_name=main") == "MS4wLjABAAAA_abc"
     assert parse_link("xiaohongshu", "https://www.xiaohongshu.com/user/profile?userId=abc123&x=1") == "abc123"

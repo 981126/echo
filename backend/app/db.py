@@ -198,6 +198,23 @@ def _migrate_chat() -> None:
             )
 
 
+
+def _migrate_transcript_asr_provider() -> None:
+    """R-112：transcripts 增加 asr_provider（mock|aliyun|siliconflow），并回填历史来源。
+
+    历史规则：2026-09-07 之前全部为阿里云 ASR；09-07 起切换到硅基流动（阿里云当时 OSS 已停用）。
+    """
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(transcripts)").fetchall()}
+        if "asr_provider" not in cols:
+            conn.exec_driver_sql("ALTER TABLE transcripts ADD COLUMN asr_provider VARCHAR(20) NOT NULL DEFAULT ''")
+        conn.exec_driver_sql(
+            "UPDATE transcripts SET asr_provider = 'aliyun' WHERE asr_provider = '' AND created_at < '2026-09-07'"
+        )
+        conn.exec_driver_sql(
+            "UPDATE transcripts SET asr_provider = 'siliconflow' WHERE asr_provider = '' AND created_at >= '2026-09-07'"
+        )
+
 def _migrate_task_note() -> None:
     """background_tasks 增加 note（阶段说明），R-081。"""
     with engine.begin() as conn:
@@ -419,6 +436,7 @@ def init_db() -> None:
     _migrate_topic_idea_likes()
     _migrate_topic_candidate_slot()
     _migrate_task_note()
+    _migrate_transcript_asr_provider()
     _fix_video_creator_binding()
     _auto_confirm_tags()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间

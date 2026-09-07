@@ -103,10 +103,11 @@ def import_video_task(db, payload: dict) -> None:
         except TranscriptionError as exc:
             # R-094：转写失败也落 asr_status=failed，并给可读原因
             if video.transcript is None:
-                video.transcript = Transcript(video_id=video.id, asr_status="failed")
+                video.transcript = Transcript(video_id=video.id, asr_status="failed", asr_provider=settings.asr_mode)
                 db.add(video.transcript)
             else:
                 video.transcript.asr_status = "failed"
+                video.transcript.asr_provider = settings.asr_mode
             db.commit()
             msg = str(exc) or "转写失败"
             if "识别结果为空" in msg:
@@ -120,12 +121,14 @@ def import_video_task(db, payload: dict) -> None:
                     transcript_text=text,
                     corrected_text=corrected,
                     asr_status="done",
+                    asr_provider=settings.asr_mode,
                 )
             )
         else:
             video.transcript.transcript_text = text
             video.transcript.corrected_text = corrected
             video.transcript.asr_status = "done"
+            video.transcript.asr_provider = settings.asr_mode
         db.commit()
         db.refresh(video)
 

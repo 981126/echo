@@ -114,6 +114,7 @@
 | R-106 | 2026-09-06 | 对标页修复：软广/自家小程序推广严格识别排除；无文案/空转写的高分项被下一条有文案的顶掉 | ✅ 已完成 | M89（已完成） | benchmark.service、/top、R-103 |
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
+| R-113 | 2026-09-07 | 转写来源入库 transcripts.asr_provider（aliyun/siliconflow 回填）+ 编辑页按真实来源显示 | ✅ 已完成 | M96（已完成） | db.py 迁移、ingest、TranscriptOut、TranscribeSection |
 | R-112 | 2026-09-07 | 卡片广告标记合并、通知复制不收起、编辑页 ASR 来源真实显示 | ✅ 已完成 | M95（已完成） | VideosView、NotificationBell、TranscribeSection、settings API |
 | R-111 | 2026-09-07 | 博主页账号行加「主页」链接；素材库卡片平台名可点击跳转对应平台作品页 | ✅ 已完成 | M94（已完成） | CreatorAccountRow、PlatformStats、works_service.post_item |
 | R-110 | 2026-09-07 | 博主页同步/全量/账号同步按钮：同步进行中禁用，防止重复点击再次入队 | ✅ 已完成 | M93（已完成） | CreatorsView、R-070/R-109 |

@@ -13,28 +13,37 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../api'
 
-defineProps({
+const props = defineProps({
   transcriptText: { type: String, default: '' },
-  transcribing: { type: Boolean, default: false }
+  transcribing: { type: Boolean, default: false },
+  asrProvider: { type: String, default: '' }
 })
 defineEmits(['start'])
 
-const asrLabel = ref('语音转文字')
+const currentMode = ref('')
+const currentModel = ref('')
 onMounted(async () => {
   try {
     const r = await api('/api/settings/asr')
-    if (r && r.mode === 'siliconflow') {
-      asrLabel.value = r.model ? `语音转文字（硅基流动 ASR · ${r.model}）` : '语音转文字（硅基流动 ASR）'
-    } else if (r && r.mode === 'aliyun') {
-      asrLabel.value = '语音转文字（阿里云 ASR）'
-    } else if (r && r.mode === 'mock') {
-      asrLabel.value = '语音转文字（模拟）'
-    }
+    currentMode.value = r?.mode || ''
+    currentModel.value = r?.model || ''
   } catch {
-    /* 后端暂不可用时保持默认文案 */
+    /* 后端暂不可用时保持默认 */
   }
+})
+
+const asrLabel = computed(() => {
+  // 已有转写稿：以该条转写记录实际来源为准；来源未知（老数据/手动粘贴）则不标服务商
+  if (props.transcriptText && !props.asrProvider) return '语音转文字'
+  const mode = props.asrProvider || currentMode.value
+  if (mode === 'siliconflow') {
+    return currentModel.value ? `语音转文字（硅基流动 ASR · ${currentModel.value}）` : '语音转文字（硅基流动 ASR）'
+  }
+  if (mode === 'aliyun') return '语音转文字（阿里云 ASR）'
+  if (mode === 'mock') return '语音转文字（模拟）'
+  return '语音转文字'
 })
 </script>
