@@ -1,5 +1,13 @@
 # 变更记录
 
+## [M101 / R-118] 2026-09-07 — 洗稿双模型多轮讨论
+- 对标洗稿改为 生成方初稿 + 评审方/生成方多轮打磨，每轮写 draft_discussions 留痕，最终稿落 drafts。
+
+## [M100 / R-117] 2026-09-07 — 洗稿来源记录 + 原文/洗稿左右对照
+- drafts 增加 source_ref 记录来源素材；草稿显示「对标洗稿 · 来源标题」并新增「原文案」tab。
+- 对标洗稿弹窗改为左右 diff 高亮（lib/diff.js 字符级 LCS）。
+
+
 ## [M99 / R-116] 2026-09-07 — 对标页进行中状态切页保留
 - AI分析/洗稿落后台任务（benchmark_analyze/benchmark_rewrite）并返回 task_id；结果写入 background_tasks.result（新增列）。
 - 前端轮询任务、切页回来按 running 任务恢复 loading 并续轮询，完成后回填结果/弹窗；同时保留模块级共享状态作为同会话快速反馈。

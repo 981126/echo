@@ -12,7 +12,7 @@
         <div class="grid">
           <div v-for="d in list('draft')" :key="d.id" class="card-tile" @click="open(d)">
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
-            <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }}</p>
+            <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
             <div class="tile-actions" @click.stop>
               <n-button size="small" secondary @click="markUsed(d)">✅ 采用</n-button>
               <n-button size="small" secondary @click="markArchived(d)">不采用</n-button>
@@ -46,7 +46,7 @@
         <div class="grid">
           <div v-for="d in list('used')" :key="d.id" class="card-tile" @click="open(d)">
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
-            <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }}</p>
+            <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
             <div class="tile-actions" @click.stop>
               <n-button size="small" secondary @click="markArchived(d)">移入废稿</n-button>
               <n-button size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
@@ -60,7 +60,7 @@
         <div class="grid">
           <div v-for="d in list('archived')" :key="d.id" class="card-tile" @click="open(d)">
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
-            <p class="tile-meta">{{ d.source === 'ai' ? 'AI 生成' : '手动' }} · {{ fmt(d.updated_at) }}</p>
+            <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
             <div class="tile-actions" @click.stop>
               <n-tag v-if="d.status === 'deleted'" size="small" :bordered="false" round type="error">已删除</n-tag>
               <n-button size="small" secondary @click="restore(d)">恢复为草稿</n-button>
@@ -159,6 +159,14 @@
               <div v-else-if="isPending" class="empty" style="padding: 12px 0">模型讨论中…</div>
             </div>
           </n-tab-pane>
+
+          <n-tab-pane name="source" tab="原文案">
+            <div v-if="editing.original_script" class="source-box">
+              <div class="muted" style="margin-bottom: 6px">该草稿由对标素材改写而来，以下为原文案：</div>
+              <pre class="source-pre">{{ editing.original_script }}</pre>
+            </div>
+            <div v-else class="empty" style="padding: 30px 0">暂无原文案（仅对标洗稿会记录）</div>
+          </n-tab-pane>
         </n-tabs>
       </div>
     </n-modal>
@@ -177,6 +185,14 @@ const drafts = ref([])
 const videos = ref([])
 const videoOptions = computed(() => videos.value.map(v => ({ label: v.title || v.filename, value: v.id })))
 const listTab = ref('draft')
+
+function srcLabel(d) {
+  if (d.source === 'ai' && d.source_ref && d.source_ref.source_title) return '对标洗稿'
+  return d.source === 'ai' ? 'AI 生成' : '手动'
+}
+function srcTitle(d) {
+  return (d.source_ref && d.source_ref.source_title) || ''
+}
 const editing = ref(null)
 const showEdit = ref(false)
 const checkInfo = ref(null)
@@ -453,3 +469,8 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
 })
 </script>
+
+<style scoped>
+.source-box { margin: 8px 0; }
+.source-pre { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; }
+</style>

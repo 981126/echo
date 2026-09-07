@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 
 from sqlalchemy.orm import Session
@@ -205,3 +206,130 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
 
     _clear_status(db, draft.id)
     return {"draft_id": draft.id, "title": draft.title}
+
+
+def run_rewrite_debate(db: Session, payload: dict) -> dict:
+    """对标洗稿双模型多轮讨论（R-118）。
+
+    payload: {owner_id, key, title, text, benchmark_name, post_id, work_id}
+    初稿先由生成方按原文改写，随后评审方/生成方交替多轮打磨；
+    每轮写 draft_discussions 留痕，最终稿落 drafts（含 original_script / source_ref）。
+    """
+    from ..models.platform import Creator
+    from .benchmark import persona_lines
+
+    owner = db.get(Creator, int(payload.get("owner_id") or 0))
+    if owner is None:
+        raise LLMError("主博主不存在")
+    source_title = str(payload.get("title") or "").strip() or "对标洗稿"
+    source_text = str(payload.get("text") or "")
+    if not source_text.strip():
+        raise LLMError("该素材还没有可用文案（先转写补齐）")
+
+    source_ref = {
+        "kind": "benchmark",
+        "key": payload.get("key") or "",
+        "source_title": source_title,
+        "benchmark_name": payload.get("benchmark_name") or "",
+        "post_id": payload.get("post_id"),
+        "work_id": payload.get("work_id"),
+    }
+
+    persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
+    settings = get_settings()
+    gen, critic = choose_models(db)
+    gen_llm = get_llm(gen, settings)
+    critic_llm = get_llm(critic, settings)
+
+    draft = Draft(
+        creator_id=owner.id,
+        title=source_title[:60],
+        script="",
+        original_script=source_text,
+        source="ai",
+        status="draft",
+        source_ref=json.dumps(source_ref, ensure_ascii=False),
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+
+    rewrite_system = (
+        "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；"
+        "不逐字抄袭、保留核心信息与结构，语言自然像本人说话。只输出脚本正文，不要标题、不要解释。"
+    )
+    rewrite_user = f"作者人设：\n{persona}\n\n参考素材标题：{source_title}\n参考素材原文：\n{source_text[:4000]}"
+
+    latest = None
+    for name, llm in ((gen, gen_llm), (critic, critic_llm)):
+        _status(db, draft.id, f"{name.upper()} 正在初稿洗稿…")
+        try:
+            latest = _chat_once(llm, rewrite_system, rewrite_user, 0.7, 4200)
+            break
+        except Exception as exc:  # noqa: BLE001
+            _note(db, draft.id, 0, f"{name} 初稿失败：{str(exc)[:200]}；切换下一位")
+    if not latest:
+        _clear_status(db, draft.id)
+        raise LLMError("DeepSeek 与 Kimi 洗稿初稿均失败")
+
+    draft.script = latest
+    db.commit()
+    _add(db, draft.id, 0, gen, "draft", latest)
+
+    critic_system = (
+        "你是脚本评审专家。对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、哪些有 AI 感、"
+        "哪些与原文重复或照搬；给出具体可执行的修改建议（简短直给）。\n"
+        f"作者人设：\n{persona}"
+    )
+    revise_system = (
+        "你是撰稿模型。根据评审意见，用作者口吻重写整篇口播脚本，只输出脚本正文，"
+        "不要解释、不要加标题，保持 1-2 分钟口播长度。"
+    )
+
+    kv_rounds = db.get(Kv, "debate_rounds")
+    rounds = int(kv_rounds.value) if kv_rounds and str(kv_rounds.value).isdigit() else int(
+        getattr(settings, "debate_rounds", 5) or 5
+    )
+    rounds = max(1, min(int(rounds), 10))
+
+    for r in range(1, rounds + 1):
+        _status(db, draft.id, f"{critic.upper()} 正在评审第 {r}/{rounds} 轮…")
+        try:
+            critique = _chat_once(
+                critic_llm,
+                critic_system,
+                f"参考原文：\n{source_text[:2000]}\n\n当前脚本：\n{latest}",
+                0.4,
+                3000,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
+            break
+        _add(db, draft.id, r, critic, "critique", critique)
+        _status(db, draft.id, f"{gen.upper()} 正在按评审修订第 {r}/{rounds} 轮…")
+        try:
+            revised = _chat_once(
+                gen_llm,
+                revise_system,
+                f"评审意见：\n{critique}\n\n当前脚本：\n{latest}",
+                0.7,
+                4200,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")
+            break
+        latest = revised
+        draft.script = latest
+        db.commit()
+        _add(db, draft.id, r, gen, "revise", latest)
+
+    _clear_status(db, draft.id)
+    return {
+        "draft_id": draft.id,
+        "title": draft.title,
+        "script": latest,
+        "original_script": source_text,
+        "source_ref": source_ref,
+        "benchmark_name": payload.get("benchmark_name") or "",
+    }
+

@@ -77,6 +77,9 @@ class TextIn(BaseModel):
     title: str = ""
     text: str = ""
     key: str = ""
+    benchmark_name: str = ""
+    post_id: int | None = None
+    work_id: int | None = None
 
 
 @router.post("/analyze", response_model=dict)
@@ -95,7 +98,15 @@ def benchmark_rewrite(payload: TextIn, db: Session = Depends(get_db)):
     owner = _owner(db)
     task_id = start_task(
         "benchmark_rewrite",
-        {"owner_id": owner.id, "key": payload.key, "title": payload.title, "text": payload.text},
+        {
+            "owner_id": owner.id,
+            "key": payload.key,
+            "title": payload.title,
+            "text": payload.text,
+            "benchmark_name": payload.benchmark_name,
+            "post_id": payload.post_id,
+            "work_id": payload.work_id,
+        },
         rewrite_worker,
     )
     return {"task_id": task_id}

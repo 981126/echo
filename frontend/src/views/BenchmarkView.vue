@@ -53,10 +53,22 @@
       </div>
     </div>
 
-    <n-modal v-model:show="showScript" preset="card" :title="'洗稿完成 · 已存入草稿 #' + (draftId || '')" style="width: min(720px, 96vw)">
-      <pre class="script-pre">{{ scriptText }}</pre>
+    <n-modal v-model:show="showScript" preset="card" :title="'洗稿完成 · 已存入草稿 #' + (draftId || '')" style="width: min(980px, 96vw)">
+      <div v-if="sourceTitle" class="muted" style="margin-bottom: 8px">
+        来源素材：{{ sourceTitle }}<template v-if="benchmarkName"> · 对标「{{ benchmarkName }}」</template>
+      </div>
+      <div class="cmp-grid">
+        <div class="cmp-col">
+          <div class="cmp-h">原文案（红 = 被改写/删除）</div>
+          <div class="diff-body"><template v-for="(seg, i) in diff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
+        </div>
+        <div class="cmp-col">
+          <div class="cmp-h">洗稿后（绿 = 新增/修改）</div>
+          <div class="diff-body"><template v-for="(seg, i) in diff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
+        </div>
+      </div>
       <div class="row" style="justify-content: flex-end; gap: 8px; margin-top: 8px">
-        <n-button size="small" @click="copyScript">复制</n-button>
+        <n-button size="small" @click="copyScript">复制洗稿后</n-button>
         <n-button size="small" type="primary" @click="showScript = false">关闭</n-button>
       </div>
     </n-modal>
@@ -64,10 +76,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, toRef, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, toRef, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { platformName } from '../lib/format'
+import { buildDiff } from '../lib/diff'
 
 const message = useMessage()
 
@@ -79,6 +92,9 @@ const ui = reactive({
   analysisMap: {},
   showScript: false,
   scriptText: '',
+  originalText: '',
+  sourceTitle: '',
+  benchmarkName: '',
   draftId: 0
 })
 
@@ -94,7 +110,12 @@ const rewritingKey = toRef(ui, 'rewritingKey')
 const analysisMap = toRef(ui, 'analysisMap')
 const showScript = toRef(ui, 'showScript')
 const scriptText = toRef(ui, 'scriptText')
+const originalText = toRef(ui, 'originalText')
+const sourceTitle = toRef(ui, 'sourceTitle')
+const benchmarkName = toRef(ui, 'benchmarkName')
 const draftId = toRef(ui, 'draftId')
+
+const diff = computed(() => buildDiff(originalText.value, scriptText.value))
 let analyzeSeq = 0
 let rewriteSeq = 0
 
@@ -262,7 +283,7 @@ async function watchAnalyze(taskId, key) {
 async function rewrite(b, it) {
   rewritingKey.value = it.key
   try {
-    const d = await api('/api/benchmark/rewrite', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key }) })
+    const d = await api('/api/benchmark/rewrite', { method: 'POST', body: JSON.stringify({ title: it.title, text: it.text, key: it.key, benchmark_name: b.name, post_id: it.post_id, work_id: it.work_id }) })
     watchRewrite(d.task_id, it.key)
   } catch (e) {
     rewritingKey.value = ''
@@ -292,6 +313,9 @@ async function watchRewrite(taskId, key) {
       try { res = JSON.parse(t.result || '{}') } catch { /* ignore */ }
       if (res && res.script) {
         scriptText.value = res.script
+        originalText.value = res.original_script || ''
+        sourceTitle.value = (res.source_ref && res.source_ref.source_title) || res.title || ''
+        benchmarkName.value = res.benchmark_name || ''
         draftId.value = res.draft_id || 0
         showScript.value = true
         message.success(`洗稿完成，已存入草稿 #${draftId.value}`)
@@ -337,4 +361,10 @@ onUnmounted(() => {
 .can { color: #18a058; font-weight: 600; }
 .no { color: #d03050; font-weight: 600; }
 .script-pre { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 60vh; overflow: auto; }
+.diff-body { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 60vh; overflow: auto; font-size: 13px; line-height: 1.7; }
+.diff-body .del { background: #ffe3e3; color: #c0392b; border-radius: 3px; }
+.diff-body .add { background: #dcf5dc; color: #1a7f37; border-radius: 3px; }
+.cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cmp-h { font-size: 12px; color: #a34f2c; font-weight: 600; margin-bottom: 4px; }
+@media (max-width: 640px) { .cmp-grid { grid-template-columns: 1fr; } }
 </style>

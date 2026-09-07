@@ -236,6 +236,14 @@ def _migrate_task_result() -> None:
         if "result" not in cols:
             conn.exec_driver_sql("ALTER TABLE background_tasks ADD COLUMN result TEXT NOT NULL DEFAULT ''")
 
+
+def _migrate_draft_source_ref() -> None:
+    """R-117：drafts 增加 source_ref（记录洗稿来源素材）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(drafts)").fetchall()}
+        if "source_ref" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN source_ref TEXT NOT NULL DEFAULT '{}'")
+
 def _migrate_task_note() -> None:
     """background_tasks 增加 note（阶段说明），R-081。"""
     with engine.begin() as conn:
@@ -458,6 +466,7 @@ def init_db() -> None:
     _migrate_topic_candidate_slot()
     _migrate_task_note()
     _migrate_task_result()
+    _migrate_draft_source_ref()
     _migrate_transcript_asr_provider()
     _migrate_transcript_asr_model()
     _fix_video_creator_binding()

@@ -391,8 +391,8 @@ def analyze_text(db: Session, owner: Creator, text: str) -> dict:
         return {"can": False, "reason": f"AI 分析暂不可用：{exc}", "suggestion": ""}
 
 
-def rewrite_text(db: Session, owner: Creator, title: str, text: str) -> dict:
-    """按人设把文案改写成原创口播稿并存脚本草稿。"""
+def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref: dict | None = None) -> dict:
+    """按人设把文案改写成原创口播稿并存脚本草稿；记录来源素材（source_ref）。"""
     if not (text or "").strip():
         raise ValueError("该素材还没有可用文案（先转写补齐）")
     persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
@@ -410,11 +410,19 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str) -> dict:
     from .creator_service import current_creator_id
 
     cid = owner.id if owner.kind == "owner" else current_creator_id(db)
-    draft = Draft(creator_id=cid, title=new_title, script=script, original_script=text, source="ai", status="draft")
+    draft = Draft(
+        creator_id=cid,
+        title=new_title,
+        script=script,
+        original_script=text,
+        source="ai",
+        status="draft",
+        source_ref=json.dumps(source_ref, ensure_ascii=False) if source_ref else "{}",
+    )
     db.add(draft)
     db.commit()
     db.refresh(draft)
-    return {"title": new_title, "script": script, "draft_id": draft.id}
+    return {"title": new_title, "script": script, "draft_id": draft.id, "original_script": text, "source_ref": source_ref or {}}
 
 
 def analyze_worker(db: Session, payload: dict, update=None) -> dict:
@@ -441,13 +449,12 @@ def analyze_worker(db: Session, payload: dict, update=None) -> dict:
 
 
 def rewrite_worker(db: Session, payload: dict, update=None) -> dict:
-    """后台任务：洗稿（R-116：落后台留痕，切页可恢复）。"""
-    owner = db.get(Creator, int(payload.get("owner_id") or 0))
-    if owner is None:
-        raise ValueError("主博主不存在")
+    """后台任务：洗稿（R-116 后台留痕；R-117 记录来源素材；R-118 双模型多轮讨论）。"""
+    from .debate import run_rewrite_debate
+
     if update:
-        update(20, "正在洗稿…")
-    res = rewrite_text(db, owner, payload.get("title") or "", payload.get("text") or "")
+        update(10, "启动双模型讨论…")
+    res = run_rewrite_debate(db, payload)
     return {"key": payload.get("key") or "", **res}
 
 

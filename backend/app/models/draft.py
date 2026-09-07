@@ -24,6 +24,7 @@ class Draft(Base):
     platform_shells: Mapped[str] = mapped_column(Text, default="{}")  # JSON：各平台外壳
     source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | ai
     original_script: Mapped[str] = mapped_column(Text, default="")  # AI 原稿（改稿差异分析用）
+    source_ref: Mapped[str] = mapped_column(Text, default="{}")  # 来源素材信息 JSON（对标 key/title/benchmark_name 等，R-117）
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|used|archived
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
