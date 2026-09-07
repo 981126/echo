@@ -46,6 +46,7 @@
     <div class="section-title">
       待确认建议
       <n-button v-if="suggested.length" size="tiny" type="primary" secondary style="margin-left: 10px" :loading="confirmingAll" @click="confirmAll">一键确认建议</n-button>
+      <n-button v-if="suggested.length" size="tiny" type="error" secondary style="margin-left: 8px" :loading="rejectingAll" @click="askRejectAll">一键拒绝建议</n-button>
     </div>
     <div v-if="!suggested.length" class="panel empty">暂无待确认建议</div>
     <div v-for="t in suggested" :key="t.id" class="panel row" style="align-items: flex-start">
@@ -62,23 +63,42 @@
 
     <div class="section-title">已确认档案</div>
     <div v-if="!confirmed.length" class="panel empty">暂无已确认人设</div>
-    <div v-for="t in confirmed" :key="t.id" class="panel row" style="align-items: flex-start">
-      <div class="grow">
-        <div class="row" style="gap: 8px">
-          <strong>{{ t.label }}</strong>
-          <n-tag size="small" :bordered="false" round>{{ categoryName(t.category) }}</n-tag>
-          <n-tag v-if="t.category === 'redline'" size="small" :bordered="false" round type="error">红线</n-tag>
-        </div>
-        <span class="muted" style="display: block; margin-top: 2px">{{ t.description }}</span>
-      </div>
-      <n-button size="tiny" secondary @click="startEdit(t)">编辑</n-button>
-      <n-popconfirm @positive-click="removeTag(t)">
-        <template #trigger>
-          <n-button size="tiny" quaternary type="error">删除</n-button>
+    <template v-else>
+      <div class="merge-float">
+        <n-button v-if="!multiMode" size="small" type="primary" secondary @click="multiMode = true">多选</n-button>
+        <template v-else>
+          <span class="muted">已选 {{ selected.size }} 项</span>
+          <n-button size="small" type="error" secondary :disabled="batchDeleting || !selected.size" :loading="batchDeleting" @click="askBatchDelete">删除所选</n-button>
+          <n-button size="small" secondary :disabled="batchDeleting" @click="cancelMulti">取消</n-button>
         </template>
-        删除该人设标签？
-      </n-popconfirm>
-    </div>
+      </div>
+      <div
+        v-for="t in confirmed"
+        :key="t.id"
+        class="panel row persona-row"
+        :class="{ picking: multiMode, picked: multiMode && selected.has(t.id) }"
+        @click="multiMode && toggleSel(t)"
+      >
+        <n-checkbox v-if="multiMode" class="persona-pick" :checked="selected.has(t.id)" @click.stop @update:checked="toggleSel(t)" />
+        <div class="grow">
+          <div class="row" style="gap: 8px">
+            <strong>{{ t.label }}</strong>
+            <n-tag size="small" :bordered="false" round>{{ categoryName(t.category) }}</n-tag>
+            <n-tag v-if="t.category === 'redline'" size="small" :bordered="false" round type="error">红线</n-tag>
+          </div>
+          <span class="muted" style="display: block; margin-top: 2px">{{ t.description }}</span>
+        </div>
+        <template v-if="!multiMode">
+          <n-button size="tiny" secondary @click="startEdit(t)">编辑</n-button>
+          <n-popconfirm @positive-click="removeTag(t)">
+            <template #trigger>
+              <n-button size="tiny" quaternary type="error">删除</n-button>
+            </template>
+            删除该人设标签？
+          </n-popconfirm>
+        </template>
+      </div>
+    </template>
 
     <div class="section-title">手动添加</div>
     <div class="panel">
@@ -129,19 +149,24 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import { api } from '../api'
 
 const suggested = ref([])
 const confirmed = ref([])
 const running = ref(false)
 const message = useMessage()
+const dialog = useDialog()
 const form = ref({ label: '', description: '', category: 'style' })
 const showEdit = ref(false)
 const editForm = ref({ id: null, label: '', description: '', category: 'style' })
 const phrases = ref([])
 const phraseLoading = ref(false)
 const confirmingAll = ref(false)
+const rejectingAll = ref(false)
+const multiMode = ref(false)
+const selected = ref(new Set())
+const batchDeleting = ref(false)
 const styleInfo = ref(null)
 const avoidList = ref([])
 const avoidText = ref('')
@@ -177,6 +202,66 @@ async function confirmAll() {
   } finally {
     confirmingAll.value = false
   }
+}
+
+function askRejectAll() {
+  const n = suggested.value.length
+  if (!n) return
+  dialog.warning({
+    title: '一键拒绝建议',
+    content: `确定拒绝全部 ${n} 条待确认建议？拒绝后不再出现在待确认列表。`,
+    positiveText: '拒绝',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      rejectingAll.value = true
+      try {
+        const r = await api('/api/persona/reject-all', { method: 'POST', body: '{}' })
+        message.success(`已拒绝 ${r.count || 0} 条建议`)
+        await load()
+      } catch (e) {
+        message.error(e.message)
+      } finally {
+        rejectingAll.value = false
+      }
+    }
+  })
+}
+
+function toggleSel(t) {
+  const id = Number(t.id)
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+
+function cancelMulti() {
+  multiMode.value = false
+  selected.value = new Set()
+}
+
+function askBatchDelete() {
+  const n = selected.value.size
+  if (!n) return
+  dialog.warning({
+    title: '删除所选档案',
+    content: `确定删除选中的 ${n} 条人设档案？删除后不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      batchDeleting.value = true
+      try {
+        const r = await api('/api/persona/tags/batch-delete', { method: 'POST', body: JSON.stringify({ ids: [...selected.value] }) })
+        message.success(`已删除 ${r.deleted || 0} 条`)
+        cancelMulti()
+        await load()
+      } catch (e) {
+        message.error(e.message)
+      } finally {
+        batchDeleting.value = false
+      }
+    }
+  })
 }
 
 async function loadStyle() {
@@ -297,3 +382,26 @@ async function adoptPhrase(ph) {
 
 onMounted(() => { load(); loadStyle() })
 </script>
+<style scoped>
+.merge-float {
+  position: fixed;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(255, 253, 250, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 4px 18px rgba(43, 40, 35, 0.12);
+  backdrop-filter: blur(2px);
+}
+.persona-row { cursor: default; }
+.persona-row.picking { cursor: pointer; }
+.persona-row.picked { border-color: #dba37d; background: #fdf3ea; }
+.persona-pick { margin-right: 10px; }
+</style>

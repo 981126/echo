@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-123 | 2026-09-07 | 人设档案：待确认建议加「一键拒绝」；已确认档案多选删除（悬浮按钮同素材库样式） | ✅ 已完成 | M105（已完成） | PersonaView、persona API |
 | R-122 | 2026-09-07 | 脚本工作台「来源素材」链接跳素材库直接打开并回显（含对标博主云端作品，不再提示未找到） | ✅ 已完成 | M104（已完成） | VideosView、works API、R-046/R-090/R-120 |
 | R-121 | 2026-09-07 | 素材编辑页封面替换按钮 + 点击封面播放视频（无视频不播放） | ✅ 已完成 | M103（已完成） | CoverEditor、VideosView |
 | R-120 | 2026-09-07 | 洗稿生成新标题+封面字；草稿素材标签文本框；来源素材点击跳素材库 | ✅ 已完成 | M102（已完成） | debate、drafts、benchmark、DraftsView/BenchmarkView |

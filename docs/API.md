@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 93 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 95 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -184,6 +184,17 @@ Confirm All Suggested
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 
+### POST /api/persona/reject-all
+
+Reject All Suggested
+
+一键把当前博主的全部「待确认建议」标记为已拒绝（R-123）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
 ### POST /api/persona/init
 
 Init Persona
@@ -247,6 +258,22 @@ Add Manual Tag
   - `source` string
 
 **返回 200**：application/json → PersonaTagOut
+
+### POST /api/persona/tags/batch-delete
+
+Batch Delete Tags
+
+批量删除人设标签（已确认档案多选删除，R-123）。只删当前博主的标签。
+
+**参数**
+
+- `x-access-token`（header）string
+**请求体**（application/json，`BatchDeleteIn`）
+
+字段：
+  - `ids` array
+
+**返回 200**：application/json → object
 
 ### PATCH /api/persona/tags/{tag_id}
 

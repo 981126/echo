@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -35,6 +36,18 @@ def confirm_all_suggested(db: Session = Depends(get_db)):
     if cid:
         q = q.filter(PersonaTag.creator_id == cid)
     count = q.update({"status": "confirmed"}, synchronize_session=False)
+    db.commit()
+    return {"ok": True, "count": count}
+
+
+@router.post("/reject-all", response_model=dict)
+def reject_all_suggested(db: Session = Depends(get_db)):
+    """一键把当前博主的全部「待确认建议」标记为已拒绝（R-123，与单条拒绝同语义留痕）。"""
+    q = db.query(PersonaTag).filter(PersonaTag.status == "suggested")
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
+    count = q.update({"status": "rejected"}, synchronize_session=False)
     db.commit()
     return {"ok": True, "count": count}
 
@@ -83,6 +96,27 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
     db.delete(tag)
     db.commit()
     return {"ok": True}
+
+
+class BatchDeleteIn(BaseModel):
+    ids: list[int] = []
+
+
+@router.post("/tags/batch-delete", response_model=dict)
+def batch_delete_tags(payload: BatchDeleteIn, db: Session = Depends(get_db)):
+    """批量删除人设标签（已确认档案多选删除，R-123）。只删当前博主的标签，找不到的忽略。"""
+    ids = [int(x) for x in (payload.ids or [])]
+    if not ids:
+        return {"ok": True, "deleted": 0}
+    q = db.query(PersonaTag).filter(PersonaTag.id.in_(ids))
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
+    rows = q.all()
+    for tag in rows:
+        db.delete(tag)
+    db.commit()
+    return {"ok": True, "deleted": len(rows)}
 
 
 @router.get("/phrases/suggest", response_model=dict)
