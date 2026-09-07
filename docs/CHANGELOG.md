@@ -1,5 +1,9 @@
 # 变更记录
 
+## [M93 / R-110] 2026-09-07 — 博主页同步按钮防重复入队
+- CreatorsView 同步按钮在对应博主已有 running 任务时进入 loading/disabled（runningCreators 派生自 activeJobs），杜绝同步进行中重复点击再次入队；触发成功后先 pollJobs 再释放点击锁，缩小竞态窗口。
+
+
 ## [R-108 补充2] 2026-09-07 — 默认模型切回 Qwen/Qwen3-ASR-1.7B（官方定价页标注免费）
 - 官方定价页确认 Qwen/Qwen3-ASR-1.7B 当前免费（¥0/分钟，实测可用无 402）；默认模型由 SenseVoiceSmall 切回 Qwen3-ASR-1.7B（config/.env/.env.example）。
 - SenseVoice 事件标记清理保留（对 Qwen3 输出无影响）。

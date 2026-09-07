@@ -33,7 +33,7 @@
         :is-current="c.is_current"
         :can-switch="!c.is_current"
         :show-add-benchmark="benchmarksOf(c).length > 0"
-        :syncing-owner-id="syncingOwner"
+        :syncing-owner-id="syncingOwner === c.id || runningCreators.has(c.id) ? c.id : 0"
         @daily="c => syncCreator(c, 'daily')"
         @initial="c => syncCreator(c, 'initial')"
         @switch="askSwitch"
@@ -52,7 +52,7 @@
         :key="a.id"
         :account="a"
         :benchmark="false"
-        :syncing-acct-id="syncingAcct"
+        :syncing-acct-id="syncingAcct === a.id || runningCreators.has(c.id) ? a.id : -1"
         sync-label="同步"
         @sync="a => runSync('daily', a.id, c.id)"
         @posts="openPosts"
@@ -65,7 +65,7 @@
         <CreatorHeaderRow
         :creator="bm"
         :benchmark="true"
-        :syncing-owner-id="syncingOwner"
+        :syncing-owner-id="syncingOwner === bm.id || runningCreators.has(bm.id) ? bm.id : 0"
         @daily="bm => syncCreator(bm, 'daily')"
         @initial="bm => syncCreator(bm, 'initial')"
         @edit="openOwnerModal"
@@ -82,7 +82,7 @@
         :key="a.id"
         :account="a"
         :benchmark="true"
-        :syncing-acct-id="syncingAcct"
+        :syncing-acct-id="syncingAcct === a.id || runningCreators.has(bm.id) ? a.id : -1"
         sync-label="同步"
         @sync="a => runSync('daily', a.id, bm.id)"
         @posts="openPosts"
@@ -271,6 +271,11 @@ function stopProgressPoll() {
 function jobFor(c) {
   return activeJobs.value[c.id] || null
 }
+const runningCreators = computed(() => {
+  const s = new Set()
+  for (const k of Object.keys(activeJobs.value)) s.add(Number(k))
+  return s
+})
 
 function openOwnerModal(c) {
   creatorForm.value = c
@@ -462,6 +467,7 @@ async function startCreatorSync(c, scope) {
     await api('/api/platform/sync', { method: 'POST', body: JSON.stringify({ scope, creator_id: c.id }) })
     message.success('已开始同步「' + c.name + '」，完成后右上角通知')
     startProgressPoll()
+    await pollJobs()
     load()
   } catch (e) {
     message.error(e.message)
@@ -479,6 +485,7 @@ async function runSync(scope, accountId, creatorId) {
     await api('/api/platform/sync', { method: 'POST', body: JSON.stringify(body) })
     message.success('同步任务已开始，完成后右上角通知')
     startProgressPoll()
+    await pollJobs()
     load()
   } catch (e) {
     message.error(e.message)
