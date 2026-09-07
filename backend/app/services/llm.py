@@ -7,6 +7,7 @@ DeepSeek 与 Kimi 均为 OpenAI 兼容 API；统一实现，
 from __future__ import annotations
 
 import json
+import re
 
 import httpx
 
@@ -16,21 +17,29 @@ from ..config import get_settings
 
 
 def _parse_json(raw: str):
-    """解析 JSON：先整体解析，失败则提取首尾大括号块（兼容推理模型前后缀）。"""
+    """解析 JSON：先整体解析；再去代码围栏；再扫描第一个合法 JSON 对象。
+
+    兼容推理模型输出（前后有推理文字、markdown 代码块、尾注等）。
+    """
     text = (raw or "").strip()
     if not text:
         return None
+    m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if m:
+        text = m.group(1).strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        try:
-            return json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            return None
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch == "{":
+            try:
+                obj, _ = decoder.raw_decode(text[i:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                return obj
     return None
 
 
@@ -103,6 +112,8 @@ class OpenAIClient:
     ) -> dict:
         message = self._chat_json(messages, temperature, max_tokens)
         raw = (message.get("content") or "").strip()
+        if not raw:
+            raw = (message.get("reasoning_content") or "").strip()
         result = _parse_json(raw)
         if not isinstance(result, dict):
             raise LLMError("模型未返回合法 JSON")

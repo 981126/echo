@@ -1,5 +1,9 @@
 # 变更记录
 
+## [M98 / R-115] 2026-09-07 — AI 分析 JSON 解析健壮化
+- _parse_json 支持代码围栏/推理前后缀，并扫描第一个合法 JSON 对象；content 为空时回退 reasoning_content。
+
+
 ## [M97 / R-114] 2026-09-07 — 对标页「AI分析」结果切页保留
 - AI分析结果落 app_kv（ba:{owner}:{key}）；/top、/prepare 返回 analysis，前端 load 回填，切页不丢。
 

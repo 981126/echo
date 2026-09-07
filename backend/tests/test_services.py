@@ -10,9 +10,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from unittest.mock import MagicMock
 
 from app.core.topics import normalize_main_topic
-from app.services.llm import LLMError
+from app.services.llm import LLMError, _parse_json
 from app.services.persona import PersonaService
 from app.services.transcription import Transcriber
+
+
+def test_parse_json_robust():
+    assert _parse_json('{"can": true}') == {"can": True}
+    assert _parse_json('```json\n{"can": false}\n```') == {"can": False}
+    assert _parse_json('先想一下……\n{"can": true, "reason": "契合", "suggestion": ""}\n以上') == {
+        "can": True,
+        "reason": "契合",
+        "suggestion": "",
+    }
+    assert _parse_json("") is None
+    assert _parse_json("没有 json") is None
 
 
 def test_persona_analyze_initial_parses_json():

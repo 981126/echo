@@ -114,6 +114,7 @@
 | R-106 | 2026-09-06 | 对标页修复：软广/自家小程序推广严格识别排除；无文案/空转写的高分项被下一条有文案的顶掉 | ✅ 已完成 | M89（已完成） | benchmark.service、/top、R-103 |
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
+| R-115 | 2026-09-07 | AI分析 LLM JSON 解析健壮化（代码块/推理前后缀/reasoning_content） | ✅ 已完成 | M98（已完成） | llm.py、test_services |
 | R-114 | 2026-09-07 | 对标页「AI分析」结果落库，切页返回不丢失 | ✅ 已完成 | M97（已完成） | benchmark API/service、BenchmarkView |
 | R-113 | 2026-09-07 | 转写来源入库 transcripts.asr_provider（aliyun/siliconflow 回填）+ 编辑页按真实来源显示 | ✅ 已完成 | M96（已完成） | db.py 迁移、ingest、TranscriptOut、TranscribeSection |
 | R-112 | 2026-09-07 | 卡片广告标记合并、通知复制不收起、编辑页 ASR 来源真实显示 | ✅ 已完成 | M95（已完成） | VideosView、NotificationBell、TranscribeSection、settings API |
