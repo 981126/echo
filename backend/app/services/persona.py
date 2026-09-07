@@ -97,19 +97,9 @@ class PersonaService:
     def __init__(self, llm=None):
         self.llm = llm or DeepSeekClient()
 
-    def analyze_initial(self, transcripts: list[str]) -> dict:
-        """初始化人设：输入历史转写稿，输出 tags + redlines。"""
-        content = "以下是作者的视频转写稿（用 --- 分隔）：\n\n" + "\n---\n".join(
-            t for t in transcripts if t
-        )
-        messages = [
-            {"role": "system", "content": get_prompt("persona_init")},
-            {"role": "user", "content": content},
-        ]
-        try:
-            data = self.llm.chat_json(messages)
-        except LLMError:
-            return {"tags": [], "redlines": []}
+    @staticmethod
+    def _parse_persona_result(data: dict) -> dict:
+        """把模型返回的 tags/redlines 清洗为内部结构。"""
         result: dict = {"tags": [], "redlines": []}
         for item in data.get("tags") or []:
             label = str(item.get("label", "")).strip() if isinstance(item, dict) else ""
@@ -121,6 +111,30 @@ class PersonaService:
             if text:
                 result["redlines"].append(text)
         return result
+
+    def analyze_initial(self, transcripts: list[str]) -> dict:
+        """初始化人设（整批一次喂给 AI 的旧口径，保留兼容；新任务走 analyze_one 逐篇，R-126）。"""
+        content = "以下是作者的视频转写稿（用 --- 分隔）：\n\n" + "\n---\n".join(
+            t for t in transcripts if t
+        )
+        messages = [
+            {"role": "system", "content": get_prompt("persona_init")},
+            {"role": "user", "content": content},
+        ]
+        try:
+            data = self.llm.chat_json(messages)
+        except LLMError:
+            return {"tags": [], "redlines": []}
+        return self._parse_persona_result(data)
+
+    def analyze_one(self, transcript: str) -> dict:
+        """单篇转写稿提炼人设（R-126）：一次调用只喂一篇；LLMError 由调用方逐篇兜底。"""
+        messages = [
+            {"role": "system", "content": get_prompt("persona_init")},
+            {"role": "user", "content": transcript or ""},
+        ]
+        data = self.llm.chat_json(messages)
+        return self._parse_persona_result(data)
 
     def suggest_video_tags(self, transcript: str) -> dict:
         """AI 预打标签：赛道（可多选）/ 是否广告 / 自定义标签。"""

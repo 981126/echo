@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy import func
 
@@ -158,26 +159,95 @@ def import_video_task(db, payload: dict) -> None:
             db.rollback()
 
 
-def persona_init_task(db, payload: dict) -> None:
-    """后台任务：用当前主博主历史转写稿初始化/刷新人设档案（新版本）。"""
+def _norm_label(label: str) -> str:
+    """去重键：去首尾/连续空白 + 小写（中文不受影响）。"""
+    return " ".join((label or "").split()).lower()
+
+
+def _analyze_one(text: str) -> dict | None:
+    """单篇转写稿调 AI 提炼人设（R-126）。每线程独立 PersonaService；单篇失败不影响其它篇。"""
+    try:
+        return PersonaService().analyze_one(text)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def persona_init_task(db, payload: dict, update=None) -> None:
+    """后台任务：把主博主每篇非广告转写稿逐篇喂 AI，去重后生成人设建议（R-126）。
+
+    不再整批拼接成一个大 prompt（R-125 澄清）；每篇一次调用（4 路并行），
+    各篇产出去重 + 跳过当前主博主已确认/待确认的同标签，再以新版本 suggested 落库供前端确认。
+    """
     cid = payload.get("creator_id") or current_creator_id(db)
     vq = db.query(Video).filter(Video.is_ad.is_(False))
     if cid:
         vq = vq.filter(Video.creator_id == cid)
     videos = vq.all()
-    transcripts = []
+    texts = []
     for v in videos:
         if v.transcript and (v.transcript.corrected_text or v.transcript.transcript_text):
-            transcripts.append(v.transcript.corrected_text or v.transcript.transcript_text)
-    if not transcripts:
+            texts.append(v.transcript.corrected_text or v.transcript.transcript_text)
+    if not texts:
         return
-    result = PersonaService().analyze_initial(transcripts)
+    total = len(texts)
+    if update:
+        update(3, f"逐篇分析人设（0/{total}）…")
+    results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(_analyze_one, t) for t in texts]
+        done = 0
+        for fut in as_completed(futures):
+            r = fut.result()
+            if r:
+                results.append(r)
+            done += 1
+            if update:
+                update(min(95, 5 + int(90 * done / total)), f"逐篇分析人设（{done}/{total}）…")
+
+    # 已有 confirmed/suggested 标签去重键（被拒标签允许再次建议）
+    existing: dict[tuple[str, str], bool] = {}
+    eq = db.query(PersonaTag)
+    if cid:
+        eq = eq.filter(PersonaTag.creator_id == cid)
+    for t in eq.all():
+        if t.status in ("confirmed", "suggested"):
+            existing[(t.category, _norm_label(t.label))] = True
+
+    tags_out: list[dict] = []
+    redlines_out: list[str] = []
+    seen_tags: set[tuple[str, str]] = set()
+    seen_redlines: set[str] = set()
+    for res in results:
+        for item in res.get("tags") or []:
+            label = str(item.get("label", "")).strip() if isinstance(item, dict) else ""
+            if not label:
+                continue
+            tag_key = ("style", _norm_label(label))
+            if tag_key in seen_tags or tag_key in existing:
+                continue
+            seen_tags.add(tag_key)
+            tags_out.append(
+                {"label": label, "description": str(item.get("description", "")).strip()}
+            )
+        for redline in res.get("redlines") or []:
+            text = str(redline).strip()
+            if not text:
+                continue
+            red_key = _norm_label(text)
+            if red_key in seen_redlines or ("redline", red_key) in existing:
+                continue
+            seen_redlines.add(red_key)
+            redlines_out.append(text)
+
+    if not tags_out and not redlines_out:
+        return
+
     ver_q = db.query(func.max(PersonaTag.version))
     if cid:
         ver_q = ver_q.filter(PersonaTag.creator_id == cid)
     current_version = ver_q.scalar() or 0
     version = int(current_version) + 1
-    for item in result["tags"]:
+    for item in tags_out:
         db.add(
             PersonaTag(
                 creator_id=cid,
@@ -189,7 +259,7 @@ def persona_init_task(db, payload: dict) -> None:
                 version=version,
             )
         )
-    for redline in result["redlines"]:
+    for redline in redlines_out:
         db.add(
             PersonaTag(
                 creator_id=cid,
@@ -202,3 +272,5 @@ def persona_init_task(db, payload: dict) -> None:
             )
         )
     db.commit()
+    if update:
+        update(100, f"完成：新增建议 {len(tags_out) + len(redlines_out)} 条")

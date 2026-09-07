@@ -1,5 +1,12 @@
 # 变更记录
 
+## [M108 / R-126] 2026-09-08 — 人设初始化改为逐篇喂 AI + 去重
+- persona_init_task 不再把所有转写稿拼进一个大 prompt：每篇非广告转写稿单独调一次 AI（4 路并行，带进度回调，单篇失败跳过）。
+- 各篇产出的标签/红线先做规范化去重（去空白/小写），并跳过当前主博主「已确认/待确认」里已有同标签（与 suggest_persona_updates 口径一致；被拒标签允许再次建议）。
+- 结果仍以 status=suggested、version=max+1 落库，出现在「待确认建议」供前端确认。
+- PersonaService 新增 analyze_one（单篇）并抽公共解析；analyze_initial 保留兼容旧口径。
+- 新增 test_persona_piecewise 2 用例（逐篇去重/跳过已存在/广告排除/空转写 noop）；verify.sh 全绿。
+
 ## [M107 / R-125] 2026-09-08 — 人设初始化防抖（禁止重复入队）
 - 根因：按钮 loading 只覆盖“提交请求”那一下（接口立即返回 task_id），后台任务跑完前按钮已可再点，连点会排队多个 persona_init。
 - 后端 POST /api/persona/init：存在 pending/running 的 persona_init 时返回 409，拒绝重复入队。
