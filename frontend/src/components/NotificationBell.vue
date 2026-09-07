@@ -134,7 +134,12 @@ async function clearAll() {
 }
 
 function onDocPointerDown(e) {
-  if (e.target && e.target.closest && e.target.closest('.notif-wrap')) return
+  const t = e.target
+  if (t && t.closest) {
+    if (t.closest('.notif-wrap')) return
+    // 清空确认框(Naive popconfirm)渲染在面板外部的 portal，点它不能误关面板
+    if (t.closest('.n-popconfirm') || t.closest('.n-popover')) return
+  }
   open.value = false
 }
 
