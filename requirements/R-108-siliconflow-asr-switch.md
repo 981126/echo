@@ -3,7 +3,7 @@
 - **日期**: 2026-09-07
 - **提出渠道**: 对话
 - **原文摘要**: ASR 接入硅基流动 API；添加开关可切换使用阿里云或硅基流动。
-- **状态**: ✅ 已完成（链路接入完成；硅基流动账户余额不足 402，充值后即可真实出稿）
+- **状态**: ✅ 已完成（2026-09-07 二次切换为免费模型 SenseVoiceSmall，真实出稿验证通过）
 - **排期**: M91（已完成）
 - **关联**: config.py（asr_mode 白名单）、services/transcription.py、services/aliyun_filetrans.py、services/ingest.import_video_task（统一转写入口）、.env / .env.example；与 R-068（模式护栏：非法配置启动报错）、R-094（转写失败可读原因+通知）、R-032/R-033（阿里云 ASR 真实接入）相关。
 
@@ -33,3 +33,7 @@
 > https://api-docs.siliconflow.cn/docs/api/uploads-audio-voice-post
 >
 > apikey：sk-gno……（打码：明文已收到，仅写入本地 .env（gitignored）。项目硬性规则：密钥不落代码/文档/commit；如该 key 曾外泄建议在硅基流动后台轮换）
+
+## 变更（2026-09-07 二次）：模型换免费 SenseVoiceSmall
+- 作者要求「硅基流动切换到免费的 ASR 模型」：默认模型由 `Qwen/Qwen3-ASR-1.7B` 改为 **`FunAudioLLM/SenseVoiceSmall`**（硅基流动免费，实测真实出稿，不再报 402 余额不足）；config 默认 + `.env`/`.env.example` 同步。
+- 顺带清理 SenseVoice 输出的事件标记（🎼、情绪表情、`<|...|>` 标签）后再入库，转写稿更干净。

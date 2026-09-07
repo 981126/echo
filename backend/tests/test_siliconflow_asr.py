@@ -22,7 +22,7 @@ def _settings(**overrides: object) -> MagicMock:
         asr_mode="siliconflow",
         siliconflow_api_key="sf-test-key",
         siliconflow_base_url="https://api.siliconflow.cn/v1",
-        siliconflow_asr_model="Qwen/Qwen3-ASR-1.7B",
+        siliconflow_asr_model="FunAudioLLM/SenseVoiceSmall",
         asr_poll_timeout=30,
     )
     base.update(overrides)
@@ -84,7 +84,7 @@ def test_transcribe_audio_skips_extraction(tmp_path, monkeypatch):
     assert post.last_kwargs is not None
     files = post.last_kwargs["files"]
     assert files["file"][0] == "demo.wav"  # 传的是原文件
-    assert post.last_kwargs["data"] == {"model": "Qwen/Qwen3-ASR-1.7B"}
+    assert post.last_kwargs["data"] == {"model": "FunAudioLLM/SenseVoiceSmall"}
     assert post.last_kwargs["headers"]["Authorization"] == "Bearer sf-test-key"
     assert path.exists()  # 原文件未被删除
 
@@ -193,3 +193,11 @@ def test_transcriber_unknown_mode_raises(tmp_path):
     path.write_bytes(b"RIFF-fake")
     with pytest.raises(TranscriptionError, match="未知 asr_mode"):
         Transcriber(settings=_settings(asr_mode="nonsense")).transcribe(path)
+
+
+def test_sensevoice_event_markup_cleaned(tmp_path, monkeypatch):
+    """R-108 二次：免费模型 SenseVoiceSmall 输出的事件标记（🎼/<|...|>）入库前清理。"""
+    from app.services.siliconflow_asr import _clean_sensevoice_text
+
+    assert _clean_sensevoice_text("🎼我找工作，线上面试成功率更高。") == "我找工作，线上面试成功率更高。"
+    assert _clean_sensevoice_text("<|zh|>大家好<|NEUTRAL|>") == "大家好"

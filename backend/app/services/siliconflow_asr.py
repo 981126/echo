@@ -10,6 +10,7 @@ multipart 上传即可（OpenAI 兼容接口）。沿用 media_tools 抽音轨�
 from __future__ import annotations
 
 import mimetypes
+import re
 from pathlib import Path
 
 import httpx
@@ -20,7 +21,17 @@ from .transcription import TranscriptionError
 
 MAX_FILE_MB = 50  # 硅基流动单文件上限 50MB
 MAX_DURATION_SECONDS = 3600  # 硅基流动单次时长上限 1 小时
-DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
+DEFAULT_MODEL = "FunAudioLLM/SenseVoiceSmall"  # 硅基流动免费 ASR（R-108 二次切换）
+# SenseVoice 输出自带事件标记（音乐/情绪表情、<|...|> 标签），对纯口播转写无意义，入库前清掉
+_SENSEVOICE_EVENTS = ("🎼", "🎵", "🎶", "♪", "♫", "🎙️", "🎤", "😀", "😂", "😅", "😐", "😮", "😢", "🥲")
+
+
+def _clean_sensevoice_text(text: str) -> str:
+    """清理 SenseVoice 事件标记/标签，返回干净的转写文本。"""
+    text = re.sub(r"<\|[^|]*\|>", "", text)
+    for token in _SENSEVOICE_EVENTS:
+        text = text.replace(token, "")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 class SiliconFlowASR:
@@ -105,4 +116,4 @@ class SiliconFlowASR:
         if not text:
             # 与 R-094 文案兼容：ingest 会对「识别结果为空」追加可读原因
             raise TranscriptionError("识别结果为空（硅基流动：未识别到有效语音）")
-        return text
+        return _clean_sensevoice_text(text)
