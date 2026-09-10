@@ -76,8 +76,14 @@ def _persona_context(db: Session) -> dict:
     if cid:
         q = q.filter(PersonaTag.creator_id == cid)
     tags = q.order_by(PersonaTag.category, PersonaTag.id).all()
+
+    def _fmt(t: PersonaTag) -> str:
+        dim = (getattr(t, "dimension", "") or "").strip()
+        prefix = f"[{dim}] " if dim else ""
+        return f"{prefix}{t.label}: {t.description}"
+
     return {
-        "tags": [f"{t.label}: {t.description}" for t in tags if t.category not in ("redline", "phrase")],
+        "tags": [_fmt(t) for t in tags if t.category not in ("redline", "phrase")],
         "anchors": [t.label for t in tags if t.category == "phrase"],
         "redlines": [t.label for t in tags if t.category == "redline"],
     }

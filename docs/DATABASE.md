@@ -4,7 +4,7 @@
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（26 张）
+## 表总览（27 张）
 
 | 表 | 说明 |
 |---|---|
@@ -22,7 +22,8 @@
 | `hot_topics` | 热点记录：平台+标题+日期去重；供选题匹配（R-025 扩充来源，R-065 后走 TikHub 热搜）。 |
 | `metrics_snapshots` | 本地素材(videos)每日指标快照：手动录入/批量导入/抓取/平台同步聚合，驱动看板增长曲线与复盘。 |
 | `notifications` | 右上角通知（R-019）：异步任务完成/失败，含目标页 target 与已读。 |
-| `persona_tags` | 人设档案版本：tags JSON + 描述 + 红线/边界 + 状态(suggested/enabled…)；版本化，AI 建议需作者确认。 |
+| `persona_checks` | 人设「增量 vs 全量」对齐校验记录（R-128）：覆盖率、AI 语义复核分、是否达标/是否回退全量、差异明细 JSON，供人设页展示 5% 对齐结果。 |
+| `persona_tags` | 人设档案版本：标签 + 描述 + AI 自定维度(dimension) + 红线/边界 + 状态(suggested/confirmed/rejected)；版本化，AI 建议需作者确认。 |
 | `pipeline_runs` | 每日流水线运行记录：当日幂等（同 run_date 不重跑）、成功/失败状态与摘要。 |
 | `platform_post_comments` | 平台作品评论（入库本地查询，R-067 后带点赞数 likes，按点赞 Top50 入库展示）：post_id+text 去重。 |
 | `platform_post_stats` | 平台作品互动指标按天快照：播放/点赞/收藏/评论/转发 + extra 平台特有字段。(post_id, stat_date) 唯一。 |
@@ -204,6 +205,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 
 **关系**：
 - creators 1—N persona_tags
+- creators 1—N persona_checks
 - creators 1—N creators（benchmark.parent_id）
 
 ---
@@ -349,9 +351,33 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 
 ---
 
+## `persona_checks`
+
+人设「增量 vs 全量」对齐校验记录（R-128）：每次新增已发布素材或手动重跑时写入，
+记录集合覆盖率、AI 语义复核分、是否达标、是否已自动回退为全量结果，以及未覆盖条目明细。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `creator_id` | INTEGER |  | 是 |  |
+| `mode` | VARCHAR(20) |  | 否 | increment |
+| `source_count` | INTEGER |  | 否 | 0 |
+| `coverage` | FLOAT |  | 否 | 0.0 |
+| `semantic` | FLOAT |  | 是 |  |
+| `passed` | BOOLEAN |  | 否 | true |
+| `fallback` | BOOLEAN |  | 否 | false |
+| `detail` | TEXT |  | 否 | {} |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**索引**：`ix_persona_checks_creator_id`（creator_id）
+
+**外键**：`creator_id` → `creators.id`
+
+---
+
 ## `persona_tags`
 
-人设档案版本：tags JSON + 描述 + 红线/边界 + 状态(suggested/enabled…)；版本化，AI 建议需作者确认。
+人设档案版本：标签 + 描述 + AI 自定维度 + 红线/边界 + 状态(suggested/confirmed/rejected)；版本化，AI 建议需作者确认。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -359,6 +385,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `creator_id` | INTEGER |  | 是 |  |
 | `label` | VARCHAR(100) |  | 否 |  |
 | `description` | TEXT |  | 否 |  |
+| `dimension` | VARCHAR(30) |  | 否 |  |
 | `category` | VARCHAR(20) |  | 否 | style |
 | `source` | VARCHAR(20) |  | 否 | ai |
 | `status` | VARCHAR(20) |  | 否 | suggested |

@@ -27,22 +27,26 @@ def test_parse_json_robust():
     assert _parse_json("没有 json") is None
 
 
-def test_persona_analyze_initial_parses_json():
+def test_persona_analyze_one_parses_json():
     service = PersonaService(llm=MagicMock())
     service.llm.chat_json.return_value = {
-        "tags": [{"label": "犀利敢说", "description": "喜欢一针见血"}],
+        "tags": [{"label": "犀利敢说", "description": "喜欢一针见血", "dimension": "语气"}],
         "redlines": ["不蹭负面热点"],
     }
-    result = service.analyze_initial(["转写稿1", "转写稿2"])
+    result = service.analyze_one("转写稿1")
     assert result["tags"][0]["label"] == "犀利敢说"
+    assert result["tags"][0]["dimension"] == "语气"
     assert result["redlines"] == ["不蹭负面热点"]
 
 
-def test_persona_analyze_initial_fallback_without_key():
+def test_persona_merge_full_fallback_without_key():
     service = PersonaService(llm=MagicMock())
     service.llm.chat_json.side_effect = LLMError("no key")
-    result = service.analyze_initial(["x"])
-    assert result == {"tags": [], "redlines": []}
+    parts = [{"tags": [{"label": "犀利敢说", "description": "一针见血"}], "redlines": ["不蹭负面热点"]}]
+    result = service.merge_full(parts)
+    # AI 不可用时退回机械合并，不丢信号
+    assert result["tags"][0]["label"] == "犀利敢说"
+    assert result["redlines"] == ["不蹭负面热点"]
 
 
 def test_persona_suggest_video_tags():

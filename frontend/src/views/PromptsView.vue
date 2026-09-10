@@ -1,7 +1,10 @@
 <template>
   <div class="page">
     <h1 class="page-title">AI 提示词</h1>
-    <p class="page-sub">查看/编辑各功能提示词；上传新视频会自动产出候选版（不直接启用）</p>
+    <p class="page-sub">
+      查看/编辑各功能提示词；上传新视频会自动产出候选版（不直接启用）。
+      候选版基于「逐篇提取 + AI 归纳合并」后的人设档案与全量加权素材优化，只给方向、不锁死 AI 思路
+    </p>
 
     <div class="toolbar">
       <span class="muted">生成模型策略：</span>

@@ -14,6 +14,7 @@ from .services.events import publish
 KIND_LABELS = {
     "import_video": "素材转写",
     "persona_init": "人设初始化",
+    "persona_incremental": "人设增量校验",
     "daily_pipeline": "每日流水线",
     "diff_analysis": "草稿差异分析",
     "generate_draft": "AI 文案生成",
@@ -35,6 +36,8 @@ def _target(kind: str, payload: dict, result) -> str:
             return f"/videos?edit={result['video_id']}"
         return "/videos"
     if kind == "persona_init":
+        return "/persona"
+    if kind == "persona_incremental":
         return "/persona"
     if kind == "daily_pipeline":
         return "/home"

@@ -260,6 +260,14 @@ def _migrate_task_note() -> None:
             conn.exec_driver_sql("ALTER TABLE background_tasks ADD COLUMN note VARCHAR(255) NOT NULL DEFAULT ''")
 
 
+def _migrate_persona_dimension() -> None:
+    """R-128：persona_tags 增加 dimension（AI 自定人设维度，如语气/价值观/口头禅）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(persona_tags)").fetchall()}
+        if "dimension" not in cols:
+            conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN dimension VARCHAR(30) NOT NULL DEFAULT ''")
+
+
 def _fix_video_creator_binding() -> None:
     """R-082：自动下载的本地素材归属错挂修复。
 
@@ -473,6 +481,7 @@ def init_db() -> None:
     _migrate_topic_idea_likes()
     _migrate_topic_candidate_slot()
     _migrate_task_note()
+    _migrate_persona_dimension()
     _migrate_task_result()
     _migrate_draft_source_ref()
     _migrate_draft_tags()

@@ -8,9 +8,15 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..services.creator_service import current_creator_id
-from ..models.persona import PersonaTag
-from ..schemas.persona import PersonaDecision, PersonaTagCreate, PersonaTagOut, PersonaTagUpdate
-from ..services.ingest import persona_init_task
+from ..models.persona import PersonaCheck, PersonaTag
+from ..schemas.persona import (
+    PersonaCheckOut,
+    PersonaDecision,
+    PersonaTagCreate,
+    PersonaTagOut,
+    PersonaTagUpdate,
+)
+from ..services.ingest import persona_init_task, persona_incremental_task
 from ..tasks import start_task
 
 router = APIRouter()
@@ -81,6 +87,7 @@ def update_tag(tag_id: int, payload: PersonaTagUpdate, db: Session = Depends(get
     if payload.label.strip():
         tag.label = payload.label.strip()
     tag.description = payload.description
+    tag.dimension = (payload.dimension or "").strip()[:30]
     tag.category = payload.category
     db.commit()
     db.refresh(tag)
@@ -146,6 +153,37 @@ def init_persona(db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="已有「用历史转写稿初始化人设」任务进行中，请稍候再试")
     cid = current_creator_id(db)
     task_id = start_task("persona_init", {"creator_id": cid}, persona_init_task)
+    return {"task_id": task_id}
+
+
+# ---------- 增量 vs 全量 5% 对齐校验（R-128） ----------
+@router.get("/check/latest", response_model=PersonaCheckOut | None)
+def latest_persona_check(db: Session = Depends(get_db)):
+    """返回当前博主最近一次「增量 vs 全量」对齐校验结果（无则 null）。"""
+    q = db.query(PersonaCheck)
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(PersonaCheck.creator_id == cid)
+    return q.order_by(PersonaCheck.id.desc()).first()
+
+
+@router.post("/recheck", response_model=dict)
+def recheck_persona(db: Session = Depends(get_db)):
+    """手动重跑一次增量人设校验（增量 + 全量重算对照），进行中拒绝重复入队（R-128）。"""
+    from ..models.task import BackgroundTask
+
+    dup = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "persona_incremental", BackgroundTask.status.in_(["pending", "running"]))
+        .order_by(BackgroundTask.id.desc())
+        .first()
+    )
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="已有「人设增量校验」任务进行中，请稍候再试")
+    cid = current_creator_id(db)
+    task_id = start_task(
+        "persona_incremental", {"creator_id": cid, "video_id": 0, "manual": True}, persona_incremental_task
+    )
     return {"task_id": task_id}
 
 

@@ -1,4 +1,4 @@
-"""人设初始化逐篇喂 AI + 去重测试（R-126）。"""
+"""人设初始化：逐篇喂 AI + AI 归纳合并去重测试（R-126 / R-128）。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from app.models.persona import PersonaTag
 from app.models.platform import Creator
 from app.models.video import Transcript, Video
 from app.services import ingest as ingest_mod
+from app.services.persona import merge_mechanical
 
 
 @pytest.fixture()
@@ -38,26 +39,45 @@ def _video(db, owner, filename, text, is_ad=False):
 
 
 class _FakePersonaService:
-    """按转写稿内容返回预设结果的假服务。"""
+    """按转写稿内容返回预设结果的假服务（逐篇提取 + 归纳合并都走它）。"""
+
     def __init__(self):
         self.calls: list[str] = []
+        self.merges = 0
 
     def analyze_one(self, text: str) -> dict:
         self.calls.append(text)
         if "求职" in text:
             return {
-                "tags": [{"label": "求职干货", "description": "应届求职"}, {"label": "面试技巧", "description": "套路拆解"}],
+                "tags": [
+                    {"label": "求职干货", "description": "应届求职", "dimension": "专业"},
+                    {"label": "面试技巧", "description": "套路拆解", "dimension": "专业"},
+                ],
                 "redlines": ["不骂人"],
             }
         if "面试" in text:
             return {
-                "tags": [{"label": " 求职干货 ", "description": "简历向"}, {"label": "涨薪谈判"}],
+                "tags": [
+                    {"label": " 求职干货 ", "description": "简历向", "dimension": "专业"},
+                    {"label": "涨薪谈判", "description": "", "dimension": "选题"},
+                ],
                 "redlines": ["不骂人", "不接软广"],
             }
         return {"tags": [], "redlines": []}
 
+    def merge_full(self, parts: list[dict]) -> dict:
+        self.merges += 1
+        return merge_mechanical(parts)
 
-def test_persona_init_task_piecewise_dedupe(db, monkeypatch):
+    def merge_incremental(self, current: dict, new_part: dict) -> dict:
+        self.merges += 1
+        return merge_mechanical([current, new_part])
+
+    def compare_profiles(self, a: dict, b: dict) -> dict:
+        return {"score": 100.0, "reason": "等价"}
+
+
+def test_persona_init_task_piecewise_merge_dedupe(db, monkeypatch):
     owner = Creator(kind="owner", name="我", is_current=True)
     db.add(owner)
     db.commit()
@@ -73,7 +93,9 @@ def test_persona_init_task_piecewise_dedupe(db, monkeypatch):
     monkeypatch.setattr(ingest_mod, "PersonaService", lambda: fake)
 
     progress = []
-    ingest_mod.persona_init_task(db, {"creator_id": owner.id}, update=lambda pct, note: progress.append((pct, note)))
+    result = ingest_mod.persona_init_task(
+        db, {"creator_id": owner.id}, update=lambda pct, note: progress.append((pct, note))
+    )
 
     rows = db.query(PersonaTag).order_by(PersonaTag.id).all()
     new = [r for r in rows if r.version == 2]
@@ -81,17 +103,20 @@ def test_persona_init_task_piecewise_dedupe(db, monkeypatch):
     cats = {r.category for r in new}
     # 逐篇只调用了 2 篇（广告篇不参与）
     assert len(fake.calls) == 2
+    # 归纳合并调用了一次（R-128）
+    assert fake.merges == 1
     # 求职干货跨两篇去重成 1 条；面试技巧因已确认被跳过；涨薪谈判保留
     assert labels == {"求职干货", "涨薪谈判", "不骂人", "不接软广"}
     assert "redline" in cats and "style" in cats
-    # 描述保留第一篇（求职干货：应届求职）
-    jd = next(r for r in new if r.label == "求职干货")
-    assert jd.description == "应届求职"
+    # 维度落库：选题维度映射为 topic，专业维度为 style
+    assert next(r for r in new if r.label == "涨薪谈判").category == "topic"
+    assert next(r for r in new if r.label == "求职干货").dimension == "专业"
     # 全部 suggested + 新版本
     assert all(r.status == "suggested" for r in new)
     assert all(r.version == 2 for r in new)
     # 进度回调走到 100
     assert progress and progress[-1][0] == 100
+    assert "2" in result["message"]
 
 
 def test_persona_init_task_no_transcripts_noop(db):

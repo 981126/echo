@@ -8,6 +8,32 @@
       </n-button>
     </div>
 
+    <div class="panel" style="margin-top: 4px">
+      <div class="row" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px">
+        <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
+          <strong>增量 vs 全量对齐（5% 口径）</strong>
+          <template v-if="check">
+            <n-tag size="small" :bordered="false" round :type="check.fallback ? 'error' : 'success'">
+              覆盖率 {{ pct(check.coverage) }}%{{ check.semantic != null ? ' · 语义 ' + Math.round(check.semantic) : '' }}
+            </n-tag>
+            <n-tag size="small" :bordered="false" round :type="check.fallback ? 'warning' : 'success'">
+              {{ check.fallback ? '差异超标 · 已回退全量' : '增量通过' }}
+            </n-tag>
+            <span class="muted" style="font-size: 12px">
+              {{ fmt(check.created_at) }} · 对照 {{ check.source_count }} 篇{{ check.mode === 'manual' ? ' · 手动' : '' }}
+            </span>
+          </template>
+          <span v-else class="muted" style="font-size: 12px">还没有校验记录（新素材导入或点右侧按钮后生成）</span>
+        </div>
+        <n-button size="small" secondary :loading="checking" @click="recheck">
+          {{ checking ? '校验中…' : '重跑增量校验' }}
+        </n-button>
+      </div>
+      <div v-if="check && missingItems.length" class="muted" style="font-size: 12px; margin-top: 6px">
+        增量未覆盖（已按全量补齐）：{{ missingItems.map(m => m.label).join('、') }}
+      </div>
+    </div>
+
     <div class="section-title">
       像我金句库
       <n-button size="tiny" secondary style="margin-left: 10px" :loading="phraseLoading" @click="suggestPhrases">从高表现素材提取</n-button>
@@ -57,6 +83,7 @@
         <div class="row" style="gap: 8px">
           <strong>{{ t.label }}</strong>
           <n-tag size="small" :bordered="false" round>{{ categoryName(t.category) }}</n-tag>
+          <n-tag v-if="t.dimension" size="small" :bordered="false" round type="info">{{ t.dimension }}</n-tag>
         </div>
         <p class="muted" style="margin: 4px 0 0">{{ t.description }}</p>
       </div>
@@ -90,6 +117,7 @@
           <div class="row" style="gap: 8px">
             <strong>{{ t.label }}</strong>
             <n-tag size="small" :bordered="false" round>{{ categoryName(t.category) }}</n-tag>
+            <n-tag v-if="t.dimension && t.category !== 'redline'" size="small" :bordered="false" round type="info">{{ t.dimension }}</n-tag>
             <n-tag v-if="t.category === 'redline'" size="small" :bordered="false" round type="error">红线</n-tag>
           </div>
           <span class="muted" style="display: block; margin-top: 2px">{{ t.description }}</span>
@@ -123,6 +151,10 @@
         <n-input v-model:value="editForm.description" placeholder="一句话描述" />
       </div>
       <div class="form-item">
+        <label class="form-label">维度（可留空）</label>
+        <n-input v-model:value="editForm.dimension" placeholder="如：语气 / 价值观 / 口头禅 / 受众" />
+      </div>
+      <div class="form-item">
         <label class="form-label">类别</label>
         <n-select v-model:value="editForm.category" :options="categoryOptions" />
       </div>
@@ -135,7 +167,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api } from '../api'
 
@@ -145,7 +177,7 @@ const running = ref(false)
 const message = useMessage()
 const dialog = useDialog()
 const showEdit = ref(false)
-const editForm = ref({ id: null, label: '', description: '', category: 'style' })
+const editForm = ref({ id: null, label: '', description: '', dimension: '', category: 'style' })
 const phrases = ref([])
 const phraseLoading = ref(false)
 const phraseAccepting = ref(false)
@@ -158,6 +190,19 @@ const styleInfo = ref(null)
 const avoidList = ref([])
 const avoidText = ref('')
 const savingStyle = ref(false)
+const check = ref(null)
+const checking = ref(false)
+
+const pct = (v) => ((Number(v) || 0) * 100).toFixed(1)
+const fmt = (s) => (s ? String(s).replace('T', ' ').slice(0, 16) : '')
+const missingItems = computed(() => {
+  if (!check.value) return []
+  try {
+    return JSON.parse(check.value.detail || '{}').missing || []
+  } catch (e) {
+    return []
+  }
+})
 
 const categoryOptions = [
   { label: '风格', value: 'style' },
@@ -286,6 +331,7 @@ async function saveStyle() {
 }
 
 let initPoll = null
+let checkPoll = null
 let initDisposed = false
 
 // R-125：初始化是后台任务，按钮 loading 不能只覆盖“提交请求”那一下；
@@ -326,6 +372,47 @@ async function initPersona() {
   }
 }
 
+async function loadCheck() {
+  try {
+    check.value = await api('/api/persona/check/latest')
+  } catch (e) {
+    /* 无记录或接口异常都不打断页面 */
+  }
+}
+
+// R-128：增量校验是后台任务，按钮 loading 要覆盖整个任务期，避免重复入队
+async function refreshCheckRunning() {
+  if (initDisposed) return
+  try {
+    const tasks = await api('/api/tasks?status=running&kind=persona_incremental&limit=10')
+    checking.value = !!(tasks && tasks.length)
+  } catch (e) {
+    /* 轮询失败不打断页面 */
+  }
+  if (!checking.value && checkPoll) {
+    clearInterval(checkPoll)
+    checkPoll = null
+    await loadCheck()
+  }
+}
+
+async function recheck() {
+  if (checking.value) {
+    message.info('已有增量校验进行中，请稍候')
+    return
+  }
+  checking.value = true
+  try {
+    const r = await api('/api/persona/recheck', { method: 'POST', body: '{}' })
+    message.success(`增量校验已启动（task #${r.task_id}），完成后右上角会通知`)
+  } catch (e) {
+    message.error(e.message || '启动失败')
+  } finally {
+    await refreshCheckRunning()
+    if (checking.value && !checkPoll) checkPoll = setInterval(refreshCheckRunning, 4000)
+  }
+}
+
 async function decide(t, status) {
   await api(`/api/persona/tags/${t.id}/decision`, { method: 'POST', body: JSON.stringify({ status }) })
   message.success(status === 'confirmed' ? '已确认' : '已拒绝')
@@ -333,12 +420,12 @@ async function decide(t, status) {
 }
 
 function startEdit(t) {
-  editForm.value = { id: t.id, label: t.label, description: t.description, category: t.category }
+  editForm.value = { id: t.id, label: t.label, description: t.description, dimension: t.dimension || '', category: t.category }
   showEdit.value = true
 }
 
 function startAdd() {
-  editForm.value = { id: null, label: '', description: '', category: 'style' }
+  editForm.value = { id: null, label: '', description: '', dimension: '', category: 'style' }
   showEdit.value = true
 }
 
@@ -352,7 +439,7 @@ async function saveEdit() {
     message.warning('标签不能为空')
     return
   }
-  const body = JSON.stringify({ label: f.label.trim(), description: f.description, category: f.category })
+  const body = JSON.stringify({ label: f.label.trim(), description: f.description, dimension: f.dimension || '', category: f.category })
   try {
     if (f.id) {
       await api(`/api/persona/tags/${f.id}`, { method: 'PATCH', body })
@@ -477,8 +564,11 @@ function rejectAllPhrases() {
 onMounted(async () => {
   load()
   loadStyle()
+  loadCheck()
   await refreshInitRunning()  // 切页回来/刷新时恢复“初始化中…”禁用态
   ensureInitPoll()
+  await refreshCheckRunning()  // 恢复“校验中…”禁用态
+  if (checking.value && !checkPoll) checkPoll = setInterval(refreshCheckRunning, 4000)
 })
 
 onUnmounted(() => {
@@ -486,6 +576,10 @@ onUnmounted(() => {
   if (initPoll) {
     clearInterval(initPoll)
     initPoll = null
+  }
+  if (checkPoll) {
+    clearInterval(checkPoll)
+    checkPoll = null
   }
 })
 </script>

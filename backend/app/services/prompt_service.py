@@ -20,9 +20,11 @@ from .llm import DeepSeekClient, LLMError
 # key -> (module, 常量名, 中文名)
 PROMPT_META: dict[str, tuple[str, str, str]] = {
     "generation": ("app.services.generation", "GENERATION_SYSTEM", "生成脚本"),
-    "persona_init": ("app.services.persona", "PERSONA_INIT_SYSTEM", "人设初始化"),
+    "persona_init": ("app.services.persona", "PERSONA_INIT_SYSTEM", "人设逐篇提取"),
+    "persona_merge": ("app.services.persona", "PERSONA_MERGE_SYSTEM", "人设归纳合并"),
     "video_tags": ("app.services.persona", "VIDEO_TAGS_SYSTEM", "视频预打标"),
-    "persona_updates": ("app.services.persona", "PERSONA_UPDATES_SYSTEM", "人设增量建议"),
+    "persona_updates": ("app.services.persona", "PERSONA_UPDATES_SYSTEM", "人设增量合并"),
+    "persona_compare": ("app.services.persona", "PERSONA_COMPARE_SYSTEM", "人设差异复核"),
     "review": ("app.services.review", "REVIEW_SYSTEM", "复盘 ABCD"),
     "diff": ("app.services.diff_analysis", "DIFF_SYSTEM", "改稿差异"),
     "chat": ("app.services.chat_service", "SYSTEM_PROMPT", "AI 对话"),
@@ -30,9 +32,14 @@ PROMPT_META: dict[str, tuple[str, str, str]] = {
 }
 
 OPT_SYSTEM = (
-    "你是提示词工程专家。基于作者当前提示词、人设、真实口播文案与打分反馈，优化该提示词，"
-    "使其更贴合作者语气、减少 AI 感、保持原有输出格式约束。"
-    "素材按点赞率/互动从高到低排列：越靠前越代表作者受欢迎的真实腔调，权重越高，应重点模仿。"
+    "你是提示词工程专家，正在帮一位自媒体作者优化他自己在用的 AI 提示词。"
+    "你的目标不是把它改得更死，而是让它更像这位作者（R-128）。"
+    "请这样做：\n"
+    "1. 先把作者的人设档案、语言习惯画像、真实口播文案读进去，判断当前提示词哪里没抓住作者的味道。\n"
+    "2. 优化时只给「方向盘」——交代角色、目标、必须遵守的红线即可；"
+    "不要用过多硬性的条数/字数/句式限制去锁死 AI 的思路，让模型有深度学习与自由发挥的空间。\n"
+    "3. 素材按点赞率/互动从高到低排列：越靠前越代表作者受欢迎的真实腔调，权重越高，应重点模仿。\n"
+    "4. 程序需要解析的输出格式（如 JSON 字段名/返回结构）必须保持不变；除此之外的内容可以大胆重写。\n"
     "只输出优化后的提示词正文，不要解释、不要 markdown 代码块。"
 )
 
@@ -180,7 +187,7 @@ def learning_material(db: Session, max_items: int = 16) -> str:
 
     ctx = _persona_context(db)
     if ctx.get("tags"):
-        parts.append("作者人设：\n" + "\n".join(f"- {t}" for t in ctx["tags"]))
+        parts.append("作者人设档案（逐篇提取 + AI 归纳合并，方括号为维度）：\n" + "\n".join(f"- {t}" for t in ctx["tags"]))
     if ctx.get("redlines"):
         parts.append("红线（不要违反）：\n" + "\n".join(f"- {r}" for r in ctx["redlines"]))
     if ctx.get("anchors"):

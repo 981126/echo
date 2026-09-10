@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-128 | 2026-09-10 | AI提示词候选版人设不到位：逐篇提取人设→AI归纳合并去重；增量更新与全量重算差异≤5%（集合覆盖+LLM语义复核，超标自动回退全量并通知）；人设页展示差异；人设/优化提示词放开「只给方向盘」；并清空旧人设/提示词数据按新管线重跑 | ✅ 已完成 | M110/M111/M112（已完成） | PersonaService、persona_profile、ingest、prompt_service、PromptsView、PersonaView、R-021/022/126 |
 | R-127 | 2026-09-08 | 像我金句库：候选金句加单条「拒绝」；新增「一键接受」「一键拒绝」 | ✅ 已完成 | M109（已完成） | PersonaView |
 | R-126 | 2026-09-08 | 人设初始化逐篇喂 AI（不再一次性拼接），每篇产出后去重（含跳过已确认/待确认同标签）再推前端确认 | ✅ 已完成 | M108（已完成） | ingest.persona_init_task、PersonaService |
 | R-125 | 2026-09-08 | 人设「用历史转写稿初始化人设」防抖（禁止重复入队）；并澄清其分析范围（当前主博主全部非广告有转写稿素材） | ✅ 已完成 | M107（已完成） | PersonaView、persona API、ingest.persona_init_task |

@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 95 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 97 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -173,6 +173,17 @@ List Persona
 - `x-access-token`（header）string
 **返回 200**：application/json → array
 
+### GET /api/persona/check/latest
+
+Latest Persona Check
+
+返回当前博主最近一次「增量 vs 全量」对齐校验结果（无则 null）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
 ### POST /api/persona/confirm-all
 
 Confirm All Suggested
@@ -215,6 +226,17 @@ Suggest Phrases
 **参数**
 
 - `limit`（query）integer
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### POST /api/persona/recheck
+
+Recheck Persona
+
+手动重跑一次增量人设校验（增量 + 全量重算对照），进行中拒绝重复入队（R-128）。
+
+**参数**
+
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 

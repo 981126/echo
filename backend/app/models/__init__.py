@@ -8,7 +8,7 @@ from .hot_topic import HotTopic, TopicCandidate, TopicIdea
 from .kv import Kv
 from .metrics import MetricsSnapshot, ReviewReport
 from .notification import Notification
-from .persona import PersonaTag
+from .persona import PersonaCheck, PersonaTag
 from .pipeline import PipelineRun
 from .platform import (
     Creator,
@@ -28,6 +28,7 @@ __all__ = [
     "Video",
     "Transcript",
     "PersonaTag",
+    "PersonaCheck",
     "BackgroundTask",
     "Notification",
     "AiPrompt",

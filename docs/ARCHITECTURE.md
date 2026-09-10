@@ -30,13 +30,13 @@ echo/
 │   │   ├── db.py          # engine/SessionLocal/get_db/init_db + 幂等迁移
 │   │   ├── api/           # 薄路由：videos/works/persona/drafts/chat/topics/metrics/review/
 │   │   │                  #   pipeline/platform/creators/prompts/requirements/notifications/tasks/settings/uploads
-│   │   ├── services/      # 业务层：generation/ingest/persona/transcription/topic_mining/
+│   │   ├── services/      # 业务层：generation/ingest/persona/persona_profile/transcription/topic_mining/
 │   │   │                  #   platform_sync/works_service/creator_service/chat_service/prompt_service/…
 │   │   │                  #   platform/{base,tikhub,budget,link_utils}.py（数据源适配器）
 │   │   │                  #   platform_assets.py（封面/头像下载命名）
 │   │   ├── core/          # 纯逻辑算法：retrieval/style_profile/transcript/matching/metrics/review/
 │   │   │                  #   pipeline/diff/digest/draft_check/requirement_file/topics/platform_links/timeutil
-│   │   ├── models/        # 26 张表（见 docs/DATABASE.md）
+│   │   ├── models/        # 27 张表（见 docs/DATABASE.md）
 │   │   ├── schemas/       # Pydantic 出入参契约
 │   │   ├── scheduler.py   # APScheduler 注册
 │   │   ├── tasks.py       # start_task/_run_worker/通知/导入后自动优化提示词
@@ -96,7 +96,7 @@ creators → creator_accounts → platform_posts → platform_post_stats / platf
                               └─ local_video_id → videos → transcripts / metrics_snapshots
 videos → drafts → feedback / draft_discussions
 hot_topics → topic_candidates → drafts
-creators → persona_tags / creator_account_snapshots
+creators → persona_tags / persona_checks / creator_account_snapshots
 background_tasks / sync_jobs / notifications / app_kv
 ```
 要点：

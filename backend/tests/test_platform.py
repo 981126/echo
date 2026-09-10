@@ -690,8 +690,8 @@ def test_import_video_task_auto_confirms_tags(db, monkeypatch):
         lambda self, text: {"main_topics": ["求职"], "is_ad": False, "tags": ["产品"]},
     )
     monkeypatch.setattr(
-        ingest.PersonaService, "suggest_updates",
-        lambda self, text, current: {"suggestions": []},
+        ingest, "enqueue_persona_incremental",
+        lambda db, video=None, creator_id=None: None,
     )
     ingest.import_video_task(db, {"video_id": v.id})
     db.refresh(v)

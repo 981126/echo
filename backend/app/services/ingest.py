@@ -1,15 +1,12 @@
-"""内容导入流水线：转写 → AI 校对 → 预打标签；人设初始化。"""
+"""内容导入流水线：转写 → AI 校对 → 预打标签；人设分析（逐篇提取→归纳合并→增量校验）。"""
 
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-from sqlalchemy import func
 
 from ..config import get_settings
 from ..core.transcript import normalize_text
-from ..models.persona import PersonaTag
+from ..models.persona import PersonaCheck
 from ..models.video import Transcript, Video
 from .llm import LLMError
 from .persona import PersonaService
@@ -18,47 +15,38 @@ from .transcription import Transcriber, TranscriptionError
 from .creator_service import current_creator_id
 
 
-def suggest_persona_updates(db, video, transcript_text: str) -> None:
-    """新视频（非广告）进入后，自动建议人设扩充（待作者确认）。"""
-    if video.is_ad or not transcript_text:
-        return
-    cid = video.creator_id or current_creator_id(db)
-    current_q = db.query(PersonaTag).filter(PersonaTag.status == "confirmed")
-    if cid:
-        current_q = current_q.filter(PersonaTag.creator_id == cid)
-    current = current_q.all()
-    result = PersonaService().suggest_updates(transcript_text, current)
-    if not result["suggestions"]:
-        return
-    latest_q = db.query(PersonaTag).order_by(PersonaTag.version.desc())
-    if cid:
-        latest_q = latest_q.filter(PersonaTag.creator_id == cid)
-    latest = latest_q.first()
-    version = latest.version if latest else 1
-    for item in result["suggestions"]:
-        dup_q = db.query(PersonaTag).filter(
-            PersonaTag.label == item["label"], PersonaTag.status.in_(["suggested", "confirmed"])
-        )
-        if cid:
-            dup_q = dup_q.filter(PersonaTag.creator_id == cid)
-        if dup_q.first():
-            continue
-        description = item.get("description", "")
-        reason = item.get("reason", "")
-        if reason:
-            description = f"{description}（依据：{reason}）"
-        db.add(
-            PersonaTag(
-                creator_id=cid,
-                label=item["label"],
-                description=description,
-                category="style",
-                source="ai",
-                status="suggested",
-                version=version,
-            )
-        )
+def _set_pending_flag(db, value: int) -> None:
+    """置「增量人设校验待补跑」标记（R-128）：任务进行中又有新素材导入时用。"""
+    from ..models.kv import Kv
+
+    row = db.get(Kv, "persona_incremental_pending")
+    if row is None:
+        db.add(Kv(key="persona_incremental_pending", value=str(value)))
+    else:
+        row.value = str(value)
     db.commit()
+
+
+def enqueue_persona_incremental(db, video=None, creator_id=None) -> int | None:
+    """入队「增量人设校验」后台任务（R-128）。
+
+    已有同类任务在跑时不重复入队，只置 pending 标记，由当前任务收尾时补跑一次
+    （避免任务执行期间新导入的素材被漏掉）。
+    """
+    from ..models.task import BackgroundTask
+    from ..tasks import start_task
+
+    cid = creator_id or (video.creator_id if video is not None else None) or current_creator_id(db)
+    vid = video.id if video is not None else 0
+    dup = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "persona_incremental", BackgroundTask.status.in_(["pending", "running"]))
+        .first()
+    )
+    if dup is not None:
+        _set_pending_flag(db, 1)
+        return None
+    return start_task("persona_incremental", {"creator_id": cid, "video_id": vid}, persona_incremental_task)
 
 CORRECT_SYSTEM = (
     "你是转写校对助手。修正转写稿中的错别字、行业术语（如面试/求职/offer 相关词汇），"
@@ -152,125 +140,173 @@ def import_video_task(db, payload: dict) -> None:
             except Exception:
                 # 预打标签失败不影响转写结果；保持 tags_confirmed=False 待后续重试/手填
                 db.rollback()
-        # 人设增量建议（广告视频不参与）
-        try:
-            suggest_persona_updates(db, video, text)
-        except Exception:
-            db.rollback()
+        # 人设增量校验（广告视频不参与）：后台做「增量 + 全量重算对照」（R-128）
+        if not video.is_ad:
+            try:
+                enqueue_persona_incremental(db, video=video)
+            except Exception:
+                db.rollback()
 
 
-def _norm_label(label: str) -> str:
-    """去重键：去首尾/连续空白 + 小写（中文不受影响）。"""
-    return " ".join((label or "").split()).lower()
-
-
-def _analyze_one(text: str) -> dict | None:
-    """单篇转写稿调 AI 提炼人设（R-126）。每线程独立 PersonaService；单篇失败不影响其它篇。"""
-    try:
-        return PersonaService().analyze_one(text)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def persona_init_task(db, payload: dict, update=None) -> None:
-    """后台任务：把主博主每篇非广告转写稿逐篇喂 AI，去重后生成人设建议（R-126）。
-
-    不再整批拼接成一个大 prompt（R-125 澄清）；每篇一次调用（4 路并行），
-    各篇产出去重 + 跳过当前主博主已确认/待确认的同标签，再以新版本 suggested 落库供前端确认。
-    """
-    cid = payload.get("creator_id") or current_creator_id(db)
+def _owner_materials(db, cid: int | None) -> list[tuple[Video, str]]:
+    """当前主博主的非广告、有转写稿素材（优先校对稿）。"""
     vq = db.query(Video).filter(Video.is_ad.is_(False))
     if cid:
         vq = vq.filter(Video.creator_id == cid)
-    videos = vq.all()
-    texts = []
-    for v in videos:
-        if v.transcript and (v.transcript.corrected_text or v.transcript.transcript_text):
-            texts.append(v.transcript.corrected_text or v.transcript.transcript_text)
-    if not texts:
-        return
-    total = len(texts)
+    out: list[tuple[Video, str]] = []
+    for v in vq.all():
+        if not v.transcript:
+            continue
+        text = v.transcript.corrected_text or v.transcript.transcript_text
+        if text:
+            out.append((v, text))
+    return out
+
+
+def _pick_new_text(materials: list[tuple[Video, str]], payload: dict) -> str:
+    """挑出本次增量要并进去的那篇：优先 payload 指定素材，否则取最新一条。"""
+    vid = int(payload.get("video_id") or 0)
+    if vid:
+        for v, text in materials:
+            if v.id == vid:
+                return text
+    return materials[-1][1]
+
+
+def persona_init_task(db, payload: dict, update=None) -> dict:
+    """后台任务：逐篇提炼 → AI 归纳合并去重 → 生成人设建议（R-126/R-128）。
+
+    每篇一次调用（4 路并行，结果按内容缓存），再用 persona_merge 提示词做一次
+    「总结去重」归纳成结构化档案（维度由 AI 自定），跳过已确认/待确认同标签后落库。
+    """
+    from . import persona_profile
+
+    cid = payload.get("creator_id") or current_creator_id(db)
+    materials = _owner_materials(db, cid)
+    if not materials:
+        return {"message": "没有可用转写稿，未产出人设建议"}
+    total = len(materials)
+    texts = [t for _v, t in materials]
     if update:
         update(3, f"逐篇分析人设（0/{total}）…")
-    results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(_analyze_one, t) for t in texts]
-        done = 0
-        for fut in as_completed(futures):
-            r = fut.result()
-            if r:
-                results.append(r)
-            done += 1
-            if update:
-                update(min(95, 5 + int(90 * done / total)), f"逐篇分析人设（{done}/{total}）…")
 
-    # 已有 confirmed/suggested 标签去重键（被拒标签允许再次建议）
-    existing: dict[tuple[str, str], bool] = {}
-    eq = db.query(PersonaTag)
-    if cid:
-        eq = eq.filter(PersonaTag.creator_id == cid)
-    for t in eq.all():
-        if t.status in ("confirmed", "suggested"):
-            existing[(t.category, _norm_label(t.label))] = True
+    def _progress(done: int, todo: int) -> None:
+        if update:
+            update(min(80, 5 + int(75 * done / max(todo, 1))), f"逐篇分析人设（{done}/{todo}）…")
 
-    tags_out: list[dict] = []
-    redlines_out: list[str] = []
-    seen_tags: set[tuple[str, str]] = set()
-    seen_redlines: set[str] = set()
-    for res in results:
-        for item in res.get("tags") or []:
-            label = str(item.get("label", "")).strip() if isinstance(item, dict) else ""
-            if not label:
-                continue
-            tag_key = ("style", _norm_label(label))
-            if tag_key in seen_tags or tag_key in existing:
-                continue
-            seen_tags.add(tag_key)
-            tags_out.append(
-                {"label": label, "description": str(item.get("description", "")).strip()}
-            )
-        for redline in res.get("redlines") or []:
-            text = str(redline).strip()
-            if not text:
-                continue
-            red_key = _norm_label(text)
-            if red_key in seen_redlines or ("redline", red_key) in existing:
-                continue
-            seen_redlines.add(red_key)
-            redlines_out.append(text)
-
-    if not tags_out and not redlines_out:
-        return
-
-    ver_q = db.query(func.max(PersonaTag.version))
-    if cid:
-        ver_q = ver_q.filter(PersonaTag.creator_id == cid)
-    current_version = ver_q.scalar() or 0
-    version = int(current_version) + 1
-    for item in tags_out:
-        db.add(
-            PersonaTag(
-                creator_id=cid,
-                label=item["label"],
-                description=item["description"],
-                category="style",
-                source="ai",
-                status="suggested",
-                version=version,
-            )
-        )
-    for redline in redlines_out:
-        db.add(
-            PersonaTag(
-                creator_id=cid,
-                label=redline,
-                description="",
-                category="redline",
-                source="ai",
-                status="suggested",
-                version=version,
-            )
-        )
-    db.commit()
+    parts = persona_profile.extract_pieces(db, texts, service_factory=lambda: PersonaService(), progress=_progress)
     if update:
-        update(100, f"完成：新增建议 {len(tags_out) + len(redlines_out)} 条")
+        update(88, f"AI 归纳合并去重（{total} 篇）…")
+    profile = persona_profile.merge_profile(parts, service_factory=lambda: PersonaService())
+    res = persona_profile.persist_suggestions(db, cid, profile, skip_existing=True)
+    tail = "（已达上限被截断，建议先确认后再跑一次）" if res.get("truncated") else ""
+    if update:
+        update(100, f"完成：新增建议 {res['added']} 条（版本 v{res['version']}）{tail}")
+    return {"message": f"新增待确认人设建议 {res['added']} 条（v{res['version']}）{tail}"}
+
+
+def persona_incremental_task(db, payload: dict, update=None) -> dict:
+    """后台任务：增量更新人设，并与「从头全量重算」结果做 5% 对齐校验（R-128）。
+
+    流程：全量重算（逐篇提炼→AI 归纳合并）→ 增量（当前档案 + 新篇）→
+    集合覆盖率 + AI 语义复核 → 达标用增量、不达标自动回退全量并通知 → 落库校验记录。
+    """
+    from . import persona_profile
+
+    cid = payload.get("creator_id") or current_creator_id(db)
+    materials = _owner_materials(db, cid)
+    if not materials:
+        return {"message": "没有可用转写稿，跳过人设增量校验"}
+    total = len(materials)
+    texts = [t for _v, t in materials]
+    if update:
+        update(3, f"全量重算对照（0/{total}）…")
+
+    def _progress(done: int, todo: int) -> None:
+        if update:
+            update(min(60, 5 + int(55 * done / max(todo, 1))), f"全量重算对照（{done}/{todo}）…")
+
+    # 1) 全量重算：逐篇提炼（按内容缓存，等价于从头重跑）→ AI 归纳合并
+    parts = persona_profile.extract_pieces(db, texts, service_factory=lambda: PersonaService(), progress=_progress)
+    if update:
+        update(66, f"全量档案归纳合并（{total} 篇）…")
+    full = persona_profile.merge_profile(parts, service_factory=lambda: PersonaService())
+    # 2) 增量：当前已确认档案 + 本次新文案
+    new_text = _pick_new_text(materials, payload)
+    new_part = persona_profile.extract_pieces(db, [new_text], service_factory=lambda: PersonaService())[0]
+    current = persona_profile.current_profile(db, cid)
+    if update:
+        update(76, "增量合并（当前档案 + 新篇）…")
+    incremental = persona_profile.incremental_profile(
+        current, new_part, service_factory=lambda: PersonaService()
+    )
+    # 3) 集合覆盖 + AI 语义复核
+    if update:
+        update(86, "增量 vs 全量对齐校验…")
+    verdict = persona_profile.compare_profiles(incremental, full, service_factory=lambda: PersonaService())
+    res = persona_profile.persist_suggestions(db, cid, verdict["chosen"], skip_existing=True)
+    db.add(
+        PersonaCheck(
+            creator_id=cid,
+            mode="manual" if payload.get("manual") else "increment",
+            source_count=total,
+            coverage=verdict["coverage"],
+            semantic=verdict["semantic"],
+            passed=verdict["passed"],
+            fallback=verdict["fallback"],
+            detail=json.dumps(
+                {
+                    "missing": verdict["missing"],
+                    "semantic_reason": verdict["semantic_reason"],
+                    "suggested_version": res["version"],
+                    "added": res["added"],
+                    "truncated": res.get("truncated", False),
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db.commit()
+    pct = verdict["coverage"] * 100
+    sem_txt = f"、语义分 {verdict['semantic']:.0f}" if verdict["semantic"] is not None else "、语义复核不可用"
+    if verdict["fallback"]:
+        from ..tasks import push_notification
+
+        push_notification(
+            db,
+            kind="persona_check",
+            status="done",
+            title="人设增量差异超标，已回退全量",
+            message=(
+                f"增量档案覆盖率 {pct:.1f}%{sem_txt}，低于 95%，"
+                f"已改用从头全量分析结果（缺失 {len(verdict['missing'])} 项）"
+            ),
+            target="/persona",
+        )
+    if update:
+        update(100, f"完成：覆盖率 {pct:.1f}%{sem_txt}，新增建议 {res['added']} 条")
+    _rerun_if_pending(db, cid)
+    tail = "（已达上限被截断）" if res.get("truncated") else ""
+    return {
+        "message": (
+            f"覆盖率 {pct:.1f}%{sem_txt}，"
+            + ("已回退为全量结果" if verdict["fallback"] else "增量结果通过")
+            + f"，新增建议 {res['added']} 条{tail}"
+        )
+    }
+
+
+def _rerun_if_pending(db, cid: int | None) -> None:
+    """增量校验期间又有新素材导入（pending 标记）→ 收尾后再补跑一次，避免漏掉新素材。"""
+    from ..models.kv import Kv
+    from ..tasks import start_task
+
+    try:
+        row = db.get(Kv, "persona_incremental_pending")
+        if row is None or row.value != "1":
+            return
+        row.value = "0"
+        db.commit()
+        start_task("persona_incremental", {"creator_id": cid, "video_id": 0}, persona_incremental_task)
+    except Exception:  # noqa: BLE001 补跑失败不影响本次结果
+        db.rollback()
