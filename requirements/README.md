@@ -116,7 +116,7 @@
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
 | R-136 | 2026-09-11 | P3 复盘正式下线 + 文档口径统一 + 死数据/孤儿接口清理 | 实施中 | M125 | review.py、docs/*、api 孤儿接口、R-133~135 |
-| R-135 | 2026-09-11 | P2 正确性与成本：转写/同步/媒体重复入队判重、预算护栏（不再吞 BudgetExceeded、预检前置）、生成模型策略对 generate_draft 生效、选题池按博主隔离、四维分节分回流生成 | 实施中 | M124 | videos/platform API、budget、generation、pipeline |
+| R-135 | 2026-09-11 | P2 正确性与成本：转写/同步/媒体重复入队判重、预算护栏（不再吞 BudgetExceeded、预检前置）、生成模型策略对 generate_draft 生效、选题池按博主隔离、四维分节分回流生成 | ✅ 已完成 | M124（已完成） | videos/platform API、budget、generation、pipeline |
 | R-134 | 2026-09-11 | P1 任务终态与体验闭环：脏 running 清理（card_sync/sync_jobs）、讨论进度接口与失败清状态、inbox 先入库再移文件、通知深链（?id=/?key=）、重启中断通知与 persona 补跑标记 | ✅ 已完成 | M123（已完成） | platform_sync、debate、watcher、DraftsView/PromptsView |
 | R-133 | 2026-09-11 | P0 稳定性兜底：备份真实性（读 ECHO_DB_PATH + 完整性校验 + 失败告警）、流水线失败不再报「完成」、stale running 自愈、最小可观测性（日志） | ✅ 已完成 | M122（已完成） | backup.sh、scheduler、pipeline、tasks、main |
 | R-132 | 2026-09-10 | 「AI 基于最新素材优化」最小改动：按钮改「基于真实样本优化」并说明"素材更新无需改提示词"、OPT_SYSTEM 增可改/不可改清单、候选长度≤1.5倍（超限拦截）、候选附「变更说明」 | ✅ 已完成 | M121（已完成） | prompt_service.optimize、OPT_SYSTEM、PromptsView、R-129/R-131 |

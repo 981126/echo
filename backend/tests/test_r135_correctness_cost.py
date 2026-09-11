@@ -1,0 +1,177 @@
+"""R-135：重复入队判重、预算护栏、生成模型策略、选题池隔离、四维分回流测试。"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.db import Base
+from app.models.draft import Draft
+from app.models.feedback import Feedback
+from app.models.kv import Kv
+from app.models.hot_topic import TopicIdea
+from app.models.platform import Creator
+from app.models.task import BackgroundTask
+from app.services import generation as gen
+from app.services import media_ensure
+from app.services.platform.budget import BudgetExceeded, ensure_budget, get_budget
+from app.services.pipeline import _comment_candidates
+
+
+@pytest.fixture()
+def db(tmp_path):
+    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=eng)
+    session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
+    yield session
+    session.close()
+    eng.dispose()
+
+
+def _set_kv(db, key, value):
+    row = db.get(Kv, key)
+    if row is None:
+        db.add(Kv(key=key, value=str(value)))
+    else:
+        row.value = str(value)
+    db.commit()
+
+
+# ---------- 预算护栏 ----------
+
+
+def test_ensure_budget_raises_when_exhausted(db):
+    _set_kv(db, "tikhub_budget_limit", 5)
+    from app.core.pipeline import today_key
+
+    _set_kv(db, f"tikhub_budget_used:{today_key()}", 5)
+    with pytest.raises(BudgetExceeded) as exc:
+        ensure_budget(db)
+    assert "未发起新请求" in str(exc.value)
+    assert get_budget(db)["remaining"] == 0
+
+
+def test_ensure_budget_ok_when_remaining(db):
+    _set_kv(db, "tikhub_budget_limit", 100)
+    ensure_budget(db)  # 不抛
+
+
+# ---------- 重复入队判重 ----------
+
+
+def test_submit_media_task_dedupes_pending(db, monkeypatch):
+    db.add(
+        BackgroundTask(
+            kind="platform_media",
+            status="running",
+            payload=json.dumps({"post_id": 42}),
+        )
+    )
+    db.commit()
+    called: list = []
+    monkeypatch.setattr(media_ensure, "start_task", lambda *a, **k: called.append(a) or 1)
+    monkeypatch.setattr(
+        media_ensure,
+        "inspect_media",
+        lambda _db, **_k: {"action": "download", "video_id": None},
+    )
+    res = media_ensure.submit_media_task(db, post_id=42)
+    assert res["status"] == "duplicate"
+    assert called == [], "已在队列中不应重复投递"
+
+
+def test_submit_media_task_starts_when_no_duplicate(db, monkeypatch):
+    called: list = []
+    monkeypatch.setattr(media_ensure, "start_task", lambda *a, **k: called.append(a) or 7)
+    monkeypatch.setattr(
+        media_ensure,
+        "inspect_media",
+        lambda _db, **_k: {"action": "download", "video_id": None},
+    )
+    res = media_ensure.submit_media_task(db, post_id=99)
+    assert res["status"] == "started" and res["task_id"] == 7
+    assert called
+
+
+# ---------- 生成模型策略 ----------
+
+
+def test_generate_draft_follows_model_strategy(db, monkeypatch):
+    owner = Creator(kind="owner", name="我", is_current=True)
+    db.add(owner)
+    db.commit()
+    _set_kv(db, "generation_model", "kimi")
+    seen: dict = {}
+
+    class _FakeLLM:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def chat_json(self, *_a, **_k):
+            seen["called"] = True
+            return {"title": "t", "cover_text": "c", "script": "s", "shells": {}}
+
+    def _fake_get_llm(name, settings=None):  # noqa: ANN001
+        seen["model"] = name
+        return _FakeLLM()
+
+    monkeypatch.setattr("app.services.llm.get_llm", _fake_get_llm)
+    gen.generate_draft(db, "选题")
+    assert seen.get("model") == "kimi", "generate_draft 应跟随 generation_model 设置"
+
+
+# ---------- 选题池博主隔离 ----------
+
+
+def test_comment_candidates_filters_by_creator(db):
+    owner = Creator(kind="owner", name="我", is_current=True)
+    other = Creator(kind="benchmark", name="对标", parent_id=None)
+    db.add_all([owner, other])
+    db.flush()
+    db.add(
+        TopicIdea(
+            creator_id=owner.id, source="comment", title="我的评论灵感", platform="douyin", snapshot_date="2099-01-01", likes=1
+        )
+    )
+    db.add(
+        TopicIdea(
+            creator_id=other.id, source="comment", title="对标的评论灵感", platform="douyin", snapshot_date="2099-01-01", likes=99
+        )
+    )
+    db.commit()
+    titles = [x["title"] for x in _comment_candidates(db, None, days=36500)]
+    assert "我的评论灵感" in titles
+    assert "对标的评论灵感" not in titles, "对标博主的评论灵感不应进入主博主选题"
+
+
+# ---------- 四维分回流 ----------
+
+
+def test_dim_examples_injected_when_feedback_exists(db):
+    owner = Creator(kind="owner", name="我", is_current=True)
+    db.add(owner)
+    db.flush()
+    draft = Draft(creator_id=owner.id, title="稿子", script="开场钩子句。中段内容。结尾引导句。", source="ai")
+    db.add(draft)
+    db.flush()
+    db.add(Feedback(draft_id=draft.id, hook_score=5, pace_score=4, ending_score=5, style_score=5))
+    db.commit()
+    text = gen._dim_examples(db)
+    assert "开场钩子" in text and "结尾引导" in text
+    assert "开场钩子" in gen.generation_user_message(db, "选题")
+
+
+def test_dim_examples_empty_without_feedback(db):
+    owner = Creator(kind="owner", name="我", is_current=True)
+    db.add(owner)
+    db.flush()
+    db.add(Draft(creator_id=owner.id, title="稿子", script="内容。", source="ai"))
+    db.commit()
+    assert gen._dim_examples(db) == ""

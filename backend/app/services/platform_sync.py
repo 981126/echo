@@ -26,7 +26,7 @@ from ..models.platform import (
     SyncJob,
 )
 from .platform_assets import _cover_path_for, _ensure_account_avatar
-from .platform.budget import BudgetExceeded, _charge, get_budget, set_budget  # noqa: F401
+from .platform.budget import BudgetExceeded, _charge, ensure_budget, get_budget, set_budget  # noqa: F401
 from .events import publish
 from .creator_service import get_current_creator
 from .platform.base import CommentData, DataSource, make_source
@@ -375,6 +375,7 @@ def sync_account(
         return {"account_id": account.id, "skipped": "disabled"}
     if not account.platform_user_id:
         raise ValueError(f"账号 {account.nickname or account.id} 未配置平台用户 ID（先解析主页链接）")
+    ensure_budget(db)  # R-135：预算预检，避免"先发请求、后计费"
     label = _PLATFORM_LABEL.get(account.platform, account.platform)
     client = make_source(account.platform)
     account.sync_status = "running"
@@ -556,6 +557,15 @@ def run_sync(
                     acc.last_sync_at = _app_now()
                     s.commit()
                 return {"account_id": acc_id, "platform": plat, **st}
+            except BudgetExceeded:
+                # R-135：预算耗尽必须向上抛，否则被当作「单平台失败」吞掉 → 任务仍报「同步完成」
+                s.rollback()
+                acc = s.get(CreatorAccount, acc_id)
+                if acc is not None:
+                    acc.sync_status = "failed"
+                    acc.sync_message = "今日 TikHub 请求预算已用完"
+                    s.commit()
+                raise
             except Exception as exc:  # noqa: BLE001 单平台失败不影响其它平台
                 s.rollback()
                 acc = s.get(CreatorAccount, acc_id)

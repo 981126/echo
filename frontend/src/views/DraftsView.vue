@@ -464,7 +464,7 @@ async function submitDims(d) {
   }
   await api(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify(body) })
   dims.value = { ...dims.value, [d.id]: {} }
-  message.success('分节反馈已记录（会精确回传人设学习）')
+  message.success('分节反馈已记录（会按维度作为生成范例）')
 }
 
 async function poll() {

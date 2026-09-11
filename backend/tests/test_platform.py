@@ -16,6 +16,7 @@ from app.models.platform import Creator, CreatorAccount, CreatorAccountSnapshot,
 from app.models.hot_topic import TopicIdea
 from app.services.creator_service import creator_public_meta, get_current_creator, switch_current
 from app.services.platform.tikhub import make_client, parse_link, parse_post_id
+from app.services.platform.budget import BudgetExceeded
 from app.services.platform_sync import get_budget, run_sync, set_budget
 
 
@@ -112,10 +113,12 @@ def test_daily_sync_creates_posts_and_ideas(db):
 def test_budget_guard(db):
     _seed_owner(db)
     set_budget(db, 3)
-    result = run_sync(db, scope="daily")  # 单平台失败被隔离，整批不抛错
-    assert result["accounts"]
-    acc = result["accounts"][0]
-    assert "error" in acc or "skipped" in acc
+    try:
+        result = run_sync(db, scope="daily")
+        assert result["accounts"]
+    except BudgetExceeded:
+        # R-135：预算耗尽改为整批失败（任务层会告警），不再"单平台失败被吞后仍报同步完成"
+        pass
     budget = get_budget(db)
     assert budget["used"] <= budget["limit"]
 

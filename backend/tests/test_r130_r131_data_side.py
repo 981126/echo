@@ -180,7 +180,7 @@ def test_generate_draft_retries_once_and_records_quality(db, monkeypatch):
                 "shells": {},
             }
 
-    monkeypatch.setattr(gen, "DeepSeekClient", _FakeLLM)
+    monkeypatch.setattr(gen, "_generation_llm", lambda _db, _settings=None: _FakeLLM())  # R-135：改走模型策略解析
     draft = gen.generate_draft(db, "测试选题")
     quality = json.loads(draft.quality)
     assert quality["attempts"] == 2  # 第一次自检不过 → 自动重写一次

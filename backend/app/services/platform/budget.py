@@ -40,15 +40,20 @@ def set_budget(db: Session, limit: int) -> dict:
 
 def _charge(db: Session, count: int = 1) -> None:
     """计一次请求；超预算抛 BudgetExceeded。"""
+    ensure_budget(db, count)
     budget = get_budget(db)
-    if budget["used"] + count > budget["limit"]:
-        raise BudgetExceeded(
-            f"今日 TikHub 请求预算已用完（{budget['used']}/{budget['limit']}），已停止本轮同步"
-        )
     row = db.get(Kv, f"tikhub_budget_used:{budget['date']}")
     if row is None:
-        row = Kv(key=f"tikhub_budget_used:{budget['date']}", value=str(budget["used"] + count))
-        db.add(row)
+        db.add(Kv(key=f"tikhub_budget_used:{budget['date']}", value=str(budget["used"] + count)))
     else:
         row.value = str(budget["used"] + count)
     db.commit()
+
+
+def ensure_budget(db: Session, count: int = 1) -> None:
+    """预算预检（R-135）：不足直接抛，避免"先发请求、后计费"让超预算那次请求已经花出去。"""
+    budget = get_budget(db)
+    if budget["remaining"] < count:
+        raise BudgetExceeded(
+            f"今日 TikHub 请求预算已用完（{budget['used']}/{budget['limit']}），未发起新请求"
+        )

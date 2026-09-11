@@ -26,7 +26,7 @@ from .media_downloader import (
     download_platform_video,
 )
 from .media_naming import media_stem, unique_path
-from .platform.budget import BudgetExceeded, _charge
+from .platform.budget import BudgetExceeded, _charge, ensure_budget
 from .platform_sync import _bound_platform_posts
 from ..tasks import push_notification, start_task
 from ..models.task import BackgroundTask
@@ -209,6 +209,23 @@ def submit_media_task(
     info = inspect_media(db, video_id=video_id, work_id=work_id, post_id=post_id)
     if info["action"] == "skip":
         return {"status": "skip", "action": info["action"], "reason": "已有本地视频与转写，跳过"}
+    # R-135：同一素材已在排队/执行中则复用，避免重复下载与重复计费
+    pending = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "platform_media", BackgroundTask.status.in_(["pending", "running"]))
+        .all()
+    )
+    for row in pending:
+        try:
+            pl = json.loads(row.payload or "{}")
+        except (TypeError, ValueError):
+            continue
+        if (
+            (post_id is not None and int(pl.get("post_id") or 0) == post_id)
+            or (video_id is not None and int(pl.get("video_id") or 0) == video_id)
+            or (work_id is not None and int(pl.get("work_id") or 0) == work_id)
+        ):
+            return {"status": "duplicate", "action": info["action"], "task_id": row.id, "reason": "该素材已在补齐队列中"}
     payload: dict = {}
     if video_id is not None:
         payload["video_id"] = video_id
@@ -397,6 +414,7 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
         row = db.get(BackgroundTask, task_id)
         post = db.get(PlatformPost, post_id)
         title = (post.title if post else "") or "素材"
+        ensure_budget(db)  # R-135：预算预检，不足直接抛 → 由 BudgetExceeded 分支取消剩余队列
 
         def _up(pct: int | None = None, note: str = "") -> None:
             t = db.get(BackgroundTask, task_id)

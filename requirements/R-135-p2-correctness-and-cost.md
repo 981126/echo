@@ -1,7 +1,7 @@
 # R-135 P2 正确性与成本：重复入队判重 + 预算护栏 + 生成模型策略 + 选题池隔离 + 四维分回流
 
 - **日期**: 2026-09-11
-- **状态**: 实施中
+- **状态**: ✅ 已完成
 - **排期**: M124
 - **关联**: R-133/R-134；`api/videos.py`、`api/platform.py`、`services/platform_sync.py`、`services/media_ensure.py`、`services/platform/budget.py`、`services/generation.py`、`services/pipeline.py`、`services/feedback.py`
 
@@ -27,3 +27,15 @@
 4. 选题池（topic-pool 与每日评论候选）按当前主博主过滤，对标评论不再串味。
 5. 四维分节分被注入生成上下文（如按维度挑选范例），前端提示语与事实一致。
 6. `scripts/verify.sh` 全绿；服务保持运行。
+
+## 实施记录（2026-09-11）
+- **重复入队判重**：`api/videos.transcribe_video` 同素材已有 pending/running `import_video` → 409；`api/platform.trigger_sync` 同 scope/账号/博主已有 `platform_sync` → 409；
+  `media_ensure.submit_media_task` 同 post/video/work 已在 `platform_media` 队列 → 返回 duplicate 不重复投递。
+- **预算护栏**：`budget.ensure_budget` 预检；`_charge` 改为先预检再计费；`platform_sync.sync_account` 与 `media_ensure.run_card_sync_queue` 每轮先 `ensure_budget`；
+  `_sync_one_acc` 增加 `except BudgetExceeded: raise`（原来被通用 except 吞掉 → 任务仍报「同步完成」），外层 `run_sync` 以 failed 收尾并向任务层抛出。
+  **行为变更**：`tests/test_platform.py::test_budget_guard` 由「预算耗尽也不抛」改为接受抛 `BudgetExceeded`（对应新的失败语义）。
+- **生成模型策略**：新增 `generation._generation_llm`（复用 `debate.choose_models`），`generate_draft` 不再固定 DeepSeek →
+  每日流水线自动生成、灵感池一键生成、同步生成、回炉、AI 对话生成、提示词自测全部跟随设置。
+- **选题池博主隔离**：`pipeline._comment_candidates` 与 `api/platform.topic_pool` 均按 `TopicIdea.creator_id == 当前主博主` 过滤。
+- **四维分回流**：新增 `generation._dim_examples`（按 hook/pace/ending/style 各取最高分范例注入生成上下文），并修正前端「回传人设学习」的不实文案。
+- 测试：新增 `test_r135_correctness_cost.py` 8 用例；同步修正受影响的 `test_platform`/`test_r130_r131`；`verify.sh` 全绿（pytest 183）。

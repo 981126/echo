@@ -119,10 +119,14 @@ def _match_candidates(db: Session, hot_items: list[dict], settings) -> list[dict
 def _comment_candidates(db: Session, profile: dict, days: int = 7) -> list[dict]:
     """近 days 天评论区灵感：人设命中的排前，再按点赞。"""
     cutoff = (_dt.date.today() - _dt.timedelta(days=max(1, days))).isoformat()
+    q = db.query(TopicIdea).filter(
+        TopicIdea.source == "comment", TopicIdea.used.is_(False), TopicIdea.snapshot_date >= cutoff
+    )
+    cid = current_creator_id(db)
+    if cid:
+        q = q.filter(TopicIdea.creator_id == cid)  # R-135：只取当前主博主的评论灵感（原来会把对标评论串进来）
     rows = (
-        db.query(TopicIdea)
-        .filter(TopicIdea.source == "comment", TopicIdea.used.is_(False), TopicIdea.snapshot_date >= cutoff)
-        .order_by(TopicIdea.snapshot_date.desc(), TopicIdea.likes.desc(), TopicIdea.id.desc())
+        q.order_by(TopicIdea.snapshot_date.desc(), TopicIdea.likes.desc(), TopicIdea.id.desc())
         .limit(200)
         .all()
     )

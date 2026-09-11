@@ -21,7 +21,7 @@ from ..models.draft import Draft
 from ..models.metrics import MetricsSnapshot
 from ..models.persona import PersonaTag
 from ..models.video import Video
-from .llm import DeepSeekClient, LLMError
+from .llm import LLMError
 
 GENERATION_SYSTEM = (
     "你是短视频口播脚本创作专家。严格模仿作者的语气与用词习惯，"
@@ -368,6 +368,64 @@ def _structure_templates(db: Session) -> str:
     return "表现最好的内容结构模板（只学开场与收尾的结构，内容要新）：\n" + "\n".join(f"- {x}" for x in starters)
 
 
+def _dim_examples(db: Session, per_dim: int = 1) -> str:
+    """按四维分节分挑选范例（R-135）：钩子/节奏/结尾/像作者各自得分最高的稿子片段。
+
+    此前四维分只进「提示词优化」冷路径，生成与人设学习完全不读；前端却提示「会精确回传人设学习」。
+    没有四维反馈时返回空串（不注入）。
+    """
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+
+    cid = _creator_filter(db)
+    dims = [
+        ("hook_score", "开场钩子"),
+        ("pace_score", "内容节奏"),
+        ("ending_score", "结尾引导"),
+        ("style_score", "像作者程度"),
+    ]
+    lines: list[str] = []
+    for field, label in dims:
+        col = getattr(Feedback, field)
+        q = db.query(Draft, Feedback).join(Feedback, Feedback.draft_id == Draft.id).filter(col >= 4)
+        if cid:
+            q = q.filter(Draft.creator_id == cid)
+        row = q.order_by(col.desc(), Feedback.id.desc()).first()
+        if not row:
+            continue
+        draft, fb = row
+        script = (draft.script or "").strip()
+        if not script:
+            continue
+        sentences = [x.strip() for x in re.split(r"[。！？!?\n]+", script) if x.strip()]
+        if field == "ending_score" and sentences:
+            seg = f"…{sentences[-1][:100]}"
+        elif field == "pace_score" and len(sentences) >= 3:
+            seg = "。".join(sentences[1:3])[:140]
+        else:
+            seg = script[:140]
+        lines.append(f"- {label}（你打了 {getattr(fb, field)} 分）：{seg}")
+    if not lines:
+        return ""
+    return "作者分节打分最高的范例（按维度学：开头怎么钩、节奏怎么走、结尾怎么收）：\n" + "\n".join(lines[: per_dim * 4])
+
+
+def _generation_llm(db: Session, settings=None):
+    """按「生成模型策略」选生成方模型（R-135）。
+
+    原来 `generate_draft` 固定用 DeepSeekClient，导致每日流水线自动生成、灵感池一键生成、
+    同步生成、回炉、AI 对话生成、提示词自测全部忽略该设置（PRD 写「默认 Kimi」）。
+    """
+    from .debate import choose_models  # 局部导入：debate 顶层依赖 generation，避免循环
+    from .llm import get_llm
+
+    try:
+        gen, _critic = choose_models(db)
+    except Exception:  # noqa: BLE001 策略解析失败退回 DeepSeek
+        gen = "deepseek"
+    return get_llm(gen, settings)
+
+
 def generation_user_message(db: Session, topic: str) -> str:
     """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
     ctx = _persona_context(db)
@@ -377,6 +435,7 @@ def generation_user_message(db: Session, topic: str) -> str:
     refs = benchmark_context_lines(db)
     structure = _structure_templates(db)
     rewrites = _rewrite_examples(db)
+    dims = _dim_examples(db)
     return "\n".join(
         [
             f"选题：{topic}",
@@ -396,6 +455,7 @@ def generation_user_message(db: Session, topic: str) -> str:
             "风格样本（按选题检索的真实原文节选）：",
             *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],
             *([] if not structure else ["", structure]),
+            *([] if not dims else ["", dims]),
             *([] if not rewrites else ["", rewrites]),
             *([] if not refs else ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs]),
         ]
@@ -425,7 +485,7 @@ def _self_check(db: Session, script: str) -> tuple[list[str], float]:
 def generate_draft(db: Session, topic: str, settings=None) -> Draft:
     user = generation_user_message(db, topic)
     system = get_prompt("generation", db)
-    llm = DeepSeekClient(settings)
+    llm = _generation_llm(db, settings)  # R-135：跟随「生成模型策略」（原来固定 DeepSeek）
     attempts = 0
     issues: list[str] = []
     coverage = 0.0

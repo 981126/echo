@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..core.topics import normalize_platforms, normalize_topics
 from ..db import get_db
 from ..models.platform import CreatorAccount, PlatformPost
+from ..models.task import BackgroundTask
 from ..models.video import Transcript, Video
 from ..schemas.video import PlatformLinkOut, TagConfirmIn, VideoDetailOut, VideoListOut, VideoOut, VideoUpdate
 from ..services.creator_service import current_creator_id
@@ -107,6 +108,17 @@ def transcribe_video(video_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="本地视频文件缺失，请重新上传")
     if video.transcript and video.transcript.transcript_text and video.transcript.asr_status == "done":
         raise HTTPException(status_code=400, detail="该素材已转写完成，无需重复转写")
+    # R-135：同一素材已在转写中则拒绝重复入队（连点会重复调用真实 ASR 并重复计费）
+    for row in (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "import_video", BackgroundTask.status.in_(["pending", "running"]))
+        .all()
+    ):
+        try:
+            if int(json.loads(row.payload or "{}").get("video_id") or 0) == video_id:
+                raise HTTPException(status_code=409, detail="该素材正在转写中，请稍候")
+        except (TypeError, ValueError):
+            continue
     task_id = start_task("import_video", {"video_id": video.id}, import_video_task)
     return {"ok": True, "task_id": task_id}
 

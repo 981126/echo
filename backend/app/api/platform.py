@@ -361,6 +361,24 @@ def _start_sync(payload: dict, scope: str = "daily"):
 @router.post("/sync", response_model=dict)
 def trigger_sync(payload: SyncRequest, db: Session = Depends(get_db)):
     """手动同步：initial=首次全量；daily=top20（R-070）；weekly=对标每周；可限定 account/creator。"""
+    # R-135：相同 scope/账号/博主的同步已在排队或执行中 → 拒绝重复入队（连点会重复拉 TikHub + 重复下载）
+    from ..models.task import BackgroundTask
+
+    for row in (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "platform_sync", BackgroundTask.status.in_(["pending", "running"]))
+        .all()
+    ):
+        try:
+            pl = json.loads(row.payload or "{}")
+        except (TypeError, ValueError):
+            continue
+        if (
+            pl.get("scope") == payload.scope
+            and pl.get("account_id") == payload.account_id
+            and pl.get("creator_id") == payload.creator_id
+        ):
+            raise HTTPException(status_code=409, detail="相同的同步任务正在进行中，请稍候")
     task_id = _start_sync(
         {
             "scope": payload.scope,
@@ -448,12 +466,11 @@ def update_budget(payload: dict, db: Session = Depends(get_db)):
 @router.get("/topic-pool")
 def topic_pool(date: str = "", db: Session = Depends(get_db)):
     key = date or today_key()
-    ideas = (
-        db.query(TopicIdea)
-        .filter(TopicIdea.snapshot_date == key, TopicIdea.used.is_(False))
-        .order_by(TopicIdea.likes.desc(), TopicIdea.id.desc())
-        .all()
-    )
+    q = db.query(TopicIdea).filter(TopicIdea.snapshot_date == key, TopicIdea.used.is_(False))
+    cid = current_creator_id(db)  # R-135：选题池按博主隔离，避免对标博主评论灵感串味
+    if cid:
+        q = q.filter(TopicIdea.creator_id == cid)
+    ideas = q.order_by(TopicIdea.likes.desc(), TopicIdea.id.desc()).all()
     items = [
         {
             "id": r.id,
