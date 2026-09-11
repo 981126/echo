@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 97 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 99 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -819,16 +819,46 @@ Unread Count
 
 List Keys
 
-每个功能：当前启用版本摘要 + 是否有候选。
+每个功能：当前启用版本 + 候选 + 最近一次评测 + 版本效果对比（R-129）。
 
 **参数**
 
 - `x-access-token`（header）string
 **返回 200**：application/json → array
 
+### POST /api/prompts/{key}/candidates/{version}/reject
+
+Reject Candidate
+
+拒绝候选（R-129 M116）：留痕为 rejected，不再占用「待启用」入口。
+
+**参数**
+
+- `key`（path）string，必填
+- `version`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
 ### POST /api/prompts/{key}/enable
 
 Enable Prompt
+
+**参数**
+
+- `key`（path）string，必填
+- `x-access-token`（header）string
+**请求体**（application/json，`PromptEnableIn`）
+
+字段：
+  - `version` integer（必填）
+
+**返回 200**：application/json → object
+
+### POST /api/prompts/{key}/eval/rerun
+
+Rerun Eval
+
+重跑某候选版的金样本回放评分（R-129 M115）。
 
 **参数**
 

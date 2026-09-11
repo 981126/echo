@@ -19,7 +19,7 @@ from .platform import (
     PlatformPostStat,
     SyncJob,
 )
-from .prompt import AiPrompt
+from .prompt import AiPrompt, PromptEval
 from .task import BackgroundTask
 from .video import Transcript, Video
 from .work import Work
@@ -32,6 +32,7 @@ __all__ = [
     "BackgroundTask",
     "Notification",
     "AiPrompt",
+    "PromptEval",
     "Draft",
     "DraftDiscussion",
     "ChatMessage",

@@ -10,12 +10,20 @@
 
 from __future__ import annotations
 
+import re
 from importlib import import_module
 
 from sqlalchemy.orm import Session
 
 from ..models.prompt import AiPrompt
-from .llm import DeepSeekClient, LLMError
+
+
+class PromptOptimizeError(RuntimeError):
+    """优化不可用或候选自检未通过；携带可读原因供 API 返回给作者（R-129）。"""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 # key -> (module, 常量名, 中文名)
 PROMPT_META: dict[str, tuple[str, str, str]] = {
@@ -32,15 +40,16 @@ PROMPT_META: dict[str, tuple[str, str, str]] = {
 }
 
 OPT_SYSTEM = (
-    "你是提示词工程专家，正在帮一位自媒体作者优化他自己在用的 AI 提示词。"
-    "你的目标不是把它改得更死，而是让它更像这位作者（R-128）。"
-    "请这样做：\n"
-    "1. 先把作者的人设档案、语言习惯画像、真实口播文案读进去，判断当前提示词哪里没抓住作者的味道。\n"
-    "2. 优化时只给「方向盘」——交代角色、目标、必须遵守的红线即可；"
-    "不要用过多硬性的条数/字数/句式限制去锁死 AI 的思路，让模型有深度学习与自由发挥的空间。\n"
-    "3. 素材按点赞率/互动从高到低排列：越靠前越代表作者受欢迎的真实腔调，权重越高，应重点模仿。\n"
-    "4. 程序需要解析的输出格式（如 JSON 字段名/返回结构）必须保持不变；除此之外的内容可以大胆重写。\n"
-    "只输出优化后的提示词正文，不要解释、不要 markdown 代码块。"
+    "你是提示词工程专家，正在帮一位自媒体作者优化他自己的 AI 提示词。"
+    "你只优化「角色与任务」部分；程序会在你输出之后自动拼接固定的输出契约段。\n"
+    "硬性规则（违反即无效）：\n"
+    "1. 只输出优化后的提示词正文（角色与任务部分），不要解释、不要 markdown 代码块、不要重复输出契约段。\n"
+    "2. **不得写死具体事实**：不要出现作者姓名/身份/学历/收入/经历/作品等传记信息，"
+    "也不要罗列红线清单、金句清单——这些由系统在运行时动态注入；写进提示词只会重复、过期、失真。\n"
+    "3. 必须保持程序解析所需的输出格式（字段名与结构见「输出契约」），不得改名或删字段。\n"
+    "4. 优化时只给「方向盘」：交代角色、目标、方法与红线原则即可；"
+    "不要新增过多硬性条数/字数/句式限制去锁死 AI 的思路，让模型有深度学习与自由发挥的空间。\n"
+    "5. 样本只用于理解作者的真实口径与偏好，不要把样本内容原样抄进提示词。"
 )
 
 
@@ -116,6 +125,67 @@ def create_candidate(db: Session, key: str, content: str, note: str = "") -> AiP
     return row
 
 
+def get_prompt_version(key: str, db: Session) -> int:
+    """当前启用版本号（无记录返回 0）；供草稿做「按提示词版本归因」（R-129 M116）。"""
+    row = (
+        db.query(AiPrompt)
+        .filter(AiPrompt.key == key, AiPrompt.status == "enabled")
+        .order_by(AiPrompt.version.desc())
+        .first()
+    )
+    return row.version if row else 0
+
+
+def reject_candidate(db: Session, key: str, version: int) -> AiPrompt | None:
+    """拒绝候选（R-129 M116）：只作用于 candidate 状态，留痕不删除。"""
+    row = (
+        db.query(AiPrompt)
+        .filter(AiPrompt.key == key, AiPrompt.version == version, AiPrompt.status == "candidate")
+        .first()
+    )
+    if row is None:
+        return None
+    row.status = "rejected"
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def version_effect(db: Session, key: str) -> list[dict]:
+    """按提示词版本聚合草稿反馈（R-129 M116）：看出哪一版真的产出更受认可的稿子。
+
+    只有 generation 会产出草稿，其它 key 返回空。
+    """
+    if key != "generation":
+        return []
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+
+    fb_by_draft: dict[int, list] = {}
+    for fb in db.query(Feedback).all():
+        fb_by_draft.setdefault(fb.draft_id, []).append(fb)
+    agg: dict[int, dict] = {}
+    for d in db.query(Draft).filter(Draft.source == "ai").all():
+        ver = d.prompt_version or 0
+        row = agg.setdefault(ver, {"version": ver, "drafts": 0, "rated": 0, "rating_sum": 0, "used": 0})
+        row["drafts"] += 1
+        for fb in fb_by_draft.get(d.id, []):
+            if fb.rating:
+                row["rated"] += 1
+                row["rating_sum"] += int(fb.rating)
+            if fb.liked:
+                row["used"] += 1
+    out: list[dict] = []
+    for _ver, row in sorted(agg.items(), key=lambda kv: kv[0], reverse=True):
+        out.append(
+            {
+                **row,
+                "avg_rating": round(row["rating_sum"] / row["rated"], 2) if row["rated"] else None,
+            }
+        )
+    return out
+
+
 def enable_version(db: Session, key: str, version: int) -> AiPrompt | None:
     row = (
         db.query(AiPrompt)
@@ -134,37 +204,49 @@ def enable_version(db: Session, key: str, version: int) -> AiPrompt | None:
 
 
 def feedback_context(db: Session) -> str:
-    """把作者的高分/低分反馈摘要带进优化输入（R-022 回流 C）。"""
+    """作者反馈回流（R-022 / R-129 M116 加厚）：星级 + 四维分节分 + 「AI 原稿→作者改后」diff。
+
+    diff 是最强的偏好信号：它直接说明作者把 AI 稿改成了什么样。
+    """
     from ..models.draft import Draft
     from ..models.feedback import Feedback
 
-    lines = []
-    lows = (
-        db.query(Feedback, Draft)
-        .join(Draft, Feedback.draft_id == Draft.id)
-        .filter(Feedback.rating <= 2)
-        .order_by(Feedback.id.desc())
-        .limit(3)
-        .all()
-    )
+    def _dims(fb) -> str:
+        pairs = [("钩子", fb.hook_score), ("节奏", fb.pace_score), ("结尾", fb.ending_score), ("风格", fb.style_score)]
+        shown = [f"{name}{val}" for name, val in pairs if val]
+        return f"（{'/'.join(shown)}）" if shown else ""
+
+    def _line(fb, d) -> str:
+        text = (d.script or "").strip() if d else ""
+        out = f"- 评分{fb.rating if fb.rating is not None else '-'}{_dims(fb)}：{text[:200]}"
+        original = (d.original_script or "").strip() if d else ""
+        if original and text and original != text:
+            out += f"\n  AI 原稿：{original[:150]}\n  作者改后：{text[:150]}"
+        return out
+
+    lines: list[str] = []
     highs = (
         db.query(Feedback, Draft)
         .join(Draft, Feedback.draft_id == Draft.id)
         .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
         .order_by(Feedback.id.desc())
-        .limit(3)
+        .limit(5)
+        .all()
+    )
+    lows = (
+        db.query(Feedback, Draft)
+        .join(Draft, Feedback.draft_id == Draft.id)
+        .filter(Feedback.rating <= 2)
+        .order_by(Feedback.id.desc())
+        .limit(5)
         .all()
     )
     if highs:
-        lines.append("作者认可（4-5 分/采用）的稿子节选——保持这种腔调：")
-        for _fb, d in highs:
-            if d and d.script:
-                lines.append(f"- {d.script[:200]}")
+        lines.append("作者认可（4-5 分/采用）的稿子——保持这种腔调与结构：")
+        lines.extend(_line(fb, d) for fb, d in highs if d)
     if lows:
-        lines.append("作者不满意（1-2 分）的稿子节选——避免这种腔调：")
-        for _fb, d in lows:
-            if d and d.script:
-                lines.append(f"- {d.script[:200]}")
+        lines.append("作者不满意（1-2 分）的稿子——避免这种腔调：")
+        lines.extend(_line(fb, d) for fb, d in lows if d)
     return "\n".join(lines)
 
 
@@ -248,39 +330,98 @@ def learning_material(db: Session, max_items: int = 16) -> str:
     return "\n\n".join(parts)
 
 
-def optimize(db: Session, key: str, material: str = "") -> AiPrompt | None:
-    """基于当前启用版 + 人设/全量素材(按点赞率加权) + 打分反馈，产出候选新版（不启用）。"""
+def _optimize_llm(db: Session):
+    """优化所用模型**跟随**「生成模型策略」（R-129）；random/alternate 归到 DeepSeek。"""
+    from ..config import get_settings
+    from ..models.kv import Kv
+    from .llm import get_llm
+
+    row = db.get(Kv, "generation_model")
+    mode = (row.value if row is not None and row.value else "") or get_settings().generation_model
+    return get_llm(mode), (mode or "deepseek")
+
+
+def _strip_fence(text: str) -> str:
+    """去掉模型可能包上的 markdown 代码围栏。"""
+    body = (text or "").strip()
+    match = re.match(r"^```[a-zA-Z0-9_-]*\s*\n?(.*?)\n?```$", body, re.DOTALL)
+    return match.group(1).strip() if match else body
+
+
+def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
+    """产出候选新版（不启用），R-129 口径：
+
+    语料按 key 定制 → 注入输出契约与运行时上下文说明 → 产出后做契约自检（失败重试 1 次）→
+    通过与程序固定的契约段拼成完整候选 → 自动排队金样本回放评分。
+    样本不足或自检两次都不过时抛 PromptOptimizeError（带可读原因）。
+    """
+    from . import prompt_contract
+
     current = get_prompt(key, db)
     if not current:
-        return None
-    try:
-        if not (material or "").strip():
-            material = learning_material(db)
-    except Exception:  # noqa: BLE001 组装语料失败仍可用反馈兜底
-        material = ""
+        raise PromptOptimizeError("当前提示词为空，无法优化")
+    if (material or "").strip():
+        sources = ["自定义语料"]
+    else:
+        material, sources = prompt_contract.material_for(key, db)
+    if not (material or "").strip():
+        raise PromptOptimizeError("样本不足，暂不优化：这个功能还没有可用于学习的真实样本")
+
     ctx = feedback_context(db)
-    parts = [material or "", ctx]
-    user_material = "\n".join(x for x in parts if x.strip()) or "（无）"
-    llm = DeepSeekClient()
-    user = f"当前提示词：\n{current}\n\n作者新增素材/反馈（用于校准语气）：\n{user_material}"
+    user = "\n".join(
+        part
+        for part in [
+            f"当前提示词：\n{current}",
+            f"该功能的输出契约（系统固定，程序会原样拼在末尾）：\n{prompt_contract.contract_for(key)}",
+            f"运行时上下文说明：{prompt_contract.context_note_for(key)}",
+            "作者真实样本（仅用于理解口径，不要抄进提示词）：\n" + "\n\n".join(p for p in [material, ctx] if p and p.strip()),
+            "请只输出优化后的「角色与任务」部分（不要输出契约段、不要解释）。",
+        ]
+        if part and part.strip()
+    )
+
+    llm, mode = _optimize_llm(db)
+    last_reason = ""
+    for _attempt in range(2):  # 自检失败自动重试 1 次（R-129 确认口径）
+        try:
+            raw = llm.chat(
+                [{"role": "system", "content": OPT_SYSTEM}, {"role": "user", "content": user}],
+                temperature=0.3,
+                max_tokens=3000,
+            )
+        except Exception as exc:  # noqa: BLE001 外部失败不破坏当前版
+            last_reason = f"AI 服务异常：{str(exc)[:150]}"
+            continue
+        candidate = prompt_contract.assemble_candidate(key, _strip_fence(raw))
+        ok, reason = prompt_contract.validate_candidate(key, candidate, db)
+        if ok:
+            row = create_candidate(
+                db,
+                key,
+                candidate,
+                note=f"AI 优化候选（模型 {mode}；语料：{prompt_contract.material_summary(sources)}）",
+            )
+            _start_eval(db, key, row.version)
+            return row
+        last_reason = reason
+    raise PromptOptimizeError(f"候选自检未通过（已重试 1 次）：{last_reason}")
+
+
+def _start_eval(db: Session, key: str, version: int) -> int | None:
+    """候选产出后自动排队金样本回放评分（R-129 M115）；评测失败不影响候选本身。"""
     try:
-        content = llm.chat(
-            [{"role": "system", "content": OPT_SYSTEM}, {"role": "user", "content": user}],
-            temperature=0.3,
-            max_tokens=2000,
-        )
-    except (LLMError, Exception):  # noqa: BLE001 外部失败不破坏当前版
+        from .prompt_eval import start_prompt_eval
+
+        return start_prompt_eval(db, key, version)
+    except Exception:  # noqa: BLE001
         return None
-    if not content or len(content) < 20:
-        return None
-    return create_candidate(db, key, content, note="AI 自动优化（待启用）")
 
 
 def auto_optimize_generation(db: Session, material: str = "", threshold: int = 3) -> AiPrompt | None:
     """每累计 threshold 条新素材才产出一次候选（R-022 节流）。
 
-    触发时基于当前所有素材/人设组装语料（material 留空走 learning_material），
-    不再只拿最新一条视频做优化。
+    触发时基于当前所有素材/人设组装语料（material 留空走 learning_material）。
+    照 R-129 确认口径：不因「已有未处理候选」而跳过；样本不足/自检失败时静默返回 None。
     """
     from ..models.kv import Kv
 
@@ -293,7 +434,10 @@ def auto_optimize_generation(db: Session, material: str = "", threshold: int = 3
         row.value = str(cur)
         db.commit()
         return None
-    cand = optimize(db, "generation", material)
+    try:
+        cand = optimize(db, "generation", material)
+    except PromptOptimizeError:
+        cand = None
     if cand is not None:
         row.value = "0"
     else:

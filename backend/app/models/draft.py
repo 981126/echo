@@ -27,6 +27,7 @@ class Draft(Base):
     source_ref: Mapped[str] = mapped_column(Text, default="{}")  # 来源素材信息 JSON（对标 key/title/benchmark_name 等，R-117）
     tags: Mapped[str] = mapped_column(Text, default="[]")  # 素材标签（来自对标素材，R-120）
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|used|archived
+    prompt_version: Mapped[int] = mapped_column(Integer, default=0)  # 生成时启用的提示词版本（R-129 M116；0=历史/未知）
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(

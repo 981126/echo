@@ -4,11 +4,11 @@
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（27 张）
+## 表总览（28 张）
 
 | 表 | 说明 |
 |---|---|
-| `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版，content 为提示词正文；支持历史回滚与自动优化候选。 |
+| `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版；R-129 起候选正文=可优化段+程序固定的输出契约段，支持候选拒绝(rejected)与历史回滚。 |
 | `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、一次性迁移标记、R-022 优化节流计数等。 |
 | `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。 |
 | `chat_conversations` | AI 对话会话（R-017）：标题 + 创建/更新时间，单用户多会话。 |
@@ -17,7 +17,7 @@
 | `creator_accounts` | 博主在某平台的账号配置：主页链接、解析出的平台 ID、增强配置(extra_config JSON)、同步开关/频率/最后同步时间/头像。 |
 | `creators` | 博主：kind=owner 主博主 / benchmark 对标（parent_id 挂主博主）；is_current 标记当前主博主，切换时素材/人设/复盘整套随动。 |
 | `draft_discussions` | 双模型讨论留痕（R-023）：围绕草稿的每轮讨论消息（模型/轮次/内容）。 |
-| `drafts` | 脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 used/…；素材双向关联 video_id。 |
+| `drafts` | 脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿；prompt_version 记录生成时启用的提示词版本（R-129 M116），用于按版本聚合反馈。 |
 | `feedback` | 作者反馈：草稿 1-5 星/采用与否，R-022 后含四维分节分（hook/pace/ending/style_score），信号回流人设学习。 |
 | `hot_topics` | 热点记录：平台+标题+日期去重；供选题匹配（R-025 扩充来源，R-065 后走 TikHub 热搜）。 |
 | `metrics_snapshots` | 本地素材(videos)每日指标快照：手动录入/批量导入/抓取/平台同步聚合，驱动看板增长曲线与复盘。 |
@@ -28,6 +28,7 @@
 | `platform_post_comments` | 平台作品评论（入库本地查询，R-067 后带点赞数 likes，按点赞 Top50 入库展示）：post_id+text 去重。 |
 | `platform_post_stats` | 平台作品互动指标按天快照：播放/点赞/收藏/评论/转发 + extra 平台特有字段。(post_id, stat_date) 唯一。 |
 | `platform_posts` | 云端作品（平台原样数据，默认无本地视频）：platform+platform_post_id 唯一；local_video_id 绑定本地素材、work_id 跨平台同作品合并。 |
+| `prompt_evals` | 提示词候选的金样本回放评分（R-129 M115）：候选版 vs 当前启用版在同一批金样本上的格式合法率/红线命中率/像作者率与综合分；supported=False 表示该功能暂不支持回放评分。 |
 | `review_reports` | 复盘报告：A 报表/B 归因/C 建议/D 赛道方向的产出记录与原文。 |
 | `sync_jobs` | 平台同步任务留痕：类型(initial/daily/weekly/single/manual)/账号/状态/统计 + R-070 实时进度(progress_done/total/note)。 |
 | `topic_candidates` | 选题候选：热点匹配/生成的候选稿，供每日选题流水线产出。 |
@@ -48,7 +49,7 @@
 
 ## `ai_prompts`
 
-AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版，content 为提示词正文；支持历史回滚与自动优化候选。
+AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版，content 为提示词正文（R-129 起候选正文 = 可优化段 + 程序固定的输出契约段）；支持历史回滚、自动优化候选与候选拒绝（rejected）。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -232,7 +233,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 
 ## `drafts`
 
-脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 used/…；素材双向关联 video_id。
+脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 used/…；素材双向关联 video_id；prompt_version 记录生成时启用的「生成脚本」提示词版本（R-129 M116），用于按版本聚合反馈。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -246,6 +247,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `source` | VARCHAR(20) |  | 否 | manual |
 | `original_script` | TEXT |  | 否 |  |
 | `status` | VARCHAR(20) |  | 否 | draft |
+| `prompt_version` | INTEGER |  | 否 | 0 |
 | `version` | INTEGER |  | 否 | 1 |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 | `updated_at` | DATETIME |  | 否 | 当前时间（北京） |
@@ -499,6 +501,27 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 - platform_posts N—1 works（work_id 合并）
 - platform_posts 1—1 videos（local_video_id 转本地素材后）
 - platform_posts 1—N platform_post_stats / platform_post_comments
+
+---
+
+## `prompt_evals`
+
+提示词候选的金样本回放评分（R-129 M115）：每次产出候选自动跑一次，候选版与当前版在同一批金样本上对比。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `key` | VARCHAR(40) |  | 否 |  |
+| `candidate_version` | INTEGER |  | 否 | 0 |
+| `base_version` | INTEGER |  | 否 | 0 |
+| `candidate_score` | FLOAT |  | 否 | 0.0 |
+| `base_score` | FLOAT |  | 否 | 0.0 |
+| `supported` | BOOLEAN |  | 否 | true |
+| `reason` | TEXT |  | 否 |  |
+| `detail` | TEXT |  | 否 | {} |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**索引**：`ix_prompt_evals_key`（key）
 
 ---
 

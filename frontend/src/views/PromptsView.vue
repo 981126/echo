@@ -3,7 +3,8 @@
     <h1 class="page-title">AI 提示词</h1>
     <p class="page-sub">
       查看/编辑各功能提示词；上传新视频会自动产出候选版（不直接启用）。
-      候选版基于「逐篇提取 + AI 归纳合并」后的人设档案与全量加权素材优化，只给方向、不锁死 AI 思路
+      候选按功能各自取真实样本优化（样本不足会明确提示），输出契约由系统固定拼接、不允许写死作者传记或红线；
+      产出后自动做「金样本回放评分」，对比候选与当前版，启用与否由你决定
     </p>
 
     <div class="toolbar">
@@ -38,16 +39,53 @@
         </div>
 
         <div v-if="candidate(item)" class="panel" style="border-left: 3px solid var(--warn)">
-          <div class="row" style="justify-content: space-between; margin-bottom: 6px">
+          <div class="row" style="justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; gap: 8px">
             <strong>候选版 v{{ candidate(item).version }}</strong>
-            <n-button size="small" type="primary" @click="enable(item, candidate(item).version)">启用此版本</n-button>
+            <div class="row" style="gap: 8px">
+              <n-button size="small" type="primary" @click="enable(item, candidate(item).version)">启用此版本</n-button>
+              <n-button size="small" type="error" secondary @click="rejectCandidate(item)">拒绝候选</n-button>
+            </div>
           </div>
           <p class="muted" style="margin: 0 0 8px">{{ candidate(item).note }}</p>
+
+          <div class="eval-box">
+            <template v-if="evalOf(item) && evalOf(item).supported">
+              <n-tag size="small" :bordered="false" round :type="scoreType(item)">
+                候选 {{ fmtScore(evalOf(item).candidate_score) }} vs 当前 {{ fmtScore(evalOf(item).base_score) }}
+              </n-tag>
+              <span class="muted" style="font-size: 12px">
+                格式 {{ pct(evalOf(item).detail && evalOf(item).detail.candidate && evalOf(item).detail.candidate.format_rate) }}
+                · 红线命中 {{ pct(evalOf(item).detail && evalOf(item).detail.candidate && evalOf(item).detail.candidate.redline_rate) }}
+                <template v-if="styleRate(item) !== null"> · 像作者 {{ pct(styleRate(item)) }}</template>
+                · 金样本 {{ probeCount(item) }} 个
+              </span>
+              <n-button size="tiny" secondary :loading="evalRunning(item.key)" @click="rerunEval(item)">重跑评测</n-button>
+            </template>
+            <template v-else-if="evalOf(item)">
+              <n-tag size="small" :bordered="false" round>未评测：{{ evalOf(item).reason }}</n-tag>
+              <n-button size="tiny" secondary :loading="evalRunning(item.key)" @click="rerunEval(item)">重跑评测</n-button>
+            </template>
+            <template v-else>
+              <span class="muted" style="font-size: 12px">{{ evalRunning(item.key) ? '金样本回放评分中…' : '暂无评测结果' }}</span>
+              <n-button size="tiny" secondary :loading="evalRunning(item.key)" @click="rerunEval(item)">跑评测</n-button>
+            </template>
+          </div>
+
           <pre class="prompt-pre dview"><span
             v-for="(l, i) in diffOf(item)"
             :key="i"
             :class="'d-' + l.type"
           >{{ prefix(l.type) + l.text }}</span></pre>
+        </div>
+
+        <div v-if="item.effect && item.effect.length" class="panel">
+          <div class="section-title" style="margin-top: 0">版本效果对比（按草稿反馈）</div>
+          <div v-for="e in item.effect" :key="e.version" class="row" style="gap: 10px; font-size: 13px">
+            <span class="ver-title">v{{ e.version }}</span>
+            <span class="muted">
+              草稿 {{ e.drafts }} 篇 · 已评分 {{ e.rated }} · 均分 {{ e.avg_rating == null ? '—' : e.avg_rating }} · 采用 {{ e.used }}
+            </span>
+          </div>
         </div>
 
         <div class="panel">
@@ -75,16 +113,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { diffLines } from '../diff'
 
-const ORDER = ['generation', 'persona_init', 'video_tags', 'persona_updates', 'review', 'diff', 'chat', 'correct']
+const ORDER = ['generation', 'persona_init', 'persona_merge', 'video_tags', 'persona_updates', 'persona_compare', 'review', 'diff', 'chat', 'correct']
 const items = ref([])
 const activeKey = ref('generation')
 const editing = ref({})
 const optimizingKey = ref(null)
+const evalTasks = ref({})
+let evalPoll = null
 const message = useMessage()
 const genMode = ref('deepseek')
 const debateRounds = ref(5)
@@ -117,6 +157,92 @@ function prefix(type) {
   if (type === 'add') return '+ '
   if (type === 'del') return '- '
   return '  '
+}
+
+function evalOf(item) {
+  return item.eval || null
+}
+
+function pct(v) {
+  return v === null || v === undefined ? '—' : `${Math.round(Number(v) * 100)}%`
+}
+
+function fmtScore(v) {
+  return v === null || v === undefined ? '—' : Number(v).toFixed(0)
+}
+
+function styleRate(item) {
+  const e = evalOf(item)
+  if (!e || !e.supported || !e.detail) return null
+  const c = e.detail.candidate || {}
+  return c.style_rate === undefined ? null : c.style_rate
+}
+
+function probeCount(item) {
+  const e = evalOf(item)
+  return e && e.detail && e.detail.probes ? e.detail.probes.length : 0
+}
+
+function scoreType(item) {
+  const e = evalOf(item)
+  if (!e || !e.supported) return 'default'
+  return Number(e.candidate_score) >= Number(e.base_score) ? 'success' : 'warning'
+}
+
+function evalRunning(key) {
+  return !!evalTasks.value[key]
+}
+
+async function refreshEvalTasks() {
+  try {
+    const tasks = await api('/api/tasks?status=running&kind=prompt_eval&limit=20')
+    const map = {}
+    ;(tasks || []).forEach((t) => {
+      let key = ''
+      try {
+        key = JSON.parse(t.payload || '{}').key || ''
+      } catch {
+        key = ''
+      }
+      if (key) map[key] = true
+    })
+    evalTasks.value = map
+    if (!Object.keys(map).length && evalPoll) {
+      clearInterval(evalPoll)
+      evalPoll = null
+      await load()  // 评测结束 → 拉一次最新结果
+    }
+  } catch {
+    /* 轮询失败不打断页面 */
+  }
+}
+
+function ensureEvalPoll() {
+  if (!evalPoll) evalPoll = setInterval(refreshEvalTasks, 4000)
+}
+
+async function rejectCandidate(item) {
+  const c = candidate(item)
+  if (!c) return
+  try {
+    await api(`/api/prompts/${item.key}/candidates/${c.version}/reject`, { method: 'POST', body: '{}' })
+    message.success(`已拒绝候选 v${c.version}`)
+    await load()
+  } catch (e) {
+    message.error(e.message)
+  }
+}
+
+async function rerunEval(item) {
+  const c = candidate(item) || { version: item.enabled_version }
+  try {
+    await api(`/api/prompts/${item.key}/eval/rerun`, { method: 'POST', body: JSON.stringify({ version: c.version }) })
+    message.success('已开始金样本回放评分，完成后右上角通知')
+    await refreshEvalTasks()
+    ensureEvalPoll()
+  } catch (e) {
+    message.error(e.message)
+  }
 }
 
 async function loadMode() {
@@ -179,10 +305,12 @@ async function optimize(item) {
   optimizingKey.value = item.key
   try {
     const r = await api(`/api/prompts/${item.key}/optimize`, { method: 'POST', body: JSON.stringify({ material: '' }) })
-    message.success(`已产出候选 v${r.version}，可预览后启用`)
+    message.success(`已产出候选 v${r.version}，正在做金样本回放评分`)
     await load()
+    await refreshEvalTasks()
+    ensureEvalPoll()
   } catch (e) {
-    message.error(e.message)
+    message.error(e.message || '优化失败')
   } finally {
     optimizingKey.value = null
   }
@@ -194,5 +322,26 @@ async function enable(item, version) {
   await load()
 }
 
-onMounted(() => { load(); loadMode(); loadRounds() })
+onMounted(() => { load(); loadMode(); loadRounds(); refreshEvalTasks(); ensureEvalPoll() })
+
+onUnmounted(() => {
+  if (evalPoll) {
+    clearInterval(evalPoll)
+    evalPoll = null
+  }
+})
 </script>
+
+<style scoped>
+.eval-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: rgba(219, 163, 125, 0.08);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+</style>

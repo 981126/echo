@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models.notification import Notification
 from ..models.prompt import AiPrompt
 from ..services import prompt_service
+from ..services.prompt_service import PromptOptimizeError
 from ..tasks import start_task
 
 router = APIRouter()
@@ -39,9 +40,33 @@ def _out(row: AiPrompt) -> dict:
     }
 
 
+def _eval_out(row) -> dict | None:
+    """评测结果摘要（R-129 M115）。"""
+    if row is None:
+        return None
+    import json
+
+    try:
+        detail = json.loads(row.detail or "{}")
+    except (TypeError, ValueError):
+        detail = {}
+    return {
+        "candidate_version": row.candidate_version,
+        "base_version": row.base_version,
+        "candidate_score": row.candidate_score,
+        "base_score": row.base_score,
+        "supported": row.supported,
+        "reason": row.reason,
+        "detail": detail,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
 @router.get("/keys", response_model=list[dict])
 def list_keys(db: Session = Depends(get_db)):
-    """每个功能：当前启用版本摘要 + 是否有候选。"""
+    """每个功能：当前启用版本 + 候选 + 最近一次评测 + 版本效果对比（R-129）。"""
+    from ..services import prompt_eval
+
     rows = db.query(AiPrompt).order_by(AiPrompt.key, AiPrompt.version.desc()).all()
     by_key: dict[str, dict] = {}
     for r in rows:
@@ -61,6 +86,10 @@ def list_keys(db: Session = Depends(get_db)):
                 "content": enabled["content"] if enabled else "",
                 "has_candidate": candidate is not None,
                 "candidate_version": candidate["version"] if candidate else 0,
+                "candidate_content": candidate["content"] if candidate else "",
+                "candidate_note": candidate["note"] if candidate else "",
+                "eval": _eval_out(prompt_eval.latest_eval(db, k)),
+                "effect": prompt_service.version_effect(db, k),
                 "versions": item["versions"][:30],
             }
         )
@@ -149,9 +178,36 @@ def enable_prompt(key: str, payload: PromptEnableIn, db: Session = Depends(get_d
 
 @router.post("/{key}/optimize", response_model=dict)
 def optimize_prompt(key: str, payload: PromptOptimizeIn, db: Session = Depends(get_db)):
+    """产出候选（R-129：按 key 语料 + 契约自检 + 自动排队金样本评测）。"""
     if key not in prompt_service.PROMPT_META:
         raise HTTPException(status_code=404, detail="未知提示词类别")
-    row = prompt_service.optimize(db, key, payload.material or "")
-    if row is None:
-        raise HTTPException(status_code=502, detail="优化失败（AI 服务不可用或结果为空），当前版本保持不变")
+    try:
+        row = prompt_service.optimize(db, key, payload.material or "")
+    except PromptOptimizeError as exc:
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
     return _out(row)
+
+
+@router.post("/{key}/candidates/{version}/reject", response_model=dict)
+def reject_candidate(key: str, version: int, db: Session = Depends(get_db)):
+    """拒绝候选（R-129 M116）：留痕为 rejected，不再占用「待启用」入口。"""
+    row = prompt_service.reject_candidate(db, key, version)
+    if row is None:
+        raise HTTPException(status_code=404, detail="候选不存在或已被处理")
+    return _out(row)
+
+
+@router.post("/{key}/eval/rerun", response_model=dict)
+def rerun_eval(key: str, payload: PromptEnableIn, db: Session = Depends(get_db)):
+    """重跑某候选版的金样本回放评分（R-129 M115）。"""
+    from ..services import prompt_eval
+
+    row = (
+        db.query(AiPrompt)
+        .filter(AiPrompt.key == key, AiPrompt.version == payload.version)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    task_id = prompt_eval.start_prompt_eval(db, key, payload.version)
+    return {"task_id": task_id}

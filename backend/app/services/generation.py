@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..core.retrieval import TfidfIndex
 from ..core.style_profile import build_style_profile, default_avoid_words, format_style_profile
-from .prompt_service import get_prompt
+from .prompt_service import get_prompt, get_prompt_version
 from ..models.draft import Draft
 from ..models.metrics import MetricsSnapshot
 from ..models.persona import PersonaTag
@@ -137,11 +137,10 @@ def _best_practice_lines(db: Session) -> str:
         db.query(Draft, Feedback)
         .join(Feedback, Feedback.draft_id == Draft.id)
         .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
-        .order_by(Feedback.id.desc())
-        .limit(12)
     )
     if creator:
-        q = q.filter(Draft.creator_id == creator.id)
+        q = q.filter(Draft.creator_id == creator.id)  # R-129：filter 必须在 order_by/limit 之前
+    q = q.order_by(Feedback.id.desc()).limit(12)
     rows = q.all()
     lines: list[str] = []
     for d, _f in rows[:3]:
@@ -257,13 +256,14 @@ def _style_profile_lines(db: Session) -> str:
         return out
 
 
-def generate_draft(db: Session, topic: str, settings=None) -> Draft:
+def generation_user_message(db: Session, topic: str) -> str:
+    """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
     ctx = _persona_context(db)
     samples = _style_samples(db, topic)
     profile = _style_profile_lines(db)
     refs = benchmark_context_lines(db)
     best = _best_practice_lines(db)
-    user = "\n".join(
+    return "\n".join(
         [
             f"选题：{topic}",
             "",
@@ -284,6 +284,10 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
             *([] if not best else ["", "你近期表现最好的草稿共性（学它的结构和收束方式，内容要新）：", best]),
         ]
     )
+
+
+def generate_draft(db: Session, topic: str, settings=None) -> Draft:
+    user = generation_user_message(db, topic)
 
     llm = DeepSeekClient(settings)
     try:
@@ -322,6 +326,7 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
         platform_shells=json.dumps(shells, ensure_ascii=False),
         source="ai",
         original_script=script or topic,
+        prompt_version=get_prompt_version("generation", db),  # R-129 M116：按提示词版本归因
     )
     db.add(draft)
     db.commit()

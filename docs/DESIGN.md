@@ -35,7 +35,7 @@
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
 | pipeline.py | /api/pipeline | 每日流水线手动触发/热点刷新/运行记录 |
 | topics.py | /api/topics | 热点/话题缺口/匹配选题 |
-| prompts.py | /api/prompts | 提示词版本 CRUD/启用/优化候选/历史回滚 |
+| prompts.py | /api/prompts | 提示词版本 CRUD/启用/优化候选/历史回滚；R-129：候选拒绝、评测重跑、`/keys` 带评测与版本效果对比 |
 | requirements.py | /api/requirements | 需求归档读写（文件为事实源） |
 | notifications.py | /api/notifications | 通知列表/已读/清空 |
 | tasks.py | /api/tasks | 后台任务状态查询 |
@@ -51,12 +51,14 @@
 - `transcription.py`：`Transcriber.transcribe` 按 `asr_mode` 路由：mock 假转写（离线）/ aliyun（`aliyun_filetrans` 泛化调用提交+轮询）/ siliconflow（`siliconflow_asr` 直传，R-108）。
 - `aliyun_filetrans.py / aliyun_oss.py`：FileTrans 4.0（CommonRequest）与 OSS 上传/预签名 URL；上传前由 `media_tools`/`media_naming` 用 ffmpeg 抽 16k 单声道 wav。
 - `siliconflow_asr.py`（R-108）：`POST {base}/audio/transcriptions` 直传音频转写（multipart file+model，无需 OSS 中转）；视频先抽音轨、纯音频直传；平台限制单文件 ≤50MB / ≤1 小时（`media_tools.probe_duration_seconds` 探测），超限明确报错走失败通知、**不自动切换其它服务商**。
-- `generation.py`：生成草稿（DeepSeek/Kimi/random/alternate）；上下文 = 人设(tags+维度+红线+禁词) + 风格画像 + 检索到的最高分样本（TF-IDF，表现加权+时间衰减）+ 金句/最佳实践 + 对标风格卡。`_all_texts`（全量素材加权语料）供优化与每周重建（R-064）。
+- `generation.py`：生成草稿（DeepSeek/Kimi/random/alternate）；上下文 = 人设(tags+维度+红线+禁词) + 风格画像 + 检索到的最高分样本（TF-IDF，表现加权+时间衰减）+ 金句/最佳实践 + 对标风格卡；`generation_user_message` 抽出供评测复用；草稿写入 `prompt_version` 做版本归因（R-129）。`_all_texts`（全量素材加权语料）供优化与每周重建（R-064）。
 - `debate.py`：双模型 5 轮讨论定稿，写入 `draft_discussions`；失败降级单模型。
 - `topic_mining.py`：热点源类（mock/公开接口/Bilibili、Douyin、Xiaohongshu/TikHub 热搜实现）；`get_sources` 按 `hot_source_mode` 选择；`fetch_and_store` 入库去重（platform+title+date）。
 - `persona.py`：LLM 分析（逐篇提取 `analyze_one` / 全量归纳 `merge_full` / 增量合并 `merge_incremental` / 语义复核 `compare_profiles` / 打标）；提示词只给「方向盘」（角色+观察方向），维度与措辞由 AI 自定，程序只解析固定字段；`_split_phrases` 与 `suggest_phrase_candidates`（金句候选）。
 - `persona_profile.py`（R-128）：人设分析管线——`extract_pieces`（逐篇提取，结果按「提示词指纹+文案 hash」缓存于 app_kv，内容不变复用、与全量重算等价）、`full_profile` / `merge_profile`（全量归纳合并：优先把每篇提炼结果原样喂模型做全局归纳，失败或 >120 篇再走「机械近义去重 + 分批归纳」）、`incremental_profile`（当前档案+新篇）、`profile_coverage`（集合覆盖率，支持近义模糊匹配）、`compare_profiles`（覆盖率 + AI 语义复核，均 ≥95% 才通过，否则回退全量）、`current_profile` / `persist_suggestions`（维度→category 映射落库，含 150 条防御上限）。
-- `prompt_service.py`：提示词 key→版本管理；`ensure_defaults`、`save_new_version/enable_version/create_candidate`、`feedback_context`、`learning_material`（全量加权前 16 条 + **AI 归纳合并后的人设档案**，R-064/R-128）、`optimize/auto_optimize_generation`（每 3 条新素材触发候选，R-022）。`OPT_SYSTEM` 改「只给方向盘」：交代角色/目标/红线，不锁死条数句式，仅保留程序解析所需的输出格式（R-128）。
+- `prompt_service.py`：提示词 key→版本管理；`ensure_defaults`、`save_new_version/enable_version/create_candidate`、`reject_candidate`、`get_prompt_version`、`version_effect`（按版本聚合草稿反馈）、`feedback_context`（星级+四维分节分+「AI 原稿→作者改后」diff）、`learning_material`（全量加权前 16 条 + **AI 归纳合并后的人设档案**，R-064/R-128）、`optimize`（R-129：按 key 语料 → 注入契约与上下文说明 → 候选自检失败重试 1 次 → 契约段程序拼接 → 自动排队评测；失败抛 `PromptOptimizeError`）、`auto_optimize_generation`（每 3 条新素材触发候选，R-022）。`OPT_SYSTEM` 明确「不得写死作者传记/红线，只给方向盘」。
+- `prompt_contract.py`（R-129）：提示词优化契约——`material_for`（按 key 取真实样本，取不到返回空→「样本不足」）、`contract_for`（程序固定的输出契约段）、`context_note_for`（运行时 user 上下文说明，避免优化器重复注入）、`budget_for`（长度预算）、`validate_candidate`（长度/契约字段/写死事实校验）、`assemble_candidate`（可优化段 + 契约段分层拼接）。
+- `prompt_eval.py`（R-129 M115）：金样本回放评分——`golden_set`（高表现素材选题 Top5 + 高/低分草稿各 3 条 + 风格标记 + 红线）、`_probes`（按 key 组装回放输入）、`_score_outputs`（格式合法率/红线命中率/像作者率 → 综合分）、`evaluate`（候选 vs 当前版同批金样本对比，落 `prompt_evals`）、`prompt_eval_task`（后台任务 + 通知）。只展示分数，不设启用门槛。
 - `style_profile`（core）：口癖/句长/感叹反问占比等画像；R-057 表达风格面板 + 禁词注入。
 - `review.py`：ABCD 复盘：A 报表（按视频/赛道/平台）、B 归因（启发式+LLM）、C 建议、D 赛道方向；`_radar` 赛道雷达（按互动率）。
 - `metrics.py`：`upsert_snapshot/import_snapshots/fetch_daily/series_for_video/_platform_breakdown/summary`；`apply_retention`（热点 30 天清理）。

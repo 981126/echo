@@ -268,6 +268,14 @@ def _migrate_persona_dimension() -> None:
             conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN dimension VARCHAR(30) NOT NULL DEFAULT ''")
 
 
+def _migrate_draft_prompt_version() -> None:
+    """R-129 M116：drafts 增加 prompt_version（生成时启用的提示词版本，便于按版本归因反馈）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(drafts)").fetchall()}
+        if "prompt_version" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN prompt_version INTEGER NOT NULL DEFAULT 0")
+
+
 def _fix_video_creator_binding() -> None:
     """R-082：自动下载的本地素材归属错挂修复。
 
@@ -482,6 +490,7 @@ def init_db() -> None:
     _migrate_topic_candidate_slot()
     _migrate_task_note()
     _migrate_persona_dimension()
+    _migrate_draft_prompt_version()
     _migrate_task_result()
     _migrate_draft_source_ref()
     _migrate_draft_tags()
