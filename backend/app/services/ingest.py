@@ -297,7 +297,10 @@ def persona_incremental_task(db, payload: dict, update=None) -> dict:
 
 
 def _rerun_if_pending(db, cid: int | None) -> None:
-    """增量校验期间又有新素材导入（pending 标记）→ 收尾后再补跑一次，避免漏掉新素材。"""
+    """增量校验期间又有新素材导入（pending 标记）→ 收尾后再补跑一次，避免漏掉新素材。
+
+    R-134：先入队成功再清标记——原实现先清标记再 start_task，start_task 失败时补跑永久丢失。
+    """
     from ..models.kv import Kv
     from ..tasks import start_task
 
@@ -305,8 +308,8 @@ def _rerun_if_pending(db, cid: int | None) -> None:
         row = db.get(Kv, "persona_incremental_pending")
         if row is None or row.value != "1":
             return
+        start_task("persona_incremental", {"creator_id": cid, "video_id": 0}, persona_incremental_task)
         row.value = "0"
         db.commit()
-        start_task("persona_incremental", {"creator_id": cid, "video_id": 0}, persona_incremental_task)
-    except Exception:  # noqa: BLE001 补跑失败不影响本次结果
+    except Exception:  # noqa: BLE001 补跑失败不影响本次结果（标记保留，下次仍会补跑）
         db.rollback()

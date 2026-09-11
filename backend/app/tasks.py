@@ -194,13 +194,95 @@ def _maybe_optimize_prompt(db, payload: dict) -> None:
 
 
 def mark_interrupted_tasks_on_startup() -> int:
-    """服务重启时，把遗留的 pending/running 任务标记为失败（线程已随进程消失）。"""
+    """服务重启时把遗留 pending/running 任务标记失败（线程已随进程消失）。
+
+    R-134：改为逐条标记并写一条汇总站内通知（原来静默改判，通知中心毫无记录）；
+    同时消费 `persona_incremental_pending` 补跑标记（重新入队增量校验）。
+    """
     db = SessionLocal()
     try:
-        n = db.query(BackgroundTask).filter(BackgroundTask.status.in_(["pending", "running"])).update(
-            {"status": "failed", "error": "服务重启，任务中断", "note": "任务中断"}, synchronize_session=False
-        )
+        rows = db.query(BackgroundTask).filter(BackgroundTask.status.in_(["pending", "running"])).all()
+        kinds: dict[str, int] = {}
+        for row in rows:
+            row.status = "failed"
+            row.error = "服务重启，任务中断"
+            row.note = "任务中断"
+            kinds[row.kind] = kinds.get(row.kind, 0) + 1
         db.commit()
-        return int(n or 0)
+        n = len(rows)
+        if n:
+            log.warning("服务重启：%d 个中断任务已标记 failed（%s）", n, kinds)
+            try:
+                summary = "、".join(f"{KIND_LABELS.get(k, k)}×{v}" for k, v in kinds.items())
+                push_notification(
+                    db,
+                    kind="task_interrupted",
+                    status="failed",
+                    title=f"服务重启，{n} 个任务被中断",
+                    message=f"这些任务已标记失败，可重新发起：{summary}",
+                    target="/videos",
+                )
+            except Exception:  # noqa: BLE001 通知失败不影响启动
+                db.rollback()
+                log.exception("重启中断任务通知写入失败")
+        _resume_persona_incremental_if_pending(db)
+        _cleanup_stale_sync_state(db)
+        return n
     finally:
         db.close()
+
+
+def _cleanup_stale_sync_state(db) -> dict:
+    """R-134：清理同步侧残留 running —— `sync_jobs` 与账号 `sync_status`。
+
+    否则同步中途重启后，博主页进度条会永久显示「同步中」（原先要等 60 天清理）。
+    """
+    from .core.timeutil import now as _now
+    from .models.platform import CreatorAccount, SyncJob
+
+    n_job = (
+        db.query(SyncJob)
+        .filter(SyncJob.status == "running")
+        .update({"status": "failed", "message": "服务重启，同步中断", "finished_at": _now()}, synchronize_session=False)
+    )
+    n_acc = (
+        db.query(CreatorAccount)
+        .filter(CreatorAccount.sync_status.in_(["running", "pending"]))
+        .update({"sync_status": "failed", "sync_message": "服务重启，同步中断"}, synchronize_session=False)
+    )
+    db.commit()
+    if n_job or n_acc:
+        log.warning("启动自愈：sync_jobs=%d、账号 sync_status=%d 已复位", n_job or 0, n_acc or 0)
+    return {"sync_jobs": int(n_job or 0), "accounts": int(n_acc or 0)}
+
+
+def _resume_persona_incremental_if_pending(db) -> bool:
+    """R-134：重启后消费 `persona_incremental_pending` 标记，重新入队增量校验（提取结果有缓存，成本可控）。"""
+    from .models.kv import Kv
+
+    try:
+        row = db.get(Kv, "persona_incremental_pending")
+        if row is None or row.value != "1":
+            return False
+        _set_persona_pending(db, "0")
+        from .services.creator_service import current_creator_id
+        from .services.ingest import enqueue_persona_incremental
+
+        enqueue_persona_incremental(db, creator_id=current_creator_id(db))
+        log.info("重启后已重新入队人设增量校验（存在未消费的 pending 标记）")
+        return True
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        log.exception("重启后补跑人设增量校验失败")
+        return False
+
+
+def _set_persona_pending(db, value: str) -> None:
+    from .models.kv import Kv
+
+    row = db.get(Kv, "persona_incremental_pending")
+    if row is None:
+        db.add(Kv(key="persona_incremental_pending", value=value))
+    else:
+        row.value = value
+    db.commit()

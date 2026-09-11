@@ -84,6 +84,21 @@ def _clear_status(db: Session, draft_id: int) -> None:
         db.commit()
 
 
+PLACEHOLDER_SCRIPT = "（双模型讨论生成中…）"
+FAILED_SCRIPT = "（生成失败，请重试或删除本稿）"
+
+
+def clear_debate_state(db: Session, draft_id: int) -> None:
+    """讨论失败/中断后的清理（R-134）：清进度状态；占位稿改成可读的失败提示，避免永久「生成中…」。"""
+    if not draft_id:
+        return
+    _clear_status(db, draft_id)
+    draft = db.get(Draft, draft_id)
+    if draft is not None and (draft.script or "").strip() == PLACEHOLDER_SCRIPT:
+        draft.script = FAILED_SCRIPT
+        db.commit()
+
+
 def _chat_once(llm, system: str, user: str, temperature: float, max_tokens: int) -> str:
     """单次调用 + 一次瞬时失败重试；仍失败抛 LLMError。"""
     from .llm import LLMError

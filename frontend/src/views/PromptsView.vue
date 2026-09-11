@@ -363,9 +363,25 @@ async function optimizeRules() {
   }
 }
 
-onMounted(() => { load(); loadMode(); loadRounds(); refreshEvalTasks(); ensureEvalPoll() })
+function applyDeepLink() {
+  // R-134：通知里的 /prompts?key=xxx 要能定位到对应提示词页签
+  const m = location.hash.match(/key=([a-z_]+)/)
+  const key = m ? m[1] : ''
+  if (key && items.value.some((i) => i.key === key)) activeKey.value = key
+}
+
+onMounted(async () => {
+  await load()
+  applyDeepLink()
+  loadMode()
+  loadRounds()
+  refreshEvalTasks()
+  ensureEvalPoll()
+  window.addEventListener('hashchange', applyDeepLink)
+})
 
 onUnmounted(() => {
+  window.removeEventListener('hashchange', applyDeepLink)
   if (evalPoll) {
     clearInterval(evalPoll)
     evalPoll = null

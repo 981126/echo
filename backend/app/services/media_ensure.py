@@ -31,6 +31,9 @@ from .platform_sync import _bound_platform_posts
 from ..tasks import push_notification, start_task
 from ..models.task import BackgroundTask
 from .events import publish
+from ..core.log import get_logger
+
+log = get_logger("media_ensure")
 
 # 下载源平台优先级：抖音单文件最简单，其次小红书，B站最重（需合并）放最后
 _PLATFORM_PRIORITY = ["douyin", "xiaohongshu", "bilibili"]
@@ -353,6 +356,26 @@ def platform_media_task(db: Session, payload: dict, update=None) -> dict:
 
 
 
+def _fail_remaining(db, remaining: list[tuple[int, int]], reason: str) -> int:
+    """R-134：队列中断（预算耗尽/异常）时把剩余排队行统一置 failed，避免永久「排队中…」。"""
+    n = 0
+    for _post_id, task_id in remaining:
+        row = db.get(BackgroundTask, task_id)
+        if row is not None and row.status in ("pending", "running"):
+            row.status = "failed"
+            row.error = reason[:2000]
+            row.note = reason[:255]
+            db.commit()
+            publish(
+                "task.update",
+                {"id": task_id, "status": "failed", "progress": row.progress, "note": row.note, "error": row.error[:500]},
+            )
+            n += 1
+    if n:
+        log.warning("素材队列中断：%d 条排队任务已标记 failed（%s）", n, reason)
+    return n
+
+
 def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: bool = True) -> dict:
     """R-093/R-094：逐素材异步队列（顺序执行）。
 
@@ -453,6 +476,7 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
             _fail("预算不足，停止素材队列")
             stats["errors"] += 1
             db.rollback()
+            stats["errors"] += _fail_remaining(db, items[idx:], "已取消：同步预算不足")  # R-134
             break
         except Exception as exc:  # noqa: BLE001 单条失败不影响后续（已通知）
             db.rollback()

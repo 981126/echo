@@ -29,11 +29,27 @@ def _scan_once(settings) -> None:
                 continue
             new_name = f"{uuid.uuid4().hex[:8]}_{path.name}"
             dest = videos_dir / new_name
-            path.replace(dest)
-            if db.query(Video).filter(Video.filename == new_name).first() is None:
-                video = Video(filename=new_name)
-                db.add(video)
-                db.commit()  # R-033：只入库不自动转写，编辑页手动「语音转文字」
+            if db.query(Video).filter(Video.filename == new_name).first() is not None:
+                continue
+            # R-134：先入库成功再移动文件——原实现先移走后入库，入库失败会让文件"消失"（inbox 没了、库里也没有）
+            video = Video(filename=new_name)
+            db.add(video)
+            try:
+                db.commit()
+            except Exception:  # noqa: BLE001
+                db.rollback()
+                log.exception("inbox 入库失败，文件保留在 inbox 待重试：%s", path)
+                continue
+            try:
+                path.replace(dest)
+            except Exception:  # noqa: BLE001
+                log.exception("inbox 文件移动失败，回滚入库记录：%s", path)
+                try:
+                    db.delete(video)
+                    db.commit()
+                except Exception:  # noqa: BLE001
+                    db.rollback()
+                    log.exception("回滚入库记录失败：%s", new_name)
     finally:
         db.close()
 

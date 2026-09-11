@@ -13,6 +13,7 @@ from ..services.creator_service import current_creator_id
 from ..models.draft import Draft
 from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
 from ..services.diff_analysis import apply_diff_suggestions
+from ..services.debate import run_debate_draft
 from ..services.feedback import add_feedback
 from ..services.generation import generate_draft
 from ..services.persona import PersonaService
@@ -79,11 +80,23 @@ def generate(payload: GenerateIn, db: Session = Depends(get_db)):
     return generate_draft(db, payload.topic)
 
 
+def _debate_task(db: Session, payload: dict, update=None) -> dict:
+    """R-134：讨论失败时清掉进度状态与占位稿，避免「思考中…／生成中…」永久残留。"""
+    try:
+        return run_debate_draft(db, payload)
+    except Exception:
+        try:
+            from ..services.debate import clear_debate_state
+
+            clear_debate_state(db, int(payload.get("draft_id") or 0))
+        except Exception:  # noqa: BLE001 清理失败不能掩盖原始错误
+            db.rollback()
+        raise
+
+
 @router.post("/generate-async", response_model=dict)
 def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
     """双模型讨论生成（R-023）：先建占位草稿，后台 初稿→5轮讨论→定稿；完成后通知跳转草稿。"""
-    from ..services.debate import run_debate_draft
-
     topic = (payload.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="选题不能为空")
@@ -101,7 +114,7 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
     task_id = start_task(
         "generate_draft",
         {"draft_id": draft.id, "topic": topic},
-        run_debate_draft,
+        _debate_task,  # R-134：失败时清状态与占位稿
     )
     return {"task_id": task_id, "draft_id": draft.id}
 
@@ -188,6 +201,7 @@ def draft_rework(draft_id: int, db: Session = Depends(get_db)):
 
 
 
+@router.get("/{draft_id}/debate-status", response_model=dict)
 def debate_status(draft_id: int, db: Session = Depends(get_db)):
     """当前双模型讨论进行到哪一步（思考中提示）。"""
     from ..models.kv import Kv

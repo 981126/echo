@@ -1,7 +1,7 @@
 # R-134 P1 任务终态与体验闭环：脏 running 清理 + 讨论进度 + inbox 安全 + 通知深链 + 重启补跑
 
 - **日期**: 2026-09-11
-- **状态**: 实施中
+- **状态**: ✅ 已完成
 - **排期**: M123
 - **关联**: R-133；`platform_sync.py`、`media_ensure.py`、`models/platform.py`、`api/drafts.py`、`services/debate.py`、`watcher.py`、`DraftsView.vue`、`PromptsView.vue`、`ingest.py`
 
@@ -24,3 +24,17 @@
 4. `DraftsView` 支持 `?id=`、`PromptsView` 支持 `?key=`，通知点击能定位到目标。
 5. 重启中断任务写站内通知；`persona_incremental_pending` 标记被消费（重新入队）。
 6. `scripts/verify.sh` 全绿；服务保持运行。
+
+## 实施记录（2026-09-11）
+- **脏 running 清理**：新增 `tasks._cleanup_stale_sync_state`（启动时把 `sync_jobs` 与 `CreatorAccount.sync_status` 的 running/pending 复位为 failed），
+  随 `mark_interrupted_tasks_on_startup` 一起执行；`media_ensure._fail_remaining` 在队列中断（预算耗尽）时把剩余排队行统一置 failed 并发 `task.update`，
+  素材卡不再永久「排队中… 4%」。（`card_sync` 的 BackgroundTask 行本身已由 R-089 启动清理覆盖。）
+- **讨论进度**：`api/drafts.py` 的 `debate_status` 补上 `@router.get("/{draft_id}/debate-status")`（此前漏装饰器 → 路由未注册 → 前端 404 静默）；
+  新增 `debate.clear_debate_state`（清进度状态 + 把占位稿改成「（生成失败，请重试或删除本稿）」）；`generate_async` 改用 `_debate_task` 包装，失败时清理后重新抛出。
+- **inbox 安全**：`watcher._scan_once` 改为「先入库 commit 成功 → 再移动文件」；移动失败回滚入库记录并留日志，文件保留在 inbox 待重试。
+- **通知深链**：`PromptsView` 新增 `applyDeepLink()`（解析 `#/prompts?key=xxx` 并 `hashchange` 监听）。
+  **更正**：`DraftsView` 实际已支持 `?id=`（用 `location.hash` 解析，见 `DraftsView.vue:485`），审计中"两处深链都失效"的结论不准确——只有提示词页失效。
+- **重启补跑**：`mark_interrupted_tasks_on_startup` 改为逐条标记 + 写一条汇总站内通知（`task_interrupted`），
+  并新增 `_resume_persona_incremental_if_pending` 消费 `persona_incremental_pending`（重新入队增量校验，逐篇提取有缓存、成本可控）；
+  `ingest._rerun_if_pending` 修正为「先入队成功再清标记」（原来先清后入队，start_task 失败即永久丢失补跑）。
+- 测试：新增 `test_r134_task_loops.py` 9 用例；`verify.sh` 全绿（pytest 175）。
