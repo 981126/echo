@@ -8,8 +8,11 @@ import uuid
 from pathlib import Path
 
 from .config import get_settings
+from .core.log import get_logger
 from .db import SessionLocal
 from .models.video import Video
+
+log = get_logger("watcher")
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v", ".ts"}
 
@@ -42,8 +45,8 @@ def start_inbox_watcher(interval_seconds: float = 10.0) -> None:
         while True:
             try:
                 _scan_once(settings)
-            except Exception:  # noqa: BLE001  监听循环不允许退出
-                pass
+            except Exception:  # noqa: BLE001  监听循环不允许退出，但必须留痕（R-133）
+                log.exception("inbox 扫描失败")
             time.sleep(interval_seconds)
 
     threading.Thread(target=loop, daemon=True).start()

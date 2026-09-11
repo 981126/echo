@@ -13,8 +13,9 @@ import re
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..core.log import get_logger
 from ..core.matching import keyword_fallback_match
-from ..core.pipeline import can_run, today_key
+from ..core.pipeline import is_stale, today_key
 from ..core.topics import MAIN_TOPICS
 from ..models.hot_topic import TopicCandidate, TopicIdea
 from ..models.pipeline import PipelineRun
@@ -25,6 +26,8 @@ from .llm import LLMError
 from .notify import send_daily_digest, send_failure_alert
 from .persona import PersonaService
 from .topic_mining import fetch_and_store
+
+log = get_logger("pipeline")
 
 SLOT_COMMENT = "comment"
 SLOT_HOT = "hot"
@@ -295,15 +298,57 @@ def _compose_daily_candidates(db: Session, hot_items: list[dict], settings, coun
     return cands
 
 
+def mark_stale_pipeline_runs_on_startup(db: Session | None = None) -> int:
+    """启动自愈（R-133）：把遗留 `running` 的 PipelineRun 置 failed。
+
+    否则 `can_run` 会永久拒绝重跑 → 每日选题/脚本生产静默停摆，只能手改库。
+    """
+    own = db is None
+    session = db
+    if session is None:
+        from ..db import SessionLocal
+
+        session = SessionLocal()
+    try:
+        rows = session.query(PipelineRun).filter(PipelineRun.status == "running").all()
+        for row in rows:
+            row.status = "failed"
+            row.error = "服务重启/中断，流水线未完成（已自动标记，可直接重跑）"
+        session.commit()
+        if rows:
+            log.warning("启动自愈：%d 个遗留 running 流水线已标记 failed", len(rows))
+        return len(rows)
+    finally:
+        if own:
+            session.close()
+
+
+class PipelineError(RuntimeError):
+    """流水线执行失败（R-133）：向上抛，让任务层写 failed + 站内通知，而不是谎报「完成」。"""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
 def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> PipelineRun:
-    """执行当日流水线。幂等：当天已成功且非 force 时直接返回。"""
+    """执行当日流水线。幂等：当天已成功且非 force 直接返回；running 超时视为卡死可重跑。
+
+    失败时把 PipelineRun 置 failed、发邮件告警，**并抛出 PipelineError**（R-133），
+    由任务层/定时任务层统一写 failed + 站内通知。
+    """
     settings = settings or get_settings()
     key = today_key()
     run = db.query(PipelineRun).filter(PipelineRun.run_date == key).first()
     if run and run.status == "done" and not force:
         return run
-    if run and not can_run(run.status):
-        return run
+    if run and run.status == "running":
+        if not is_stale(run.created_at):
+            log.info("当日流水线仍在运行中，跳过（run_date=%s）", key)
+            return run
+        run.status = "failed"
+        run.error = "流水线超时未完成，已自动标记（可重跑）"
+        db.commit()
+        log.warning("当日流水线 running 超时，已标记 failed 并可重跑（run_date=%s）", key)
     if run is None:
         run = PipelineRun(run_date=key, status="running")
         db.add(run)
@@ -345,8 +390,10 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
         run.status = "failed"
         run.error = str(exc)[:2000]
         db.commit()
+        log.exception("每日流水线失败（run_date=%s）", key)
         try:
             send_failure_alert(db, run, settings)
         except Exception:  # noqa: BLE001
-            pass
+            log.exception("流水线失败邮件告警发送失败")
+        raise PipelineError(f"每日流水线失败：{str(exc)[:300]}") from exc
     return run

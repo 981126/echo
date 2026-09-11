@@ -11,17 +11,42 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import text
 
 from .config import get_settings
+from .core.log import get_logger, setup_logging
 from .db import SessionLocal
 from .services.metrics import apply_retention
 from .services.pipeline import run_daily_pipeline
 
 _scheduler: BackgroundScheduler | None = None
+log = get_logger("scheduler")
+
+
+def _alert(kind: str, title: str, detail: str) -> None:
+    """定时任务失败统一处理（R-133）：日志 + 站内通知 + 邮件告警（邮件未配置时自动跳过）。"""
+    log.error("%s：%s", title, detail)
+    db = SessionLocal()
+    try:
+        from .tasks import push_notification
+
+        push_notification(db, kind=kind, status="failed", title=title, message=detail[:200], target="/home")
+    except Exception:  # noqa: BLE001 通知失败不能影响主流程
+        db.rollback()
+        log.exception("定时任务失败通知写入失败")
+    finally:
+        db.close()
+    try:
+        from .services.notify import send_alert
+
+        send_alert(title, detail)
+    except Exception:  # noqa: BLE001
+        log.exception("定时任务失败邮件告警发送失败")
 
 
 def _daily_pipeline_job() -> None:
     db = SessionLocal()
     try:
         run_daily_pipeline(db)
+    except Exception as exc:  # noqa: BLE001 定时触发没有 BackgroundTask，必须自己告警（R-133）
+        _alert("daily_pipeline", "每日流水线失败", str(exc))
     finally:
         db.close()
 
@@ -31,10 +56,11 @@ def _daily_metrics_job() -> None:
     try:
         # cookie 指标抓取为占位通道（需 NAS 联调），未启用前不执行，避免误导；只做留存清理
         apply_retention(db, hot_days=30)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        _alert("daily_metrics", "每日留存清理失败", str(exc))
     finally:
         db.close()
-
-
 
 
 def _platform_sync_job() -> None:
@@ -51,8 +77,8 @@ def _platform_sync_job() -> None:
 
     try:
         start_task("platform_sync", {"scope": "daily", "source": "scheduler"}, fn)
-    except Exception:  # noqa: BLE001  定时失败不拖垮进程（预算/无账号时静默）
-        pass
+    except Exception as exc:  # noqa: BLE001 入队失败要告警（R-133）
+        _alert("platform_sync", "定时平台同步入队失败", str(exc))
 
 
 def _housekeep_job() -> None:
@@ -68,8 +94,9 @@ def _housekeep_job() -> None:
         for (sql,) in rules:
             db.execute(text(sql))
         db.commit()
-    except Exception:  # noqa: BLE001  清理失败不拖垮主服务
+    except Exception as exc:  # noqa: BLE001 清理失败要留痕（R-133）
         db.rollback()
+        _alert("daily_housekeep", "每日清理失败", str(exc))
     finally:
         db.close()
 
@@ -90,25 +117,40 @@ def _weekly_style_job() -> None:
             kind="prompt_refresh_hint",
             status="done",
             title="每周提示：可重跑生成提示词候选",
-            message="素材/人设已更新；到「AI 提示词」页手动点一次「AI 基于最新素材优化」（会自动做金样本评测并给出对比分）",
+            message="素材/人设已更新；到「AI 提示词」页手动点一次「AI 基于真实样本优化」（会自动做金样本评测并给出对比分）",
             target="/prompts?key=generation",
         )
-    except Exception:  # noqa: BLE001 周任务失败不影响主服务
+    except Exception as exc:  # noqa: BLE001 周任务失败要留痕（R-133）
         db.rollback()
+        _alert("weekly_prompt_hint", "每周提示任务失败", str(exc))
     finally:
         db.close()
 
 
 def _backup_job() -> None:
+    """每日备份（R-133）：检查退出码，失败写站内通知 + 邮件告警（原来 check=False + pass 全程无感）。"""
     script = Path(__file__).resolve().parents[2] / "scripts" / "backup.sh"
-    if script.exists():
-        try:
-            subprocess.run(["bash", str(script)], check=False, timeout=600)
-        except Exception:  # noqa: BLE001
-            pass
+    if not script.exists():
+        _alert("daily_backup", "每日备份失败", f"备份脚本不存在：{script}")
+        return
+    ok = False
+    detail = ""
+    try:
+        proc = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=600)
+        ok = proc.returncode == 0
+        stdout = (proc.stdout or "").strip()
+        stderr = (proc.stderr or "").strip()
+        detail = stderr or stdout or f"exit={proc.returncode}"
+    except Exception as exc:  # noqa: BLE001
+        detail = f"执行备份脚本异常：{exc}"
+    if ok:
+        log.info("每日备份完成：%s", (detail.splitlines() or [""])[-1])
+    else:
+        _alert("daily_backup", "每日备份失败", detail)
 
 
 def setup_scheduler() -> None:
+    setup_logging()
     global _scheduler
     if _scheduler is not None:
         return

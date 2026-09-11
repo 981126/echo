@@ -7,9 +7,12 @@ import json
 import threading
 
 from .db import SessionLocal
+from .core.log import get_logger
 from .models.notification import Notification
 from .models.task import BackgroundTask
 from .services.events import publish
+
+log = get_logger("tasks")
 
 KIND_LABELS = {
     "import_video": "素材转写",
@@ -157,13 +160,18 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             _maybe_optimize_prompt(db, payload)
     except Exception as exc:  # noqa: BLE001
         db.rollback()
+        log.exception("后台任务失败 kind=%s task_id=%s", kind, task_id)
         task = db.get(BackgroundTask, task_id)
         if task is not None:
             task.status = "failed"
             task.error = str(exc)[:2000]
             db.commit()
             publish("task.update", {"id": task_id, "status": "failed", "progress": task.progress, "note": task.note or "", "error": task.error[:500], "payload": payload})
-        _notify(db, kind=kind, payload=payload, status="failed", error=str(exc))
+        try:
+            _notify(db, kind=kind, payload=payload, status="failed", error=str(exc))
+        except Exception:  # noqa: BLE001 R-133：通知失败不得影响终态（否则会把已成功的任务改判 failed）
+            db.rollback()
+            log.exception("后台任务失败通知写入失败 task_id=%s", task_id)
     finally:
         db.close()
 

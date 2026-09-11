@@ -63,3 +63,10 @@ def send_failure_alert(db: Session, run: object, settings=None) -> bool:
     html = build_failure_html(str(getattr(run, "error", "未知错误")))
     subject = f"【echo】今日流水线运行失败（{getattr(run, 'run_date', '')}）"
     return _send(subject, html, settings)
+
+
+def send_alert(subject: str, detail: str, settings=None) -> bool:
+    """通用失败告警（R-133）：定时任务/后台任务失败时用；未配置 SMTP 时返回 False。"""
+    settings = settings or get_settings()
+    html = build_failure_html(detail)
+    return _send(f"【echo】{subject}", html, settings)

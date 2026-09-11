@@ -11,18 +11,26 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import benchmark, chat, creators, drafts, events, works, notifications, persona, pipeline, platform, prompts, requirements, settings, tasks, topics, uploads, videos
 from .config import get_settings
+from .core.log import get_logger, setup_logging
 from .db import init_db
 from .scheduler import setup_scheduler
 from .tasks import mark_interrupted_tasks_on_startup
 from .watcher import start_inbox_watcher
 
+log = get_logger("main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()  # R-133：全后端此前零日志，失败不可观测
     init_db()
     mark_interrupted_tasks_on_startup()  # R-089：重启后清理遗留 running 任务
+    from .services.pipeline import mark_stale_pipeline_runs_on_startup
+
+    mark_stale_pipeline_runs_on_startup()  # R-133：流水线 running 卡死自愈
     setup_scheduler()
     start_inbox_watcher()
+    log.info("echo 后端启动完成")
     yield
 
 
