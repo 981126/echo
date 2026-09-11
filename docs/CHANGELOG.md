@@ -1,5 +1,44 @@
 # 变更记录
 
+## [M122~M125 / R-133~R-136] 2026-09-11 — 系统体检修复：P0 稳定性 → P1 任务闭环 → P2 正确性 → P3 复盘下线/文档统一
+> 起因：对全系统做「闭环 / 描述与实现一致性 / bug」体检，作者要求按 P0–P3 顺序登记并修复。
+
+**P0 稳定性兜底（R-133）**
+- **备份修复（此前形同虚设）**：`scripts/backup.sh` 硬编码 `data/echo.db`（不存在），`sqlite3.connect` 会新建空库 → 备份出的其实是 4KB 空库。
+  现改为从 `.env` 解析 `ECHO_DB_PATH`（回退 `ECHO_DATA_DIR/echo.db`），源库缺失/校验失败非零退出，备份后做 `integrity_check` + 表数量校验。
+  实测：**58,372,096 bytes / 28 张表**，与真实库一致。`scheduler._backup_job` 检查退出码并对失败告警。
+- **流水线终态**：`run_daily_pipeline` 失败时置 failed + 邮件告警 + **抛 `PipelineError`**（任务层写 failed + 站内通知，不再谎报「完成」）；
+  `running` 超 2 小时视为卡死可重跑（`core.pipeline.is_stale`）；新增启动自愈 `mark_stale_pipeline_runs_on_startup`。
+- **最小可观测性**：新增 `core/log.py`；此前全后端**零日志**、53 处 `except` 只 pass/rollback。关键失败路径（任务/定时/备份/inbox/流水线）全部留痕；
+  新增 `_alert()` 统一「日志 + 站内通知 + 邮件告警」；`_run_worker` 的失败通知单独 try（通知写失败不再把成功任务改判 failed）。
+
+**P1 任务终态与体验闭环（R-134）**
+- 启动自愈 `_cleanup_stale_sync_state`：复位 `sync_jobs` 与账号 `sync_status` 的 running（原来博主页进度条会永久「同步中」）；
+  `card_sync` 队列中断时 `_fail_remaining` 把剩余行置 failed（不再永久「排队中… 4%」）。
+- `debate_status` **补上漏掉的 `@router.get` 装饰器**（路由此前未注册，前端 404 被静默吞掉）；新增 `clear_debate_state` 清理进度状态与占位稿。
+- inbox 改为「先入库 commit 成功再移动文件」，移动失败回滚并留日志（此前会丢素材）。
+- `PromptsView` 支持 `#/prompts?key=xxx` 深链（通知点击可定位）；
+  **更正**：`DraftsView` 实际已支持 `?id=`（用 `location.hash` 解析），体检中「两处深链都失效」的结论不准确。
+- 重启中断任务改为逐条标记 + 汇总站内通知；消费 `persona_incremental_pending` 重新入队；`_rerun_if_pending` 改为「先入队成功再清标记」。
+
+**P2 正确性与成本（R-135）**
+- 重复入队判重：转写（同素材进行中→409）、同步（同 scope/账号/博主→409）、媒体补齐（同素材已在队列→duplicate）。
+- 预算护栏：新增 `ensure_budget` 预检并在同步/队列每轮调用；`_sync_one_acc` 不再吞 `BudgetExceeded`（此前任务仍报「同步完成」）。
+- **生成模型策略生效**：`generate_draft` 不再固定 DeepSeek，改为跟随 `generation_model`（影响每日流水线、灵感池、回炉、AI 对话、提示词自测）。
+- 选题池博主隔离：`_comment_candidates` 与 `topic_pool` 按 `creator_id` 过滤（此前对标评论灵感会串进主博主生成）。
+- 四维分节分回流：新增 `_dim_examples` 按 hook/pace/ending/style 注入生成范例；修正前端不实文案。
+
+**P3 复盘下线 + 文档统一（R-136）**
+- **复盘 ABCD 正式下线**（API/页面已在 R-097 删除）：删除 `services/review.py`、`ReviewReport` 模型与 `review_reports` 表（幂等迁移）、chat 的 `get_review_report` 工具、
+  以及 prompt_service/prompt_contract/prompt_eval 中的 review 引用；**赛道雷达保留**并迁到 `services/metrics.radar`。
+- 删除 `services/metrics.py` 中无调用方的 `upsert_snapshot/import_snapshots/fetch_daily/series_for_video`。
+- 文档口径统一：PRD/ARCHITECTURE/DESIGN/README/QUICKSTART/AGENTS 更正「数据看板与复盘（已下线）」、提示词候选（手动）、27 张表、views 10、top15、pytest 183、inbox 路径；
+  `API.md`/`DATABASE.md` 头注由「自动生成」改为「人工维护」；删除 milestones 重复的 M117 行。
+- **门禁增强**：新增 `scripts/check_doc_consistency.py`（校验表数量/表名 + 路由数量/每条路由是否收录）并接入 `verify.sh`；实测 27 张表 / 122 个路由一致。
+
+**测试**：新增 4 个测试文件（`test_r133_stability` 6 + `test_r134_task_loops` 9 + `test_r135_correctness_cost` 8 + `test_r136_review_sunset_docs` 4），
+`verify.sh` 全绿（ruff + mypy + pytest 187 + 前端 lint/build + 文档一致性）。
+
 ## [M121 / R-132] 2026-09-10 — 「AI 基于最新素材优化」最小改动：定位说清 + 可改清单 + 长度约束 + 变更说明
 - **定位说清**：按钮「AI 基于最新素材优化（候选）」→「**AI 基于真实样本优化（候选）**」（"最新素材"是误导——素材更新会自动注入、无需改提示词）；
   `generation` 卡片增加说明「素材/反馈更新会自动注入，无需改提示词；此按钮只在你想调整**写法与结构**时用」。
