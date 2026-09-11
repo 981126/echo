@@ -388,16 +388,28 @@ def max_candidate_chars(key: str, current: str) -> int:
 
 
 _CHANGE_MARKERS = ("【变更说明】", "[变更说明]", "变更说明：", "变更说明:")
+_BODY_MARKERS = ("【提示词】", "[提示词]", "提示词：", "提示词:")
 
 
 def split_change_note(text: str) -> tuple[str, str]:
-    """把模型输出拆成 (提示词正文, 变更说明)（R-132）；没有标记时整体视为正文。"""
+    """把模型输出拆成 (提示词正文, 变更说明)（R-132）。
+
+    模型按「【提示词】…【变更说明】…」输出，这里要去掉两个小标题；
+    没有变更说明标记时，剩下的整体视为正文（但仍会剥掉可能的「【提示词】」标题）。
+    """
     body = (text or "").strip()
+    note = ""
     for marker in _CHANGE_MARKERS:
         if marker in body:
             head, _sep, tail = body.partition(marker)
-            return head.strip(), tail.strip()
-    return body, ""
+            body, note = head, tail.strip()
+            break
+    body = body.strip()
+    for marker in _BODY_MARKERS:
+        if body.startswith(marker):
+            body = body[len(marker) :].strip()
+            break
+    return body, note
 
 
 def material_summary(sources: list[str]) -> str:

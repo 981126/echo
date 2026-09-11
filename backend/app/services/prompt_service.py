@@ -415,6 +415,9 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
             last_reason = f"AI 服务异常：{str(exc)[:150]}"
             continue
         body, change_note = prompt_contract.split_change_note(_strip_fence(raw))
+        if len(body) < 20:  # 只输出了小标题 / 空正文
+            last_reason = "候选正文过短（可能只输出了标题）"
+            continue
         candidate = prompt_contract.assemble_candidate(key, body)
         if len(candidate) > limit:  # R-132：防膨胀
             last_reason = f"候选过长（{len(candidate)}/{limit} 字），已要求保持简洁"

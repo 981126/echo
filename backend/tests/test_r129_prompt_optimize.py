@@ -269,6 +269,29 @@ def test_split_change_note():
     assert body2 == "只有正文" and note2 == ""
 
 
+def test_split_change_note_strips_body_header():
+    # 真实模型会输出「【提示词】/【变更说明】」两个小标题，都不能留进正文（实测踩过）
+    body, note = pc.split_change_note("【提示词】\n你是标注助手。\n【变更说明】\n- 调整了广告判定")
+    assert body == "你是标注助手。"
+    assert "调整了广告判定" in note
+    body2, note2 = pc.split_change_note("【提示词】\n只有正文没有说明")
+    assert body2 == "只有正文没有说明" and note2 == ""
+
+
+def test_optimize_rejects_header_only_body(db, monkeypatch):
+    owner = _owner(db)
+    _video(db, owner, "v1", "讲简历包装", tags='["简历包装"]', confirmed=True)
+    db.commit()
+    fake = _FakeLLM(["【提示词】\n【变更说明】\n- 没写正文", "【提示词】\n【变更说明】\n- 还是没写"])
+    monkeypatch.setattr(ps, "_optimize_llm", lambda _db: (fake, "deepseek"))
+    monkeypatch.setattr(ps, "_start_eval", lambda _db, _key, _version: None)
+
+    with pytest.raises(PromptOptimizeError) as exc:
+        optimize(db, "video_tags")
+    assert "过短" in str(exc.value)
+    assert db.query(AiPrompt).filter(AiPrompt.status == "candidate").count() == 0
+
+
 def test_max_candidate_chars_floor_and_ratio():
     limit = pc.max_candidate_chars("video_tags", "短")
     assert limit == 300  # 下限兜底
@@ -296,7 +319,7 @@ def test_optimize_stores_change_note_and_strips_it_from_body(db, monkeypatch):
     owner = _owner(db)
     _video(db, owner, "v1", "讲简历包装", tags='["简历包装"]', confirmed=True)
     db.commit()
-    fake = _FakeLLM(["你是视频内容标注助手，按作者口径判断。\n【变更说明】\n- 补充了广告判定标准\n- 依据：已确认标签素材"])
+    fake = _FakeLLM(["你是视频内容标注助手，请按作者的真实口径判断赛道、广告与标签。\n【变更说明】\n- 补充了广告判定标准\n- 依据：已确认标签素材"])
     monkeypatch.setattr(ps, "_optimize_llm", lambda _db: (fake, "deepseek"))
     monkeypatch.setattr(ps, "_start_eval", lambda _db, _key, _version: None)
 
