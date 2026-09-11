@@ -242,7 +242,7 @@ async function generateWithAngle(title) {
   generatingTitle.value = pendingTopic.value
   try {
     await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic: title }) })
-    message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你')
+    message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你；记得给稿子打分，AI 才能学到你的偏好')
   } catch (e) {
     message.error('提交失败：' + e.message)
   } finally {
@@ -255,7 +255,7 @@ async function generateDirect(topic) {
   generatingTitle.value = topic
   try {
     await api('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic }) })
-    message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你')
+    message.success('已提交双模型讨论生成（约 1-2 分钟），完成后右上角通知你；记得给稿子打分，AI 才能学到你的偏好')
   } catch (e) {
     message.error('提交失败：' + e.message)
   } finally {

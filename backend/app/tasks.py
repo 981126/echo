@@ -16,6 +16,8 @@ KIND_LABELS = {
     "persona_init": "人设初始化",
     "persona_incremental": "人设增量校验",
     "prompt_eval": "提示词候选评测",
+    "prompt_rule_optimize": "规则型提示词优化",
+    "prompt_refresh_hint": "提示词优化提醒",
     "daily_pipeline": "每日流水线",
     "diff_analysis": "草稿差异分析",
     "generate_draft": "AI 文案生成",
@@ -42,6 +44,10 @@ def _target(kind: str, payload: dict, result) -> str:
         return "/persona"
     if kind == "prompt_eval":
         return f"/prompts?key={payload.get('key', '')}"
+    if kind == "prompt_rule_optimize":
+        return "/prompts"
+    if kind == "prompt_refresh_hint":
+        return "/prompts?key=generation"
     if kind == "daily_pipeline":
         return "/home"
     if kind == "diff_analysis":
@@ -163,9 +169,9 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
 
 
 def _maybe_optimize_prompt(db, payload: dict) -> None:
-    """每次导入新视频后，基于当前全部素材+人设自动产出候选新版（不启用）+ 通知。"""
+    """素材导入后的提示词提醒（R-131）：**不再自动产出候选**，只在累计到阈值时发一条提醒。"""
     from .models.video import Video
-    from .services.prompt_service import auto_optimize_generation
+    from .services.prompt_service import maybe_notify_prompt_refresh
 
     try:
         video = db.get(Video, int(payload.get("video_id") or 0))
@@ -174,21 +180,8 @@ def _maybe_optimize_prompt(db, payload: dict) -> None:
         text = video.transcript.corrected_text or video.transcript.transcript_text
         if not text:
             return
-        # R-022：每累计 3 条新素材才产一个候选（防过拟合单条）；语料=全部 ASR 文案按点赞率加权
-        candidate = auto_optimize_generation(db)
-        if candidate is None:
-            return
-        db.add(
-            Notification(
-                kind="prompt_candidate",
-                status="done",
-                title="生成提示词有新候选",
-                message=f"基于新素材自动优化了生成提示词 v{candidate.version}，待你启用",
-                target="/prompts?key=generation",
-            )
-        )
-        db.commit()
-    except Exception:  # noqa: BLE001 自动优化失败不影响导入主流程
+        maybe_notify_prompt_refresh(db)
+    except Exception:  # noqa: BLE001 提醒失败不影响导入主流程
         db.rollback()
 
 

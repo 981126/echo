@@ -233,7 +233,7 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 
 ## `drafts`
 
-脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 used/…；素材双向关联 video_id；prompt_version 记录生成时启用的「生成脚本」提示词版本（R-129 M116），用于按版本聚合反馈。
+脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 used/…；素材双向关联 video_id；prompt_version / persona_version 记录生成时启用的提示词版本与人设档案版本（R-129/R-130，0=历史/未知）；quality 存生成后自检结果 JSON（attempts/issues/passed/style_coverage，R-131）。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -248,6 +248,8 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `original_script` | TEXT |  | 否 |  |
 | `status` | VARCHAR(20) |  | 否 | draft |
 | `prompt_version` | INTEGER |  | 否 | 0 |
+| `persona_version` | INTEGER |  | 否 | 0 |
+| `quality` | TEXT |  | 否 | {} |
 | `version` | INTEGER |  | 否 | 1 |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 | `updated_at` | DATETIME |  | 否 | 当前时间（北京） |

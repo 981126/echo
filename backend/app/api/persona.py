@@ -208,6 +208,16 @@ def style_overview(db: Session = Depends(get_db)):
         except (TypeError, ValueError):
             avoid = []
     weighted = sorted(rows, key=lambda vt: _weight(db, vt[0]), reverse=True)[:3]
+    # R-131：风格范本（必定注入生成上下文）+ 风格样本条数
+    from ..services.generation import _style_anchor_ids
+
+    anchor_ids = _style_anchor_ids(db)
+    candidates = sorted(rows, key=lambda vt: _weight(db, vt[0]), reverse=True)[:20]
+    count_row = db.get(Kv, "style_sample_count")
+    try:
+        sample_count = int(count_row.value) if count_row is not None and count_row.value else 5
+    except (TypeError, ValueError):
+        sample_count = 5
     return {
         "count": len(texts),
         "profile": format_style_profile(profile),
@@ -215,26 +225,70 @@ def style_overview(db: Session = Depends(get_db)):
         "top_weighted": [
             {"title": v.title or "", "text": text[:300]} for v, text in weighted
         ],
+        "anchor_ids": anchor_ids,
+        "anchor_candidates": [
+            {"id": v.id, "title": v.title or f"素材#{v.id}", "text": text[:80]} for v, text in candidates
+        ],
+        "sample_count": max(3, min(8, sample_count)),
     }
 
 
 @router.put("/style", response_model=dict)
 def save_style_words(payload: dict, db: Session = Depends(get_db)):
-    """保存 AI 腔禁用/少用词（存 [] 表示关闭内置清单）。"""
+    """保存 AI 腔禁用词 / 风格范本素材 / 风格样本条数（R-057 / R-131）。"""
     import json
 
     from ..models.kv import Kv
 
-    words = payload.get("avoid_words")
-    if not isinstance(words, list):
-        raise HTTPException(status_code=400, detail="avoid_words 必须是数组")
-    cleaned = [str(x).strip() for x in words if str(x).strip()]
+    def _set(key: str, value: str) -> None:
+        row = db.get(Kv, key)
+        if row is None:
+            db.add(Kv(key=key, value=value))
+        else:
+            row.value = value
+
+    if "avoid_words" in payload:
+        words = payload.get("avoid_words")
+        if not isinstance(words, list):
+            raise HTTPException(status_code=400, detail="avoid_words 必须是数组")
+        cleaned = [str(x).strip() for x in words if str(x).strip()]
+        _set("ai_no_words", json.dumps(cleaned, ensure_ascii=False))
+    if "anchor_ids" in payload:
+        ids = payload.get("anchor_ids")
+        if not isinstance(ids, list):
+            raise HTTPException(status_code=400, detail="anchor_ids 必须是数组")
+        cleaned_ids: list[int] = []
+        for x in ids:
+            try:
+                cleaned_ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        _set("style_anchor_video_ids", json.dumps(cleaned_ids, ensure_ascii=False))
+    if "sample_count" in payload:
+        raw = payload.get("sample_count")
+        try:
+            n = int(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="sample_count 必须是数字") from None
+        _set("style_sample_count", str(max(3, min(8, n))))
+    db.commit()
+    from ..services.generation import _style_anchor_ids
+
+    return {"ok": True, "avoid_words": _avoid_words_out(db), "anchor_ids": _style_anchor_ids(db)}
+
+
+def _avoid_words_out(db: Session) -> list[str]:
+    import json
+
+    from ..core.style_profile import default_avoid_words
+    from ..models.kv import Kv
+
     row = db.get(Kv, "ai_no_words")
     if row is None:
-        row = Kv(key="ai_no_words", value=json.dumps(cleaned, ensure_ascii=False))
-        db.add(row)
-    else:
-        row.value = json.dumps(cleaned, ensure_ascii=False)
-    db.commit()
-    return {"ok": True, "avoid_words": cleaned}
+        return default_avoid_words()
+    try:
+        data = json.loads(row.value or "[]")
+    except (TypeError, ValueError):
+        return default_avoid_words()
+    return [str(x).strip() for x in data if str(x).strip()] or default_avoid_words()
 

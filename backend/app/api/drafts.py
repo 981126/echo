@@ -21,6 +21,13 @@ from ..tasks import start_task
 router = APIRouter()
 
 
+def _persona_version(db: Session) -> int:
+    """当前人设档案版本（R-130：草稿记录生成时的人设版本）。"""
+    from ..services.persona_profile import current_persona_version
+
+    return current_persona_version(db, current_creator_id(db))
+
+
 class GenerateIn(BaseModel):
     topic: str
 
@@ -86,6 +93,7 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
         script="（双模型讨论生成中…）",
         source="ai",
         creator_id=current_creator_id(db),  # 归属当前主博主，否则工作台看不到（R-063 后续修复）
+        persona_version=_persona_version(db),  # R-130：记录生成时的人设版本
     )
     db.add(draft)
     db.commit()

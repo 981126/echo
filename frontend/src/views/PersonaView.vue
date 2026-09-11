@@ -65,10 +65,28 @@
       <div class="row" style="gap: 8px; margin-top: 8px; flex-wrap: wrap">
         <n-input v-model:value="avoidText" placeholder="添加（逗号分隔）" clearable style="max-width: 320px" />
         <n-button size="small" secondary @click="addAvoidWords">添加</n-button>
+        <span class="muted" style="font-size: 12px; margin-left: 8px">风格样本条数：</span>
+        <n-input-number v-model:value="sampleCount" :min="3" :max="8" size="small" style="width: 90px" />
         <n-button size="small" type="primary" :loading="savingStyle" @click="saveStyle">保存</n-button>
       </div>
+
+      <div class="section-title" style="font-size: 13px; margin-top: 14px">生成风格范本（可选）</div>
+      <p class="muted" style="font-size: 12px; margin: 4px 0 6px">
+        勾选的素材会被必定注入生成上下文（不参与检索淘汰），适合挑你最有代表性的几篇
+      </p>
+      <div class="row" style="gap: 10px; flex-wrap: wrap">
+        <n-checkbox
+          v-for="c in anchorCandidates"
+          :key="c.id"
+          :checked="anchorIds.includes(c.id)"
+          @update:checked="(v) => toggleAnchor(c.id, v)"
+        >
+          {{ c.title }}
+        </n-checkbox>
+      </div>
       <p class="muted" style="font-size: 12px; margin: 6px 0 0">
-        禁用词会注入生成提示词；每周日凌晨自动做一次风格重建并产出提示词新候选（右上角通知，可回滚）
+        以上（含禁用词、风格画像、金句锚点）都是生成时的运行时上下文，由本页维护、动态注入，
+        不在「AI 提示词」正文里——想改风格请改这里，不用去改提示词
       </p>
     </div>
 
@@ -190,6 +208,9 @@ const styleInfo = ref(null)
 const avoidList = ref([])
 const avoidText = ref('')
 const savingStyle = ref(false)
+const anchorIds = ref([])
+const anchorCandidates = ref([])
+const sampleCount = ref(5)
 const check = ref(null)
 const checking = ref(false)
 
@@ -301,9 +322,19 @@ async function loadStyle() {
     const r = await api('/api/persona/style')
     styleInfo.value = r
     avoidList.value = [...(r.avoid_words || [])]
+    anchorIds.value = [...(r.anchor_ids || [])]
+    anchorCandidates.value = r.anchor_candidates || []
+    sampleCount.value = r.sample_count || 5
   } catch (e) {
     /* 静默 */
   }
+}
+
+function toggleAnchor(id, checked) {
+  const next = new Set(anchorIds.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  anchorIds.value = [...next]
 }
 
 function removeAvoid(w) {
@@ -319,10 +350,18 @@ function addAvoidWords() {
 async function saveStyle() {
   savingStyle.value = true
   try {
-    const r = await api('/api/persona/style', { method: 'PUT', body: JSON.stringify({ avoid_words: avoidList.value }) })
+    const r = await api('/api/persona/style', {
+      method: 'PUT',
+      body: JSON.stringify({
+        avoid_words: avoidList.value,
+        anchor_ids: anchorIds.value,
+        sample_count: sampleCount.value
+      })
+    })
     avoidList.value = [...(r.avoid_words || [])]
+    anchorIds.value = [...(r.anchor_ids || [])]
     if (styleInfo.value) styleInfo.value = { ...styleInfo.value, avoid_words: avoidList.value }
-    message.success('已保存')
+    message.success('已保存（下次生成生效）')
   } catch (e) {
     message.error(e.message)
   } finally {

@@ -75,29 +75,24 @@ def _housekeep_job() -> None:
 
 
 def _weekly_style_job() -> None:
-    """每周日 03:20 风格重建（R-057）：基于全部素材画像 + 表现最好样本，
-    自动产出一版新的生成提示词候选（不启用）并通知作者。"""
+    """每周日 03:20 提示：素材/人设已更新，可手动重跑生成提示词候选（R-131：不再自动产出候选）。"""
     db = SessionLocal()
     try:
         from .services.generation import _all_texts
-        from .services.prompt_service import optimize
 
         rows = _all_texts(db)
         if len(rows) < 5:
-            return  # 语料太少不值得每周重建
-        # 语料=人设 + 全部 ASR 转写文案（按点赞率/互动加权），由 optimize 内部组装
-        candidate = optimize(db, "generation")
-        if candidate is not None:
-            from .tasks import push_notification
+            return  # 语料太少不值得提示
+        from .tasks import push_notification
 
-            push_notification(
-                db,
-                kind="prompt_candidate",
-                status="done",
-                title="每周风格重建：生成提示词新候选",
-                message=f"基于全部素材风格画像与高分节选自动优化了 v{candidate.version}，待你启用",
-                target="/prompts?key=generation",
-            )
+        push_notification(
+            db,
+            kind="prompt_refresh_hint",
+            status="done",
+            title="每周提示：可重跑生成提示词候选",
+            message="素材/人设已更新；到「AI 提示词」页手动点一次「AI 基于最新素材优化」（会自动做金样本评测并给出对比分）",
+            target="/prompts?key=generation",
+        )
     except Exception:  # noqa: BLE001 周任务失败不影响主服务
         db.rollback()
     finally:
@@ -165,11 +160,11 @@ def setup_scheduler() -> None:
         misfire_grace_time=3600,
         coalesce=True,
     )
-    # R-057：每周风格重建（周日 03:20）
+    # R-057/R-131：每周提示重跑生成提示词候选（周日 03:20，不再自动产出候选）
     _scheduler.add_job(
         _weekly_style_job,
         CronTrigger(day_of_week="sun", hour=3, minute=20, timezone=settings.tz),
-        id="weekly_style_rebuild",
+        id="weekly_prompt_hint",
         misfire_grace_time=3600,
         coalesce=True,
     )

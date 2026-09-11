@@ -208,13 +208,18 @@ def _existing_keys(db, cid: int | None) -> set[tuple[str, str]]:
     return keys
 
 
-def _next_version(db, cid: int | None) -> int:
+def current_persona_version(db, cid: int | None) -> int:
+    """当前人设档案版本（max PersonaTag.version）；供草稿记录生成时的人设版本（R-130）。"""
     from sqlalchemy import func
 
     q = db.query(func.max(PersonaTag.version))
     if cid:
         q = q.filter(PersonaTag.creator_id == cid)
-    return int(q.scalar() or 0) + 1
+    return int(q.scalar() or 0)
+
+
+def _next_version(db, cid: int | None) -> int:
+    return current_persona_version(db, cid) + 1
 
 
 def persist_suggestions(
@@ -298,6 +303,7 @@ __all__ = [
     "profile_coverage",
     "compare_profiles",
     "current_profile",
+    "current_persona_version",
     "persist_suggestions",
     "merge_mechanical",
 ]

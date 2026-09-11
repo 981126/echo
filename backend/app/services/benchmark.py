@@ -369,6 +369,8 @@ def rewrite_script(db: Session, owner: Creator, unit: dict, title: str = "") -> 
     from .creator_service import current_creator_id
 
     cid = owner.id if owner.kind == "owner" else current_creator_id(db)
+    from .persona_profile import current_persona_version
+
     draft = Draft(
         creator_id=cid,
         title=new_title,
@@ -376,6 +378,7 @@ def rewrite_script(db: Session, owner: Creator, unit: dict, title: str = "") -> 
         original_script=text,
         source="ai",
         status="draft",
+        persona_version=current_persona_version(db, cid),  # R-130：人设变化可控
     )
     db.add(draft)
     db.commit()
@@ -421,6 +424,8 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref:
     from .creator_service import current_creator_id
 
     cid = owner.id if owner.kind == "owner" else current_creator_id(db)
+    from .persona_profile import current_persona_version
+
     draft = Draft(
         creator_id=cid,
         title=new_title,
@@ -429,6 +434,7 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref:
         source="ai",
         status="draft",
         source_ref=json.dumps(source_ref, ensure_ascii=False) if source_ref else "{}",
+        persona_version=current_persona_version(db, cid),  # R-130：人设变化可控
     )
     db.add(draft)
     db.commit()

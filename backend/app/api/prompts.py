@@ -82,6 +82,7 @@ def list_keys(db: Session = Depends(get_db)):
             {
                 "key": k,
                 "label": item["label"],
+                "group": prompt_service.prompt_group(k),
                 "enabled_version": enabled["version"] if enabled else 0,
                 "content": enabled["content"] if enabled else "",
                 "has_candidate": candidate is not None,
@@ -186,6 +187,22 @@ def optimize_prompt(key: str, payload: PromptOptimizeIn, db: Session = Depends(g
     except PromptOptimizeError as exc:
         raise HTTPException(status_code=422, detail=exc.reason) from exc
     return _out(row)
+
+
+@router.post("/optimize-rules", response_model=dict)
+def optimize_rule_keys(db: Session = Depends(get_db)):
+    """一键为规则型提示词（预打标/校对/改稿差异/复盘）产出候选（R-131；自动触发已取消）。"""
+    from ..models.task import BackgroundTask
+
+    dup = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "prompt_rule_optimize", BackgroundTask.status.in_(["pending", "running"]))
+        .first()
+    )
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="已有规则型提示词优化任务进行中，请稍候再试")
+    task_id = start_task("prompt_rule_optimize", {"keys": list(prompt_service.RULE_KEYS)}, prompt_service.optimize_rule_keys_task)
+    return {"task_id": task_id}
 
 
 @router.post("/{key}/candidates/{version}/reject", response_model=dict)

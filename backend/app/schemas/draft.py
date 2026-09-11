@@ -22,9 +22,25 @@ class DraftOut(BaseModel):
     source_ref: dict = {}
     tags: list[str] = []
     status: str = "draft"
+    prompt_version: int = 0
+    persona_version: int = 0
+    quality: dict = {}
     version: int = 1
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("quality", mode="before")
+    @classmethod
+    def _parse_quality(cls, value):
+        if isinstance(value, str):
+            import json
+
+            try:
+                data = json.loads(value)
+                return data if isinstance(data, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return value or {}
 
     @field_validator("platform_shells", mode="before")
     @classmethod

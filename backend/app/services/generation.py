@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import threading
 from datetime import date
 
@@ -89,7 +90,7 @@ def _persona_context(db: Session) -> dict:
     }
 
 
-_PROFILE_CACHE: dict[tuple, str] = {}
+_PROFILE_DICT_CACHE: dict[tuple, dict] = {}
 _PROFILE_LOCK = threading.Lock()
 
 
@@ -124,35 +125,6 @@ def _weight(db: Session, video: Video) -> float:
     base = video.published_at.date() if video.published_at else video.created_at.date()
     age = max((date.today() - base).days, 0)
     return (1.0 + math.log1p(engage)) * math.exp(-age / 500.0)
-
-
-def _best_practice_lines(db: Session) -> str:
-    """R-030④：把近期表现最好的草稿共性（标题/开头/结尾）注入生成，模仿结构不抄内容。"""
-    from ..models.draft import Draft
-    from ..models.feedback import Feedback
-    from .creator_service import get_current_creator
-
-    creator = get_current_creator(db)
-    q = (
-        db.query(Draft, Feedback)
-        .join(Feedback, Feedback.draft_id == Draft.id)
-        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
-    )
-    if creator:
-        q = q.filter(Draft.creator_id == creator.id)  # R-129：filter 必须在 order_by/limit 之前
-    q = q.order_by(Feedback.id.desc()).limit(12)
-    rows = q.all()
-    lines: list[str] = []
-    for d, _f in rows[:3]:
-        if not d.script:
-            continue
-        first = next((x.strip() for x in d.script.split("\n") if x.strip()), d.script)[:80]
-        tail = [x.strip() for x in d.script.split("\n") if x.strip()]
-        ending = tail[-1][:60] if tail else ""
-        lines.append(f"《{d.title or '无题'}》 开头：{first} … 结尾引导：{ending}")
-    if not lines:
-        return ""
-    return "\n".join(f"- {x}" for x in lines)
 
 
 _INDEX_CACHE: dict[tuple, "TfidfIndex"] = {}
@@ -236,33 +208,175 @@ def _style_index(db: Session) -> "TfidfIndex":
         return index
 
 
-def _style_samples(db: Session, topic: str, k: int = 3) -> list[str]:
+def _style_samples(db: Session, topic: str, k: int | None = None) -> list[str]:
+    """按选题检索风格样本；条数可配置（R-131：默认 5，范围 3~8）。"""
+    if k is None:
+        from ..models.kv import Kv
+
+        row = db.get(Kv, "style_sample_count")
+        try:
+            k = int(row.value) if row is not None and row.value else 5
+        except (TypeError, ValueError):
+            k = 5
+        k = max(3, min(8, k))
     return [hit["text"] for hit in _style_index(db).search(topic, top_k=k)]
 
 
-def _style_profile_lines(db: Session) -> str:
-    """风格画像文本（进程内缓存：素材数量/字数变化才重算；结果与原来完全一致）。"""
+def _style_anchor_ids(db: Session) -> list[int]:
+    """作者指定的「风格范本」素材 id（R-131，存 app_kv）。"""
+    from ..models.kv import Kv
+
+    row = db.get(Kv, "style_anchor_video_ids")
+    if row is None or not (row.value or "").strip():
+        return []
+    try:
+        data = json.loads(row.value)
+    except (TypeError, ValueError):
+        return []
+    out: list[int] = []
+    for x in data if isinstance(data, list) else []:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _style_anchor_samples(db: Session, limit: int = 5) -> list[str]:
+    """风格范本素材的原文（必定注入，不参与检索淘汰，R-131）。"""
+    ids = _style_anchor_ids(db)
+    if not ids:
+        return []
+    from ..models.video import Video
+
+    by_id = {v.id: v for v in db.query(Video).filter(Video.id.in_(ids)).all()}
+    out: list[str] = []
+    for vid in ids:
+        v = by_id.get(vid)
+        if v is None:
+            continue
+        tr = getattr(v, "transcript", None)
+        text = (tr.corrected_text or tr.transcript_text or "").strip() if tr else ""
+        if text:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _rewrite_examples(db: Session, limit: int = 2) -> str:
+    """作者对 AI 初稿的真实修改（R-131）：最强的"像作者"信号，作为 few-shot 注入。
+
+    优先取作者认可（高星/采用）的改稿；没有任何成对样本时返回空串（不注入、不影响生成）。
+    """
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+
+    cid = _creator_filter(db)
+    rated: dict[int, object] = {fb.draft_id: fb for fb in db.query(Feedback).all()}
+    q = db.query(Draft).filter(Draft.source == "ai")
+    if cid:
+        q = q.filter(Draft.creator_id == cid)
+    pairs: list[tuple[int, int, str, str]] = []
+    for d in q.order_by(Draft.id.desc()).limit(60).all():
+        original = (d.original_script or "").strip()
+        edited = (d.script or "").strip()
+        if not original or not edited or original == edited:
+            continue
+        fb = rated.get(d.id)
+        score = 3
+        if fb is not None and (bool(getattr(fb, "liked", False)) or int(getattr(fb, "rating", 0) or 0) >= 4):
+            score = 5
+        elif fb is not None and int(getattr(fb, "rating", 0) or 0) <= 2:
+            score = 1
+        pairs.append((score, d.id, original, edited))
+    if not pairs:
+        return ""
+    pairs.sort(key=lambda x: (-x[0], -x[1]))
+    blocks = [f"【AI 原稿】{o[:260]}\n【作者改后】{e[:260]}" for _s, _i, o, e in pairs[:limit]]
+    return (
+        "作者对 AI 初稿的真实修改（重点学他的改法：删了什么、把什么改得更口语、加了什么钩子；"
+        "只学改法，不要照抄其中的具体内容）：\n" + "\n\n".join(blocks)
+    )
+
+
+def _style_profile(db: Session) -> dict:
+    """风格画像 dict（进程内缓存：素材数量/字数变化才重算）。"""
     rows = _all_texts(db)
     texts = [text for _, text in rows]
     cid = _creator_filter(db) or 0
     key = (cid, len(texts), sum(len(t) for t in texts))
     with _PROFILE_LOCK:
-        if key in _PROFILE_CACHE:
-            return _PROFILE_CACHE[key]
-        out = format_style_profile(build_style_profile(texts))
-        if len(_PROFILE_CACHE) > 20:
-            _PROFILE_CACHE.clear()
-        _PROFILE_CACHE[key] = out
-        return out
+        if key in _PROFILE_DICT_CACHE:
+            return _PROFILE_DICT_CACHE[key]
+        profile = build_style_profile(texts)
+        if len(_PROFILE_DICT_CACHE) > 20:
+            _PROFILE_DICT_CACHE.clear()
+        _PROFILE_DICT_CACHE[key] = profile
+        return profile
+
+
+def _style_markers(db: Session, limit: int = 8) -> list[str]:
+    """作者高频口头禅/标志用词（R-131：生成后自检「像不像」用）。"""
+    try:
+        return [str(x) for x in (_style_profile(db).get("top_phrases") or [])[:limit] if str(x).strip()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _style_profile_lines(db: Session) -> str:
+    return format_style_profile(_style_profile(db))
+
+
+def _structure_templates(db: Session) -> str:
+    """表现最好的内容结构模板（R-131）：开场句 + 结尾引导句，只学结构不抄内容。
+
+    优先用作者认可（高星/采用）的草稿；没有时退回真实互动最高的素材转写稿。
+    """
+    from ..models.draft import Draft
+    from ..models.feedback import Feedback
+
+    cid = _creator_filter(db)
+    starters: list[str] = []
+    q = (
+        db.query(Draft, Feedback)
+        .join(Feedback, Feedback.draft_id == Draft.id)
+        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
+    )
+    if cid:
+        q = q.filter(Draft.creator_id == cid)
+    for d, _fb in q.order_by(Feedback.id.desc()).limit(12).all():
+        script = (d.script or "").strip()
+        if not script:
+            continue
+        sentences = [x.strip() for x in re.split(r"[。！？!?\n]+", script) if x.strip()]
+        if not sentences:
+            continue
+        starters.append(f"《{d.title or '无题'}》开场：{sentences[0][:60]} → 结尾：{sentences[-1][:50]}")
+        if len(starters) >= 3:
+            break
+    if not starters:
+        # 无评分反馈时：用互动最高的素材转写稿的开场/结尾
+        rows = sorted(_all_texts(db), key=lambda vt: _weight(db, vt[0]), reverse=True)[:3]
+        for _v, text in rows:
+            sentences = [x.strip() for x in re.split(r"[。！？!?\n]+", text) if x.strip()]
+            if not sentences:
+                continue
+            starters.append(f"开场：{sentences[0][:60]} → 结尾：{sentences[-1][:50]}")
+    if not starters:
+        return ""
+    return "表现最好的内容结构模板（只学开场与收尾的结构，内容要新）：\n" + "\n".join(f"- {x}" for x in starters)
 
 
 def generation_user_message(db: Session, topic: str) -> str:
     """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
     ctx = _persona_context(db)
     samples = _style_samples(db, topic)
+    anchors = _style_anchor_samples(db)
     profile = _style_profile_lines(db)
     refs = benchmark_context_lines(db)
-    best = _best_practice_lines(db)
+    structure = _structure_templates(db)
+    rewrites = _rewrite_examples(db)
     return "\n".join(
         [
             f"选题：{topic}",
@@ -277,49 +391,97 @@ def generation_user_message(db: Session, topic: str) -> str:
             "作者语言习惯（从全部素材统计，必须模仿）：",
             profile,
             *([] if not _avoid_words(db) else ["", "这些表达尽量别用（AI 腔/套话，用了会不像真人）：", "、".join(_avoid_words(db)[:20])]),
+            *([] if not anchors else ["", "作者指定为风格范本的素材（必须重点模仿其语气与节奏）：", *[f"--- 范本{i+1} ---\n{s[:400]}" for i, s in enumerate(anchors)]]),
             "",
-            "风格样本（模仿语气的原文节选）：",
+            "风格样本（按选题检索的真实原文节选）：",
             *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],
+            *([] if not structure else ["", structure]),
+            *([] if not rewrites else ["", rewrites]),
             *([] if not refs else ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs]),
-            *([] if not best else ["", "你近期表现最好的草稿共性（学它的结构和收束方式，内容要新）：", best]),
         ]
     )
 
 
+def _self_check(db: Session, script: str) -> tuple[list[str], float]:
+    """生成后自检（R-131）：红线命中 / AI 腔禁用词 / 口癖覆盖率。返回 (问题列表, 口癖覆盖率)。"""
+    text = script or ""
+    issues: list[str] = []
+    ctx = _persona_context(db)
+    for redline in ctx["redlines"]:
+        if len(redline) >= 6 and redline in text:
+            issues.append(f"命中红线：{redline[:20]}")
+    for word in _avoid_words(db):
+        if word and word in text:
+            issues.append(f"用了 AI 腔词：{word}")
+    markers = _style_markers(db)
+    coverage = 0.0
+    if markers:
+        coverage = sum(1 for m in markers if m in text) / len(markers)
+        if coverage == 0:
+            issues.append("没有用上作者的标志性口癖/用词")
+    return issues, round(coverage, 4)
+
+
 def generate_draft(db: Session, topic: str, settings=None) -> Draft:
     user = generation_user_message(db, topic)
-
+    system = get_prompt("generation", db)
     llm = DeepSeekClient(settings)
-    try:
-        data = llm.chat_json(
-            [
-                {"role": "system", "content": get_prompt("generation", db)},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.8,
-            max_tokens=2500,
-        )
-        title = str(data.get("title", "")).strip()
-        cover = str(data.get("cover_text", "")).strip()
-        script = str(data.get("script", "")).strip()
-        shells = data.get("shells") if isinstance(data.get("shells"), dict) else {}
-    except LLMError:
-        title = f"{topic}（mock 标题）"
-        cover = (topic or "今日话题")[:8]
-        script = (
-            f"[mock 脚本] 大家好，今天想聊聊{topic}。"
-            "很多人对这件事有误区，其实只要抓住三个关键点，结果会完全不一样。"
-            "第一，先想清楚目标；第二，小步快跑试错；第三，持续复盘优化。"
-            "如果你也有类似困惑，评论区告诉我，我们下期见。"
-        )
-        shells = {
-            "douyin": f"#{topic} 短视频 干货分享",
-            "bilibili": f"{topic} | 亲测有效的 3 个方法",
-            "xiaohongshu": f"🔥 {topic}，建议收藏！",
-        }
+    attempts = 0
+    issues: list[str] = []
+    coverage = 0.0
+    is_mock = False
+    while attempts < 2:
+        attempts += 1
+        try:
+            data = llm.chat_json(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature=0.8,
+                max_tokens=2500,
+            )
+            title = str(data.get("title", "")).strip()
+            cover = str(data.get("cover_text", "")).strip()
+            script = str(data.get("script", "")).strip()
+            shells = data.get("shells") if isinstance(data.get("shells"), dict) else {}
+        except LLMError:
+            is_mock = True
+            issues = []
+            title = f"{topic}（mock 标题）"
+            cover = (topic or "今日话题")[:8]
+            script = (
+                f"[mock 脚本] 大家好，今天想聊聊{topic}。"
+                "很多人对这件事有误区，其实只要抓住三个关键点，结果会完全不一样。"
+                "第一，先想清楚目标；第二，小步快跑试错；第三，持续复盘优化。"
+                "如果你也有类似困惑，评论区告诉我，我们下期见。"
+            )
+            shells = {
+                "douyin": f"#{topic} 短视频 干货分享",
+                "bilibili": f"{topic} | 亲测有效的 3 个方法",
+                "xiaohongshu": f"🔥 {topic}，建议收藏！",
+            }
+            break
+        issues, coverage = _self_check(db, script)
+        if not issues:
+            break
+        if attempts >= 2:
+            break
+        # 自检不通过：带上问题重写一次（R-131，最多 1 次）
+        user = user + "\n\n上一次生成存在这些问题，请重写并避免：\n" + "\n".join(f"- {i}" for i in issues)
 
+    cid = _creator_filter(db)
+    from .persona_profile import current_persona_version
+
+    quality = json.dumps(
+        {
+            "attempts": attempts,
+            "issues": issues,
+            "passed": not issues,
+            "style_coverage": coverage,
+            "mock": is_mock,
+        },
+        ensure_ascii=False,
+    )
     draft = Draft(
-        creator_id=_creator_filter(db),
+        creator_id=cid,
         title=title or topic,
         cover_text=cover,
         script=script or topic,
@@ -327,6 +489,8 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
         source="ai",
         original_script=script or topic,
         prompt_version=get_prompt_version("generation", db),  # R-129 M116：按提示词版本归因
+        persona_version=current_persona_version(db, cid),  # R-130：人设变化可控
+        quality=quality,  # R-131：生成后自检留痕
     )
     db.add(draft)
     db.commit()

@@ -243,6 +243,8 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     gen_llm = get_llm(gen, settings)
     critic_llm = get_llm(critic, settings)
 
+    from .persona_profile import current_persona_version
+
     draft = Draft(
         creator_id=owner.id,
         title="",
@@ -253,6 +255,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         status="draft",
         source_ref=json.dumps(source_ref, ensure_ascii=False),
         tags=json.dumps(source_tags, ensure_ascii=False),
+        persona_version=current_persona_version(db, owner.id),  # R-130：人设变化可控
     )
     db.add(draft)
     db.commit()

@@ -28,6 +28,8 @@ class Draft(Base):
     tags: Mapped[str] = mapped_column(Text, default="[]")  # 素材标签（来自对标素材，R-120）
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|used|archived
     prompt_version: Mapped[int] = mapped_column(Integer, default=0)  # 生成时启用的提示词版本（R-129 M116；0=历史/未知）
+    persona_version: Mapped[int] = mapped_column(Integer, default=0)  # 生成时的人设档案版本（R-130；0=历史/未知）
+    quality: Mapped[str] = mapped_column(Text, default="{}")  # 生成后自检结果 JSON（R-131）
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(

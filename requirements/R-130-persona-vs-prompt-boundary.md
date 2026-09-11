@@ -1,8 +1,8 @@
 # R-130 人设管理 与 AI 提示词 的边界整理
 
 - **日期**: 2026-09-10
-- **状态**: 已确认（待作者说「继续」后实施）
-- **排期**: M117（待确认）
+- **状态**: ✅ 已完成
+- **排期**: M118（已完成）
 - **关联**: R-128（人设管线）、R-129（提示词优化）、`persona_tags` / `persona_checks` / `ai_prompts` / `drafts`
 
 ## 原文（作者原话，未改动）
@@ -41,3 +41,12 @@ AI 提示词功能的重心问题：作者原本只想让它「保证自动生�
 3. 人设页对「表达风格/禁词/金句锚点」标注来源与用途（生成时注入，非提示词正文）。
 4. 人设引擎类候选启用后给出「去人设页确认」的引导。
 5. `scripts/verify.sh` 全绿；接口冒烟；服务保持运行。
+
+## 实施记录（2026-09-10）
+- `drafts` 增加 `persona_version`（幂等迁移 `_migrate_draft_persona_version`）；AI 草稿（`generate_draft` / `run_debate_draft` / 两处对标洗稿 / generate-async 占位稿）记录生成时的人设版本。
+- `prompt_service.PERSONA_ENGINE_KEYS` + `prompt_group`；`GET /api/prompts/keys` 返回 `group`；前端页签加「人设引擎」标签，并标注「改这里会影响人设提取质量」。
+- `version_effect` 增加 `persona_versions` / `mixed_persona`；前端版本效果对比显示「跨 N 个人设版本，均分不宜直接横向比」。
+- 人设页：表达风格区块明确标注「生成时的运行时上下文，由本页维护、动态注入，不在提示词正文里」。
+- 前端：启用人设引擎候选后提示「建议到人设档案页重跑一次并确认新建议」。
+- 单一事实源：R-129 已用「契约段程序拼接 + 禁止写死事实自检」落地，DESIGN 已记录为硬约束。
+- 测试：`test_r130_r131_data_side` 中 `prompt_group` 与 `mixed_persona` 用例；verify 全绿。

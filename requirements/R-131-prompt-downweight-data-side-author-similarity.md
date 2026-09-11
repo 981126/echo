@@ -1,8 +1,8 @@
 # R-131 AI 提示词降权 + 生成「像作者」重心转向数据侧
 
 - **日期**: 2026-09-10
-- **状态**: 已确认（待作者说「继续」后实施）
-- **排期**: M119 / M120（待确认）
+- **状态**: ✅ 已完成
+- **排期**: M119 / M120（已完成）
 - **关联**: R-129（提示词优化）、R-130（人设↔提示词边界）、R-030（最佳实践/金句）、R-057（风格学习）、`generation.py` / `prompt_service.py` / `scheduler.py` / `tasks.py`
 
 ## 原文（作者原话，未改动）
@@ -48,3 +48,21 @@
 5. 生成后自检：命中红线或 AI 腔词/格式非法时自动重写 1 次，并在草稿上留可查痕迹。
 6. 草稿保存后有打分引导（不打扰、可忽略）。
 7. `scripts/verify.sh` 全绿；接口冒烟；服务保持运行。
+
+## 实施记录（2026-09-10）
+- **降权**：`tasks._maybe_optimize_prompt` 不再自动产出候选，改为 `prompt_service.maybe_notify_prompt_refresh`（累计 10 条素材发一条提醒）；
+  `scheduler._weekly_style_job` 改为每周只发提醒（job id `weekly_prompt_hint`）；删除 `auto_optimize_generation`。
+- **偏离说明**：原方案写「规则型 key 自动优化默认关闭、设置里可开」，实施时改为**手动一键** `POST /api/prompts/optimize-rules`
+  （后台任务 `optimize_rule_keys_task`，逐 key 产出候选、样本不足自动跳过），并在提示词页加按钮——
+  理由：后台自动触发即使默认关闭也需要一套设置 UI 与节流状态，而手动一键同样达到"只对规则型 key 优化"的目的且更可控、不会不可见地烧钱。
+- **数据侧增强**：
+  - `generation._rewrite_examples`（改写稿 few-shot，优先高分/采用；无成对样本返回空）；
+  - `_style_samples` 条数可配置（Kv `style_sample_count`，3~8，默认 5）+ `_style_anchor_samples`（Kv `style_anchor_video_ids`，必定注入）；
+  - `_structure_templates` 取代 `_best_practice_lines`（高表现内容开场/结尾；无反馈时退回高互动素材）。
+  - 人设页新增「生成风格范本」勾选（候选按权重 Top20）+ 风格样本条数；`PUT /api/persona/style` 扩展 `anchor_ids` / `sample_count`。
+- **生成后自检**：`generation._self_check`（红线命中 / AI 腔禁用词 / 口癖覆盖率）→ 不达标自动重写 1 次（附失败原因）；
+  结果写入新列 `drafts.quality`（attempts/issues/passed/style_coverage/mock），`DraftOut` 已带出。
+- **打分引导**：首页生成提交提示 + 草稿打分处提示「打分是 AI 学你偏好最强的信号」。
+- **提示词页重定位**：页头改为「支架 + 高级设置」；generation 卡片标注「自动优化已改为手动」。
+- 实测：`generation_user_message` 已包含「作者对 AI 初稿的真实修改」（当前 4 对样本）与「内容结构模板」；风格范本段在未勾选时不出现。
+- 测试：`test_r130_r131_data_side` 13 用例（few-shot/范本/样本条数/结构模板/自检+重写+版本记录/提醒阈值/规则型批量）；verify 全绿。

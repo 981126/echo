@@ -276,6 +276,16 @@ def _migrate_draft_prompt_version() -> None:
             conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN prompt_version INTEGER NOT NULL DEFAULT 0")
 
 
+def _migrate_draft_persona_version() -> None:
+    """R-130/R-131：drafts 增加 persona_version（生成时的人设版本）与 quality（生成后自检结果 JSON）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(drafts)").fetchall()}
+        if "persona_version" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN persona_version INTEGER NOT NULL DEFAULT 0")
+        if "quality" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN quality TEXT NOT NULL DEFAULT '{}'")
+
+
 def _fix_video_creator_binding() -> None:
     """R-082：自动下载的本地素材归属错挂修复。
 
@@ -491,6 +501,7 @@ def init_db() -> None:
     _migrate_task_note()
     _migrate_persona_dimension()
     _migrate_draft_prompt_version()
+    _migrate_draft_persona_version()
     _migrate_task_result()
     _migrate_draft_source_ref()
     _migrate_draft_tags()

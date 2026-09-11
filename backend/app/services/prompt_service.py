@@ -125,6 +125,15 @@ def create_candidate(db: Session, key: str, content: str, note: str = "") -> AiP
     return row
 
 
+# 人设引擎提示词（R-130）：产出物是人设档案，改这些会影响人设提取质量
+PERSONA_ENGINE_KEYS = frozenset({"persona_init", "persona_merge", "persona_updates", "persona_compare"})
+
+
+def prompt_group(key: str) -> str:
+    """提示词分组：persona_engine（人设引擎）/ production（生产提示词）。"""
+    return "persona_engine" if key in PERSONA_ENGINE_KEYS else "production"
+
+
 def get_prompt_version(key: str, db: Session) -> int:
     """当前启用版本号（无记录返回 0）；供草稿做「按提示词版本归因」（R-129 M116）。"""
     row = (
@@ -167,8 +176,12 @@ def version_effect(db: Session, key: str) -> list[dict]:
     agg: dict[int, dict] = {}
     for d in db.query(Draft).filter(Draft.source == "ai").all():
         ver = d.prompt_version or 0
-        row = agg.setdefault(ver, {"version": ver, "drafts": 0, "rated": 0, "rating_sum": 0, "used": 0})
+        row = agg.setdefault(
+            ver,
+            {"version": ver, "drafts": 0, "rated": 0, "rating_sum": 0, "used": 0, "persona_versions": set()},
+        )
         row["drafts"] += 1
+        row["persona_versions"].add(d.persona_version or 0)
         for fb in fb_by_draft.get(d.id, []):
             if fb.rating:
                 row["rated"] += 1
@@ -177,10 +190,14 @@ def version_effect(db: Session, key: str) -> list[dict]:
                 row["used"] += 1
     out: list[dict] = []
     for _ver, row in sorted(agg.items(), key=lambda kv: kv[0], reverse=True):
+        persona_versions = sorted(v for v in row.pop("persona_versions") if v)
         out.append(
             {
                 **row,
                 "avg_rating": round(row["rating_sum"] / row["rated"], 2) if row["rated"] else None,
+                # R-130：同一提示词版本跨越多个人设版本时，均分不能直接横向比较
+                "persona_versions": persona_versions,
+                "mixed_persona": len(persona_versions) > 1,
             }
         )
     return out
@@ -417,11 +434,11 @@ def _start_eval(db: Session, key: str, version: int) -> int | None:
         return None
 
 
-def auto_optimize_generation(db: Session, material: str = "", threshold: int = 3) -> AiPrompt | None:
-    """每累计 threshold 条新素材才产出一次候选（R-022 节流）。
+def maybe_notify_prompt_refresh(db: Session, threshold: int = 10) -> bool:
+    """素材累计到阈值时，提醒作者可**手动**重跑提示词候选（R-131：不再自动产出候选）。
 
-    触发时基于当前所有素材/人设组装语料（material 留空走 learning_material）。
-    照 R-129 确认口径：不因「已有未处理候选」而跳过；样本不足/自检失败时静默返回 None。
+    返回是否发出了提醒。自动产出被取消的原因：generation 提示词杠杆小、成本高、候选噪音大；
+    现在改为「提醒 + 作者手动点一次（会自动做金样本评测）」。
     """
     from ..models.kv import Kv
 
@@ -433,14 +450,50 @@ def auto_optimize_generation(db: Session, material: str = "", threshold: int = 3
     if cur < threshold:
         row.value = str(cur)
         db.commit()
-        return None
-    try:
-        cand = optimize(db, "generation", material)
-    except PromptOptimizeError:
-        cand = None
-    if cand is not None:
-        row.value = "0"
-    else:
-        row.value = str(threshold - 1)  # 失败则下一次导入再试
+        return False
+    row.value = "0"
     db.commit()
-    return cand
+    from ..tasks import push_notification
+
+    push_notification(
+        db,
+        kind="prompt_refresh_hint",
+        status="done",
+        title="素材有更新，可重跑提示词候选",
+        message=f"新增素材已累计 {threshold} 条；到「AI 提示词」页手动点一次「AI 基于最新素材优化」即可（会自动做金样本评测）",
+        target="/prompts?key=generation",
+    )
+    return True
+
+
+# 规则型提示词（有明确规则、样本可量化）：一键批量优化的对象（R-131）
+RULE_KEYS = ("video_tags", "correct", "diff", "review")
+
+
+def optimize_rule_keys_task(db: Session, payload: dict, update=None) -> dict:
+    """手动一键：为有真实样本的规则型 key 各产出一版候选（R-131）。
+
+    自动触发已取消（杠杆在数据侧）；这里保留"能优化规则型提示词"的能力，但由作者主动触发。
+    """
+    keys = [k for k in (payload.get("keys") or list(RULE_KEYS)) if k in PROMPT_META]
+    made: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+    total = max(len(keys), 1)
+    for i, key in enumerate(keys, 1):
+        if update:
+            update(int(100 * i / total), f"优化「{label(key)}」…")
+        try:
+            row = optimize(db, key)
+            made.append(f"{label(key)} v{row.version}")
+        except PromptOptimizeError as exc:
+            if "样本不足" in str(exc):
+                skipped.append(label(key))
+            else:
+                failed.append(f"{label(key)}：{exc}")
+    parts = [f"产出候选 {len(made)} 个"]
+    if skipped:
+        parts.append(f"跳过（样本不足）{len(skipped)} 个")
+    if failed:
+        parts.append(f"失败 {len(failed)} 个")
+    return {"message": "；".join(parts), "made": made, "skipped": skipped, "failed": failed}

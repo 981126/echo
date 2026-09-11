@@ -2,9 +2,9 @@
   <div class="page">
     <h1 class="page-title">AI 提示词</h1>
     <p class="page-sub">
-      查看/编辑各功能提示词；上传新视频会自动产出候选版（不直接启用）。
-      候选按功能各自取真实样本优化（样本不足会明确提示），输出契约由系统固定拼接、不允许写死作者传记或红线；
-      产出后自动做「金样本回放评分」，对比候选与当前版，启用与否由你决定
+      这里是 AI 的「支架 + 高级设置」，默认不建议改：只负责角色、方法与输出契约。
+      「像不像作者」主要由人设页维护的运行时上下文决定（人设档案 / 红线 / 语言习惯画像 / 金句锚点 / 禁用词 / 风格范本）。
+      候选按功能各自取真实样本优化（样本不足会明确提示），产出后自动做金样本评测；启用与否由你决定
     </p>
 
     <div class="toolbar">
@@ -12,16 +12,31 @@
       <n-select v-model:value="genMode" :options="modeOptions" style="width: 200px" @update:value="saveMode" />
       <span class="muted">讨论轮次：</span>
       <n-input-number v-model:value="debateRounds" :min="1" :max="10" style="width: 90px" @update:value="saveRounds" />
+      <n-button secondary size="small" :loading="ruleOptimizing" @click="optimizeRules">
+        一键优化规则型（预打标/校对/差异/复盘）
+      </n-button>
     </div>
 
     <n-tabs v-model:value="activeKey" type="line" animated>
-      <n-tab-pane v-for="item in items" :key="item.key" :name="item.key" :tab="item.label">
+      <n-tab-pane v-for="item in items" :key="item.key" :name="item.key">
+        <template #tab>
+          {{ item.label }}
+          <n-tag v-if="item.group === 'persona_engine'" size="tiny" :bordered="false" round type="info">人设引擎</n-tag>
+        </template>
         <div class="panel">
-          <div class="row" style="justify-content: space-between; margin-bottom: 8px">
+          <div class="row" style="justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px">
             <strong>当前启用 · v{{ item.enabled_version }}</strong>
-            <n-tag v-if="item.has_candidate" size="small" :bordered="false" round type="warning">
-              有候选 v{{ item.candidate_version }} 待启用
-            </n-tag>
+            <div class="row" style="gap: 8px">
+              <n-tag v-if="item.group === 'persona_engine'" size="small" :bordered="false" round type="info">
+                改这里会影响人设提取质量
+              </n-tag>
+              <n-tag v-if="item.key === 'generation'" size="small" :bordered="false" round>
+                自动优化已改为手动（素材更新会提醒你）
+              </n-tag>
+              <n-tag v-if="item.has_candidate" size="small" :bordered="false" round type="warning">
+                有候选 v{{ item.candidate_version }} 待启用
+              </n-tag>
+            </div>
           </div>
           <n-input
             v-model:value="editing[item.key]"
@@ -80,11 +95,14 @@
 
         <div v-if="item.effect && item.effect.length" class="panel">
           <div class="section-title" style="margin-top: 0">版本效果对比（按草稿反馈）</div>
-          <div v-for="e in item.effect" :key="e.version" class="row" style="gap: 10px; font-size: 13px">
+          <div v-for="e in item.effect" :key="e.version" class="row" style="gap: 10px; font-size: 13px; flex-wrap: wrap">
             <span class="ver-title">v{{ e.version }}</span>
             <span class="muted">
               草稿 {{ e.drafts }} 篇 · 已评分 {{ e.rated }} · 均分 {{ e.avg_rating == null ? '—' : e.avg_rating }} · 采用 {{ e.used }}
             </span>
+            <n-tag v-if="e.mixed_persona" size="tiny" :bordered="false" round type="warning">
+              跨 {{ (e.persona_versions || []).length }} 个人设版本，均分不宜直接横向比
+            </n-tag>
           </div>
         </div>
 
@@ -123,6 +141,7 @@ const items = ref([])
 const activeKey = ref('generation')
 const editing = ref({})
 const optimizingKey = ref(null)
+const ruleOptimizing = ref(false)
 const evalTasks = ref({})
 let evalPoll = null
 const message = useMessage()
@@ -318,8 +337,27 @@ async function optimize(item) {
 
 async function enable(item, version) {
   await api(`/api/prompts/${item.key}/enable`, { method: 'POST', body: JSON.stringify({ version }) })
-  message.success(`已启用 v${version}`)
+  if (item.group === 'persona_engine') {
+    // R-130：人设引擎提示词改完，产出的人设档案会变 → 引导去人设页确认
+    message.success(`已启用 v${version}；这是人设引擎提示词，建议到「人设档案」页重跑一次并确认新建议`)
+  } else {
+    message.success(`已启用 v${version}`)
+  }
   await load()
+}
+
+async function optimizeRules() {
+  ruleOptimizing.value = true
+  try {
+    const r = await api('/api/prompts/optimize-rules', { method: 'POST', body: '{}' })
+    message.success(`已开始规则型提示词优化（task #${r.task_id}），完成后右上角通知`)
+    await refreshEvalTasks()
+    ensureEvalPoll()
+  } catch (e) {
+    message.error(e.message || '启动失败')
+  } finally {
+    ruleOptimizing.value = false
+  }
 }
 
 onMounted(() => { load(); loadMode(); loadRounds(); refreshEvalTasks(); ensureEvalPoll() })

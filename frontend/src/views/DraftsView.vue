@@ -22,6 +22,7 @@
               <span class="muted">打分</span>
               <button v-for="i in 5" :key="i" class="rate-star" :class="{ on: (ratings[d.id] || 0) >= i }" @click="rate(d, i)">{{ (ratings[d.id] || 0) >= i ? '★' : '☆' }}</button>
               <span v-if="ratings[d.id]" class="muted" style="font-size: 11px">{{ ratings[d.id] }} 分</span>
+              <span v-else class="muted" style="font-size: 11px">← 打分是 AI 学你偏好最强的信号</span>
             </div>
             <div class="tile-rate dims" @click.stop>
               <span class="muted">分节</span>

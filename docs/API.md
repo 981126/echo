@@ -1,6 +1,6 @@
 # API 接口文档（自动生成）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 99 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 100 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -825,6 +825,17 @@ List Keys
 
 - `x-access-token`（header）string
 **返回 200**：application/json → array
+
+### POST /api/prompts/optimize-rules
+
+Optimize Rule Keys
+
+一键为规则型提示词（预打标/校对/改稿差异/复盘）产出候选（R-131；自动触发已取消）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
 
 ### POST /api/prompts/{key}/candidates/{version}/reject
 
