@@ -33,7 +33,6 @@ PROMPT_META: dict[str, tuple[str, str, str]] = {
     "video_tags": ("app.services.persona", "VIDEO_TAGS_SYSTEM", "视频预打标"),
     "persona_updates": ("app.services.persona", "PERSONA_UPDATES_SYSTEM", "人设增量合并"),
     "persona_compare": ("app.services.persona", "PERSONA_COMPARE_SYSTEM", "人设差异复核"),
-    "review": ("app.services.review", "REVIEW_SYSTEM", "复盘 ABCD"),
     "diff": ("app.services.diff_analysis", "DIFF_SYSTEM", "改稿差异"),
     "chat": ("app.services.chat_service", "SYSTEM_PROMPT", "AI 对话"),
     "correct": ("app.services.ingest", "CORRECT_SYSTEM", "转写校对"),
@@ -477,7 +476,7 @@ def maybe_notify_prompt_refresh(db: Session, threshold: int = 10) -> bool:
 
 
 # 规则型提示词（有明确规则、样本可量化）：一键批量优化的对象（R-131）
-RULE_KEYS = ("video_tags", "correct", "diff", "review")
+RULE_KEYS = ("video_tags", "correct", "diff")
 
 
 def optimize_rule_keys_task(db: Session, payload: dict, update=None) -> dict:

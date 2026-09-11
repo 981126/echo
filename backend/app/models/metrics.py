@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -26,12 +26,3 @@ class MetricsSnapshot(Base):
     source: Mapped[str] = mapped_column(String(20), default="manual")  # manual|import|cookie
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 
-
-class ReviewReport(Base):
-    __tablename__ = "review_reports"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_date: Mapped[str] = mapped_column(String(10), index=True)
-    report_type: Mapped[str] = mapped_column(String(20), default="full")  # full|radar
-    content: Mapped[str] = mapped_column(Text, default="{}")  # JSON
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

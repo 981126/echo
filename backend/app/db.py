@@ -286,6 +286,20 @@ def _migrate_draft_persona_version() -> None:
             conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN quality TEXT NOT NULL DEFAULT '{}'")
 
 
+def _migrate_sunset_review() -> None:
+    """R-136：复盘功能正式下线——删除 review_reports 表与 review 提示词行。
+
+    复盘 ABCD 的 API 与前端页面已在 R-097 删除，generate_report 成为孤儿函数、表恒空；
+    作者确认「正式下线」，故清理死表与死提示词（赛道雷达能力已迁到 services/metrics.radar）。
+    """
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS review_reports")
+        try:
+            conn.exec_driver_sql("DELETE FROM ai_prompts WHERE key = 'review'")
+        except Exception:  # noqa: BLE001 老库可能还没有 ai_prompts 表
+            pass
+
+
 def _fix_video_creator_binding() -> None:
     """R-082：自动下载的本地素材归属错挂修复。
 
@@ -502,6 +516,7 @@ def init_db() -> None:
     _migrate_persona_dimension()
     _migrate_draft_prompt_version()
     _migrate_draft_persona_version()
+    _migrate_sunset_review()
     _migrate_task_result()
     _migrate_draft_source_ref()
     _migrate_draft_tags()

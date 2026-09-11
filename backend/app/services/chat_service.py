@@ -87,14 +87,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_review_report",
-            "description": "获取最新复盘报告（ABCD）",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_radar",
             "description": "获取赛道雷达（各赛道互动率）",
             "parameters": {"type": "object", "properties": {}},
@@ -261,24 +253,10 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
                 for r in rows
             ]
         }
-    if name == "get_review_report":
-        from .review import latest_report
-
-        rep = latest_report(db)
-        if not rep:
-            return {"available": False, "message": "还没有复盘报告，可先在看板生成"}
-        c = rep["content"]
-        return {
-            "run_date": rep["run_date"],
-            "C_next_action": c.get("C_next_action", ""),
-            "D_topic_direction": c.get("D_topic_direction", ""),
-            "B_attribution": c.get("B_attribution", []),
-            "radar": c.get("radar", []),
-        }
     if name == "get_radar":
-        from .review import _radar
+        from .metrics import radar
 
-        return {"radar": _radar(db)}
+        return {"radar": radar(db)}
     if name == "search_drafts":
         return {"drafts": _search_drafts(db, args)}
     if name == "generate_draft":

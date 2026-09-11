@@ -71,7 +71,7 @@ def test_prompt_group_splits_persona_engine_from_production():
     assert ps.prompt_group("persona_compare") == "persona_engine"
     assert ps.prompt_group("generation") == "production"
     assert ps.prompt_group("correct") == "production"
-    assert set(ps.RULE_KEYS) == {"video_tags", "correct", "diff", "review"}
+    assert set(ps.RULE_KEYS) == {"video_tags", "correct", "diff"}  # R-136：review 已随复盘下线
 
 
 def test_version_effect_marks_mixed_persona(db):

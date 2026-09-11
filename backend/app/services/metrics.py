@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..core.metrics import normalize_snapshot, retention_cutoff_date
+from ..core.metrics import retention_cutoff_date
 from ..models.hot_topic import HotTopic
 from ..models.metrics import MetricsSnapshot
 from ..models.video import Video
@@ -24,59 +24,6 @@ def _parse_list(raw) -> list:
         return []
 
 
-def upsert_snapshot(
-    db: Session,
-    video_id: int,
-    snapshot_date: str,
-    values: dict,
-    source: str = "manual",
-) -> MetricsSnapshot:
-    """按 (video_id, date) 幂等写入/更新。"""
-    norm = normalize_snapshot(values)
-    row = (
-        db.query(MetricsSnapshot)
-        .filter(MetricsSnapshot.video_id == video_id, MetricsSnapshot.snapshot_date == snapshot_date)
-        .first()
-    )
-    if row is None:
-        row = MetricsSnapshot(video_id=video_id, snapshot_date=snapshot_date, source=source, **norm)
-        db.add(row)
-    else:
-        for k, v in norm.items():
-            setattr(row, k, v)
-        row.source = source
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-def import_snapshots(db: Session, rows: list[dict]) -> int:
-    """批量导入（平台导出/手动填报）。rows: [{video_id, snapshot_date, plays, ...}]"""
-    count = 0
-    for row in rows:
-        try:
-            video_id = int(row["video_id"])
-            snapshot_date = str(row["snapshot_date"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if db.get(Video, video_id) is None:
-            continue
-        upsert_snapshot(db, video_id, snapshot_date, row, source="import")
-        count += 1
-    return count
-
-
-def fetch_daily(db: Session) -> dict:
-    """每日 cookie 抓取（best-effort）。real 模式需在 NAS 联调；mock 模式不造假数据。"""
-    from ..config import get_settings
-
-    settings = get_settings()
-    if (settings.hot_source_mode or "mock").lower() == "mock":
-        return {"fetched": 0, "note": "mock 模式不抓取指标，请用导入/手动通道录入"}
-    # real 模式：此处为占位，需按平台（抖音/B站/小红书）创作者后台实现 cookie 抓取
-    return {"fetched": 0, "note": "cookie 抓取需在 NAS 联调（见 PRD §3.6 三通道设计）"}
-
-
 def apply_retention(db: Session, hot_days: int = 30) -> dict:
     """数据保留策略：热点快照只留 N 天。"""
     cutoff = retention_cutoff_date(hot_days)
@@ -87,27 +34,6 @@ def apply_retention(db: Session, hot_days: int = 30) -> dict:
     )
     db.commit()
     return {"hot_topics_deleted": deleted}
-
-
-def series_for_video(db: Session, video_id: int) -> list[dict]:
-    rows = (
-        db.query(MetricsSnapshot)
-        .filter(MetricsSnapshot.video_id == video_id)
-        .order_by(MetricsSnapshot.snapshot_date)
-        .all()
-    )
-    return [
-        {
-            "date": r.snapshot_date,
-            "plays": r.plays,
-            "likes": r.likes,
-            "favorites": r.favorites,
-            "comments": r.comments,
-            "followers_gained": r.followers_gained,
-            "source": r.source,
-        }
-        for r in rows
-    ]
 
 
 def _platform_breakdown(db, v) -> list[dict[str, Any]]:
@@ -206,3 +132,22 @@ def summary(db: Session) -> dict:
         "by_topic": topic_stats,
         "by_platform": platform_stats,
     }
+
+
+def radar(db: Session) -> list[dict[str, Any]]:
+    """赛道雷达（R-007）：按赛道统计互动率并降序（从已下线的 review 服务迁来，功能仍被 AI 对话使用）。"""
+    from ..core.metrics import engagement_rate
+
+    data = summary(db)
+    out = [
+        {
+            "topic": topic,
+            "videos": s["videos"],
+            "plays": s["plays"],
+            "likes": s["likes"],
+            "engagement": engagement_rate(s["plays"], s["likes"], s["favorites"], s["comments"]),
+        }
+        for topic, s in data["by_topic"].items()
+    ]
+    out.sort(key=lambda x: x["engagement"], reverse=True)
+    return out

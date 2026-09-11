@@ -1,6 +1,6 @@
-# API 接口文档（自动生成）
+# API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），随代码自动一致。共 100 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 122 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -1278,7 +1278,7 @@ Post To Material
 
 Trigger Sync
 
-手动同步：initial=首次全量；daily=top20（R-070）；weekly=对标每周；可限定 account/creator。
+手动同步：initial=首次全量；daily=top15（R-070/R-109）；weekly=对标每周；可限定 account/creator。
 
 **参数**
 
@@ -1521,3 +1521,61 @@ AI 判断“我能不能讲”。
 ### POST /api/benchmark/rerun
 
 R-102：页顶「重新对标」一键重跑——重捞所有对标最新10条 + 自动补 Top3 文案（长任务后台执行，返回 task_id）。
+
+### GET /api/videos/{video_id}/media-meta
+
+Video Media Meta
+
+探测本地素材媒体信息（时长/是否纯音频），供前端播放器展示。
+
+**参数**
+
+- `video_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/events
+
+Sse Events
+
+SSE 事件流（通知/任务进度实时推送）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/drafts/{draft_id}/debate-status
+
+Debate Status
+
+当前双模型讨论进行到哪一步（思考中提示，R-134 补注册）。
+
+**参数**
+
+- `draft_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/settings/asr
+
+Get Asr Config
+
+查看当前 ASR 服务商与模型配置。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### POST /api/creators/{creator_id}/benchmark
+
+Toggle Benchmark
+
+把某博主设为/取消「对标博主」。
+
+**参数**
+
+- `creator_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object

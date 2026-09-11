@@ -14,10 +14,11 @@
 4. `docs/milestones.md` —— 进度（做到哪、下一步做什么）
 5. `docs/WORKFLOW.md` —— 标准流程细则（含需求反问清单）
 6. `docs/DECISIONS.md` —— 关键决策记录（为什么这么设计，别改坏）
-7. 按需：`docs/QUICKSTART.md`（本地跑起来）、`docs/API.md`（接口，自动生成）、`docs/DATABASE.md`（表结构，自动生成）、`docs/GLOSSARY.md`（术语）、`docs/FAQ.md`
+7. 按需：`docs/QUICKSTART.md`（本地跑起来）、`docs/API.md`（接口，人工维护）、`docs/DATABASE.md`（表结构，人工维护）、`docs/GLOSSARY.md`（术语）、`docs/FAQ.md`
 
-> 注意：`docs/API.md` 与 `docs/DATABASE.md` 是**自动生成**的（分别来自 FastAPI OpenAPI 与 SQLAlchemy 模型元数据），
-> 改代码后如涉及接口/表结构，需用 `backend/.venv` 重新生成（生成器见 docs/DATABASE.md 头注；API 生成脚本见历史 commit/维护脚本），不要手改这两份结构部分。
+> 注意：`docs/API.md` 与 `docs/DATABASE.md` 由**人工维护**（仓库内没有生成器脚本，此前"自动生成"的描述与实际不符，R-136 已更正）。
+> 改代码后如涉及接口/表结构，请同步改这两份；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验
+> 「表数量/表名」与「路由数量/每条路由是否收录」，不一致会直接让门禁失败。
 
 ## 技术栈速览（现状，均为真实接入）
 - 后端：Python FastAPI + APScheduler（单进程单体，轻量低内存）
@@ -40,7 +41,7 @@ echo/
 ├── requirements/       # 需求归档（事实源）：R-xxx.md + README 索引
 ├── backend/            # FastAPI：app/（api/services/models/core/schemas）tests/ scripts/
 ├── frontend/           # Vue 3：src/（views/components/api/router）
-├── scripts/            # 项目级脚本：verify.sh（质量门禁）/ backup.sh / update.sh
+├── scripts/            # 项目级脚本：verify.sh（质量门禁）/ backup.sh / update.sh / check_doc_consistency.py
 └── data/               # 仓库内遗留空目录（实际数据在 .env 指向的 echo_resource/）
 ```
 
@@ -88,4 +89,4 @@ echo/
   + 相关后端接口冒烟（真实或 mock 均可，跑通关键链路）+ 前端关键交互点检，并说明自测结论
 - **改完必须保持服务运行（强制）**：每次改动/修复完成后，确保后端(8000)与前端(5173)处于运行状态且已加载最新代码；
   如被重启/中断需重新拉起并做 health 检查，再交付给作者验收
-- 文档与代码同步更新：改功能必须同步 PRD / ARCHITECTURE / DESIGN / CHANGELOG；改接口/表结构需重新生成 API.md / DATABASE.md
+- 文档与代码同步更新：改功能必须同步 PRD / ARCHITECTURE / DESIGN / CHANGELOG；改接口/表结构需同步更新 API.md / DATABASE.md（verify 会校验一致性）

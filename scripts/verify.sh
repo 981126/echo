@@ -58,7 +58,11 @@ else
   echo "==> [frontend] 暂无代码"
 fi
 
-# 5) 文档与需求归档完整性（自描述体系必须存在）
+# 5) 文档完整性 + 与代码一致性（自描述体系必须存在）
+if $PY -c "import sqlalchemy, fastapi" 2>/dev/null; then
+  echo "==> [docs] 表数量/路由与代码一致性"
+  $PY scripts/check_doc_consistency.py || FAIL=1
+fi
 for f in AGENTS.md README.md docs/PRD.md docs/ARCHITECTURE.md docs/WORKFLOW.md docs/DECISIONS.md docs/milestones.md docs/CHANGELOG.md requirements/README.md scripts/update.sh; do
   [ -f "$f" ] || { echo "  缺少必需文件: $f"; FAIL=1; }
 done

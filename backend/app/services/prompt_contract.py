@@ -33,12 +33,6 @@ CONTRACTS: dict[str, str] = {
         "输出契约（系统固定）：\n"
         "只输出修正后的转写文本本身，不要 JSON、不要解释、不要增删内容、不要改写成书面语。"
     ),
-    "review": (
-        "输出契约（系统固定）：\n"
-        "只输出 JSON："
-        '{"B_attribution":[{"video":"文件名","why":"为什么好/差"}],'
-        '"C_next_action":"下一条应该做什么","D_topic_direction":"赛道方向建议"}'
-    ),
     "diff": (
         "输出契约（系统固定）：\n"
         "只输出 JSON："
@@ -75,7 +69,6 @@ REQUIRED_MARKERS: dict[str, list[str]] = {
     "generation": ["title", "cover_text", "script", "shells", "JSON"],
     "video_tags": ["main_topics", "is_ad", "tags", "JSON"],
     "correct": ["校对", "只输出"],
-    "review": ["B_attribution", "C_next_action", "D_topic_direction", "JSON"],
     "diff": ["suggestions", "label", "description", "reason", "JSON"],
     "persona_init": ["tags", "label", "description", "dimension", "evidence", "redlines", "JSON"],
     "persona_merge": ["tags", "label", "description", "dimension", "evidence", "redlines", "JSON"],
@@ -93,7 +86,6 @@ CONTEXT_NOTES: dict[str, str] = {
     ),
     "video_tags": "运行时 user 消息是**一条**视频的转写稿（无其它上下文）。",
     "correct": "运行时 user 消息是：原始文案（仅供参考，可能不准）+ 待校对转写稿。",
-    "review": "运行时 user 消息是当期视频数据摘要（指标/赛道/雷达）。",
     "diff": "运行时 user 消息是 AI 原稿 + 作者改后稿。",
     "persona_init": "运行时 user 消息是作者**一篇**转写稿。",
     "persona_merge": "运行时 user 消息是多篇文案各自提炼结果组成的 JSON 数组。",
@@ -107,7 +99,6 @@ BUDGETS: dict[str, int] = {
     "generation": 2000,
     "video_tags": 1200,
     "correct": 1000,
-    "review": 1500,
     "diff": 1200,
     "persona_init": 1600,
     "persona_merge": 1600,
@@ -219,16 +210,6 @@ def _material_correct(db: Session) -> tuple[str, list[str]]:
     return "\n\n".join(lines), ([f"转写原始/校对对×{len(lines)}"] if lines else [])
 
 
-def _material_review(db: Session) -> tuple[str, list[str]]:
-    from ..models.metrics import ReviewReport
-
-    rows = db.query(ReviewReport).order_by(ReviewReport.id.desc()).limit(2).all()
-    lines = [
-        f"【历史复盘产出（run_date={r.run_date}）】\n{_clip(r.content, 900)}" for r in rows if r.content
-    ]
-    return "\n\n".join(lines), ([f"历史复盘报告×{len(lines)}"] if lines else [])
-
-
 def _material_diff(db: Session) -> tuple[str, list[str]]:
     from ..models.draft import Draft
 
@@ -315,7 +296,6 @@ _BUILDERS = {
     "generation": _material_generation,
     "video_tags": _material_video_tags,
     "correct": _material_correct,
-    "review": _material_review,
     "diff": _material_diff,
     "chat": _material_chat,
 }

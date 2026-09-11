@@ -1,10 +1,10 @@
-# 数据库表结构（自动生成 + 人工注释）
+# 数据库表结构（人工维护 + 注释）
 
-> 表结构来源：`backend/app/models/*.py`（SQLAlchemy 2.x 声明式），由模型元数据生成，保证与代码一致；说明注释为人工维护。
+> 表结构来源：`backend/app/models/*.py`（SQLAlchemy 2.x 声明式），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验表数量与表名和代码一致。
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（28 张）
+## 表总览（27 张）
 
 | 表 | 说明 |
 |---|---|
@@ -29,7 +29,6 @@
 | `platform_post_stats` | 平台作品互动指标按天快照：播放/点赞/收藏/评论/转发 + extra 平台特有字段。(post_id, stat_date) 唯一。 |
 | `platform_posts` | 云端作品（平台原样数据，默认无本地视频）：platform+platform_post_id 唯一；local_video_id 绑定本地素材、work_id 跨平台同作品合并。 |
 | `prompt_evals` | 提示词候选的金样本回放评分（R-129 M115）：候选版 vs 当前启用版在同一批金样本上的格式合法率/红线命中率/像作者率与综合分；supported=False 表示该功能暂不支持回放评分。 |
-| `review_reports` | 复盘报告：A 报表/B 归因/C 建议/D 赛道方向的产出记录与原文。 |
 | `sync_jobs` | 平台同步任务留痕：类型(initial/daily/weekly/single/manual)/账号/状态/统计 + R-070 实时进度(progress_done/total/note)。 |
 | `topic_candidates` | 选题候选：热点匹配/生成的候选稿，供每日选题流水线产出。 |
 | `topic_ideas` | 选题池灵感（R-028）：来源=各平台热点或作品评论区（source=hot/comment），人工挑选，不自动推送。 |
@@ -527,21 +526,6 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 
 ---
 
-## `review_reports`
-
-复盘报告：A 报表/B 归因/C 建议/D 赛道方向的产出记录与原文。
-
-| 字段 | 类型 | 主键 | 可空 | 默认 |
-|---|---|---|---|---|
-| `id` | INTEGER | ✔ | 否 |  |
-| `run_date` | VARCHAR(10) |  | 否 |  |
-| `report_type` | VARCHAR(20) |  | 否 | full |
-| `content` | TEXT |  | 否 | {} |
-| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
-
-**索引**：`ix_review_reports_run_date`（run_date）
-
----
 
 ## `sync_jobs`
 

@@ -21,7 +21,7 @@
 ```
 echo/
 ├── AGENTS.md / README.md
-├── docs/                  # 见 README 导航；API.md、DATABASE.md 自动生成
+├── docs/                  # 见 README 导航；API.md、DATABASE.md 人工维护（verify 校验一致性）
 ├── requirements/          # 需求事实源 R-xxx + README 索引
 ├── backend/
 │   ├── app/
@@ -41,9 +41,9 @@ echo/
 │   │   ├── scheduler.py   # APScheduler 注册
 │   │   ├── tasks.py       # start_task/_run_worker/通知/导入后自动优化提示词
 │   │   └── watcher.py     # inbox 轮询
-│   ├── tests/             # pytest（53 项，离线 mock 可跑）
+│   ├── tests/             # pytest（183 项，离线 mock 可跑）
 │   └── .venv/
-├── frontend/src/          # views(11 页)/components(24)/composables/api/router/lib
+├── frontend/src/          # views(10 页)/components(23)/composables/api/router/lib
 └── scripts/               # verify.sh / backup.sh / update.sh
 ```
 
@@ -88,8 +88,8 @@ echo/
 | videos / covers / uploads / inbox | `…/videos|covers|uploads|inbox` | 视频文件 / 封面 / 编辑器插图 / 待入库 |
 仓库 `data/` 为空壳，不是运行时目录。
 
-## 6. 数据库（26 表）
-见 `docs/DATABASE.md`（自动生成）。关系速览：
+## 6. 数据库（27 表）
+见 `docs/DATABASE.md`（人工维护，verify 校验）。关系速览：
 ```
 creators → creator_accounts → platform_posts → platform_post_stats / platform_post_comments
                               └─ work_id → works（跨平台合并）
@@ -109,10 +109,10 @@ background_tasks / sync_jobs / notifications / app_kv
 1. **导入学习**：上传/inbox → videos 行 → 编辑页手动「语音转文字」（抽音轨→按 .env 选 阿里云 FileTrans(OSS 中转) 或 硅基流动直传，R-108→校对稿回填）→ 确认标签 → 进入人设/风格语料
 2. **平台同步**：run_sync（daily top15 带视频下载转写 / weekly 3 / initial 全量）→ 账号并发（每平台独立线程/会话）→ 作品 upsert + 指标按天 upsert + 评论 Top50 → auto_merge 合并 work → daily 再对前15条媒体补齐（下载+转写，R-085）→ 进度实时写 sync_jobs → 完成通知
 3. **选题/生成**：热点/灵感 → 人设+风格检索加权（TF-IDF/RAG）→ 生成（可双模型讨论）→ 草稿 → 作者改写 → 反馈回流
-4. **复盘**：本地指标 + 平台数据 → 看板增长曲线 → ABCD 复盘报告
+4. ~~复盘~~：已下线（R-097/R-136）；赛道雷达保留在 `services/metrics.radar`，可经 AI 对话查询
 
 ## 8. 质量与安全
-- 门禁 `scripts/verify.sh`：ruff + mypy + pytest（53 项，离线 mock）+ 前端 lint/build + 文档存在性
+- 门禁 `scripts/verify.sh`：ruff + mypy + pytest（183 项，离线 mock）+ 前端 lint/build + 文档存在性 + 文档一致性
 - Web 入口 `X-Access-Token`（ECHO_ACCESS_TOKEN）；静态资源 /health/openapi 免令牌
 - 密钥仅 .env（gitignore）；备份每日自动 + 手动脚本
 - 预算护栏：TikHub 每日请求预算（默认 2000，Kv 可覆盖），超限停止本轮并通知

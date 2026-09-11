@@ -28,8 +28,6 @@
 | platform.py | /api/platform | 云端作品/评论/指标/同步触发与任务/预算/选题池/主页快照；bind-links |
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
 | benchmark.py | /api/benchmark | 博主对标：Top3 展示/转写补齐/AI可讲/洗稿；「重新对标」一键重跑（R-102，后台任务） |
-| metrics.py | /api/metrics | 手动录入/批量导入/汇总/单视频序列 |
-| review.py | /api/review | 生成报告/最新报告/雷达 |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选/增量校验结果（R-128：`/check/latest`、`/recheck`）；R-131：`/style` 扩展风格范本与样本条数 |
 | drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分 |
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
@@ -60,8 +58,7 @@
 - `prompt_contract.py`（R-129）：提示词优化契约——`material_for`（按 key 取真实样本，取不到返回空→「样本不足」）、`contract_for`（程序固定的输出契约段）、`context_note_for`（运行时 user 上下文说明，避免优化器重复注入）、`budget_for`（长度预算）、`validate_candidate`（长度/契约字段/写死事实校验）、`assemble_candidate`（可优化段 + 契约段分层拼接）。
 - `prompt_eval.py`（R-129 M115）：金样本回放评分——`golden_set`（高表现素材选题 Top5 + 高/低分草稿各 3 条 + 风格标记 + 红线）、`_probes`（按 key 组装回放输入）、`_score_outputs`（格式合法率/红线命中率/像作者率 → 综合分）、`evaluate`（候选 vs 当前版同批金样本对比，落 `prompt_evals`）、`prompt_eval_task`（后台任务 + 通知）。只展示分数，不设启用门槛。
 - `style_profile`（core）：口癖/句长/感叹反问占比等画像；R-057 表达风格面板 + 禁词注入。
-- `review.py`：ABCD 复盘：A 报表（按视频/赛道/平台）、B 归因（启发式+LLM）、C 建议、D 赛道方向；`_radar` 赛道雷达（按互动率）。
-- `metrics.py`：`upsert_snapshot/import_snapshots/fetch_daily/series_for_video/_platform_breakdown/summary`；`apply_retention`（热点 30 天清理）。
+- `metrics.py`：`_platform_breakdown`（平台最新指标，供生成加权）/`summary`/`radar`（赛道雷达，R-136 自 review 迁入）/`apply_retention`（热点 30 天清理）；R-136 已删除无调用方的 upsert/import/fetch/series。
 - `chat_service.py`：只读工具集 + 流式问答；工具：search_videos/get_video_detail/get_persona/list_requirements/get_metrics_summary/get_today_topics/get_review_report/get_radar/search_drafts/generate_draft（写操作需明确同意）。SSE 由 api/chat 组装。
 - `benchmark.py`：对标聚合（最新15条按互动分 Top3，R-109：10→15；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `ensure_top3_with_text`（缺文案自动下载转写、无文案顺延；有文案后严格 AI 审核软广/商单/引流并落库排除，R-103/R-106）+ `rerun_benchmarks(db, owner, update, refetch)`（R-102/R-109：refetch=True 手动重捞最新15条；refetch=False 每日同步后自动触发、不重复拉取，只重算 Top3/补缺转写）；/top 有文案优先（空文案被下一条顶上，R-106）。
 - `platform_sync.py`：见 §4。
@@ -80,7 +77,6 @@
 - `transcript.py`：转写稿切分/处理。
 - `matching.py`：热点标题与确认关键词的命中打分。
 - `metrics.py`：互动率等规范化。
-- `review.py`：复盘启发式。
 - `diff.py`：改稿差异（diff 文本）。
 - `digest.py`：每日邮件 HTML。
 - `draft_check.py`：生成前体检（红线/人设词频/开头钩子/结尾引导，R-030⑦）。
@@ -122,9 +118,9 @@
 - `watcher.py`：10s 轮询 inbox，移入 videos 目录并建 `Video` 行（文件名 uuid 前缀防重），**不自动转写**（R-033，手动按钮触发）。
 
 ## 6. 前端结构（frontend/src/）
-- `router.js`：/home /videos /drafts /chat /persona /requirements /prompts /dashboard /creators /login（hash）。
+- `router.js`：/home /videos /drafts /chat /persona /requirements /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并）、DraftsView（三 tab+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、DashboardView、CreatorsView（博主/账号/作品/同步+进度条）、RequirementsView、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并）、DraftsView（三 tab+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、RequirementsView、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）。
 - `composables/media.js`：fetchVideos/fetchWorks 统一入口。
 - `lib/`：format.js（平台名/数字缩写）、options.js（平台/赛道/状态选项）、timeline.js。

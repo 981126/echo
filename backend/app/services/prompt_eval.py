@@ -31,7 +31,6 @@ MAX_OUTPUT_TOKENS = 6000
 OUTPUT_FIELDS: dict[str, list[str] | None] = {
     "generation": ["title", "script"],
     "video_tags": ["main_topics", "is_ad", "tags"],
-    "review": ["B_attribution", "C_next_action", "D_topic_direction"],
     "diff": ["suggestions"],
     "persona_init": ["tags"],
     "persona_merge": ["tags"],
@@ -182,24 +181,6 @@ def _probes(db: Session, key: str, golden: dict) -> list[dict]:
             if len(out) >= 3:
                 break
         return out
-    if key == "review":
-        try:
-            from .metrics import summary
-            from .review import _radar
-
-            data = summary(db)
-            lines = [
-                f"- {v['filename']} | 赛道:{'/'.join(v.get('main_topics') or ['未标'])} | "
-                f"播放:{v['plays']} 赞:{v['likes']} 藏:{v['favorites']} 评:{v['comments']}"
-                for v in data["per_video"][:15]
-            ]
-            radar = "\n".join(
-                f"- {r['topic']}: {r['videos']} 条, 播放 {r['plays']}, 互动率 {r['engagement']}%"
-                for r in _radar(db)
-            )
-            return [{"label": "当期视频数据", "user": "视频数据：\n" + "\n".join(lines) + f"\n\n赛道雷达：\n{radar}"}]
-        except Exception:  # noqa: BLE001
-            return []
     if key == "diff":
         pairs = [d for d in (golden.get("high_drafts") or []) if d.get("original")]
         if not pairs:

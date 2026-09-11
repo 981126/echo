@@ -6,7 +6,7 @@ from .draft import Draft
 from .feedback import Feedback
 from .hot_topic import HotTopic, TopicCandidate, TopicIdea
 from .kv import Kv
-from .metrics import MetricsSnapshot, ReviewReport
+from .metrics import MetricsSnapshot
 from .notification import Notification
 from .persona import PersonaCheck, PersonaTag
 from .pipeline import PipelineRun
@@ -42,7 +42,6 @@ __all__ = [
     "TopicCandidate",
     "PipelineRun",
     "MetricsSnapshot",
-    "ReviewReport",
     "Feedback",
     "Creator",
     "CreatorAccount",
