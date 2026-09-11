@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-132 | 2026-09-10 | 「AI 基于最新素材优化」最小改动：按钮改「基于真实样本优化」并说明"素材更新无需改提示词"、OPT_SYSTEM 增可改/不可改清单、候选长度≤1.5倍（超限拦截）、候选附「变更说明」 | 已确认（待开工） | M121（待实施） | prompt_service.optimize、OPT_SYSTEM、PromptsView、R-129/R-131 |
 | R-131 | 2026-09-10 | AI 提示词降权 + 生成「像作者」重心转向数据侧：取消 generation 自动产出候选（改通知 + 手动一键规则型）、改写稿 few-shot、风格样本扩容+风格范本、开场/结尾结构模板、生成后自检并自动重写 1 次、打分引导、提示词页重定位为「支架+高级设置」 | ✅ 已完成 | M119/M120（已完成） | generation、prompt_service、scheduler、Draft/Feedback、R-129/R-130 |
 | R-130 | 2026-09-10 | 人设管理 与 AI 提示词 的边界整理：单一事实源（人设不写进提示词）、drafts 记录 persona_version、提示词页按「人设引擎/生产提示词」分组、表达风格归位说明、人设引擎候选启用后引导去人设页确认 | ✅ 已完成 | M118（已完成） | persona_tags/ai_prompts/drafts、R-128/R-129 |
 | R-129 | 2026-09-10 | AI 提示词优化升级：按 key 定制语料 + 输出契约自检 + 禁止写死事实 + 分层模板与长度预算 + 金样本回放评分 + 草稿版本归因 + 反馈语料加厚 + 候选拒绝/回滚；优化模型跟随生成模型策略 | ✅ 已完成 | M113~M116（已完成） | prompt_contract、prompt_eval、prompt_service.optimize、PromptsView、Draft/Feedback、R-021/022/128 |
