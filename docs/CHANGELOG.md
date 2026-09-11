@@ -12,6 +12,9 @@
 - **修复**：`generation._best_practice_lines` 先 `limit()` 后 `filter()`，存在当前博主时必抛 `InvalidRequestError`——最佳实践注入一直失效，已修正。
 - **实测**：video_tags 候选不再变「人设分身」（评测 100 vs 当前 60）；correct 候选为纯校对任务提示词；generation 候选显式声明「人设/红线运行时动态注入」，不再写死传记与红线；优化模型正确跟随设置为 kimi。
 - 测试：新增 `test_r129_prompt_optimize` 16 用例；`verify.sh` 全绿。
+- **评测稳健性修复**：评测模型改为与各 key 生产实际使用的模型一致（只有 generation 跟随生成模型策略，其余走 DeepSeek）——
+  此前统一用推理模型跑 `correct` 长文本会返回空正文（实测 2/3 样本为空，评分被误判）；回放 `max_tokens` 提高到 6000、
+  JSON 类输出允许代码围栏、两版全空时标记「评测无效」而不是给误导性低分。复测：correct 候选 92.5 vs 当前 92.5；video_tags 100 vs 60。
 
 ## [M110/M111/M112 / R-128] 2026-09-10 — 人设分析管线升级 + 增量/全量 5% 对齐 + 候选提示词人设化
 - 人设分析：逐篇提取（`analyze_one`）的提示词改为「只给方向盘」（角色 + 观察方向；维度/措辞/条数由 AI 自定，程序只解析固定字段）；新增 `persona_merge` 归纳合并层，把近义/重复信号「总结去重」成结构化档案；`persona_tags` 新增 `dimension` 落库（维度→category 映射）。

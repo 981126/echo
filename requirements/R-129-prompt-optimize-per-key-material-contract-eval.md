@@ -83,3 +83,17 @@
   - `generation`：候选显式写「基于运行时动态注入的选题/人设/红线/风格样本」并要求「严守运行时注入的红线，不编造作者未…」，
     不再把姓名/学历/收入/红线整段写死；自动化断言「写死事实命中：无」。
 - 质量门禁：`scripts/verify.sh` 全绿（ruff + mypy + pytest 141 用例 + 前端 lint/build + 文档完整性）；服务保持运行（后端 8000 / 前端 5173）。
+
+## 评测稳健性修复（实施中发现，2026-09-10）
+- 现象：`correct` 候选评测出现 `empty: 2/3`（AI 回放返回空正文）→ 评分被误判为 47 vs 71。
+- 根因：评测最初统一用「生成模型策略」（当时为 kimi 推理模型）跑所有 key；kimi 把 token 预算花在思考上，
+  长文本输出（校对稿）在中途被截断 → `content` 为空。
+- 修复：
+  1. `_eval_llm`：评测模型与该 key **生产时实际使用的模型**保持一致——只有 `generation` 跟随生成模型策略，
+     其余功能（video_tags/correct/review/diff/persona_*）生产里都走 DeepSeek，评测也用 DeepSeek；
+  2. 回放 `max_tokens` 1200 → 6000；
+  3. `_format_ok` 对 JSON 类 key 放宽（允许 ```json 围栏，由 `_parse_json` 兼容）；
+  4. 两版回放全为空时标记 `supported=False`（「评测无效」），不再给出误导性低分。
+- 复测：`correct` 候选 92.5 vs 当前 92.5（empty 0、errors 0）；`video_tags` 候选 100 vs 当前 60。
+- 交付状态：作者明确要求清空 AI 提示词数据，故验收用的测试候选与评测记录已清除，
+  当前库里为 10 条默认提示词（enabled v1）、0 条候选；作者点「AI 基于最新素材优化（候选）」即可看到新流程效果。

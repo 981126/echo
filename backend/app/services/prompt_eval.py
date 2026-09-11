@@ -25,7 +25,7 @@ GOLDEN_VIDEOS = 8
 GOLDEN_DRAFTS = 3
 MAX_PROBES = 5
 # 回放单次生成上限：推理模型（如 kimi）会把预算花在思考上，太小会导致正文为空（R-129 实测踩过）
-MAX_OUTPUT_TOKENS = 4000
+MAX_OUTPUT_TOKENS = 6000
 
 # 每个 key 期望的输出字段（None = 纯文本输出）
 OUTPUT_FIELDS: dict[str, list[str] | None] = {
@@ -319,6 +319,22 @@ def _store(db: Session, key: str, cand_version: int, base_version: int, supporte
     return row
 
 
+def _eval_llm(db: Session, key: str):
+    """评测用模型与该 key 在生产里的模型保持一致（R-129）：
+
+    只有 generation 跟随「生成模型策略」，其余功能生产里都走 DeepSeek；
+    用错模型会得到与线上不同的结果（实测：kimi 推理模型跑长文本校对会返回空正文）。
+    """
+    from .llm import DeepSeekClient
+
+    if key == "generation":
+        from .prompt_service import _optimize_llm
+
+        llm, mode = _optimize_llm(db)
+        return llm, mode
+    return DeepSeekClient(), "deepseek"
+
+
 def evaluate(db: Session, key: str, candidate_version: int, update=None) -> PromptEval | None:
     """对候选版做金样本回放评分，与当前启用版对比；结果落 prompt_evals。"""
     candidate = (
@@ -343,9 +359,7 @@ def evaluate(db: Session, key: str, candidate_version: int, update=None) -> Prom
     redlines = golden.get("redlines") or []
     if update:
         update(20, f"金样本回放评分（{len(probes)} 个样本 × 2 版）…")
-    from .prompt_service import _optimize_llm
-
-    llm, _mode = _optimize_llm(db)
+    llm, _mode = _eval_llm(db, key)
     cand_result = _run_version(db, llm, candidate.content, probes, key, markers, redlines)
     if update:
         update(60, "候选版评分完成，正在跑当前版…")
