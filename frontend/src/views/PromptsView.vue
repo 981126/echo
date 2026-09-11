@@ -33,6 +33,9 @@
               <n-tag v-if="item.key === 'generation'" size="small" :bordered="false" round>
                 自动优化已改为手动（素材更新会提醒你）
               </n-tag>
+              <n-tag v-if="item.key === 'generation'" size="small" :bordered="false" round type="info">
+                素材/反馈更新会自动注入，无需改提示词；此按钮只在你想调整写法与结构时用
+              </n-tag>
               <n-tag v-if="item.has_candidate" size="small" :bordered="false" round type="warning">
                 有候选 v{{ item.candidate_version }} 待启用
               </n-tag>
@@ -48,7 +51,7 @@
           <div class="row" style="margin-top: 12px">
             <n-button type="primary" @click="save(item)">保存为新版本并启用</n-button>
             <n-button secondary :loading="optimizingKey === item.key" @click="optimize(item)">
-              AI 基于最新素材优化（候选）
+              AI 基于真实样本优化（候选）
             </n-button>
           </div>
         </div>
@@ -61,7 +64,7 @@
               <n-button size="small" type="error" secondary @click="rejectCandidate(item)">拒绝候选</n-button>
             </div>
           </div>
-          <p class="muted" style="margin: 0 0 8px">{{ candidate(item).note }}</p>
+          <p class="muted" style="margin: 0 0 8px; white-space: pre-wrap">{{ candidate(item).note }}</p>
 
           <div class="eval-box">
             <template v-if="evalOf(item) && evalOf(item).supported">

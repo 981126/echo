@@ -381,6 +381,25 @@ def assemble_candidate(key: str, optimizable: str) -> str:
     return f"{body}\n\n{contract}" if body else contract
 
 
+def max_candidate_chars(key: str, current: str) -> int:
+    """候选长度上限（R-132）：1.5 ×（当前提示词 + 契约段），下限 300 字。"""
+    baseline = len((current or "").strip()) + len(contract_for(key))
+    return max(int(baseline * 1.5), 300)
+
+
+_CHANGE_MARKERS = ("【变更说明】", "[变更说明]", "变更说明：", "变更说明:")
+
+
+def split_change_note(text: str) -> tuple[str, str]:
+    """把模型输出拆成 (提示词正文, 变更说明)（R-132）；没有标记时整体视为正文。"""
+    body = (text or "").strip()
+    for marker in _CHANGE_MARKERS:
+        if marker in body:
+            head, _sep, tail = body.partition(marker)
+            return head.strip(), tail.strip()
+    return body, ""
+
+
 def material_summary(sources: list[str]) -> str:
     return "、".join(sources) if sources else "样本不足"
 
@@ -397,4 +416,6 @@ __all__ = [
     "material_summary",
     "validate_candidate",
     "assemble_candidate",
+    "max_candidate_chars",
+    "split_change_note",
 ]

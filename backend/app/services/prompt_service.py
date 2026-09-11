@@ -42,14 +42,14 @@ PROMPT_META: dict[str, tuple[str, str, str]] = {
 OPT_SYSTEM = (
     "你是提示词工程专家，正在帮一位自媒体作者优化他自己的 AI 提示词。"
     "你只优化「角色与任务」部分；程序会在你输出之后自动拼接固定的输出契约段。\n"
-    "硬性规则（违反即无效）：\n"
-    "1. 只输出优化后的提示词正文（角色与任务部分），不要解释、不要 markdown 代码块、不要重复输出契约段。\n"
-    "2. **不得写死具体事实**：不要出现作者姓名/身份/学历/收入/经历/作品等传记信息，"
-    "也不要罗列红线清单、金句清单——这些由系统在运行时动态注入；写进提示词只会重复、过期、失真。\n"
-    "3. 必须保持程序解析所需的输出格式（字段名与结构见「输出契约」），不得改名或删字段。\n"
-    "4. 优化时只给「方向盘」：交代角色、目标、方法与红线原则即可；"
-    "不要新增过多硬性条数/字数/句式限制去锁死 AI 的思路，让模型有深度学习与自由发挥的空间。\n"
-    "5. 样本只用于理解作者的真实口径与偏好，不要把样本内容原样抄进提示词。"
+    "**可以改**：角色设定、写作或判断的方法、结构要求（如开场钩子与收尾引导）、篇幅与语气方向、需要遵守的原则。\n"
+    "**不可以改**：作者姓名/身份/学历/收入/经历等具体事实、红线与金句清单、程序解析所需的输出格式与字段名"
+    "（这些由系统在运行时动态注入，写进提示词只会重复、过期、失真）。\n"
+    "硬性规则：\n"
+    "1. 只输出「提示词」正文与「变更说明」，不要 markdown 代码块、不要复述契约段。\n"
+    "2. 保持简洁：正文不要超过原提示词的 1.5 倍，能短则短——过长反而锁死 AI 的思路。\n"
+    "3. 只给「方向盘」：不要新增过多硬性条数/字数/句式限制。\n"
+    "4. 样本只用于理解作者的真实口径与偏好，不要把样本内容原样抄进提示词。"
 )
 
 
@@ -392,11 +392,16 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
             f"该功能的输出契约（系统固定，程序会原样拼在末尾）：\n{prompt_contract.contract_for(key)}",
             f"运行时上下文说明：{prompt_contract.context_note_for(key)}",
             "作者真实样本（仅用于理解口径，不要抄进提示词）：\n" + "\n\n".join(p for p in [material, ctx] if p and p.strip()),
-            "请只输出优化后的「角色与任务」部分（不要输出契约段、不要解释）。",
+            "请按下面格式输出，不要解释、不要 markdown 代码块：\n"
+            "【提示词】\n"
+            "（只写优化后的角色与任务部分，保持简洁，不要超过原提示词的 1.5 倍）\n"
+            "【变更说明】\n"
+            "（- 改了什么、依据哪条样本或反馈；不超过 3 条）",
         ]
         if part and part.strip()
     )
 
+    limit = prompt_contract.max_candidate_chars(key, current)
     llm, mode = _optimize_llm(db)
     last_reason = ""
     for _attempt in range(2):  # 自检失败自动重试 1 次（R-129 确认口径）
@@ -409,15 +414,17 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
         except Exception as exc:  # noqa: BLE001 外部失败不破坏当前版
             last_reason = f"AI 服务异常：{str(exc)[:150]}"
             continue
-        candidate = prompt_contract.assemble_candidate(key, _strip_fence(raw))
+        body, change_note = prompt_contract.split_change_note(_strip_fence(raw))
+        candidate = prompt_contract.assemble_candidate(key, body)
+        if len(candidate) > limit:  # R-132：防膨胀
+            last_reason = f"候选过长（{len(candidate)}/{limit} 字），已要求保持简洁"
+            continue
         ok, reason = prompt_contract.validate_candidate(key, candidate, db)
         if ok:
-            row = create_candidate(
-                db,
-                key,
-                candidate,
-                note=f"AI 优化候选（模型 {mode}；语料：{prompt_contract.material_summary(sources)}）",
-            )
+            note = f"AI 微调候选（模型 {mode}；语料：{prompt_contract.material_summary(sources)}）"
+            if change_note:
+                note += "\n变更说明：\n" + change_note
+            row = create_candidate(db, key, candidate, note=note)
             _start_eval(db, key, row.version)
             return row
         last_reason = reason

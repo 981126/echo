@@ -1,8 +1,8 @@
 # R-132 「AI 基于最新素材优化」最小改动：定位说清 + 可改清单 + 长度约束 + 变更说明
 
 - **日期**: 2026-09-10
-- **状态**: 已确认（待作者说「继续」后实施）
-- **排期**: M121（待确认）
+- **状态**: ✅ 已完成
+- **排期**: M121（已完成）
 - **关联**: R-129（提示词优化/契约自检/评测）、R-131（提示词降权+数据侧）、`prompt_service.optimize` / `prompt_contract` / `OPT_SYSTEM` / `PromptsView`
 
 ## 原文（作者原话，未改动）
@@ -41,3 +41,12 @@
 3. 超长候选被拦截：单测覆盖（构造超长输出 → 自检失败重试 → 抛 `PromptOptimizeError`）。
 4. 候选 `note` 含「变更说明」，前端多行可读。
 5. `scripts/verify.sh` 全绿；接口冒烟；服务保持运行。
+
+## 实施记录（2026-09-10）
+- `prompt_service.OPT_SYSTEM` 重写：新增「可以改 / 不可以改」正面清单；加"保持简洁，不超过原提示词 1.5 倍"。
+- `prompt_contract` 新增 `max_candidate_chars(key, current)`（1.5×，下限 300 字）与 `split_change_note(text)`。
+- `optimize`：要求模型按「【提示词】/【变更说明】」输出；先做长度门禁（超限 → 记原因并重试 1 次 → 仍超则抛 `PromptOptimizeError`），再跑既有契约自检；
+  变更说明写入候选 `note`（与模型/语料来源并列），不进入提示词正文。
+- 前端 `PromptsView`：按钮改「AI 基于真实样本优化（候选）」；generation 卡片加「素材/反馈更新会自动注入，无需改提示词；此按钮只在你想调整写法与结构时用」；候选 note 多行展示。
+- 测试：`test_r129_prompt_optimize` 新增 4 用例（`split_change_note`、`max_candidate_chars` 下限与比例、超长候选重试后丢弃、变更说明入库且不在正文）。
+- `verify.sh` 全绿（ruff + mypy + pytest 158 + 前端 lint/build）。

@@ -188,8 +188,6 @@ def test_optimize_sample_insufficient_raises(db, monkeypatch):
 
 
 # ---------- 拒绝候选 / 版本效果 ----------
-
-
 def test_reject_candidate_marks_rejected(db):
     db.add(AiPrompt(key="generation", version=2, content="候选内容占位符超过二十个字符", status="candidate"))
     db.commit()
@@ -258,3 +256,52 @@ def test_generate_draft_records_prompt_version(db, monkeypatch):
     # 无密钥 → generate_draft 走 mock 兜底，仍应记录当前启用版本
     draft = generation.generate_draft(db, "测试选题")
     assert draft.prompt_version == 1
+
+
+# ---------- R-132：变更说明 / 长度约束 ----------
+
+
+def test_split_change_note():
+    body, note = pc.split_change_note("正文内容\n【变更说明】\n- 补充了广告判定")
+    assert body == "正文内容"
+    assert "补充了广告判定" in note
+    body2, note2 = pc.split_change_note("只有正文")
+    assert body2 == "只有正文" and note2 == ""
+
+
+def test_max_candidate_chars_floor_and_ratio():
+    limit = pc.max_candidate_chars("video_tags", "短")
+    assert limit == 300  # 下限兜底
+    long_current = "提示词" * 200
+    expected = max(int((len(long_current) + len(pc.contract_for("video_tags"))) * 1.5), 300)
+    assert pc.max_candidate_chars("video_tags", long_current) == expected
+
+
+def test_optimize_rejects_overlong_candidate(db, monkeypatch):
+    owner = _owner(db)
+    _video(db, owner, "v1", "讲简历包装", tags='["简历包装"]', confirmed=True)
+    db.commit()
+    fake = _FakeLLM(["很长" * 3000, "还是" * 3000])
+    monkeypatch.setattr(ps, "_optimize_llm", lambda _db: (fake, "deepseek"))
+    monkeypatch.setattr(ps, "_start_eval", lambda _db, _key, _version: None)
+
+    with pytest.raises(PromptOptimizeError) as exc:
+        optimize(db, "video_tags")
+    assert "过长" in str(exc.value)
+    assert fake.calls == 2  # 重试 1 次后仍超限 → 丢弃
+    assert db.query(AiPrompt).filter(AiPrompt.status == "candidate").count() == 0
+
+
+def test_optimize_stores_change_note_and_strips_it_from_body(db, monkeypatch):
+    owner = _owner(db)
+    _video(db, owner, "v1", "讲简历包装", tags='["简历包装"]', confirmed=True)
+    db.commit()
+    fake = _FakeLLM(["你是视频内容标注助手，按作者口径判断。\n【变更说明】\n- 补充了广告判定标准\n- 依据：已确认标签素材"])
+    monkeypatch.setattr(ps, "_optimize_llm", lambda _db: (fake, "deepseek"))
+    monkeypatch.setattr(ps, "_start_eval", lambda _db, _key, _version: None)
+
+    row = optimize(db, "video_tags")
+    assert "变更说明" in row.note
+    assert "补充了广告判定标准" in row.note
+    assert "变更说明" not in row.content  # 变更说明不进提示词正文
+    assert row.content.endswith(pc.contract_for("video_tags"))
