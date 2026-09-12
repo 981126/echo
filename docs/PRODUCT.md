@@ -38,7 +38,7 @@ echo 的目标：让 AI 越来越懂作者的人设 ——
 - 平台互动：TikHub（抖音/B站/小红书）真实接口
 - 热点：TikHub 各平台热搜
 - 语音转文字：阿里云录音文件识别（FileTrans + OSS 中转，自动抽音轨）
-- AI 生成/复盘/对话：DeepSeek + Kimi 真实模型（生成默认 Kimi）
+- AI 生成/对话：DeepSeek（V4.1 Flash，`deepseek-flash`）+ Kimi 真实模型（生成默认 Kimi）
 - 邮件：QQ 邮箱 SMTP（每日推送）
 
 ## 5. 边界与不做（Non-goals）

@@ -1,5 +1,11 @@
 # 变更记录
 
+## [M126 / R-137] 2026-09-11 — DeepSeek 模型切换到 DeepSeek-V4.1-Flash
+- 官方 2026-09-10 发布 V4.1 Flash，规范 API 模型名为 **`deepseek-flash`**（`deepseek-v4-flash` 等仅为临时兼容别名）。
+- `.env` / `.env.example` / `config.py` 默认值三处统一改为 `deepseek-flash`；**顺带修掉已停用的旧模型名 `deepseek-chat`**（官方 2026-07-24 停用）。
+- 真实调用验证：JSON 模式返回可解析结构；长输出 334 字符 JSON / 286 字脚本无截断（确认 thinking 模式未吃光 token）；应用层 `correct_transcript` 走新模型并正确纠错「面视→面试」。
+- 未改动 Kimi 配置、`generation_model` 策略（仍为 kimi）、base_url 与鉴权。
+
 ## [M122~M125 / R-133~R-136] 2026-09-11 — 系统体检修复：P0 稳定性 → P1 任务闭环 → P2 正确性 → P3 复盘下线/文档统一
 > 起因：对全系统做「闭环 / 描述与实现一致性 / bug」体检，作者要求按 P0–P3 顺序登记并修复。
 

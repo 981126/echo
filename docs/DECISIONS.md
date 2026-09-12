@@ -17,7 +17,7 @@
 - **代价**：并发写受限（单用户无感）；未来多用户再评估
 
 ## D-003：LLM 适配器 + DeepSeek/Kimi 可插拔
-- **决策**：所有 LLM 调用统一 OpenAI 兼容客户端（services/llm.py），模型名 env 可配；生成默认 Kimi，可切 deepseek/random/alternate
+- **决策**：所有 LLM 调用统一 OpenAI 兼容客户端（services/llm.py），模型名 env 可配（DeepSeek 侧为 V4.1 Flash：`deepseek-flash`，R-137）；生成默认 Kimi，可切 deepseek/random/alternate
 - **原因**：中文语气质量与成本可控；双模型交叉评审可压 AI 感（见 D-025/026）
 
 ## D-004：ASR 用阿里云录音文件识别（FileTrans 4.0）

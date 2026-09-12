@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # DeepSeek（模型名可在 .env 配任意值：ECHO_DEEPSEEK_MODEL）
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-flash"  # R-137：DeepSeek-V4.1-Flash 官方 ID
 
     # Kimi / Moonshot（R-023；模型名可配任意值：ECHO_KIMI_MODEL）
     kimi_api_key: str = ""
