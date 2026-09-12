@@ -24,6 +24,11 @@ log = get_logger("main")
 async def lifespan(app: FastAPI):
     setup_logging()  # R-133：全后端此前零日志，失败不可观测
     init_db()
+    # R-144 B：结构自检（模型声明的列 vs 实际库）——缺列时日志 + 站内通知，绝不阻塞启动
+    from .core import schema_guard
+    from .db import engine
+
+    schema_guard.run_startup_check(engine)
     mark_interrupted_tasks_on_startup()  # R-089：重启后清理遗留 running 任务
     from .services.pipeline import mark_stale_pipeline_runs_on_startup
 

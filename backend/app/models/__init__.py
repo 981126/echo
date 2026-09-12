@@ -20,6 +20,7 @@ from .platform import (
     SyncJob,
 )
 from .prompt import AiPrompt, PromptEval
+from .schema_migration import SchemaMigration
 from .task import BackgroundTask
 from .video import Transcript, Video
 from .work import Work
@@ -33,6 +34,7 @@ __all__ = [
     "Notification",
     "AiPrompt",
     "PromptEval",
+    "SchemaMigration",
     "Draft",
     "DraftDiscussion",
     "ChatMessage",

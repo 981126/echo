@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -112,8 +113,15 @@ def test_backup_script_uses_env_db_path_and_validates(tmp_path):
     con.close()
     (tmp_path / ".env").write_text(f"ECHO_DB_PATH={real_db}\n", encoding="utf-8")
 
+    # R-144 A：backup.sh 现在「环境变量优先、其次 .env」。本用例测的是「读 .env 那条路径」，
+    # 所以显式清空环境变量（pytest 进程本身带着 ECHO_DB_PATH，否则会盖掉 .env）。
+    env = {**os.environ, "ECHO_DB_PATH": "", "ECHO_DATA_DIR": ""}
     proc = subprocess.run(
-        ["bash", str(tmp_path / "scripts" / "backup.sh")], capture_output=True, text=True, cwd=tmp_path
+        ["bash", str(tmp_path / "scripts" / "backup.sh")],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
     )
     assert proc.returncode == 0, proc.stderr
     backups = list((tmp_path / "data" / "backups").glob("*/echo.db"))
@@ -128,7 +136,11 @@ def test_backup_script_uses_env_db_path_and_validates(tmp_path):
     # 源库缺失 → 明确失败（而不是静默新建空库）
     real_db.unlink()
     proc2 = subprocess.run(
-        ["bash", str(tmp_path / "scripts" / "backup.sh")], capture_output=True, text=True, cwd=tmp_path
+        ["bash", str(tmp_path / "scripts" / "backup.sh")],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,  # 同上：必须清掉继承来的 ECHO_DB_PATH，否则测的是另一个库
     )
     assert proc2.returncode != 0
     assert "备份失败" in (proc2.stderr + proc2.stdout)

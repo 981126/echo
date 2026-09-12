@@ -23,7 +23,7 @@
 ## 技术栈速览（现状，均为真实接入）
 - 后端：Python FastAPI + APScheduler（单进程单体，轻量低内存）
 - 前端：Vue 3 + Vite + Naive UI SPA（响应式，桌面/手机浏览器均可用）
-- 数据库：SQLite + SQLAlchemy 2.x；运行时数据目录由 `.env` 的 `ECHO_DATA_DIR`/`ECHO_DB_PATH` 决定（当前 `echo_resource/`，**不是**仓库 `data/`）；schema 用幂等轻量迁移（Alembic 是 tech-debt，未落地）
+- 数据库：SQLite + SQLAlchemy 2.x；运行时数据目录由 `.env` 的 `ECHO_DATA_DIR`/`ECHO_DB_PATH` 决定（当前 `echo_resource/`，**不是**仓库 `data/`）；schema 用幂等轻量迁移（Alembic 是 tech-debt，未落地）：**加表**靠 `create_all` 自动建、**加字段必须手写 `_migrate_*`**（`create_all` 不给已有表补列），启动时 `core/schema_guard` 会自检「模型声明 vs 实际库」并报警；迁移记在 `schema_migrations`，增量上线流程见 `docs/QUICKSTART.md` §8
 - 真实外部服务（2026-09-06 起全部 real，配置非法会启动报错，见 R-068）：
   - 平台数据：TikHub（抖音/B站/小红书，含主页/作品/统计/评论）
   - LLM：模型1 / 模型2 两个可配置槽位（厂家 + 模型 ID + API Key，界面「AI 设置 → 模型设置」；当前默认 模型1=DeepSeek `deepseek-flash`、模型2=Kimi `kimi-k2.6`）。

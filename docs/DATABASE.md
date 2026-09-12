@@ -4,11 +4,12 @@
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（27 张）
+## 表总览（28 张）
 
 | 表 | 说明 |
 |---|---|
 | `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版；R-129 起候选正文=可优化段+程序固定的输出契约段，支持候选拒绝(rejected)与历史回滚。 |
+| `schema_migrations` | 结构变更记账（R-144）：`name` 唯一 + `applied_at` + `note`。轻量替代 Alembic，用来回答「这个库升到哪一版」；首次运行写入基线 `baseline_pre_r144`。启动自检（`core/schema_guard`）会把状态写进日志并校验「模型声明的列 vs 实际库」。 |
 | `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、一次性迁移标记、R-022 优化节流计数等。 |
 | `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。 |
 | `chat_conversations` | AI 对话会话（R-017）：标题 + 创建/更新时间，单用户多会话。 |
@@ -677,3 +678,17 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 **外键**：`creator_id` → `creators.id`
 
 ---
+
+## `schema_migrations`
+
+库结构变更记账（R-144）。
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `name` | VARCHAR(120) | 迁移名，唯一（如 `baseline_pre_r144`、`r145_draft_share_count`） |
+| `note` | VARCHAR(255) | 备注 |
+| `applied_at` | DATETIME | 应用时间（北京时间） |
+
+用法：新迁移在 `app/db.py` 的 `_migrate_*` 里干完活后调用 `schema_guard.record_migration(engine, "<名字>")`；
+`migration_status(engine)` 返回已应用条数与最新迁移名，启动日志会打印。R-144 之前的所有变更记为基线一行。

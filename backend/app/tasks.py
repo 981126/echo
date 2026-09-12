@@ -33,6 +33,7 @@ KIND_LABELS = {
     "benchmark_rewrite": "洗稿",
     "llm_fallback": "模型降级",
     "model_selfcheck": "双模型兼容性自检",
+    "schema_check": "库结构自检",
 }
 
 

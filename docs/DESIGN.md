@@ -67,6 +67,16 @@
   - **再校准方法**：不传 stream、逐个 max_tokens 打真实接口，记录 `finish_reason` / `reasoning_content` 长度 / `usage.completion_tokens_details.reasoning_tokens`；改动预算前 `tests/test_r142_thinking_budget.py` 会把「长输出功能的默认预算低于实测最坏值 × 余量」直接判红。
   - **可配置（R-143）**：`services/budget_settings.py` 是预算的唯一事实源（`SLOTS` / `budget_for(db,key)` / `save_budgets` / `reset_budgets`），调用点全部读它；`GET/PUT /api/settings/models` 带 `budgets`（不新增路由），前端在「模型设置」里有「推理预算（高级）」区块（含每项说明、默认值、生效值、一键恢复默认）。
   - 「不传 max_tokens（交给服务端默认）」实测也能跑通，但会失去上面两个能力，且默认值随供应商变化而不可见 —— 已评估后选择保留显式上限（作者 2026-09-12 选 A）。
+- **库结构与增量升级（R-144）**：结构事实源是 `backend/app/models/*.py`；启动时 `init_db()` 执行
+  `create_all`（建缺失的表）+ `_ensure_indexes()`（补索引，`create_all` 对已存在的表整个跳过，所以索引要单独补）
+  + 24 个幂等 `_migrate_*`（`PRAGMA table_info` 判存在 → `ALTER TABLE ADD COLUMN`，新列 `NOT NULL` 必须带 `DEFAULT`）
+  + `ensure_defaults`（seed 默认提示词）。
+  - **注意**：`create_all` **不会给已存在的表补列** —— 所以「往模型加字段」必须手写迁移，否则线上 `no such column`。
+  - `core/schema_guard.py`：① `missing_schema(bind)` 把模型声明的表/列与实际库对一遍；启动时 `run_startup_check()`
+    跑一次，缺了就日志 error + 站内通知 + 落 `app_kv`（**绝不阻塞启动**）；② 迁移记账 `record_migration` / `migration_status`，
+    表 `schema_migrations`（首次写基线 `baseline_pre_r144`），启动日志打印「库结构版本」。
+  - 测试护栏：`tests/fixtures/schema_baseline.sql` 是生产库**结构快照**，`tests/test_r144_schema_guard.py`
+    用它模拟老库跑 `init_db()` 并断言「模型每一列都存在」—— 治「本地测试全用全新库，漏写迁移 100% 绿」。
 - `notify.py`（R-141）：`mail_config_problem(settings)` 是邮件配置的唯一体检入口（缺失 / 非 ASCII 占位符 / 非法邮箱 → 可读原因）；`_send` 把配置非法与 SMTP 异常都收敛成「log + 返回 False」，中文主题用 `Header(...,'utf-8').encode()` 做 RFC2047 编码，正文用 `msg.as_bytes()` 发送。因此邮件是**次要通道**：`run_daily_pipeline` 只在稿子生成失败时才置 failed。
 - `platform_sync.py` 的灵感池入池（R-140）：`pool_ideas_from_comments(db, post, comments, *, account=None, per_post=None)` 是「评论 → 选题池」的**唯一实现**——`_collect_comments()`（全量/每周，非队列）与 `sync_post_comments()`（daily 逐素材队列 / 单帖）都调用它。限量：单帖 `ECHO_POOL_IDEAS_PER_POST`（默认 8，按点赞降序）、单博主每天 `ECHO_POOL_IDEAS_PER_DAY`（默认 40，`0`=不限）；保留「标题 ≥4 字」、按 `(source,title,snapshot_date)` 去重、重复点赞取大。`_pool_quota()` 负责当天剩余配额。同步说明与 payload 汇报 `pool_ideas`（灵感池新增 N 条）。
 - `debate.py`：**所有脚本生成的唯一路径**（R-139）。`debate_rounds(db)` 取「AI 设置」轮次（Kv `debate_rounds` > `.env` > 5，夹 1–10）；`snapshot(db).generation_pair()` 解析生成方/评审方（可相同）；`_side_llm` 把某一方包成「该槽位主用 + 另一方兜底」；初稿用 `generation_user_message`（与金样本回放同一输入），自检不通过再做一次收口修订；结果写 `draft_discussions` 与 `Draft.quality`（models/used/fallback/rounds/rounds_done/issues/passed/style_coverage）。入口：`run_debate`（通用）、`run_debate_draft`（工作台后台任务）、`run_rewrite_debate`（对标洗稿，R-118）。

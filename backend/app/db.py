@@ -501,6 +501,10 @@ def init_db() -> None:
     from . import models  # noqa: F401  确保模型已注册
 
     Base.metadata.create_all(bind=engine)
+    # R-144 D：迁移记账表（模型已注册，create_all 会建；这里显式确保一次，便于单独调用）
+    from .core import schema_guard
+
+    schema_guard.ensure_migrations_table(engine)
     _ensure_indexes()
     _ensure_binding_integrity()
     _migrate_videos()
@@ -534,3 +538,5 @@ def init_db() -> None:
     finally:
         session.close()
     _fix_platform_timezone()
+    # R-144 D：写入基线记录（R-144 之前的所有结构变更已在上面的幂等迁移里跑过）
+    schema_guard.ensure_baseline(engine)

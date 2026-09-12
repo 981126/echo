@@ -1,0 +1,37 @@
+# R-144 A：构建上下文黑名单。
+#
+# 两个作用：
+# 1) 别把本机的大目录（node_modules 192M / .venv 283M / data 112M）上传给 docker daemon；
+# 2) **正确性**：Dockerfile 里 `COPY frontend/ ./` 会把宿主机的 frontend/ 整个覆盖进去，
+#    若包含宿主机装的 node_modules（macOS 二进制），会覆盖镜像内 npm install 装的
+#    Linux 版 esbuild/rollup → `npm run build` 直接失败（平台不匹配）。
+.env
+*.env.local
+
+# 运行时数据与备份（核心资产，绝不进镜像）
+data/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / 前端
+node_modules/
+frontend/dist/
+.vite/
+
+# 版本控制与编辑器
+.git/
+.gitignore
+.idea/
+.DS_Store
+
+# 本地临时文件
+*.log
+*.tar.gz

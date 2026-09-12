@@ -1,5 +1,41 @@
 # 变更记录
 
+## [M133 / R-144] 2026-09-12 — 上线部署加固：镜像带脚本 + 启动结构自检 + 老库升级测试 + 迁移记账
+> 作者准备上线，追问「后续增量上线怎么办，新表/新字段怎么办」。查证后确认 4 个缺口，作者要求全做（A/B/C/D）。
+
+**查证到的 4 个缺口**
+- **A**：`Dockerfile` 与 `docker-compose.yml` 都没有 `scripts/`（grep 计数 0），而 `scheduler._backup_job`
+  每天 02:30 会调 `/app/scripts/backup.sh` → 每晚报「备份脚本不存在」，**每日备份永不执行**（= 没有回滚预案）。
+  顺带发现：镜像里**没有 `.dockerignore`**，构建上下文会把宿主机的 `frontend/node_modules`（192M）带进去，
+  `COPY frontend/ ./` 会覆盖镜像内 `npm install` 装的 Linux 版 esbuild/rollup → **前端构建必然失败**；
+  健康检查用 `curl` 而 `python:3.12-slim` 没有 curl → 容器会永久 unhealthy。
+- **B**：`create_all` 不给已存在的表补列（所以有 24 个手写 `_migrate_*`），漏写迁移只能在运行时 `no such column` 才暴露，启动毫无提示。
+- **C**：pytest 全部用**全新库**（直接建出最新结构），漏写迁移在本地 100% 绿，上线才炸。
+- **D**：没有迁移记录，排障只能人工 `PRAGMA table_info` 比对，不知道库升到哪一版。
+
+**修复**
+- **A**：`Dockerfile` 加 `COPY scripts/ ./scripts/` + `chmod +x`；新增 `.dockerignore`（排除 `node_modules/.venv/data/.git` 等）；
+  健康检查改 python urllib + `start_period: 40s`；`scripts/backup.sh` 改为**环境变量优先、其次 `.env`**
+  （容器里没有 `.env` 文件，只有注入的环境变量）。
+- **B**：新增 `app/core/schema_guard.py::missing_schema(bind)` + `run_startup_check(bind)`：启动时把
+  「模型声明的表/列」与实际库对一遍，缺了 → 日志 error（写明「多半是加了字段忘了写迁移」）+ 站内通知
+  `schema_check` + 落 `app_kv`；**内部任何异常都吞掉，绝不阻塞启动**。
+- **C**：新增 `backend/tests/fixtures/schema_baseline.sql`（生产库**结构快照**，27 表，只含 schema 不含数据）
+  + `tests/test_r144_schema_guard.py::test_upgrade_from_prod_snapshot_adds_everything`：
+  用快照建库 → 跑 `init_db()` → 断言「模型每一张表、每一列都存在」。**漏写迁移今后会直接红。**
+- **D**：新增 `schema_migrations` 表（28 张）+ `record_migration` / `migration_status` / `ensure_baseline`；
+  首次运行写基线 `baseline_pre_r144`；启动日志打印「结构自检通过：N 张表；库结构版本=…」。
+- 文档：`docs/QUICKSTART.md` 新增 §8「NAS 部署 + 增量上线 runbook」（改表/改字段模板、生产库副本演练、备份→升级→回滚顺序）；
+  `docs/DESIGN.md` 记结构机制与两个坑；`AGENTS.md` 技术栈同步；`docs/DATABASE.md` 27→28 张 + `schema_migrations` 章节。
+
+**验证（都是真实执行）**
+- **用真实生产库副本（61MB）演练老库升级**：`init_db()` 后结构自检通过、28 张表、库结构版本=`baseline_pre_r144`。
+- **故意漏写迁移的演练**：在同一副本上 `ALTER TABLE drafts DROP COLUMN tags` → 启动自检 `ok=False`、
+  日志给出可读原因、站内通知 1 条、结果落 `app_kv`（证明护栏真的会响）。
+- 测试：新增 `tests/test_r144_schema_guard.py`（12 例，含镜像/构建契约与老库升级）；总数 **263 例**；verify 全绿。
+- ⚠ **未验证**：本机 Docker daemon 未启动，`docker compose build` 没能在这里真跑 —— 请在 NAS 上首次构建时确认
+  （重点看前端 build 阶段是否成功，这正是不加 `.dockerignore` 会炸的地方）。
+
 ## [M132 / R-143] 2026-09-12 — 各功能 LLM 预算做成可配置（AI 设置内，保存即生效）
 > 作者在选定「保留显式上限、按实测定标」方案 A 后，同意把各功能预算也做成可配置项（「要」）。
 

@@ -18,6 +18,10 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend/ ./backend/
+# R-144 A：scripts/ 必须进镜像——scheduler._backup_job 每天 02:30 会调 /app/scripts/backup.sh，
+# 少了它容器里「每日备份」会一直报「备份脚本不存在」（备份永不执行 → 没有回滚预案）
+COPY scripts/ ./scripts/
+RUN chmod +x scripts/*.sh
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist
 
 EXPOSE 8000

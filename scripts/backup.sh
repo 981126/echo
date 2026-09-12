@@ -11,13 +11,15 @@ STAMP=$(date +%Y%m%d_%H%M%S)
 BK_DIR=data/backups/$STAMP
 mkdir -p "$BK_DIR"
 
-# ---------- 解析运行时库路径（优先 .env 的 ECHO_DB_PATH） ----------
+# ---------- 解析运行时库路径 ----------
+# R-144 A：优先**环境变量**（容器里没有 .env 文件，只有注入的环境变量），
+# 其次读 .env（笔记本本地运行），最后按约定回退。
 _env_get() {
   [ -f .env ] || return 0
   grep -E "^$1=" .env | tail -1 | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//' | xargs || true
 }
-DB_PATH="$(_env_get ECHO_DB_PATH)"
-DATA_DIR="$(_env_get ECHO_DATA_DIR)"
+DB_PATH="${ECHO_DB_PATH:-$(_env_get ECHO_DB_PATH)}"
+DATA_DIR="${ECHO_DATA_DIR:-$(_env_get ECHO_DATA_DIR)}"
 if [ -z "${DB_PATH:-}" ] && [ -n "${DATA_DIR:-}" ]; then DB_PATH="$DATA_DIR/echo.db"; fi
 if [ -z "${DB_PATH:-}" ]; then DB_PATH="data/echo.db"; fi
 

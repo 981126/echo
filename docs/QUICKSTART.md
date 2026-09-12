@@ -57,6 +57,57 @@ PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh
 
 ## 7. 常见运维
 - 改 `.env` 后重启后端（配置启动时读取）
-- 数据迁移自动（启动时幂等补列）；重大变更先 `scripts/backup.sh`
+- 数据迁移自动（启动时幂等补列）**并且启动时会自检**：把「模型声明的列」与实际库对一遍，
+  缺列 → 日志 error + 站内通知「库结构自检发现问题」（多半是加了字段忘了写迁移）
+- 库结构版本：`schema_migrations` 表记录已应用的迁移（`baseline_pre_r144` 为 R-144 前的基线）；
+  启动日志会打印「结构自检通过：N 张表；库结构版本=…」
+- 重大变更先 `scripts/backup.sh`
 - 定时任务在进程内（APScheduler）；改时间在 `.env`（如 `ECHO_PLATFORM_SYNC_TIMES=06:00,17:00`，主博主+对标统一每日两轮，R-109）
 - 接口/表结构文档为人工维护；`scripts/check_doc_consistency.py` 会校验表数量/路由与代码一致（verify.sh 已接入）
+
+## 8. NAS 部署（Docker Compose）
+
+```bash
+# 首次
+cp .env.example .env        # ⚠ 不要直接拷笔记本的 .env（路径是 macOS 的）
+# 生产 .env 必须改：
+#   ECHO_DATA_DIR=/app/data
+#   ECHO_DB_PATH=/app/data/echo.db
+#   ECHO_ACCESS_TOKEN=<强口令>   ECHO_WEB_BASE_URL=http://<NAS地址>:8000
+docker compose build && docker compose up -d
+docker compose logs -f echo     # 看「结构自检通过」与定时任务注册
+```
+
+- 数据卷是 `./data:/app/data`（**唯一持久化位置**：库/素材/封面/上传/备份）；
+  若 `.env` 仍写本机绝对路径，数据会落进容器可写层，重建即丢。
+- 镜像内置 `scripts/`（每日 02:30 备份依赖它）；健康检查用 python urllib（slim 镜像没有 curl）。
+- `.dockerignore` 排除了 `node_modules/.venv/data`：**必须**，否则宿主机的 `node_modules`
+  会覆盖镜像内的 Linux 版前端依赖，`npm run build` 直接失败。
+- **单进程**：不要加 `uvicorn --workers`（APScheduler 会重复触发、SQLite 单写会锁）。
+
+### 增量上线 runbook（新表 / 新字段 / 改结构）
+
+```bash
+# ── 本地：改代码 + 写迁移
+#   新增表   → 加模型 + 在 app/models/__init__.py import（否则 create_all 看不见它）
+#   新增字段 → 在 app/db.py 加 _migrate_xxx（PRAGMA table_info 判存在 → ALTER TABLE ADD COLUMN），
+#              并在 init_db() 里注册；干完调用 schema_guard.record_migration(engine, "<名字>")
+#   改文档   → docs/DATABASE.md 表数/章节（verify 会校验）
+bash scripts/verify.sh
+# 用生产库副本演练（不要用全新库！全新库建的是最新结构，测不出漏写迁移）
+cp <生产库> /tmp/upgrade_drill.db
+ECHO_DB_PATH=/tmp/upgrade_drill.db python -c "from app.db import init_db; init_db()"
+git commit -am "feat(R-xxx): ..." && git tag vX.Y.Z && git push --follow-tags
+
+# ── NAS
+cd /volume1/echo
+bash scripts/backup.sh              # ① 先备份（回滚预案的前提）
+git pull --ff-only                  # ② 或 bash scripts/update.sh（含 build + up + 健康检查）
+docker compose build && docker compose up -d
+curl -fsS localhost:8000/health     # ③ 验证
+# 回滚：git checkout <上个 tag> → build → up -d → 用升级前的备份换回 echo.db
+```
+
+> 维护约定（见 `tests/test_r144_schema_guard.py`）：
+> ① `fixtures/schema_baseline.sql` 是「从哪个版本升级」的起点快照，**不要随手刷新**；
+> ② 老库升级测试会对「模型每一列都存在」做断言 —— 漏写迁移会直接红，这是有意的。
