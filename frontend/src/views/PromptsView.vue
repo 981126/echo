@@ -1,16 +1,14 @@
 <template>
   <div class="page">
-    <h1 class="page-title">AI 提示词</h1>
+    <h1 class="page-title">AI 设置</h1>
     <p class="page-sub">
-      这里是 AI 的「支架 + 高级设置」，默认不建议改：只负责角色、方法与输出契约。
-      「像不像作者」主要由人设页维护的运行时上下文决定（人设档案 / 红线 / 语言习惯画像 / 金句锚点 / 禁用词 / 风格范本）。
-      候选按功能各自取真实样本优化（样本不足会明确提示），产出后自动做金样本评测；启用与否由你决定
+      第一个 tab 配置项目用的模型（模型1/2、生成方/评审方、ASR、每日篇数），保存即生效；
+      其余 tab 是各功能的提示词（AI 的「支架 + 高级设置」，默认不建议改）。
+      「像不像作者」主要由人设页维护的运行时上下文决定（人设档案 / 红线 / 语言习惯画像 / 金句锚点 / 禁用词 / 风格范本）
     </p>
 
     <div class="toolbar">
-      <span class="muted">生成模型策略：</span>
-      <n-select v-model:value="genMode" :options="modeOptions" style="width: 200px" @update:value="saveMode" />
-      <span class="muted">讨论轮次：</span>
+      <span class="muted">讨论轮次（所有脚本生成的评审轮数）：</span>
       <n-input-number v-model:value="debateRounds" :min="1" :max="10" style="width: 90px" @update:value="saveRounds" />
       <n-button secondary size="small" :loading="ruleOptimizing" @click="optimizeRules">
         一键优化规则型（预打标/校对/差异/复盘）
@@ -18,6 +16,85 @@
     </div>
 
     <n-tabs v-model:value="activeKey" type="line" animated>
+      <n-tab-pane name="__models" tab="模型设置">
+        <div class="panel">
+          <div class="section-title" style="margin-top: 0">模型槽位（可分别配厂家 / 模型 / API Key）</div>
+          <n-alert v-for="(w, i) in modelWarnings" :key="i" type="warning" :bordered="false" style="margin-bottom: 8px">
+            {{ w }}
+          </n-alert>
+
+          <div v-for="slot in ['model1', 'model2']" :key="slot" class="slot-box">
+            <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
+              <strong style="min-width: 56px">{{ slot === 'model1' ? '模型1' : '模型2' }}</strong>
+              <n-select
+                v-model:value="models[slot].vendor"
+                :options="vendorOptions"
+                style="width: 150px"
+                @update:value="(v) => onVendorChange(slot, v)"
+              />
+              <n-select
+                v-model:value="models[slot].model"
+                :options="modelOptionsFor(slot)"
+                filterable
+                tag
+                placeholder="模型 ID（可直接输入新模型）"
+                style="width: 240px"
+              />
+              <n-input
+                v-model:value="models[slot].key"
+                :placeholder="models[slot].keyHint || 'API Key（留空则用 .env）'"
+                style="width: 300px"
+                show-password-on="click"
+                type="password"
+              />
+              <n-tag v-if="models[slot].keyPresent" size="small" :bordered="false" round type="success">
+                已配置{{ models[slot].keyFromEnv ? '（来自 .env）' : '' }}
+              </n-tag>
+              <n-tag v-else size="small" :bordered="false" round type="error">缺少 Key</n-tag>
+            </div>
+            <p class="muted" style="font-size: 12px; margin: 4px 0 0">
+              {{ models[slot].vendorLabel }} · {{ models[slot].baseUrl }} · {{ models[slot].keyHint }}
+            </p>
+          </div>
+
+          <div class="row" style="gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center">
+            <span class="muted">脚本生成 · 生成方：</span>
+            <n-select v-model:value="models.genRole" :options="roleOptions" style="width: 150px" />
+            <span class="muted">评审方：</span>
+            <n-select v-model:value="models.refereeRole" :options="roleOptions" style="width: 150px" />
+            <span class="muted" style="font-size: 12px">两方可以选同一个模型</span>
+          </div>
+
+          <div class="row" style="gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center">
+            <span class="muted">ASR 服务商：</span>
+            <n-select v-model:value="models.asrMode" :options="asrModeOptions" style="width: 190px" />
+            <template v-if="models.asrMode === 'siliconflow'">
+              <span class="muted">ASR 模型：</span>
+              <n-select
+                v-model:value="models.asrModel"
+                :options="asrModelOptions"
+                filterable
+                tag
+                style="width: 260px"
+              />
+            </template>
+          </div>
+
+          <div class="row" style="gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center">
+            <span class="muted">每日自动生成篇数：</span>
+            <n-input-number v-model:value="models.topicsCount" :min="1" :max="10" style="width: 90px" />
+            <span class="muted" style="font-size: 12px">
+              双模型讨论成本 ≈ 篇数 × 轮次 × 2 次调用，建议 1–2 篇
+            </span>
+          </div>
+
+          <div class="row" style="gap: 8px; margin-top: 16px">
+            <n-button type="primary" :loading="savingModels" @click="saveModels">保存（立即生效）</n-button>
+            <n-button secondary :loading="loadingModels" @click="loadModels">重新读取</n-button>
+          </div>
+        </div>
+      </n-tab-pane>
+
       <n-tab-pane v-for="item in items" :key="item.key" :name="item.key">
         <template #tab>
           {{ item.label }}
@@ -134,12 +211,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { diffLines } from '../diff'
 
-const ORDER = ['generation', 'persona_init', 'persona_merge', 'video_tags', 'persona_updates', 'persona_compare', 'review', 'diff', 'chat', 'correct']
+const ORDER = ['generation', 'persona_init', 'persona_merge', 'video_tags', 'persona_updates', 'persona_compare', 'diff', 'chat', 'correct']
 const items = ref([])
 const activeKey = ref('generation')
 const editing = ref({})
@@ -148,14 +225,111 @@ const ruleOptimizing = ref(false)
 const evalTasks = ref({})
 let evalPoll = null
 const message = useMessage()
-const genMode = ref('deepseek')
 const debateRounds = ref(5)
-const modeOptions = [
-  { label: 'DeepSeek（Kimi 评审）', value: 'deepseek' },
-  { label: 'Kimi（DeepSeek 评审）', value: 'kimi' },
-  { label: '随机生成方', value: 'random' },
-  { label: '轮流生成方', value: 'alternate' }
+
+// ---- R-138 模型设置 ----
+const models = ref({
+  model1: { vendor: 'deepseek', model: '', key: '', keyPresent: false, keyFromEnv: false, vendorLabel: '', baseUrl: '', keyHint: '' },
+  model2: { vendor: 'kimi', model: '', key: '', keyPresent: false, keyFromEnv: false, vendorLabel: '', baseUrl: '', keyHint: '' },
+  genRole: 'model2',
+  refereeRole: 'model1',
+  asrMode: 'siliconflow',
+  asrModel: '',
+  topicsCount: 2
+})
+const vendors = ref({})
+const asrOptions = ref({})
+const asrModelList = ref([])
+const modelWarnings = ref([])
+const loadingModels = ref(false)
+const savingModels = ref(false)
+
+const vendorOptions = computed(() =>
+  Object.entries(vendors.value).map(([value, meta]) => ({ label: meta.label, value }))
+)
+const roleOptions = [
+  { label: '模型1', value: 'model1' },
+  { label: '模型2', value: 'model2' }
 ]
+const asrModeOptions = computed(() =>
+  Object.entries(asrOptions.value).map(([value, label]) => ({ label, value }))
+)
+const asrModelOptions = computed(() => asrModelList.value.map(m => ({ label: m, value: m })))
+
+function modelOptionsFor(slot) {
+  const vendor = models.value[slot].vendor
+  const list = (vendors.value[vendor] && vendors.value[vendor].models) || []
+  const opts = list.map(m => ({ label: m, value: m }))
+  const current = models.value[slot].model
+  if (current && !list.includes(current)) opts.unshift({ label: current, value: current })
+  return opts
+}
+
+function onVendorChange(slot, vendor) {
+  const meta = vendors.value[vendor] || {}
+  const item = models.value[slot]
+  item.vendorLabel = meta.label || vendor
+  item.keyHint = meta.key_hint || ''
+  if (!item.model || !(meta.models || []).includes(item.model)) {
+    item.model = meta.default_model || ''
+  }
+}
+
+async function loadModels() {
+  loadingModels.value = true
+  try {
+    const r = await api('/api/settings/models')
+    vendors.value = r.vendors || {}
+    asrOptions.value = (r.asr && r.asr.options) || {}
+    asrModelList.value = (r.asr && r.asr.siliconflow_models) || []
+    modelWarnings.value = r.warnings || []
+    models.value = {
+      model1: {
+        vendor: r.model1.vendor, model: r.model1.model, key: r.model1.key || '',
+        keyPresent: r.model1.key_present, keyFromEnv: r.model1.key_from_env,
+        vendorLabel: r.model1.vendor_label, baseUrl: r.model1.base_url, keyHint: r.model1.key_hint
+      },
+      model2: {
+        vendor: r.model2.vendor, model: r.model2.model, key: r.model2.key || '',
+        keyPresent: r.model2.key_present, keyFromEnv: r.model2.key_from_env,
+        vendorLabel: r.model2.vendor_label, baseUrl: r.model2.base_url, keyHint: r.model2.key_hint
+      },
+      genRole: r.gen_role,
+      refereeRole: r.referee_role,
+      asrMode: (r.asr && r.asr.mode) || 'mock',
+      asrModel: (r.asr && r.asr.model) || '',
+      topicsCount: r.topics_count || 2
+    }
+  } catch (e) {
+    message.error('读取模型设置失败：' + e.message)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
+async function saveModels() {
+  savingModels.value = true
+  try {
+    const body = {
+      model1: { vendor: models.value.model1.vendor, model: models.value.model1.model, key: models.value.model1.key },
+      model2: { vendor: models.value.model2.vendor, model: models.value.model2.model, key: models.value.model2.key },
+      gen_role: models.value.genRole,
+      referee_role: models.value.refereeRole,
+      asr_mode: models.value.asrMode,
+      asr_model: models.value.asrModel,
+      topics_count: models.value.topicsCount,
+      debate_rounds: debateRounds.value
+    }
+    await api('/api/settings/models', { method: 'PUT', body: JSON.stringify(body) })
+    await loadModels()
+    message.success('已保存，立即生效（无需重启）')
+  } catch (e) {
+    message.error(e.message || '保存失败')
+  } finally {
+    savingModels.value = false
+  }
+}
+
 
 function fmt(v) {
   return v ? v.replace('T', ' ').slice(0, 16) : ''
@@ -267,15 +441,6 @@ async function rerunEval(item) {
   }
 }
 
-async function loadMode() {
-  try {
-    const r = await api('/api/settings/generation-model')
-    genMode.value = r.mode
-  } catch {
-    /* ignore */
-  }
-}
-
 async function loadRounds() {
   try {
     const r = await api('/api/settings/debate-rounds')
@@ -289,15 +454,6 @@ async function saveRounds(n) {
   try {
     await api('/api/settings/debate-rounds', { method: 'PUT', body: JSON.stringify({ rounds: n }) })
     message.success('已更新讨论轮次')
-  } catch (e) {
-    message.error(e.message)
-  }
-}
-
-async function saveMode(mode) {
-  try {
-    await api('/api/settings/generation-model', { method: 'PUT', body: JSON.stringify({ mode }) })
-    message.success('已切换生成模型策略')
   } catch (e) {
     message.error(e.message)
   }
@@ -371,9 +527,9 @@ function applyDeepLink() {
 }
 
 onMounted(async () => {
+  loadModels()
   await load()
   applyDeepLink()
-  loadMode()
   loadRounds()
   refreshEvalTasks()
   ensureEvalPoll()
@@ -400,5 +556,12 @@ onUnmounted(() => {
   background: rgba(219, 163, 125, 0.08);
   border: 1px solid var(--line);
   border-radius: 10px;
+}
+.slot-box {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
 }
 </style>

@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 122 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 124 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -1578,4 +1578,38 @@ Toggle Benchmark
 
 - `creator_id`（path）integer，必填
 - `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/settings/models
+
+Get Models
+
+AI 设置 → 模型设置：当前模型1/2（厂家/模型/Key）、生成方/评审方、ASR 服务商与模型、讨论轮次、每日篇数（R-138）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### PUT /api/settings/models
+
+Put Models
+
+保存模型设置（非法配置返回 400）；保存即生效、无需重启（R-138）。
+
+**参数**
+
+- `x-access-token`（header）string
+**请求体**（application/json，`ModelsIn`）
+
+字段：
+  - `model1` object（必填）
+  - `model2` object（必填）
+  - `gen_role` string（必填）
+  - `referee_role` string（必填）
+  - `asr_mode` string（必填）
+  - `asr_model` string
+  - `debate_rounds` integer
+  - `topics_count` integer
+
 **返回 200**：application/json → object
