@@ -37,6 +37,8 @@
 2. **单次调用需要硬性墙钟上限**：httpx 的 read timeout 会被长连接的持续字节重置，实测一次真实评审
    调用挂了 **39 分钟**才失败。`OpenAIClient._post` 改为流式读取 + `ECHO_LLM_TIMEOUT_SECONDS`（默认 600s）
    墙钟上限，超期即按「超时」失败并降级。
+3. **流式读取要用 `iter_bytes`**：Kimi 对较长响应返回 gzip（实测 770B gzip / 1401B 解码后 JSON），
+   `iter_raw` 只给压缩字节 → JSON 全部解析失败。此坑由「双模型兼容性自检」自动发现并修复。
 
 ## 不包含
 - 不引入第三方供应商（厂家目录本次为 DeepSeek / Kimi，加供应商只需在目录加一行）；

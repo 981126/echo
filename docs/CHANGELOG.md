@@ -41,9 +41,13 @@
      read timeout 被不断重置），「超时降级」形同虚设。`OpenAIClient._post` 改为**流式读取 + 墙钟上限**
      （`ECHO_LLM_TIMEOUT_SECONDS`，默认 600s），每收到一段数据检查是否超期；HTTP 4xx/5xx 与响应结构异常
      也直接转成可读 `LLMError`（通知里能一眼看出是 Key 失效还是限流）。
-- 测试：新增 `tests/test_r139_llm_router.py`（26 例：降级四种触发、输出不可用先抬预算重试、参数归一化与厂家下限、
+  3. **流式读取必须用 `iter_bytes` 而非 `iter_raw`**：Kimi 对较长响应返回 `Content-Encoding: gzip`
+     （实测 770 字节 gzip / 1401 字节解码后 JSON），`iter_raw` 拿到的是压缩字节 → JSON 解析必然失败。
+     **这个坑是「双模型兼容性自检」自己抓出来的**（自检报告 model2 在两个 JSON 契约上不兼容），
+     修完自检 6/6 通过 —— 正好证明自检功能本身有效。
+- 测试：新增 `tests/test_r139_llm_router.py`（28 例：降级四种触发、输出不可用先抬预算重试、参数归一化与厂家下限、
   墙钟上限/HTTP 错误可读、通知落地、双模型讨论与轮次、运行时篇数、ASR 运行时接线、非脚本功能默认模型1、
-  注入 llm 不被路由破坏）；`tests/test_r138_model_settings.py`（7 例）；总 219 例通过。
+  注入 llm 不被路由破坏、gzip 响应解码）；`tests/test_r138_model_settings.py`（7 例）；总 221 例通过。
 - **真实链路实测**（非 mock）：双模型兼容性自检 6 次调用全通过（模型1 DeepSeek 0.9–1.5s / 模型2 Kimi 4.9–13.9s）；
   人为把模型1 Key 改错后调 `/api/drafts/angles` → 自动降级模型2 并产出 3 个可用角度（8.5s 正常路径，
   降级路径 29s），站内出现 `llm_fallback` 通知；真实双模型讨论生成 3 篇（生成方 Kimi + 评审方 DeepSeek，1 轮），

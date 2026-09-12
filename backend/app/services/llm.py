@@ -119,7 +119,9 @@ class OpenAIClient:
                         resp.read()
                         raise LLMError(f"HTTP {resp.status_code}：{(resp.text or '')[:200]}")
                     chunks: list[bytes] = []
-                    for chunk in resp.iter_raw():
+                    # 注意用 iter_bytes 而不是 iter_raw：iter_raw 给的是「未解码」字节，
+                    # Kimi 的响应是 gzip 压缩的，用 iter_raw 会得到压缩字节并解析失败（R-139 实测踩到）。
+                    for chunk in resp.iter_bytes():
                         chunks.append(chunk)
                         if time.monotonic() > deadline:
                             raise LLMError(

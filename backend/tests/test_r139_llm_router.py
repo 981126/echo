@@ -324,7 +324,7 @@ def test_call_deadline_is_enforced(monkeypatch):
         def __exit__(self, *_a):
             return False
 
-        def iter_raw(self):
+        def iter_bytes(self):
             def _gen():
                 while True:
                     yield b" "
@@ -347,6 +347,51 @@ def test_call_deadline_is_enforced(monkeypatch):
     monkeypatch.setattr(_httpx, "Client", _Client)
     with pytest.raises(LLMError, match="按超时处理"):
         client._post({"model": "m", "messages": []})
+
+
+def _gzip_transport(body: bytes):
+    """真实 gzip 压缩响应（带 Content-Encoding），让 httpx 自己负责解码。"""
+    import httpx as _httpx
+
+    def handler(_request):
+        return _httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
+            content=body,
+        )
+
+    return _httpx.MockTransport(handler)
+
+
+def _patch_httpx_client(monkeypatch, transport):
+    import httpx as _httpx
+
+    real = _httpx.Client
+
+    def _factory(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_httpx, "Client", _factory)
+
+
+def test_gzip_encoded_response_is_decoded(monkeypatch):
+    """流式读取必须用 iter_bytes（解码后）：Kimi 的响应是 gzip 的。
+
+    回归护栏：把 `iter_bytes` 改回 `iter_raw` 时，这个用例会直接失败
+    （iter_raw 要么给压缩字节导致 JSON 解析失败，要么在已读的流上抛 StreamConsumed）。
+    """
+    import gzip
+    import json as _json
+
+    from app.services.llm import OpenAIClient
+
+    body = gzip.compress(
+        _json.dumps({"choices": [{"message": {"content": "压缩过的正文"}}]}).encode()
+    )
+    _patch_httpx_client(monkeypatch, _gzip_transport(body))
+    client = OpenAIClient("https://example.invalid", "sk-x", "kimi-k2.6")
+    assert client._post({"model": "kimi-k2.6", "messages": []})["content"] == "压缩过的正文"
 
 
 def test_read_timeout_becomes_readable_error(monkeypatch):
