@@ -395,10 +395,14 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
         db.commit()
 
         sent = send_daily_digest(db, key, settings)
+        # R-140：稿子已经生成好了，邮件（次要通道）失败只记原因，不能把整轮判为 failed
         run.status = "done"
         run.generated_count = len(drafts)
         if not sent:
-            run.error = "邮件未发送：SMTP 未配置（开发模式）"
+            from .notify import mail_config_problem
+
+            problem = mail_config_problem(settings)
+            run.error = f"邮件未发送：{problem}" if problem else "邮件发送失败（详见日志）"
         db.commit()
     except Exception as exc:  # noqa: BLE001
         db.rollback()

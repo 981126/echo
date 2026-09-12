@@ -1,5 +1,29 @@
 # 变更记录
 
+## [M130 / R-141] 2026-09-12 — 邮件次要通道化：配置校验 + 发信失败不炸穿流水线
+> 发现于 R-140 的端到端验证：作者要求手动触发每日流水线，结果**3 条候选 + 3 篇脚本都生成落库了**，
+> 但最后一步发邮件抛 `UnicodeEncodeError` → 整轮被置 `failed`、`generated_count=0`；失败告警邮件走同一路径也失败。
+
+**根因（两层）**
+- **配置层**：`.env` 里 `ECHO_SMTP_AUTH_CODE=授权码（非登录密码）`、`ECHO_MAIL_TO=接收邮箱` 是把
+  `.env.example` 的说明文字当值留着（值 100% 非 ASCII）。`smtplib` 在 `server.login()` 里
+  `initial_response.encode('ascii')` 炸在位置 17-26（正好是授权码前 10 个字符）。
+  另发现 `ECHO_WEB_BASE_URL` 的行尾注释被整串吃进值里（AGENTS.md 早已要求「行尾注释必须换行书写」）。
+- **代码层**：`_send` 只判断「三个值非空」就当配置可用，占位符一路走到 `login()` 才炸；而它在流水线 `try` 里，
+  异常直接让整轮 `failed`。
+
+**修复**
+- 新增 `notify.mail_config_problem()`：提前校验「缺失 / 非 ASCII（占位符） / 非法邮箱」并给出可读原因。
+- `_send`：配置非法或发送异常都**记日志 + 返回 False**，不再向上抛；中文主题改 RFC2047
+  （`Header(subject,"utf-8").encode()`，纯 ASCII 保持原样）；正文改 `msg.as_bytes()`，
+  避开 `sendmail(str)` 的 ASCII 编码路径。
+- 流水线把邮件当次要通道：稿子生成成功即 `status=done` + `generated_count` 保留，
+  邮件问题写进 `run.error` 并经 `_pipeline_task` 带进**完成通知**（站内可见「已生成 N 篇脚本；注意：邮件未发送：<原因>」）。
+- 测试：`tests/test_r140_pool_ideas.py` 增 4 例（配置校验、`_send` 不抛且不连 SMTP、中文主题编码、
+  邮件失败时流水线仍 done 且计数保留）。真实进程复现验证：`send_daily_digest` 由「抛异常」变为「返回 False + 可读原因」。
+- **待作者处理（代码改不了）**：`.env` 的 `ECHO_SMTP_AUTH_CODE` / `ECHO_MAIL_TO` 需填真实值，
+  `ECHO_WEB_BASE_URL` 需去掉行尾注释。
+
 ## [M129 / R-140] 2026-09-12 — 灵感池入池修复与限量 + 每日篇数口径对齐
 > 起因：作者发现首页「灵感池」没数据。查证后确认是 **R-093 的回归**（非 R-138/R-139 引入），
 > 作者确认「要（每日队列同步也进池）」「限量」，并要求一并做「篇数口径对齐」与「端到端验证」。

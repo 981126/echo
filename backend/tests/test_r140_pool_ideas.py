@@ -260,3 +260,86 @@ def _set_kv(db, key: str, value: str) -> None:
     else:
         row.value = value
     db.commit()
+
+
+# ---------- 邮件是次要通道：失败不能把「已生成好的稿子」判为失败（R-140 端到端实测发现） ----------
+
+
+def test_mail_config_problem_detects_placeholders():
+    from unittest.mock import MagicMock
+
+    from app.services.notify import mail_config_problem
+
+    def s(**kw):
+        base = dict(smtp_user="me@qq.com", smtp_auth_code="abcdefghijklmnop", mail_to="you@qq.com")
+        base.update(kw)
+        return MagicMock(**base)
+
+    assert mail_config_problem(s()) == ""
+    assert "未配置" in mail_config_problem(s(mail_to=""))
+    assert "非 ASCII" in mail_config_problem(s(smtp_auth_code="授权码（非登录密码）"))
+    assert "非 ASCII" in mail_config_problem(s(mail_to="接收邮箱"))
+    assert "不是合法邮箱" in mail_config_problem(s(mail_to="not-an-email"))
+
+
+def test_send_returns_false_instead_of_raising(monkeypatch):
+    """占位符配置下 `_send` 只返回 False（记日志），不抛 UnicodeEncodeError 炸穿调用方。"""
+    from unittest.mock import MagicMock
+
+    from app.services import notify as notify_mod
+
+    bad = MagicMock(
+        smtp_user="me@qq.com",
+        smtp_auth_code="授权码（非登录密码）",
+        mail_to="接收邮箱",
+        smtp_host="smtp.qq.com",
+        smtp_port=465,
+    )
+    assert notify_mod._send("中文主题", "<p>正文</p>", bad) is False
+    # 断言没有真的去连 SMTP：SMTP_SSL 一旦被调用就说明校验没拦住
+    monkeypatch.setattr(notify_mod.smtplib, "SMTP_SSL", lambda *a, **k: (_ for _ in ()).throw(AssertionError("不该连 SMTP")))
+    assert notify_mod._send("中文主题", "<p>正文</p>", bad) is False
+
+
+def test_digest_subject_is_rfc2047_encoded():
+    """中文主题必须编码，否则 smtplib 在 ASCII 编码阶段就会失败。"""
+    from email.mime.multipart import MIMEMultipart
+    from email.header import Header
+
+    subject = "【echo】今日选题与脚本（2026-09-12）"
+    assert not subject.isascii()
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject if subject.isascii() else Header(subject, "utf-8").encode()
+    assert msg["Subject"].startswith("=?utf-8?")
+    assert msg.as_bytes()  # 可安全转字节（body 会被 base64 编码）
+
+
+def test_pipeline_keeps_done_when_mail_fails(db, monkeypatch):
+    """邮件失败时流水线仍是 done、generated_count 保留、error 写明邮件原因（R-140）。"""
+    from app.models.draft import Draft
+    from app.models.pipeline import PipelineRun
+    from app.services import pipeline as pl
+    from app.services import topic_mining
+
+    monkeypatch.setattr(topic_mining, "fetch_and_store", lambda *_a, **_k: [])
+    monkeypatch.setattr(pl, "fetch_and_store", lambda *_a, **_k: [])
+    monkeypatch.setattr(pl, "_compose_daily_candidates", lambda *_a, **_k: [{"title": "选题", "platform": "ai", "score": 1, "reason": "", "slot": "ai"}])
+
+    def _fake_generate(db, topic, settings=None):
+        d = Draft(title=topic, script="正文", source="ai", creator_id=None)
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+        return d
+
+    monkeypatch.setattr(pl, "generate_draft", _fake_generate)
+    monkeypatch.setattr(pl, "send_daily_digest", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        "app.services.notify.mail_config_problem", lambda *_a, **_k: "ECHO_MAIL_TO 含非 ASCII 字符"
+    )
+
+    run = pl.run_daily_pipeline(db, force=True)
+    assert run.status == "done", "邮件失败不该把已生成稿子的流水线判为 failed"
+    assert run.generated_count == 1
+    assert "邮件未发送" in run.error and "非 ASCII" in run.error
+    assert db.query(PipelineRun).count() == 1

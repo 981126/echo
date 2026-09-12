@@ -18,8 +18,13 @@ class RunIn(BaseModel):
     force: bool = False
 
 
-def _pipeline_task(db: Session, payload: dict) -> None:
-    run_daily_pipeline(db, force=bool(payload.get("force")))
+def _pipeline_task(db: Session, payload: dict) -> dict:
+    run = run_daily_pipeline(db, force=bool(payload.get("force")))
+    # R-140：把「邮件没发出去」等次要问题带进完成通知，避免只有日志里能看到
+    message = f"已生成 {run.generated_count} 篇脚本（候选 {run.candidates_count} 条）"
+    if run.error:
+        message += f"；注意：{run.error}"
+    return {"message": message}
 
 
 @router.post("/run")

@@ -742,7 +742,7 @@ def _sync_one_post(db: Session, post: PlatformPost) -> dict:
     stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
     _charge(db)
     _write_stat(db, post, stats)
-    cres = {"added": 0, "updated": 0}
+    cres = {"added": 0, "updated": 0, "pool_added": 0}
     try:
         cres = sync_post_comments(db, post, limit=50, client=client, account=account, charge=True)
     except Exception:  # noqa: BLE001 评论失败不影响主同步
@@ -753,6 +753,7 @@ def _sync_one_post(db: Session, post: PlatformPost) -> dict:
         "stats": stats,
         "comments_added": cres["added"],
         "comments_updated": cres["updated"],
+        "pool_added": int(cres.get("pool_added") or 0),  # R-140：本次进灵感池条数
     }
 
 
