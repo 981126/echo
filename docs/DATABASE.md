@@ -4,12 +4,13 @@
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（28 张）
+## 表总览（29 张）
 
 | 表 | 说明 |
 |---|---|
 | `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版；R-129 起候选正文=可优化段+程序固定的输出契约段，支持候选拒绝(rejected)与历史回滚。 |
 | `schema_migrations` | 结构变更记账（R-144）：`name` 唯一 + `applied_at` + `note`。轻量替代 Alembic，用来回答「这个库升到哪一版」；首次运行写入基线 `baseline_pre_r144`。启动自检（`core/schema_guard`）会把状态写进日志并校验「模型声明的列 vs 实际库」。 |
+| `agent_actions` | AI 对话的写操作提案与审计（R-147 P2）：模型只**提议**（`status=pending`，含 `preview` 影响范围说明），作者在对话里点「确认执行」后才真正落库（`confirmed→done`），取消则 `cancelled`。`task_id` 记录入队的后台任务。 |
 | `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、一次性迁移标记、R-022 优化节流计数等。 |
 | `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。 |
 | `chat_conversations` | AI 对话会话（R-017）：标题 + 创建/更新时间，单用户多会话。 |
@@ -692,3 +693,38 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 
 用法：新迁移在 `app/db.py` 的 `_migrate_*` 里干完活后调用 `schema_guard.record_migration(engine, "<名字>")`；
 `migration_status(engine)` 返回已应用条数与最新迁移名，启动日志会打印。R-144 之前的所有变更记为基线一行。
+
+## `agent_actions`
+
+AI 对话写操作的提案与审计（R-147 P2）。
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `conversation_id` | INTEGER | 来源会话（可空=遗留单线程） |
+| `message_id` | INTEGER | 预留：关联的助手消息 |
+| `action` | VARCHAR(50) | `generate_draft` / `rework_draft` / `set_draft_status` |
+| `payload` | TEXT | 动作参数（JSON） |
+| `preview` | VARCHAR(500) | 给作者看的「这一步会做什么」 |
+| `status` | VARCHAR(20) | `pending` / `confirmed` / `cancelled` / `done` / `failed` |
+| `result` | TEXT | 执行结果说明 |
+| `error` | TEXT | 失败原因 |
+| `task_id` | INTEGER | 若入队了后台任务，记录任务 id |
+| `created_at` / `decided_at` | DATETIME | 登记时间 / 作者决定时间 |
+
+## 只读分析视图（不是表，供 AI 对话的 `sql_query` 使用）
+
+R-147 P1：把「可以让 AI 看的数据」做成视图，**原始表不给模型**（`app_kv` 含明文模型 Key、`ai_prompts` 含提示词正文，
+都不在视图里）。视图由 `app/core/analytics_views.py` 在启动时幂等重建（`DROP VIEW IF EXISTS` + `CREATE VIEW`），
+`sql_query` 只允许查询这些名字。
+
+| 视图 | 内容 |
+|---|---|
+| `v_videos` | 素材（标题/状态/平台/赛道/是否广告/发布时间） |
+| `v_drafts` | 草稿（状态/来源/字数/脚本前 120 字/人设与提示词版本） |
+| `v_feedback` | 反馈（总分/四维分/评论） |
+| `v_persona_tags` | 人设标签与红线 |
+| `v_topics` | 每日选题候选（槽位/分数/理由） |
+| `v_ideas` | 灵感池（评论/热榜） |
+| `v_metrics` | 指标快照（按天） |
+| `v_platform_posts` | 平台云端作品（含博主归属/是否已绑定本地素材） |

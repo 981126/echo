@@ -538,5 +538,9 @@ def init_db() -> None:
     finally:
         session.close()
     _fix_platform_timezone()
+    # R-147 P1：只读分析视图（给 AI 对话的 sql_query 用；视图即白名单）
+    from .core import analytics_views
+
+    analytics_views.ensure_views(engine)
     # R-144 D：写入基线记录（R-144 之前的所有结构变更已在上面的幂等迁移里跑过）
     schema_guard.ensure_baseline(engine)

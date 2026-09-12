@@ -51,7 +51,26 @@
             </div>
             <template v-for="m in messages" :key="m.key">
               <div v-if="m.role === 'assistant'" class="bubble assistant">
+                <div v-if="(m.steps || []).length" class="agent-steps">
+                  <div v-for="(st, i) in m.steps" :key="i" class="agent-step">
+                    <span class="dot" :class="st.kind" />
+                    <span class="what">{{ st.text }}</span>
+                  </div>
+                </div>
                 <div class="prose" v-html="renderMd(m.content)" />
+                <div v-for="a in (m.actions || [])" :key="a.id" class="action-card">
+                  <div class="row" style="justify-content: space-between; align-items: center; gap: 8px">
+                    <strong>⚠ 待你确认：{{ a.label }}</strong>
+                    <n-tag size="tiny" :bordered="false" round :type="tagType(a.status)">{{ statusText(a.status) }}</n-tag>
+                  </div>
+                  <p class="muted" style="margin: 6px 0 0; font-size: 12.5px">{{ a.preview }}</p>
+                  <p v-if="a.result" class="muted" style="margin: 4px 0 0; font-size: 12.5px">✓ {{ a.result }}</p>
+                  <p v-if="a.error" style="margin: 4px 0 0; font-size: 12.5px; color: var(--warn)">✗ {{ a.error }}</p>
+                  <div v-if="a.status === 'pending'" class="row" style="gap: 8px; margin-top: 8px">
+                    <n-button size="tiny" type="primary" :loading="deciding === a.id" @click="confirmAction(a)">确认执行</n-button>
+                    <n-button size="tiny" secondary :loading="deciding === a.id" @click="cancelAction(a)">取消</n-button>
+                  </div>
+                </div>
                 <span v-if="m.streaming" class="caret" />
                 <div v-if="!m.streaming" class="bubble-actions">
                   <button class="icon-btn" title="复制" @click="copy(m.content)">复制</button>
@@ -110,8 +129,14 @@ async function loadConversations() {
 
 async function selectConversation(id) {
   currentId.value = id
+  await loadActions()
   const rows = await api(`/api/chat/history?conversation_id=${id}&limit=200`)
-  messages.value = rows.map(r => ({ key: r.id, role: r.role, content: r.content, streaming: false }))
+  messages.value = rows.map(r => ({ key: r.id, role: r.role, content: r.content, streaming: false, steps: [], actions: [] }))
+  // R-147 P2：刷新/切会话后，把该会话最近的写操作提案挂到最后的助手消息上，作者仍能确认
+  const lastAssistant = [...messages.value].reverse().find(m => m.role === 'assistant')
+  if (lastAssistant && actions.value.length) {
+    lastAssistant.actions = actions.value.filter(a => a.status === 'pending' || a.status === 'done' || a.status === 'failed')
+  }
   scroll()
 }
 
@@ -161,6 +186,71 @@ function ask(q) {
   send()
 }
 
+const deciding = ref(0)
+const actions = ref([])
+
+function stepText(ev) {
+  if (ev.kind === 'tool') {
+    const args = ev.args && Object.keys(ev.args).length ? ' ' + JSON.stringify(ev.args).slice(0, 60) : ''
+    return `调用 ${ev.name}${args}`
+  }
+  return `${ev.name} → ${ev.summary || '完成'}`
+}
+function statusText(s) {
+  return { pending: '待确认', done: '已执行', cancelled: '已取消', failed: '执行失败', confirmed: '已确认' }[s] || s
+}
+function tagType(s) {
+  return { pending: 'warning', done: 'success', cancelled: 'default', failed: 'error' }[s] || 'default'
+}
+
+async function loadActions() {
+  if (currentId.value == null) return
+  try {
+    actions.value = await api(`/api/chat/actions?conversation_id=${currentId.value}`)
+  } catch {
+    actions.value = []
+  }
+}
+
+function attachActions(msgKey) {
+  const msg = messages.value.find(m => m.key === msgKey)
+  if (!msg || !actions.value.length) return
+  const known = new Set(messages.value.flatMap(m => (m.actions || []).map(a => a.id)))
+  const fresh = actions.value.filter(a => !known.has(a.id))
+  if (fresh.length) msg.actions = [...(msg.actions || []), ...fresh]
+}
+
+async function refreshAction(a) {
+  await loadActions()
+  const updated = actions.value.find(x => x.id === a.id)
+  if (updated) Object.assign(a, updated)
+}
+
+async function confirmAction(a) {
+  deciding.value = a.id
+  try {
+    const r = await api(`/api/chat/actions/${a.id}/confirm`, { method: 'POST', body: '{}' })
+    Object.assign(a, r)
+    message.success('已执行')
+  } catch (e) {
+    message.error(e.message || '执行失败')
+  } finally {
+    deciding.value = 0
+  }
+}
+
+async function cancelAction(a) {
+  deciding.value = a.id
+  try {
+    const r = await api(`/api/chat/actions/${a.id}/cancel`, { method: 'POST', body: '{}' })
+    Object.assign(a, r)
+  } catch (e) {
+    message.error(e.message || '取消失败')
+  } finally {
+    deciding.value = 0
+  }
+}
+
 async function send() {
   const q = text.value.trim()
   if (!q || sending.value) return
@@ -169,7 +259,8 @@ async function send() {
   text.value = ''
   sending.value = true
   messages.value.push({ key: 'u' + (++keySeq), role: 'user', content: q })
-  const asst = { key: 'a' + (++keySeq), role: 'assistant', content: '', streaming: true }
+  const asst = { key: 'a' + (++keySeq), role: 'assistant', content: '', streaming: true, steps: [], actions: [] }
+  const asstKey = asst.key
   messages.value.push(asst)
   scroll()
   try {
@@ -190,6 +281,7 @@ async function send() {
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const block = buf.slice(0, idx)
         buf = buf.slice(idx + 2)
+        const evName = (block.split('\n').find(l => l.startsWith('event:')) || '').slice(6).trim()
         for (const line of block.split('\n')) {
           if (!line.startsWith('data:')) continue
           let data
@@ -199,7 +291,11 @@ async function send() {
             continue
           }
           if (data.error) throw new Error(data.message || data.error)
-          if (data.delta) {
+          if (evName === 'step') {
+            const kind = data.kind === 'result' ? 'ok' : 'run'
+            asst.steps.push({ kind, text: stepText(data) })
+            scroll()
+          } else if (data.delta) {
             asst.content += data.delta
             scroll()
           }
@@ -207,6 +303,8 @@ async function send() {
       }
     }
     asst.streaming = false
+    await loadActions()
+    attachActions(asstKey)
     await loadConversations()
   } catch (e) {
     asst.content = '出错了：' + e.message

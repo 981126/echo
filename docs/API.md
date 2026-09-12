@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 124 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 127 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -612,6 +612,43 @@ Chat History
 - `limit`（query）integer
 - `x-access-token`（header）string
 **返回 200**：application/json → array
+
+### GET /api/chat/actions
+
+List Agent Actions
+
+列出 AI 对话的写操作提案（R-147 P2）；前端刷新后据此渲染「待确认」卡片。
+
+**参数**
+
+- `conversation_id`（query）integer，可选
+- `status`（query）string，可选（`pending` / `cancelled` / `done` / `failed`）
+- `x-access-token`（header）string
+**返回 200**：application/json → array
+
+### POST /api/chat/actions/{action_id}/confirm
+
+Confirm Agent Action
+
+**作者确认后**才真正执行写操作（生成草稿 / 回炉 / 改草稿状态）；先前的写工具只登记提案，不会直接执行。
+
+**参数**
+
+- `action_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### POST /api/chat/actions/{action_id}/cancel
+
+Cancel Agent Action
+
+取消待确认的写操作：**不动任何数据**。
+
+**参数**
+
+- `action_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
 
 ### POST /api/chat/stream
 

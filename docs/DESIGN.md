@@ -67,6 +67,15 @@
   - **再校准方法**：不传 stream、逐个 max_tokens 打真实接口，记录 `finish_reason` / `reasoning_content` 长度 / `usage.completion_tokens_details.reasoning_tokens`；改动预算前 `tests/test_r142_thinking_budget.py` 会把「长输出功能的默认预算低于实测最坏值 × 余量」直接判红。
   - **可配置（R-143）**：`services/budget_settings.py` 是预算的唯一事实源（`SLOTS` / `budget_for(db,key)` / `save_budgets` / `reset_budgets`），调用点全部读它；`GET/PUT /api/settings/models` 带 `budgets`（不新增路由），前端在「模型设置」里有「推理预算（高级）」区块（含每项说明、默认值、生效值、一键恢复默认）。
   - 「不传 max_tokens（交给服务端默认）」实测也能跑通，但会失去上面两个能力，且默认值随供应商变化而不可见 —— 已评估后选择保留显式上限（作者 2026-09-12 选 A）。
+- **AI 对话作为受限 agent（R-147）**：`ChatService.reply(..., conversation_id, on_step)` 是「多步工具循环」——
+  回合/工具预算/墙钟可配，到限**收尾作答**而不是抛错；`on_step` 把每步（工具名/参数 → 结果摘要）抛给
+  `api/chat.py::/stream`，后者用「后台线程 + 队列」把它转成 `event: step`（真正的步骤级流式，而不是"全算完再吐字"）。
+  - **读**：`sql_query` 只允许查 `app/core/analytics_views.py` 里的 8 个只读视图，安全边界四层
+    （只读连接 / 单条 SELECT / 表引用白名单 / 资源上限），见 `services/chat_sql.py`；系统消息注入视图 schema 卡片。
+  - **写**：写工具只登记 `agent_actions` 提案（`pending` + 影响范围 `preview`），作者点「确认执行」后才落库；
+    `services/agent_actions.py` 负责 propose/confirm/cancel 与审计；`services/draft_flow.py` 提供
+    「建占位稿 + 入队讨论」「同稿回炉」两个动作，供 API 与 agent 共用。
+  - **不做**：沙箱跑代码/shell（P3）—— 需独立容器 + 只读数据副本 + 禁网，风险高于收益。
 - **AI 对话的接地气（R-146）**：`services/chat_service.py` 的工具凡是**分页**的都必须返回
   `{total, returned, truncated, <items>}`（`total` 用 `q.count()`，是**筛选后**的真实总数）——
   否则模型会把这一页的条数当成总数（实测「292 条素材」被答成「50 条」）。

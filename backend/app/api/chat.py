@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,9 +26,38 @@ from ..schemas.chat import (
     ConversationOut,
     ConversationUpdate,
 )
+from ..services import agent_actions
 from ..services.chat_service import ChatService
 
 router = APIRouter()
+
+
+@router.get("/actions", response_model=list[dict])
+def list_agent_actions(
+    conversation_id: int | None = None,
+    status: str = "",
+    db: Session = Depends(get_db),
+):
+    """列出 agent 写操作提案（R-147 P2）：前端刷新后仍能渲染待确认卡片。"""
+    return [agent_actions.to_dict(r) for r in agent_actions.list_actions(db, conversation_id, status)]
+
+
+@router.post("/actions/{action_id}/confirm", response_model=dict)
+def confirm_agent_action(action_id: int, db: Session = Depends(get_db)):
+    """作者确认后才真正执行写操作（生成/回炉/改状态）。"""
+    try:
+        return agent_actions.to_dict(agent_actions.confirm(db, action_id))
+    except agent_actions.AgentActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/actions/{action_id}/cancel", response_model=dict)
+def cancel_agent_action(action_id: int, db: Session = Depends(get_db)):
+    """取消待确认的写操作：不动任何数据。"""
+    try:
+        return agent_actions.to_dict(agent_actions.cancel(db, action_id))
+    except agent_actions.AgentActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _last_history(db: Session, conversation_id: int | None, limit: int = 40) -> list[dict]:
@@ -107,11 +138,12 @@ def chat_history(
 def chat(payload: ChatIn, db: Session = Depends(get_db)):
     """非流式问答（兼容旧调用）。"""
     user_msg = payload.message.strip()
-    history = _last_history(db, None)
+    conv_id = getattr(payload, "conversation_id", None)
+    history = _last_history(db, conv_id)
     service = ChatService(db=db)
-    reply = service.reply(db, user_msg, history)
-    db.add(ChatMessage(role="user", content=user_msg))
-    db.add(ChatMessage(role="assistant", content=reply))
+    reply = service.reply(db, user_msg, history, conversation_id=conv_id)
+    db.add(ChatMessage(conversation_id=conv_id, role="user", content=user_msg))
+    db.add(ChatMessage(conversation_id=conv_id, role="assistant", content=reply))
     db.commit()
     last = db.query(ChatMessage).order_by(ChatMessage.id.desc()).first()
     return {"reply": reply, "message_id": last.id if last else 0}
@@ -125,40 +157,68 @@ def chat_stream(payload: ChatStreamIn):
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     def gen():
-        db = SessionLocal()
-        try:
-            conversation_id = payload.conversation_id
-            if conversation_id is not None and db.get(ChatConversation, conversation_id) is None:
-                yield f"event: error\ndata: {json.dumps({'message': '会话不存在'}, ensure_ascii=False)}\n\n"
+        """R-147 P0：agent 在后台线程里跑，每步工具调用实时下发（event: step），
+        最后把整段回答按打字机节奏发出去。"""
+        out: queue.Queue = queue.Queue()
+
+        def worker() -> None:
+            db = SessionLocal()
+            try:
+                conversation_id = payload.conversation_id
+                if conversation_id is not None and db.get(ChatConversation, conversation_id) is None:
+                    out.put(("error", "会话不存在"))
+                    return
+                history = _last_history(db, conversation_id)
+                db.add(ChatMessage(conversation_id=conversation_id, role="user", content=user_msg))
+                db.commit()
+
+                def on_step(step: dict) -> None:
+                    out.put(("step", step))
+
+                reply = ChatService(db=db).reply(
+                    db, user_msg, history, conversation_id=conversation_id, on_step=on_step
+                )
+                msg = ChatMessage(conversation_id=conversation_id, role="assistant", content=reply)
+                db.add(msg)
+                db.commit()
+                db.refresh(msg)
+                if conversation_id is not None:
+                    conv = db.get(ChatConversation, conversation_id)
+                    if conv:
+                        conv.updated_at = _app_now()
+                        db.commit()
+                out.put(("reply", (reply, msg.id)))
+            except Exception as exc:  # noqa: BLE001 统一转成 error 事件
+                out.put(("error", str(exc)))
+            finally:
+                db.close()
+                out.put(("end", None))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        reply_text = ""
+        message_id = 0
+        while True:
+            kind, data = out.get()
+            if kind == "end":
+                break
+            if kind == "step":
+                yield f"event: step\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            elif kind == "error":
+                yield f"event: error\ndata: {json.dumps({'message': data}, ensure_ascii=False)}\n\n"
                 return
-            history = _last_history(db, conversation_id)
-            db.add(
-                ChatMessage(conversation_id=conversation_id, role="user", content=user_msg)
-            )
-            db.commit()
-
-            reply = ChatService(db=db).reply(db, user_msg, history)
-            msg = ChatMessage(conversation_id=conversation_id, role="assistant", content=reply)
-            db.add(msg)
-            db.commit()
-            db.refresh(msg)
-            if conversation_id is not None:
-                conv = db.get(ChatConversation, conversation_id)
-                if conv:
-                    conv.updated_at = _app_now()
-                    db.commit()
-
-            yield f"event: start\ndata: {json.dumps({'message_id': msg.id}, ensure_ascii=False)}\n\n"
-            step = 12
-            for i in range(0, len(reply), step):
-                chunk = reply[i : i + step]
-                yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
-                time.sleep(0.015)
-            yield f"event: done\ndata: {json.dumps({'done': True, 'message_id': msg.id}, ensure_ascii=False)}\n\n"
-        except Exception as exc:  # noqa: BLE001
-            yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
-        finally:
-            db.close()
+            elif kind == "reply":
+                reply_text, message_id = data
+        if not reply_text:
+            yield f"event: error\ndata: {json.dumps({'message': '没有拿到回答'}, ensure_ascii=False)}\n\n"
+            return
+        yield f"event: start\ndata: {json.dumps({'message_id': message_id}, ensure_ascii=False)}\n\n"
+        step = 12
+        for i in range(0, len(reply_text), step):
+            chunk = reply_text[i : i + step]
+            yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
+            time.sleep(0.015)
+        yield f"event: done\ndata: {json.dumps({'done': True, 'message_id': message_id}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         gen(),

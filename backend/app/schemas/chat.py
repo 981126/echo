@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 class ChatIn(BaseModel):
     message: str
+    conversation_id: Optional[int] = None
 
 
 class ChatStreamIn(BaseModel):

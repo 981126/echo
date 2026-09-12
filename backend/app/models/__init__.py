@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .agent_action import AgentAction
 from .chat import ChatMessage
 from .discussion import DraftDiscussion
 from .draft import Draft
@@ -38,6 +39,7 @@ __all__ = [
     "Draft",
     "DraftDiscussion",
     "ChatMessage",
+    "AgentAction",
     "HotTopic",
     "TopicIdea",
     "Kv",

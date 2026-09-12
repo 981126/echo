@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # 单次 LLM 调用的硬性墙钟上限（秒）：超过即按超时处理 → 由 llm_router 降级到模型2（R-139）
     llm_timeout_seconds: int = 600
 
+    # AI 对话 agent 行为（R-147 P0）：回合数 / 单次提问的工具调用总次数 / 墙钟上限（秒）
+    # 到限不再抛「未收敛」，而是带着已获得的数据收尾作答。
+    agent_max_rounds: int = 8
+    agent_max_tool_calls: int = 16
+    agent_timeout_seconds: int = 120
+
     # 灵感池进池限量（R-140）：每条作品最多进池 N 条（按点赞降序）、每个博主每天最多进池 N 条。
     # 设为 0 表示该维度不限量。daily 走「逐素材队列」后评论量大，必须限量避免灌进几百上千条。
     pool_ideas_per_post: int = 8

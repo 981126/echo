@@ -6,12 +6,17 @@
 from __future__ import annotations
 
 import json
+import time
+from typing import Callable
+
+from ..config import get_settings
+from ..core.log import get_logger
 
 from sqlalchemy.orm import Session
 
 from ..models.persona import PersonaTag
 from ..models.video import Video
-from . import budget_settings, llm_router
+from . import agent_actions, budget_settings, chat_sql, llm_router
 from .llm import LLMError
 from .prompt_service import get_prompt
 from .requirements_service import list_requirements
@@ -33,7 +38,12 @@ TOOL_DATA_RULES = (
     "**绝不能把列表长度当成总数**。\n"
     "2. 只依据工具返回的数据作答：没返回的数字、标题、日期、结论一律不要编造；"
     "查不到或数据不足时直接说「没查到 / 数据不足」，不要猜。\n"
-    "3. 引用具体条目时用工具返回的真实标题与 id，不要自己改名或编号。"
+    "3. 引用具体条目时用工具返回的真实标题与 id，不要自己改名或编号。\n"
+    "4. sql_query 只能查只读视图（表名见 schema 卡片），返回的 row_count 是取回条数、"
+    "truncated=true 表示还有更多；不要用它去猜没查到的数据。\n"
+    "5. 写操作（generate_draft / rework_draft / set_draft_status）只会生成**待作者确认的提案**，"
+    "不会立即执行。你必须把提案内容告诉作者并请他点击确认，"
+    "严禁说「我已经生成/我已经改好了」这类已完成的话。"
 )
 
 TOOLS = [
@@ -119,12 +129,67 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "generate_draft",
-            "description": "根据选题生成脚本草稿（写操作，必须先获得作者明确同意）",
+            "name": "sql_query",
+            "description": (
+                "用只读 SQL 精确查询数据（只允许查下面 schema 里的视图："
+                "v_videos 素材 / v_drafts 草稿 / v_feedback 反馈 / v_persona_tags 人设 / "
+                "v_topics 选题候选 / v_ideas 灵感池 / v_metrics 指标快照 / v_platform_posts 平台作品）。"
+                "适合「按条件筛选/排序/分组统计」类问题，例如互动率最低的几条、某月发布数量。"
+                "只允许单条 SELECT，自动限制 200 行。"
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"topic": {"type": "string"}},
+                "properties": {"sql": {"type": "string", "description": "单条 SELECT 语句，表名只能用上面的视图"}},
+                "required": ["sql"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_draft",
+            "description": (
+                "【写操作】提议生成一篇脚本草稿（双模型讨论，约 3-5 分钟）。"
+                "这只会生成一条待作者确认的提案，**不会立即执行**："
+                "你必须告诉作者「请点击确认后才会开始生成」，不要声称已经开始或完成。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"topic": {"type": "string", "description": "选题标题"}},
                 "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rework_draft",
+            "description": (
+                "【写操作】提议把某篇草稿按原选题重跑一遍双模型讨论（回炉）。"
+                "同样只生成待确认提案，不会立即执行。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"draft_id": {"type": "integer"}},
+                "required": ["draft_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_draft_status",
+            "description": (
+                "【写操作】提议修改某篇草稿的状态：used=采用（待制作）/ archived=不采用 / "
+                "deleted=删除（软删，可恢复）/ draft=退回草稿。只生成待确认提案，不会立即执行。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "draft_id": {"type": "integer"},
+                    "status": {"type": "string", "enum": ["used", "archived", "deleted", "draft"]},
+                },
+                "required": ["draft_id", "status"],
             },
         },
     },
@@ -223,7 +288,8 @@ def _search_drafts(db: Session, args: dict) -> dict:
     }
 
 
-def _dispatch(db: Session, name: str, args: dict) -> dict:
+def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -> dict:
+    """执行一个工具调用。`context` 带会话信息（写操作提案要记录来源会话）。"""
     if name == "search_videos":
         return _search_videos(db, args)
     if name == "get_video_detail":
@@ -292,17 +358,76 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
         return {"radar": radar(db)}
     if name == "search_drafts":
         return _search_drafts(db, args)
-    if name == "generate_draft":
-        from .generation import generate_draft
-
-        draft = generate_draft(db, str(args.get("topic", "")))
+    if name == "sql_query":
+        return chat_sql.run(_db_path_of(db), str(args.get("sql") or ""))
+    # R-147 P2：写操作只登记「待确认提案」，由作者在界面点确认后才执行
+    if name in agent_actions.ACTION_LABELS:
+        try:
+            row = agent_actions.propose(
+                db,
+                action=name,
+                payload=dict(args),
+                conversation_id=(context or {}).get("conversation_id"),
+            )
+        except agent_actions.AgentActionError as exc:
+            return {"error": str(exc)}
         return {
-            "draft_id": draft.id,
-            "title": draft.title,
-            "cover_text": draft.cover_text,
-            "script": draft.script,
+            "status": "pending_confirmation",
+            "action_id": row.id,
+            "action": name,
+            "preview": row.preview,
+            "note": "已生成待确认操作：请在回答里告诉作者这一步做什么，并请他点击「确认执行」后才会真正开始。",
         }
     return {"error": f"未知工具: {name}"}
+
+
+def _db_path_of(db: Session):
+    """取当前会话所连的 SQLite 文件路径（比读全局 settings 更准，也便于测试指向别的库）。"""
+    bind = db.get_bind()
+    url = getattr(bind, "url", None)
+    path = getattr(url, "database", None)
+    if path:
+        return path
+    from ..config import get_settings
+
+    return get_settings().db_path
+
+
+def _schema_section(db: Session) -> str:
+    """给模型的只读视图 schema 卡片（R-147 P1）。"""
+    from ..core import analytics_views
+
+    try:
+        bind = db.get_bind()
+        return "【可查询的只读视图（sql_query 只能用这些）】\n" + analytics_views.schema_card(bind)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001 schema 取不到不影响对话
+        log.exception("生成 schema 卡片失败")
+        return ""
+
+
+def _step_summary(name: str, result: dict) -> str:
+    """把工具结果压成一行进度文案（给前端步骤条用）。"""
+    if not isinstance(result, dict):
+        return "完成"
+    if result.get("error"):
+        return f"失败：{str(result['error'])[:60]}"
+    if result.get("status") == "pending_confirmation":
+        return f"已生成待确认操作 #{result.get('action_id')}"
+    if "total" in result:
+        extra = f"，本次取回 {result.get('returned')}" if result.get("truncated") else ""
+        return f"共 {result['total']} 条{extra}"
+    if "video_total" in result:
+        return f"有数据的视频 {result['video_total']} 条"
+    if "row_count" in result:
+        extra = "（还有更多）" if result.get("truncated") else ""
+        return f"查到 {result['row_count']} 行{extra}"
+    for key in ("videos", "drafts", "topics", "requirements", "radar", "tags"):
+        if key in result and isinstance(result[key], list):
+            return f"取回 {len(result[key])} 条"
+    return "完成"
+
+
+log = get_logger("chat")
 
 
 class ChatService:
@@ -311,32 +436,61 @@ class ChatService:
     def __init__(self, llm=None, db: Session | None = None):
         self.llm = llm or llm_router.primary_llm(db, "chat")
 
-    def reply(self, db: Session, user_message: str, history: list[dict]) -> str:
-        messages: list[dict] = [{"role": "system", "content": get_prompt("chat") + TOOL_DATA_RULES}]
+    def reply(
+        self,
+        db: Session,
+        user_message: str,
+        history: list[dict],
+        *,
+        conversation_id: int | None = None,
+        on_step: Callable[[dict], None] | None = None,
+    ) -> str:
+        """多步 agent 问答（R-147 P0）。
+
+        - 回合数 / 工具调用总次数 / 墙钟上限都可配（`.env` 的 `ECHO_AGENT_*`）；
+        - 每一步工具调用通过 `on_step` 抛出（前端画进度条）；
+        - 到限**不再抛「未收敛」**，而是带着已获得的数据请模型收尾作答。
+        """
+        settings = get_settings()
+        max_rounds = max(1, int(settings.agent_max_rounds or 8))
+        max_calls = max(1, int(settings.agent_max_tool_calls or 16))
+        deadline = time.monotonic() + max(5, int(settings.agent_timeout_seconds or 120))
+        budget = budget_settings.budget_for(db, "chat")
+
+        messages: list[dict] = [
+            {"role": "system", "content": get_prompt("chat") + TOOL_DATA_RULES + "\n\n" + _schema_section(db)}
+        ]
         messages.extend(history[-20:])
         messages.append({"role": "user", "content": user_message})
+        context = {"conversation_id": conversation_id}
+        calls = 0
+        stop_reason = ""
 
-        for _ in range(3):
+        for round_no in range(1, max_rounds + 1):
+            if time.monotonic() > deadline:
+                stop_reason = f"已达时间上限（{settings.agent_timeout_seconds}s）"
+                break
             try:
                 message = self.llm.chat_completion(
-                    messages,
-                    temperature=0.5,
-                    max_tokens=budget_settings.budget_for(db, "chat"),
-                    tools=TOOLS,
+                    messages, temperature=0.5, max_tokens=budget, tools=TOOLS
                 )
             except LLMError:
+                if calls:
+                    stop_reason = "模型暂时不可用"
+                    break
                 return "（AI 服务暂时不可用：模型1 与模型2 都没能给出结果，请到「AI 设置」检查 API Key。）"
             except Exception as exc:  # noqa: BLE001 外部服务失败统一降级，不让对话页报裸错
+                if calls:
+                    stop_reason = f"模型异常：{exc}"
+                    break
                 return f"（AI 服务暂时不可用：{exc}）"
+
             tool_calls = message.get("tool_calls")
             if not tool_calls:
                 return (message.get("content") or "").strip()
+
             messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.get("content") or "",
-                    "tool_calls": tool_calls,
-                }
+                {"role": "assistant", "content": message.get("content") or "", "tool_calls": tool_calls}
             )
             for call in tool_calls:
                 fn = call.get("function") or {}
@@ -345,7 +499,22 @@ class ChatService:
                     args = json.loads(fn.get("arguments") or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                result = _dispatch(db, name, args)
+                if calls >= max_calls or time.monotonic() > deadline:
+                    stop_reason = f"已达工具调用上限（{max_calls} 次）"
+                    result: dict = {"error": "已达本次提问的工具调用上限，请基于已有数据作答"}
+                else:
+                    calls += 1
+                    if on_step is not None:
+                        try:
+                            on_step({"kind": "tool", "name": name, "args": args, "round": round_no})
+                        except Exception:  # noqa: BLE001 进度回调失败不影响回答
+                            log.exception("on_step 回调失败")
+                    result = _dispatch(db, name, args, context)
+                    if on_step is not None:
+                        try:
+                            on_step({"kind": "result", "name": name, "summary": _step_summary(name, result)})
+                        except Exception:  # noqa: BLE001
+                            log.exception("on_step 回调失败")
                 messages.append(
                     {
                         "role": "tool",
@@ -353,4 +522,25 @@ class ChatService:
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
-        raise LLMError("对话在多次工具调用后未收敛")
+            if stop_reason:
+                break
+
+        # 收尾：不再给工具，要求它基于已有信息直接回答（到限也让你拿到答案）
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"（系统提示：{stop_reason or '已达到本次提问的步骤上限'}。"
+                    "请立刻基于上面已经取得的数据给出最终回答；不要再调用任何工具；"
+                    "如果信息不足以回答，就直接说明缺什么。）"
+                ),
+            }
+        )
+        try:
+            final = self.llm.chat_completion(
+                messages, temperature=0.4, max_tokens=budget
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"（已查到部分数据但收尾失败：{exc}）"
+        text = (final.get("content") or "").strip()
+        return text or "（已达到步骤上限，但没能组织出答案；可以换个更具体的问法。）"

@@ -1,5 +1,45 @@
 # 变更记录
 
+## [M136 / R-147] 2026-09-12 — AI 对话升级为通用型 agent（P0 多步可见 + P1 只读 SQL + P2 写操作确认）
+> 作者问「有办法让 ai 对话像个通用型 agent 吗」，在 P0/P1/P2/P3 四档方案里确认 **P0+P1+P2 都做**（P3 沙箱跑代码明确不做）。
+
+**P0｜多步与过程可见**
+- `ChatService.reply(..., conversation_id, on_step)`：回合数 / 工具调用总次数 / 墙钟上限都走 `.env`
+  （`ECHO_AGENT_MAX_ROUNDS=8` / `ECHO_AGENT_MAX_TOOL_CALLS=16` / `ECHO_AGENT_TIMEOUT_SECONDS=120`）；
+  **到限不再抛「对话在多次工具调用后未收敛」**，而是补一条系统提示让模型带着已有数据收尾作答。
+- `api/chat.py::/stream` 改为「后台线程跑 agent + 队列转发 SSE」：每一步工具调用实时下发
+  `event: step`（调用名/参数 → 结果摘要），前端渲染成步骤条；回答仍按打字机节奏发。
+- `ChatView.vue`：助手气泡里显示步骤条（`调用 sql_query …` / `sql_query → 查到 1 行`）。
+
+**P1｜只读 SQL（能答任意数据问题）**
+- 新增 `app/core/analytics_views.py`：启动时幂等重建 **8 个只读视图**
+  （`v_videos`/`v_drafts`/`v_feedback`/`v_persona_tags`/`v_topics`/`v_ideas`/`v_metrics`/`v_platform_posts`），
+  **明确排除** `app_kv`（含明文模型 Key）、`ai_prompts`（提示词正文）、`chat_*`、`schema_migrations` 等敏感/内部表。
+- 新增 `sql_query` 工具 + `app/services/chat_sql.py`，四层护栏：① 只读连接（`mode=ro` + `PRAGMA query_only=1`）；
+  ② 只允许单条 `SELECT`/`WITH`（拒 `;` 多语句与全部写/管理关键字）；③ **表引用必须是视图白名单**
+  （正则抽 `FROM`/`JOIN` 标识符后校验，连子查询偷查原表也挡住）；④ 自动补 `LIMIT ≤200`、单元格截断、
+  5s 超时（progress handler 中断）。返回 `{columns, rows, row_count, truncated, sql}`。
+- 系统消息注入**视图 schema 卡片**（视图名 + 真实列名 + 中文说明，含「platforms 是 JSON 用 LIKE 判平台」这类提示）。
+
+**P2｜写操作人机确认（可审计）**
+- 新增 `agent_actions` 表（第 29 张表）+ `app/services/agent_actions.py`：写工具**只登记提案**
+  （`pending` + 影响范围 `preview`），作者在对话里点「确认执行」后才真正落库；取消则不动任何数据。
+- 写工具从「直接执行」改为「提议」：`generate_draft`、`rework_draft`、`set_draft_status`
+  （used/archived/deleted/draft；删除是软删可恢复）。系统规则明确要求模型**不得声称已完成**。
+- 新接口：`GET /api/chat/actions`、`POST /api/chat/actions/{id}/confirm`、`POST /api/chat/actions/{id}/cancel`
+  （API.md 路由 124→**127**）。前端渲染「⚠ 待你确认」卡片（动作 + 预览 + 确认/取消 + 执行结果/失败原因），
+  刷新或切会话后仍能重新挂载。
+- 顺带把「建占位稿 + 入队双模型讨论」抽到 `services/draft_flow.py`，供「AI 生成」按钮与 agent 写操作共用
+  （原来只写在 API 层，别处复用不了）。
+
+**验证（真实调用）**
+- P0+P1：一次提问里模型**自己选择** `sql_query` 并写对 SQL —— 4 个 `event: step` 事件，答案与库完全一致
+  （素材 292 条；草稿 22 篇 = draft 8 + used 1 + archived 4 + deleted 9）。
+- P2：说「把草稿 22 标记为不采用」→ 只产出待确认提案（库中状态**仍是 draft**），确认后变 `archived` 并写审计
+  （`agent_actions`：action/status/result/created_at/decided_at）；随后已还原为 draft。
+- 测试：新增 `tests/test_r147_chat_agent.py`（27 例，含 10 条 SQL 越权用例与「到限必须收尾作答」）；
+  总数 **310 例**；verify 全绿。
+
 ## [M135 / R-146] 2026-09-12 — AI 对话「瞎回复」修复：工具暴露总数 + 程序固定的数据使用规则
 > 作者反馈：「现在项目中的ai对话功能，完全就是瞎回复」。
 
