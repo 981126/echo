@@ -394,6 +394,17 @@ def test_gzip_encoded_response_is_decoded(monkeypatch):
     assert client._post({"model": "kimi-k2.6", "messages": []})["content"] == "压缩过的正文"
 
 
+def test_read_timeout_is_generous_enough_for_reasoning_models():
+    """单次「无数据到达」上限必须大于推理模型的静默思考时间（实测 Kimi >30s 才吐第一字节）。"""
+    from app.services.llm import OpenAIClient
+
+    assert OpenAIClient.READ_TIMEOUT_SECONDS >= 120
+    client = OpenAIClient("https://example.invalid", "sk-x", "kimi-k2.6", timeout_seconds=600)
+    assert client.READ_TIMEOUT_SECONDS >= 120
+    # 整体墙钟上限仍然生效（防「一直有字节但永不结束」）
+    assert client.timeout_seconds == 600
+
+
 def test_read_timeout_becomes_readable_error(monkeypatch):
     """连接层超时也要转成可读的 LLMError（而不是裸 httpx 异常）。"""
     import httpx as _httpx

@@ -86,6 +86,8 @@ class OpenAIClient:
     """
 
     DEFAULT_TIMEOUT_SECONDS = 600
+    # 单次「无数据到达」上限：必须大于推理模型最长静默思考时间（实测 Kimi 会静默 >30s）
+    READ_TIMEOUT_SECONDS = 180.0
 
     def __init__(
         self,
@@ -110,8 +112,10 @@ class OpenAIClient:
         url = f"{self.base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}"}
         deadline = time.monotonic() + self.timeout_seconds
-        # read=30：30 秒没有**任何**数据到达就认为连接废了；整体上限由 deadline 兜底
-        timeout = httpx.Timeout(connect=15.0, read=30.0, write=60.0, pool=30.0)
+        # read：多久没有任何数据到达就认为是死连接。推理模型「思考中」可能长时间不吐字节
+        # （实测 Kimi 用 read=30 会稳定超时，40s 就被判死），所以给足 180s；
+        # 「连接一直有字节但永远不结束」由上面的墙钟 deadline 兜底（实测曾挂 39 分钟）。
+        timeout = httpx.Timeout(connect=15.0, read=self.READ_TIMEOUT_SECONDS, write=60.0, pool=30.0)
         try:
             with httpx.Client(timeout=timeout) as client:
                 with client.stream("POST", url, headers=headers, json=payload) as resp:

@@ -45,9 +45,14 @@
      （实测 770 字节 gzip / 1401 字节解码后 JSON），`iter_raw` 拿到的是压缩字节 → JSON 解析必然失败。
      **这个坑是「双模型兼容性自检」自己抓出来的**（自检报告 model2 在两个 JSON 契约上不兼容），
      修完自检 6/6 通过 —— 正好证明自检功能本身有效。
-- 测试：新增 `tests/test_r139_llm_router.py`（28 例：降级四种触发、输出不可用先抬预算重试、参数归一化与厂家下限、
+  4. **单次「无数据到达」上限要给推理模型留足静默时间**：加了墙钟上限后把 read timeout 收到 30s，
+     结果 Kimi 稳定在 40s 被判超时（思考中长时间不吐第一个字节），默认配置（生成方=Kimi）
+     每篇都被迫降级 —— 反而制造了「降级」。现固定 `READ_TIMEOUT_SECONDS = 180s`：
+     静默超过 180s 才算死连接，整体仍由墙钟 deadline（600s）兜底。复测自动生成路径
+     `fallback=False`、`used.gen=model2(Kimi)`、`used.critic=model1(DeepSeek)`、`passed=True`。
+- 测试：新增 `tests/test_r139_llm_router.py`（29 例：降级四种触发、输出不可用先抬预算重试、参数归一化与厂家下限、
   墙钟上限/HTTP 错误可读、通知落地、双模型讨论与轮次、运行时篇数、ASR 运行时接线、非脚本功能默认模型1、
-  注入 llm 不被路由破坏、gzip 响应解码）；`tests/test_r138_model_settings.py`（7 例）；总 221 例通过。
+  注入 llm 不被路由破坏、gzip 响应解码、read timeout 留足思考静默）；`tests/test_r138_model_settings.py`（7 例）；总 222 例通过。
 - **真实链路实测**（非 mock）：双模型兼容性自检 6 次调用全通过（模型1 DeepSeek 0.9–1.5s / 模型2 Kimi 4.9–13.9s）；
   人为把模型1 Key 改错后调 `/api/drafts/angles` → 自动降级模型2 并产出 3 个可用角度（8.5s 正常路径，
   降级路径 29s），站内出现 `llm_fallback` 通知；真实双模型讨论生成 3 篇（生成方 Kimi + 评审方 DeepSeek，1 轮），
