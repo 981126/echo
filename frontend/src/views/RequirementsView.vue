@@ -20,9 +20,9 @@
     </div>
 
     <div class="panel">
-      <!-- R-148：宽表用 .table-wrap 兜底横向滚动，长标题不会再撑破页面 -->
+      <!-- R-148：固定列宽布局 + .table-wrap 兜底。长标题/长摘要在列内换行，表格恒为 100% 宽 -->
       <div class="table-wrap">
-        <table class="table">
+        <table class="table table-fixed">
           <thead>
             <tr>
               <th>编号</th>
@@ -33,12 +33,18 @@
           </thead>
           <tbody>
             <tr v-for="r in items" :key="r.id">
-              <td style="font-family: var(--mono); font-size: 12.5px; white-space: nowrap">{{ r.id }}</td>
-              <td style="min-width: 180px">{{ r.title }}</td>
-              <td style="min-width: 130px">
-                <n-select size="small" :value="r.status" :options="statusOptions" @update:value="(v) => changeStatus(r, v)" />
+              <td class="cell-id">{{ r.id }}</td>
+              <td class="cell-title">{{ r.title }}</td>
+              <td class="cell-status">
+                <n-select
+                  size="small"
+                  style="width: 100%"
+                  :value="r.status"
+                  :options="statusOptions"
+                  @update:value="(v) => changeStatus(r, v)"
+                />
               </td>
-              <td class="muted">{{ r.summary }}</td>
+              <td class="muted cell-summary">{{ r.summary }}</td>
             </tr>
           </tbody>
         </table>
@@ -80,3 +86,19 @@ async function changeStatus(r, status) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+/* R-148：固定列宽布局 —— 列宽由下面几条决定，不再让「状态」下拉那一列吃掉剩余空间
+   （实测修复前：编号 54 / 标题 180 / 状态 805 / 摘要 29 → 表格 1067px，比容器宽 189px）。
+   长标题/长摘要靠全局的 overflow-wrap:anywhere 在列内换行，表格恒为 100% 宽。 */
+.table-fixed { table-layout: fixed; }
+.table-fixed .cell-id {
+  width: 76px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.table-fixed .cell-title { width: 28%; }
+.table-fixed .cell-status { width: 132px; }
+.table-fixed .cell-summary { width: auto; }
+</style>

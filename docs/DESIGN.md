@@ -67,6 +67,11 @@
   - **再校准方法**：不传 stream、逐个 max_tokens 打真实接口，记录 `finish_reason` / `reasoning_content` 长度 / `usage.completion_tokens_details.reasoning_tokens`；改动预算前 `tests/test_r142_thinking_budget.py` 会把「长输出功能的默认预算低于实测最坏值 × 余量」直接判红。
   - **可配置（R-143）**：`services/budget_settings.py` 是预算的唯一事实源（`SLOTS` / `budget_for(db,key)` / `save_budgets` / `reset_budgets`），调用点全部读它；`GET/PUT /api/settings/models` 带 `budgets`（不新增路由），前端在「模型设置」里有「推理预算（高级）」区块（含每项说明、默认值、生效值、一键恢复默认）。
   - 「不传 max_tokens（交给服务端默认）」实测也能跑通，但会失去上面两个能力，且默认值随供应商变化而不可见 —— 已评估后选择保留显式上限（作者 2026-09-12 选 A）。
+- **宽表与长串的布局约定（R-148）**：`.table th/td` 必须能换行（`overflow-wrap: anywhere` —— 它参与
+  min-content 计算，长 slug/路径不会再把表格撑宽）；**列多或含控件的表要用 `table-layout: fixed` + 显式列宽**，
+  不要靠内联 `min-width`（`table-layout:auto` 会把剩余空间全塞给某一列：实测「状态」列被撑到 805px）；
+  `.table-wrap` 只作极窄屏兜底。验收方式：headless Chrome 量 `documentElement.scrollWidth - clientWidth`
+  与 `wrap.scrollWidth - wrap.clientWidth`，两者都必须是 0。
 - **AI 对话作为受限 agent（R-147）**：`ChatService.reply(..., conversation_id, on_step)` 是「多步工具循环」——
   回合/工具预算/墙钟可配，到限**收尾作答**而不是抛错；`on_step` 把每步（工具名/参数 → 结果摘要）抛给
   `api/chat.py::/stream`，后者用「后台线程 + 队列」把它转成 `event: step`（真正的步骤级流式，而不是"全算完再吐字"）。

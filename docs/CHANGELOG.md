@@ -1,26 +1,37 @@
 # 变更记录
 
-## [M137 / R-148] 2026-09-12 — 需求管理页 UI 溢出修复（标题 slug 残渣 + 表格长串不换行）
-> 作者反馈：「需求管理这个页面，ui都超出了浏览器边界了」。
+## [M137 / R-148] 2026-09-12 — 需求管理页整页横向溢出修复（真实布局修复，非隐藏）
+> 作者反馈：「需求管理这个页面，ui都超出了浏览器边界了」。第一版只做了「换行 + 外套滚动容器」，
+> 被作者当场指出 **「你这只是单独溢出隐藏了」** —— 用 headless Chrome 量了渲染宽度，确认作者是对的。
 
-**复现与根因（实测）**
-- 需求列表 145 条里 **108 条标题被文件名 slug 污染**：`# R-001-HISTORY-IMPORT: 历史内容导入与转写…`
-  被解析成 `-HISTORY-IMPORT: 历史内容导入与转写…` —— 因为 `^#\s+(R-\d{3})[::\s]*(.*)$` 只剥掉 `R-001`。
-- 这类 slug 是 **33 字符无断点的 ASCII 串**（`-DOWNLOAD-TIMEOUT-ASR-FAIL-NOTIFY`）；表格是
-  `width:100%` + `table-layout:auto`，单元格又没有 `overflow-wrap`，于是 min-content 宽度被长串撑大
-  → 表格比 `.page`（`max-width:920px`）还宽 → **整页横向溢出**。
+**实测（headless Chrome 量 DOM 尺寸）**
+| | 修复前 | 第一版（只加 wrap） | 最终（固定列宽） |
+|---|---|---|---|
+| 表格宽度 | 1067px | **1067px（恒定）** | **878 / 775 / 575 / 675（跟随容器）** |
+| 表格内溢出 | — | **189～492px（要横向滚动）** | **0** |
+| 页面溢出 | >0 | 0 | 0 |
+
+**两个根因**
+1. **数据侧**：145 条需求里 108 条标题被文件名 slug 污染（`# R-001-HISTORY-IMPORT: 中文标题`
+   被解析成 `-HISTORY-IMPORT: 中文标题`），是 33 字符无断点 ASCII。
+2. **布局侧（主因）**：需求表是 `table-layout: auto`，单元格上又有内联 `min-width`，
+   各列实测宽度 `编号 54 / 标题 180 / **状态 805** / 摘要 29` —— **「状态」下拉那一列独吞 805px**，
+   把表格推到 1067px，比容器（1440 视口下 878px）宽 189px。
 
 **修复**
-- **解析层**（不改需求文档，`requirements/*.md` 是事实源）：新增 `_parse_headline()`，
-  识别老式 `# R-xxx-SLUG: 中文标题` 并把 slug 一并剥掉；保守规则 —— **只有 ID 后紧跟 `-` 且 slug 以冒号结尾**才剥
-  （实测 108/108 条都带冒号，因此 `# R-110 博主页…`、`# R-141: …` 这类新式标题不受影响，`# R-148-API 接入…` 也不误伤）；
-  剥完为空则回退 slug 本身。
-- **样式层**：`.table th/td` 增加 `overflow-wrap: anywhere; word-break: break-word`
-  （`anywhere` 参与 min-content 计算 —— 这是关键，任何长串都不会再撑破容器）；
-  新增 `.table-wrap { overflow-x: auto }` 工具类，需求页表格包一层做横向滚动兜底。
-- 测试：新增 `tests/test_r148_requirements_title.py`（6 例），其中一条**对真实 `requirements/` 全量跑**，
-  断言「标题不残留 slug、不含 slug 形态的长串」—— 以后谁再写出 `# R-xxx-SLUG: 标题` 或把解析规则改坏都会红；
-  另一条是样式契约（必须保留换行规则与 `.table-wrap`）。总数 **316 例**；verify 全绿。
+- 解析层 `_parse_headline()`：剥掉老式 H1 里的 slug（保守规则：仅当 ID 后紧跟 `-` 且 slug 以冒号结尾；
+  新式 `# R-110 标题` / `# R-141: 标题` 不受影响），不改任何需求文档原文。
+- 布局层：需求表改 **`table-layout: fixed`** + 显式列宽（编号 76px / 标题 28% / 状态 132px / 摘要自适应），
+  去掉会撑宽列的内联 `min-width`，下拉框 `width: 100%` 填满本列 → 表格恒等于容器宽，**不需要横向滚动**。
+- 兜底层（保留但已不触发）：`.table th/td { overflow-wrap: anywhere }` 让长串在列内换行；
+  `.table-wrap { overflow-x: auto }` 作为极窄屏的最后防线。
+- **顺带全站扫描**（headless Chrome，1440/1100 两档）：`/home /videos /creators /benchmark /drafts
+  /persona /prompts /chat /requirements` **页面溢出全为 0**；其中首页时间线 `.tl` 与提示词页 tab 条
+  是**设计上的内部横向滚动**，不属缺陷。
+
+**测试**：`tests/test_r148_requirements_title.py` 扩到 7 例 —— 除标题清洗（含对真实 `requirements/`
+全量跑的护栏）外，新增**固定列宽契约**（必须有 `table-fixed`/`table-layout: fixed`/显式列宽/下拉 100%，
+且**禁止再出现内联 `min-width`**），防止退回「auto 布局 + 撑宽 + 藏滚动」。总数 **317 例**。
 
 ## [M136 / R-147] 2026-09-12 — AI 对话升级为通用型 agent（P0 多步可见 + P1 只读 SQL + P2 写操作确认）
 > 作者问「有办法让 ai 对话像个通用型 agent 吗」，在 P0/P1/P2/P3 四档方案里确认 **P0+P1+P2 都做**（P3 沙箱跑代码明确不做）。

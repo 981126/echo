@@ -80,9 +80,28 @@ def test_real_requirement_files_have_no_slug_residue():
 
 
 def test_stylesheet_wraps_long_tokens_in_tables():
-    """样式契约：表格单元格必须允许长串换行，且提供宽表横向滚动兜底。"""
+    """样式契约①：表格单元格必须允许长串在列内换行。"""
     css = (REPO_ROOT / "frontend" / "src" / "styles.css").read_text(encoding="utf-8")
-    assert "overflow-wrap: anywhere" in css, "缺少长串换行规则 → 表格会再次撑破页面"
+    assert "overflow-wrap: anywhere" in css, "缺少长串换行规则 → 长标题会再次撑宽表格"
     assert ".table-wrap" in css and "overflow-x: auto" in css
+
+
+def test_requirements_table_uses_fixed_layout():
+    """样式契约②：需求表必须是**固定列宽**布局。
+
+    实测教训（R-148 第二轮）：只给单元格加 `overflow-wrap` + 外层滚动，**表格本身仍是 1067px**
+    （`table-layout:auto` 把剩余空间全给了「状态」下拉那一列：编号 54 / 标题 180 / 状态 805 / 摘要 29），
+    在 1440 宽的屏上仍要横向滚动 —— 那只是把溢出圈起来，不是修好。
+    固定列宽后表格宽恒等于容器宽（实测 878/775/575/675，内溢出 0）。
+    """
     view = (REPO_ROOT / "frontend" / "src" / "views" / "RequirementsView.vue").read_text(encoding="utf-8")
-    assert 'class="table-wrap"' in view, "需求页表格应使用横向滚动兜底"
+    assert 'class="table table-fixed"' in view, "需求表应使用 .table-fixed"
+    assert "table-layout: fixed" in view, "缺少固定列宽布局"
+    assert "width: 28%" in view and "width: 132px" in view and "width: 76px" in view, "列宽应由 % / 固定值显式指定"
+    assert 'class="table-wrap"' in view, "宽表兜底容器应保留"
+    # 之前导致 auto 布局失控的内联 min-width 必须去掉
+    assert "min-width: 180px" not in view and "min-width: 130px" not in view, (
+        "内联 min-width 会与 table-layout:auto 一起把列撑宽 —— 已改用固定列宽，不要退回"
+    )
+    # 下拉框要填满它那一列，否则固定列宽下会溢出单元格
+    assert 'style="width: 100%"' in view
