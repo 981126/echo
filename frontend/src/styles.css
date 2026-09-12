@@ -149,6 +149,12 @@ a { color: inherit; text-decoration: none; }
 
 /* ---------- 表格 ---------- */
 .table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+/* R-148：表格单元格里的长串（英文 slug / 路径 / 错误码）必须能换行。
+   `overflow-wrap: anywhere` 会参与 min-content 宽度计算 —— 不加这一条，
+   一个 33 字符的不可断串就能把表格撑得比容器宽，导致整页横向溢出。 */
+.table th, .table td { overflow-wrap: anywhere; word-break: break-word; }
+/* 宽表兜底：包一层 .table-wrap 就能横向滚动，永远不会撑破页面 */
+.table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .table td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .table tr:last-child td { border-bottom: 0; }

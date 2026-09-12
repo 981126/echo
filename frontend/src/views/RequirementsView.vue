@@ -20,26 +20,29 @@
     </div>
 
     <div class="panel">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>编号</th>
-            <th>标题</th>
-            <th>状态</th>
-            <th>摘要</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in items" :key="r.id">
-            <td style="font-family: var(--mono); font-size: 12.5px">{{ r.id }}</td>
-            <td style="min-width: 180px">{{ r.title }}</td>
-            <td style="min-width: 130px">
-              <n-select size="small" :value="r.status" :options="statusOptions" @update:value="(v) => changeStatus(r, v)" />
-            </td>
-            <td class="muted">{{ r.summary }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- R-148：宽表用 .table-wrap 兜底横向滚动，长标题不会再撑破页面 -->
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>标题</th>
+              <th>状态</th>
+              <th>摘要</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in items" :key="r.id">
+              <td style="font-family: var(--mono); font-size: 12.5px; white-space: nowrap">{{ r.id }}</td>
+              <td style="min-width: 180px">{{ r.title }}</td>
+              <td style="min-width: 130px">
+                <n-select size="small" :value="r.status" :options="statusOptions" @update:value="(v) => changeStatus(r, v)" />
+              </td>
+              <td class="muted">{{ r.summary }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="!items.length" class="empty">暂无需求记录</div>
     </div>
   </div>

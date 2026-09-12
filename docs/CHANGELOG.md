@@ -1,5 +1,27 @@
 # 变更记录
 
+## [M137 / R-148] 2026-09-12 — 需求管理页 UI 溢出修复（标题 slug 残渣 + 表格长串不换行）
+> 作者反馈：「需求管理这个页面，ui都超出了浏览器边界了」。
+
+**复现与根因（实测）**
+- 需求列表 145 条里 **108 条标题被文件名 slug 污染**：`# R-001-HISTORY-IMPORT: 历史内容导入与转写…`
+  被解析成 `-HISTORY-IMPORT: 历史内容导入与转写…` —— 因为 `^#\s+(R-\d{3})[::\s]*(.*)$` 只剥掉 `R-001`。
+- 这类 slug 是 **33 字符无断点的 ASCII 串**（`-DOWNLOAD-TIMEOUT-ASR-FAIL-NOTIFY`）；表格是
+  `width:100%` + `table-layout:auto`，单元格又没有 `overflow-wrap`，于是 min-content 宽度被长串撑大
+  → 表格比 `.page`（`max-width:920px`）还宽 → **整页横向溢出**。
+
+**修复**
+- **解析层**（不改需求文档，`requirements/*.md` 是事实源）：新增 `_parse_headline()`，
+  识别老式 `# R-xxx-SLUG: 中文标题` 并把 slug 一并剥掉；保守规则 —— **只有 ID 后紧跟 `-` 且 slug 以冒号结尾**才剥
+  （实测 108/108 条都带冒号，因此 `# R-110 博主页…`、`# R-141: …` 这类新式标题不受影响，`# R-148-API 接入…` 也不误伤）；
+  剥完为空则回退 slug 本身。
+- **样式层**：`.table th/td` 增加 `overflow-wrap: anywhere; word-break: break-word`
+  （`anywhere` 参与 min-content 计算 —— 这是关键，任何长串都不会再撑破容器）；
+  新增 `.table-wrap { overflow-x: auto }` 工具类，需求页表格包一层做横向滚动兜底。
+- 测试：新增 `tests/test_r148_requirements_title.py`（6 例），其中一条**对真实 `requirements/` 全量跑**，
+  断言「标题不残留 slug、不含 slug 形态的长串」—— 以后谁再写出 `# R-xxx-SLUG: 标题` 或把解析规则改坏都会红；
+  另一条是样式契约（必须保留换行规则与 `.table-wrap`）。总数 **316 例**；verify 全绿。
+
 ## [M136 / R-147] 2026-09-12 — AI 对话升级为通用型 agent（P0 多步可见 + P1 只读 SQL + P2 写操作确认）
 > 作者问「有办法让 ai 对话像个通用型 agent 吗」，在 P0/P1/P2/P3 四档方案里确认 **P0+P1+P2 都做**（P3 沙箱跑代码明确不做）。
 
