@@ -10,6 +10,13 @@
     "lint": "eslint src --ext .js,.vue"
   },
   "dependencies": {
+    "@tiptap/extension-image": "^3.31.3",
+    "@tiptap/extension-list": "^3.31.3",
+    "@tiptap/extension-placeholder": "^3.31.3",
+    "@tiptap/extension-table": "^3.31.3",
+    "@tiptap/markdown": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "@tiptap/vue-3": "^3.31.3",
     "markdown-it": "^15.0.1",
     "naive-ui": "^2.45.3",
     "vue": "^3.4.29",

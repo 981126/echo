@@ -115,31 +115,20 @@
         <n-tabs v-model:value="editTab" type="line" animated>
           <n-tab-pane name="edit" tab="编辑">
             <div class="form-item">
-              <label class="form-label">口播脚本（Markdown，可插图）</label>
-              <div class="md-toolbar">
-                <n-button size="tiny" secondary @click="wrap('**', '**', '加粗文字')"><b>B</b></n-button>
-                <n-button size="tiny" secondary @click="wrap('*', '*', '斜体文字')"><i>I</i></n-button>
-                <n-button size="tiny" secondary @click="linePrefix('## ')">H2</n-button>
-                <n-button size="tiny" secondary @click="linePrefix('> ')">引用</n-button>
-                <n-button size="tiny" secondary @click="linePrefix('- ')">列表</n-button>
-                <n-button size="tiny" secondary @click="insertHr">分隔线</n-button>
-                <n-button size="tiny" secondary @click="insertLink">链接</n-button>
-                <n-button size="tiny" secondary @click="imgInput && imgInput.click()">🖼 插图</n-button>
-                <input ref="imgInput" type="file" accept="image/*" class="file-hidden" @change="onImage" />
+              <div class="row" style="align-items: center; margin-bottom: 6px">
+                <label class="form-label" style="margin: 0">口播脚本（Markdown，可插图）</label>
                 <span class="grow" />
-                <n-button size="tiny" :type="preview ? 'primary' : 'default'" @click="preview = !preview">
+                <n-button size="tiny" secondary :type="preview ? 'primary' : 'default'" @click="preview = !preview">
                   {{ preview ? '返回编辑' : '预览' }}
                 </n-button>
               </div>
-              <n-input
-                v-if="!preview"
-                ref="scriptInput"
-                v-model:value="editing.script"
-                type="textarea"
-                :rows="15"
+              <div v-if="preview" class="prose md-preview" v-html="renderMd(editing.script)" />
+              <ScriptEditor
+                v-else
+                :model-value="editing.script"
                 placeholder="在这里撰写 / 改写脚本"
+                @update:model-value="v => (editing.script = v)"
               />
-              <div v-else class="prose md-preview" v-html="renderMd(editing.script)" />
             </div>
             <div v-if="checkInfo && editing.id" class="panel check-panel" style="margin-bottom: 10px">
               <div class="row" style="gap: 8px; align-items: center">
@@ -213,13 +202,16 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import { api, uploadImage } from '../api'
+import { api } from '../api'
 import { fetchVideos } from '../composables/media'
 import { fmt } from '../lib/format'
 import { renderMd } from '../md'
 import { buildDiff } from '../lib/diff'
+
+// R-150：Tiptap 块编辑器（含 ProseMirror）体积较大，异步加载不进首屏
+const ScriptEditor = defineAsyncComponent(() => import('../components/ScriptEditor.vue'))
 
 const drafts = ref([])
 const videos = ref([])
@@ -256,8 +248,6 @@ const discussions = ref([])
 const discussionsMap = ref({})
 const debateStatus = ref('')
 const preview = ref(false)
-const scriptInput = ref(null)
-const imgInput = ref(null)
 const ratings = ref({})
 const dimDefs = [
   { key: 'hook_score', label: '钩子' },
@@ -290,11 +280,6 @@ function actorName(m) {
 }
 function kindName(k) {
   return { draft: '初稿', critique: '评审', revise: '修订', note: '说明' }[k] || k
-}
-function textarea() {
-  const inp = scriptInput.value
-  if (!inp) return null
-  return inp.textareaEl || (inp.$el && inp.$el.querySelector('textarea'))
 }
 
 async function load() {
@@ -391,65 +376,6 @@ async function softDelete(d) {
   await setStatus(d.id, 'deleted')
   message.success('已删除（逻辑删除，可在废稿/已删除中恢复）')
   load()
-}
-
-function wrap(prefix, suffix, placeholder) {
-  const el = textarea()
-  if (!el) return
-  const value = editing.value.script
-  const s = el.selectionStart
-  const e = el.selectionEnd
-  const sel = value.slice(s, e) || placeholder
-  editing.value.script = value.slice(0, s) + prefix + sel + suffix + value.slice(e)
-  nextTick(() => {
-    el.focus()
-    el.setSelectionRange(s + prefix.length, s + prefix.length + sel.length)
-  })
-}
-function linePrefix(prefix) {
-  const el = textarea()
-  if (!el) return
-  const value = editing.value.script
-  const s = el.selectionStart
-  const lineStart = value.lastIndexOf('\n', s - 1) + 1
-  editing.value.script = value.slice(0, lineStart) + prefix + value.slice(lineStart)
-  nextTick(() => {
-    el.focus()
-    el.setSelectionRange(lineStart + prefix.length, lineStart + prefix.length)
-  })
-}
-function insertHr() {
-  const el = textarea()
-  if (!el) return
-  const value = editing.value.script
-  const s = el.selectionStart
-  editing.value.script = value.slice(0, s) + '\n---\n' + value.slice(s)
-  nextTick(() => el.focus())
-}
-function insertLink() {
-  wrap('[', '](https://)', '链接文字')
-}
-async function onImage(e) {
-  const f = e.target.files[0]
-  if (!f) return
-  try {
-    const r = await uploadImage(f)
-    const el = textarea()
-    if (el) {
-      const value = editing.value.script
-      const s = el.selectionStart
-      const ins = `\n![图片](${r.url})\n`
-      editing.value.script = value.slice(0, s) + ins + value.slice(s)
-      nextTick(() => el.focus())
-    } else {
-      editing.value.script += `\n![图片](${r.url})\n`
-    }
-    message.success('图片已插入')
-  } catch (err) {
-    message.error(err.message)
-  } finally {
-    if (imgInput.value) imgInput.value.value = ''
-  }
 }
 
 async function save() {

@@ -174,10 +174,14 @@
 - `watcher.py`：10s 轮询 inbox，移入 videos 目录并建 `Video` 行（文件名 uuid 前缀防重），**不自动转写**（R-033，手动按钮触发）。
 
 ## 6. 前端结构（frontend/src/）
-- `router.js`：/home /videos /drafts /chat /persona /requirements /prompts /benchmark /creators /login（hash）。
+- `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并）、DraftsView（三 tab+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、RequirementsView、LoginView。
-- `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并）、DraftsView（三 tab+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
+  **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，
+  `drafts.script` 契约不变）；扩展 = StarterKit + Image + Placeholder + TableKit + TaskList/TaskItem + `@tiptap/markdown`；
+  `onUpdate → editor.getMarkdown()` 回写，外部换稿走 `setContent({ contentType: 'markdown', emitUpdate: false })`；
+  插图（工具栏/粘贴/拖拽）复用 `uploadImage()`；DraftsView 用 `defineAsyncComponent` 懒加载（ProseMirror 不进首屏）。
 - `composables/media.js`：fetchVideos/fetchWorks 统一入口。
 - `lib/`：format.js（平台名/数字缩写）、options.js（平台/赛道/状态选项）、timeline.js。
 - dev：vite 5173 代理后端 8000（`vite.config`）；构建产物 dist 由后端托管。

@@ -1,8 +1,8 @@
 # R-150 口播脚本编辑区换成 Tiptap 块编辑器（嵌入开源组件，保持 Markdown 存储）
 
 - **日期**: 2026-09-12
-- **状态**: 已确认范围，待作者说「继续」后实施（M139）
-- **关联**: `DraftsView.vue`（口播脚本编辑区）、`api.js` 的 `uploadImage`、R-018（Markdown 编辑器）、R-024
+- **状态**: ✅ 已完成（M139，2026-09-12 实施）
+- **关联**: `DraftsView.vue`（口播脚本编辑区）、`components/ScriptEditor.vue`、`api.js` 的 `uploadImage`、R-018（Markdown 编辑器）、R-024
 
 ## 原文（作者原话，未改动）
 
@@ -79,5 +79,41 @@
 
 ## 排期
 
-- **M139**（待作者确认后实施）
+- **M139**（已实施）
 - commit 信息：`feat(R-150): 口播脚本编辑区换 Tiptap 块编辑器（保持 Markdown 存储）`
+
+## 实施记录（2026-09-12）
+
+**改动文件**
+
+| 文件 | 改动 |
+|---|---|
+| `frontend/src/components/ScriptEditor.vue` | 新增：Tiptap v3 块编辑器；`v-model` 绑 Markdown；扩展 = StarterKit（含 Link/Underline）+ Image + Placeholder + TableKit + TaskList/TaskItem + `@tiptap/markdown`；工具栏（B/I/U/S/H2/H3/引用/列表/有序/代码/分隔线/表格/链接/插图/撤销/重做）；粘贴与拖拽图片走 `uploadImage()` |
+| `frontend/src/views/DraftsView.vue` | 编辑器改为 `defineAsyncComponent` 懒加载；删除 `textarea()/wrap()/linePrefix()/insertHr()/insertLink()/onImage()` 与 `scriptInput`/`imgInput`（约 -100 行）；「预览」按钮保留在标题行，仍用 `markdown-it` |
+| `frontend/package.json` / `package-lock.json` | 新增依赖：`@tiptap/vue-3`、`@tiptap/starter-kit`、`@tiptap/markdown`、`@tiptap/extension-image`、`@tiptap/extension-placeholder`、`@tiptap/extension-table`、`@tiptap/extension-list`（均 3.31.3 / MIT） |
+
+**实施中的两个判断**
+
+1. **补了表格与任务列表扩展**（超出「最小依赖」）：如果不补，StarterKit 解析不了表格 → 打开含表格的稿件时内容消失，再保存就永久丢失（实测原样吞掉）。补齐后表格 GFM 往返保留、任务列表逐字一致。这是「不丢数据」的必要项，不是加功能。
+2. **样式自绘**：没有引入 Tiptap 官方 UI 包，工具栏沿用 Naive UI `n-button`，与全站视觉一致。
+
+**验证证据**
+
+1. `scripts/verify.sh` **全绿**：ruff、mypy、pytest **314 例**、前端 lint（0 error）、前端构建、文档一致性（29 表 / 123 路由）。
+2. **Markdown 往返**（Node 里用与组件完全相同的扩展集跑 `MarkdownManager`）：
+   - 生产库 18 篇历史 AI 稿：**18/18 逐字一致**（该语料为纯口播文本，无格式标记）；
+   - 语法矩阵 14 类：标题 / 粗斜体 / 删除线 / 行内码 / 有序无序 / 嵌套列表 / 引用 / 代码块 / 分隔线 / 链接 / 图片 / 硬换行 / 任务列表 **逐字一致**；表格仅空白规范化且二次往返稳定（不持续漂移）。
+3. **浏览器端到端**（Chrome headless + puppeteer-core，**拦截 PATCH 未写库**，仅读真实草稿）**15/15 通过**：
+   载入库存正文、清空显示占位、加粗/H2/列表/引用/表格按钮生效、预览渲染 h2/strong/blockquote/table、
+   「预览 ↔ 返回编辑」内容不丢、保存 payload 仍是 Markdown（`**重点**` / `## 小节标题` / `- 第一条` / `> 引用内容` / GFM 表格）且 `title/cover_text/script/tags/video_id` 字段齐全。
+4. 数据安全：测试全程未写生产库（复检 `drafts` 无 `E2E` 字样、#11/#24 未变）。
+5. 服务形态：后端 8000（运行中）+ 前端 vite 5173（同一前端目录，HMR 已加载新代码），`/health` ok。
+
+**已知限制（留档，不阻塞）**
+
+- 行内 HTML（如 `<br>`）会被 Markdown 序列化转义为 `&lt;br&gt;`；历史稿无此类内容，且 `markdown-it` 一直是 `html:false`（预览也不解析 HTML）。
+- ScriptEditor 独立 chunk 507KB（gzip 160KB），已懒加载；Vite 对其报「>500KB」提示，未做进一步拆分。
+
+**非目标（未做，符合登记口径）**
+
+- 未改后端 / 数据库 / AI 链路；未做斜杠命令、拖拽块、多人协作；未替换素材文案、转写文本、提示词等其它输入框。

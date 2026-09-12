@@ -1,5 +1,31 @@
 # 变更记录
 
+## [M139 / R-150] 2026-09-12 — 口播脚本编辑区换 Tiptap v3 块编辑器（保持 Markdown 存储）
+> 作者：「有那种类似于 notion 开源组件吗，嵌入进我这个系统，我现在这个富文本使用不方便」。
+> 反问后作者确认：**Tiptap v3** + 官方 `@tiptap/markdown` 往返、**只换 DraftsView 口播脚本这一处**、
+> **保持 `drafts.script` 为 Markdown**（后端零改动）。
+
+- **新增** `frontend/src/components/ScriptEditor.vue`：Tiptap v3 块编辑器，对外仍是 Markdown 字符串
+  （`v-model` ↔ `props.modelValue`）；扩展 = StarterKit（含 Link/Underline）+ Image + Placeholder
+  + TableKit + TaskList/TaskItem + `Markdown`；`onUpdate` 用 `editor.getMarkdown()` 回写，
+  外部换稿用 `setContent(..., { contentType: 'markdown', emitUpdate: false })` 且先比对避免光标跳走。
+- **改造** `DraftsView.vue`：`defineAsyncComponent` 懒加载编辑器（Tiptap/ProseMirror 不进首屏，
+  实测独立 chunk 507KB / gzip 160KB，入口 chunk 353KB 未变）；删掉自研 `wrap/linePrefix/insertHr/insertLink/onImage`
+  与 `textarea().selectionStart` 拼接逻辑（-100 行）；「预览」按钮保留，仍走 `markdown-it`（与草稿列表同一渲染器）。
+- **插图**：工具栏 / 粘贴 / 拖拽三条入口都走原有 `uploadImage()`（`POST /api/uploads/image`），存 URL 不存 base64。
+- **为什么补表格/任务列表扩展**：StarterKit 不含表格，缺了会导致「打开含表格的稿 → 保存」把表格整块丢掉
+  （实测原样吞掉）。补齐后：表格 GFM 往返保留（仅多余空行/对齐空格被规范化）、任务列表逐字一致。
+- **保真性验证（可复现）**：用与组件完全相同的扩展集在 Node 里跑 `MarkdownManager` 往返
+  ① 库里 18 篇历史 AI 稿 → **18/18 逐字一致**；② 语法矩阵（标题/粗斜/删除线/有序无序/嵌套列表/引用/代码块/
+  分隔线/链接/图片/硬换行/表格/任务列表）逐字一致（表格仅空白规范化，二次往返稳定不漂移）。
+- **浏览器端到端（Chrome headless + puppeteer-core，拦截 PATCH 不写库）**：15/15 通过——载入库存正文、
+  占位提示、加粗/H2/列表/引用/表格按钮生效、「预览↔返回编辑」内容不丢、保存 payload 仍是 Markdown
+  （`**重点**` / `## 小节标题` / `- 第一条` / `> 引用内容` / GFM 表格）且字段齐全。
+- **已知限制**（不改行为，仅留档）：行内 HTML（如 `<br>`）会被 Markdown 序列化转义成 `&lt;br&gt;`；
+  历史稿中无此内容，`markdown-it` 也一直是 `html:false`。
+- 门禁：`scripts/verify.sh` 全绿（ruff + mypy + pytest **314 例** + 前端 lint 0 error + 构建 + 文档一致性 29 表/123 路由）。
+- 顺带把 R-149 遗漏的 `DESIGN.md` 前端页面清单同步（去掉已下线的 `RequirementsView` / `/requirements`）。
+
 ## [M138 / R-149] 2026-09-12 — 下线「需求管理」网页（保留需求归档与 AI 查需求工具）
 > 作者：「需求管理这个菜单不用了」。按询问确认的范围 **A（正式下线网页）** 实施，沿用 R-136 下线复盘时
 > 「不留死代码」的口径。

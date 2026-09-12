@@ -8,7 +8,7 @@
 | 层 | 选型 | 说明 |
 |---|---|---|
 | 后端 | Python 3.12+ / FastAPI / Uvicorn | 单进程单体；路由薄、业务厚；同步阻塞业务跑在后台线程 |
-| 前端 | Vue 3 + Vite + Naive UI | Hash 路由 SPA，桌面/移动响应式；dev(5173) 代理 8000，也可 build 后由 FastAPI 托管 |
+| 前端 | Vue 3 + Vite + Naive UI（+ Tiptap v3 块编辑器，R-150） | Hash 路由 SPA，桌面/移动响应式；dev(5173) 代理 8000，也可 build 后由 FastAPI 托管 |
 | 数据库 | SQLite + SQLAlchemy 2.x | 单用户零运维；engine `check_same_thread=False, timeout=30` 支持多线程 |
 | schema 演进 | 幂等轻量迁移（`db.py` 内函数） | 每次启动 `init_db()` 检查补列/建索引；**未用 Alembic**（tech-debt） |
 | 定时任务 | APScheduler BackgroundScheduler（进程内） | 每日流水线/平台同步两轮/指标留存/备份/清理/每周风格重建 |

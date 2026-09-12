@@ -22,7 +22,7 @@
 | M132 | 各功能 LLM 预算可配置（R-143） | ✅ |
 | M137 | 需求管理页 UI 溢出修复（R-148） | ✅ |
 | M138 | 下线「需求管理」网页（R-149） | ✅ |
-| M139 | 口播脚本编辑区换 Tiptap v3 块编辑器（R-150） | 🔲 待作者确认后实施 |
+| M139 | 口播脚本编辑区换 Tiptap v3 块编辑器（R-150） | ✅ |
 | M136 | AI 对话升级为通用型 agent：多步可见 + 只读 SQL + 写操作确认（R-147） | ✅ |
 | M135 | AI 对话「瞎回复」修复：工具暴露总数 + 程序固定数据规则（R-146） | ✅ |
 | M134 | 一键打包/部署 + 升级前自动备份（R-145） | ✅ |
@@ -34,7 +34,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
-| M139 / R-150 | 口播脚本编辑区换 Tiptap v3 块编辑器（新增 `ScriptEditor.vue`，懒加载；`@tiptap/vue-3` + `@tiptap/markdown` 往返 Markdown；删自研 textarea 工具栏；只换 DraftsView 一处，后端零改动） | 待实施：verify 全绿 + 历史稿往返回归 + 前端点检 | 🔲 |
+| M139 / R-150 | 口播脚本编辑区换 Tiptap v3 块编辑器（新增 `ScriptEditor.vue` 懒加载，Markdown v-model；补 TableKit/TaskList 防丢内容；删自研 textarea 工具栏；只换 DraftsView 一处，后端零改动） | verify 全绿（314 例）；MarkdownManager 往返：历史稿 18/18 逐字一致 + 14 类语法一致；Chrome headless 端到端 15/15（拦截 PATCH 未写库） | ✅ |
 | M138 / R-149 | 下线「需求管理」网页：删菜单/路由/视图 + 4 条 `/api/requirements` 与只服务该页的 create/update/get；保留需求归档与 AI 对话的查需求工具 | verify 全绿（123 路由）；AI 查需求冒烟通过；无残留引用 | ✅ |
 | M137 / R-148 | 需求页溢出：解析层剥掉 H1 里的英文 slug（108/145 条）+ 表格 `overflow-wrap:anywhere` + `.table-wrap` 兜底 | verify 全绿；6 个新用例（含对真实 requirements/ 全量护栏） | ✅ |
 | M136 / R-147 | 对话 agent：回合/预算/超时可配 + 步骤级 SSE；8 个只读视图 + `sql_query`（四层护栏）；写操作只提议 + `agent_actions` 确认/审计 | verify 全绿；27 个新用例；实测多步 SQL 答案与库一致、写操作确认前后状态正确 | ✅ |
