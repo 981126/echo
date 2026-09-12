@@ -5,6 +5,9 @@
 # 运行时数据（NAS 卷）
 data/
 
+# 发布包产物（R-145：scripts/release.sh 输出）
+dist_release/
+
 # Python
 __pycache__/
 *.py[cod]

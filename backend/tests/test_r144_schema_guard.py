@@ -172,3 +172,158 @@ def test_ensure_baseline_once(engine):
     assert status["has_baseline"] is True
     assert status["applied"] == 1
     assert status["latest"] == schema_guard.BASELINE_MIGRATION
+
+
+# ---------- R-145：启动即自动升级 → 升级前自动备份 / 打包部署脚本 ----------
+
+
+def _make_old_db(path, *, tables: int = 0):
+    """建一个「老结构」库（默认用生产结构快照；tables=1 时只建一张表以示差异）。"""
+    con = sqlite3.connect(path)
+    try:
+        if tables == 0:
+            con.executescript(BASELINE_SQL.read_text(encoding="utf-8"))
+        else:
+            con.execute("CREATE TABLE demo(id INTEGER)")
+            con.execute("INSERT INTO demo VALUES (1)")
+        con.commit()
+    finally:
+        con.close()
+
+
+def test_pending_upgrade_detects_old_schema(tmp_path, monkeypatch):
+    from app.config import get_settings
+
+    old = tmp_path / "old.db"
+    _make_old_db(old)
+    monkeypatch.setattr(get_settings(), "db_path", old, raising=False)
+    eng = create_engine(f"sqlite:///{old}")
+    try:
+        pending = schema_guard.pending_upgrade(eng, db_path=old)
+        assert pending and "schema_migrations" in pending["missing_tables"]
+    finally:
+        eng.dispose()
+
+
+def test_pending_upgrade_is_none_when_current(tmp_path, engine):
+    assert schema_guard.pending_upgrade(engine) is None
+
+
+def test_pending_upgrade_is_none_for_fresh_install(tmp_path):
+    """全新安装（库文件不存在）→ 没什么可备份，且**不能**因为探测而建出空库。"""
+    missing = tmp_path / "not_yet.db"
+    eng = create_engine(f"sqlite:///{missing}")
+    try:
+        assert schema_guard.pending_upgrade(eng, db_path=missing) is None
+    finally:
+        eng.dispose()
+    assert not missing.exists(), "判断待升级不应创建库文件"
+
+
+def test_auto_backup_before_upgrade_creates_verifiable_copy(tmp_path, monkeypatch):
+    from app.config import get_settings
+
+    db_file = tmp_path / "echo.db"
+    _make_old_db(db_file, tables=1)  # 有数据，便于校验备份可用
+    monkeypatch.setattr(get_settings(), "db_path", db_file, raising=False)
+    eng = create_engine(f"sqlite:///{db_file}")
+    try:
+        out = schema_guard.auto_backup_before_upgrade(eng, data_dir=tmp_path)
+    finally:
+        eng.dispose()
+    assert out, "应产出备份文件"
+    copy = sqlite3.connect(out)
+    try:
+        assert copy.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert copy.execute("SELECT count(*) FROM demo").fetchone()[0] == 1, "备份应包含真实数据"
+    finally:
+        copy.close()
+    assert "pre_upgrade" in out
+
+
+def test_auto_backup_keeps_only_recent(tmp_path, monkeypatch):
+    from app.config import get_settings
+
+    db_file = tmp_path / "echo.db"
+    _make_old_db(db_file, tables=1)
+    monkeypatch.setattr(get_settings(), "db_path", db_file, raising=False)
+    eng = create_engine(f"sqlite:///{db_file}")
+    try:
+        for i in range(schema_guard.KEEP_PRE_UPGRADE + 3):
+            out = schema_guard.auto_backup_before_upgrade(eng, data_dir=tmp_path)
+            assert out
+            # 让时间戳文件名不同（同秒会互相覆盖，所以直接改名模拟不同时刻）
+            Path(out).rename(Path(out).with_name(f"2026010{i % 9}_12000{i}.db"))
+    finally:
+        eng.dispose()
+    kept = list((tmp_path / "backups" / "pre_upgrade").glob("*.db"))
+    assert len(kept) <= schema_guard.KEEP_PRE_UPGRADE, f"应只保留 {schema_guard.KEEP_PRE_UPGRADE} 份，实际 {len(kept)}"
+
+
+def test_startup_upgrade_flow_backs_up_then_migrates(tmp_path, monkeypatch):
+    """复现作者要的链路：老库 + 新版本代码 → 启动时自动「先备份 → 再增量升级」。"""
+    from app import db as db_mod
+    from app.config import get_settings
+
+    db_file = tmp_path / "prod_like.db"
+    _make_old_db(db_file)
+    monkeypatch.setattr(get_settings(), "db_path", db_file, raising=False)
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path, raising=False)
+
+    eng = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
+    monkeypatch.setattr(db_mod, "engine", eng)
+    monkeypatch.setattr(db_mod, "SessionLocal", sessionmaker(bind=eng, autoflush=False, autocommit=False))
+
+    # ① 启动时先判断 + 备份（app/main.py lifespan 的顺序）
+    pending = schema_guard.pending_upgrade(eng, db_path=db_file)
+    assert pending, "老库应被判定为有待应用变更"
+    backup = schema_guard.auto_backup_before_upgrade(eng, data_dir=tmp_path)
+    assert backup and Path(backup).exists()
+
+    # ② 再升级
+    db_mod.init_db()
+    assert schema_guard.missing_schema(eng)["ok"] is True
+
+    # ③ 重复启动：不再有待应用变更 → 不会再备份（幂等）
+    assert schema_guard.pending_upgrade(eng, db_path=db_file) is None
+    assert len(list((tmp_path / "backups" / "pre_upgrade").glob("*.db"))) == 1
+    eng.dispose()
+
+
+def test_release_script_packages_without_secrets(tmp_path):
+    """release.sh 用 git archive 打包：只含被跟踪文件（不含 .env/data/node_modules）。"""
+    import shutil
+    import subprocess as sp
+
+    if shutil.which("git") is None or not (REPO_ROOT / ".git").exists():
+        pytest.skip("需要 git 仓库")
+    proc = sp.run(
+        ["git", "archive", "--format=tar.gz", "-o", str(tmp_path / "pkg.tar.gz"), "--prefix=echo/", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    listing = sp.run(["tar", "-tzf", str(tmp_path / "pkg.tar.gz")], capture_output=True, text=True).stdout
+    # 逐行精确比较：不能用子串（"echo/.env" 会匹配到 "echo/.env.example"）
+    lines = {ln.strip() for ln in listing.splitlines() if ln.strip()}
+    assert "echo/backend/app/db.py" in lines
+    assert "echo/scripts/backup.sh" in lines
+    assert "echo/backend/tests/fixtures/schema_baseline.sql" in lines
+    assert "echo/.env" not in lines, "发布包绝不能带 .env（含密钥）"
+    assert not any(ln.startswith("echo/data/") for ln in lines), "发布包不能带运行时数据"
+    assert not any(".venv/" in ln or "node_modules/" in ln for ln in lines)
+
+    script = (REPO_ROOT / "scripts" / "release.sh").read_text(encoding="utf-8")
+    for token in ("git archive", "git status --porcelain", "echo/.env"):
+        assert token in script
+
+
+def test_update_script_has_backup_health_and_version_steps():
+    """update.sh 必须是「先备份 → 构建 → 启动 → 健康检查 → 结构版本」且任一步失败即退出。"""
+    script = (REPO_ROOT / "scripts" / "update.sh").read_text(encoding="utf-8")
+    assert "set -euo pipefail" in script
+    assert "scripts/backup.sh" in script
+    assert "docker compose build" in script and "docker compose up -d" in script
+    assert "健康检查" in script and "结构自检与库结构版本" in script
+    assert script.index("scripts/backup.sh") < script.index("docker compose build"), "备份必须在构建/启动之前"

@@ -85,10 +85,37 @@ docker compose logs -f echo     # 看「结构自检通过」与定时任务注�
   会覆盖镜像内的 Linux 版前端依赖，`npm run build` 直接失败。
 - **单进程**：不要加 `uvicorn --workers`（APScheduler 会重复触发、SQLite 单写会锁）。
 
+### 一键打包 / 一键部署（R-145）
+
+```bash
+# ── 本地：打包（只含被 git 跟踪的文件，天然排除 .env / data / node_modules）
+git commit -am "feat(R-xxx): ..." && git tag v0.3.0
+bash scripts/release.sh            # → dist_release/echo_v0.3.0_<时间戳>.tar.gz
+                                   #   工作区有未提交改动会直接拒绝打包（防止发半成品）
+
+# ── NAS：部署（备份 → 拉码 → 构建 → 启动 → 健康检查 → 打印库结构版本）
+#   包部署：tar -xzf echo_v0.3.0_*.tar.gz --strip-components=1 -C /volume1/echo && cd /volume1/echo
+#   git 部署：cd /volume1/echo
+bash scripts/update.sh             # 解包部署可加 SKIP_PULL=1；任一步失败即非零退出
+```
+
+**启动时会自动增量升级**（这就是「打包上去、启动就好」的原理）：
+
+| 变更类型 | 谁来做 | 部署侧要做什么 |
+|---|---|---|
+| 新增**表** | `Base.metadata.create_all` 启动时自动建 | 什么都不用做 |
+| 新增**字段** | 那一版代码里的 `_migrate_*`（在 `init_db()` 里注册） | 什么都不用做（但**发布侧必须写迁移**，见下） |
+| 改了字段含义/删表 | 手写迁移 + 「先停用后清理」两步走 | 无（但别在一个版本里直接删） |
+
+启动顺序（`app/main.py` lifespan）：**判断待应用变更 → 自动备份 → 升级 → 结构自检**。
+即：只要检测到「模型声明的表/列 与 实际库不一致」，就会先自动备份到
+`data/backups/pre_upgrade/<时间戳>.db`（SQLite 官方 backup API + `integrity_check`，保留最近 5 份），
+**再**执行升级；备份失败只告警、不阻断启动（宁可先起来，也别让服务停着）。
+
 ### 增量上线 runbook（新表 / 新字段 / 改结构）
 
 ```bash
-# ── 本地：改代码 + 写迁移
+# ── 本地：改代码 + 写迁移（发布侧唯一必须的人工动作）
 #   新增表   → 加模型 + 在 app/models/__init__.py import（否则 create_all 看不见它）
 #   新增字段 → 在 app/db.py 加 _migrate_xxx（PRAGMA table_info 判存在 → ALTER TABLE ADD COLUMN），
 #              并在 init_db() 里注册；干完调用 schema_guard.record_migration(engine, "<名字>")

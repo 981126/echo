@@ -14,16 +14,23 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, TypeAlias
 
 from sqlalchemy import Engine, inspect
 
 from ..core.log import get_logger
 from ..db import Base
 
+PathType: TypeAlias = str | Path
+
 log = get_logger("schema_guard")
 
 SCHEMA_CHECK_KV = "schema_check_result"
+
+# 升级前自动备份（R-145）：放在 data/backups/pre_upgrade/，与 backup.sh 的 <时间戳>/ 目录分开，互不干扰
+PRE_UPGRADE_DIRNAME = "pre_upgrade"
+KEEP_PRE_UPGRADE = 5
 
 # 引入 R-144 之前的所有结构变更统称基线（这些迁移在 init_db 里每次都会幂等跑一遍）
 BASELINE_MIGRATION = "baseline_pre_r144"
@@ -106,6 +113,78 @@ def migration_status(bind: Engine) -> dict:
         "has_baseline": BASELINE_MIGRATION in names,
         "names": names,
     }
+
+
+def pending_upgrade(bind: Engine, db_path: PathType | None = None) -> dict | None:
+    """启动时判断是否有待应用的结构变更（= 需要先自动备份）。
+
+    - 库文件不存在（全新安装）→ 返回 None（没什么可备份的）；
+    - 结构已是最新 → 返回 None（重复启动不动数据）；
+    - 有待应用的表/列（含首次引入 `schema_migrations`）→ 返回 `missing_schema` 的结果。
+    """
+    from ..config import get_settings
+
+    path = db_path or get_settings().db_path
+    try:
+        if not Path(path).exists():
+            return None
+        report = missing_schema(bind)
+    except Exception as exc:  # noqa: BLE001 判断失败不能挡住启动
+        log.warning("判断是否有待应用的结构变更失败（跳过自动备份）：%s", exc)
+        return None
+    return None if report.get("ok") else report
+
+
+def auto_backup_before_upgrade(bind: Engine, data_dir: str | Path | None = None) -> str:
+    """升级前自动备份（R-145）：SQLite 官方 backup API + integrity_check；返回备份路径（失败返回空串）。"""
+    import sqlite3
+    import time
+
+    from ..config import get_settings
+
+    settings = get_settings()
+    src = Path(settings.db_path)
+    base = Path(data_dir) if data_dir is not None else Path(settings.data_dir)
+    try:
+        if not src.exists():
+            return ""
+        target_dir = base / "backups" / PRE_UPGRADE_DIRNAME
+        target_dir.mkdir(parents=True, exist_ok=True)
+        dst = target_dir / f"{time.strftime('%Y%m%d_%H%M%S')}.db"
+        con = sqlite3.connect(str(src))
+        try:
+            bck = sqlite3.connect(str(dst))
+            try:
+                con.backup(bck)
+            finally:
+                bck.close()
+        finally:
+            con.close()
+        chk = sqlite3.connect(str(dst))
+        try:
+            integrity = chk.execute("PRAGMA integrity_check").fetchone()[0]
+            tables = chk.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
+        finally:
+            chk.close()
+        if integrity != "ok" or tables <= 0:
+            log.error("升级前自动备份校验失败（integrity=%s tables=%s）：%s", integrity, tables, dst)
+            return ""
+        _prune_pre_upgrade(target_dir)
+        log.warning("检测到待应用的结构变更，已自动备份到 %s（%d 字节, %d 张表）", dst, dst.stat().st_size, tables)
+        return str(dst)
+    except Exception:  # noqa: BLE001 备份失败只告警，不阻断升级
+        log.exception("升级前自动备份失败（继续升级；请手工确认备份）")
+        return ""
+
+
+def _prune_pre_upgrade(target_dir) -> None:
+    """只保留最近 KEEP_PRE_UPGRADE 份升级前备份。"""
+    try:
+        files = sorted(target_dir.glob("*.db"), key=lambda p: p.name, reverse=True)
+        for old in files[KEEP_PRE_UPGRADE:]:
+            old.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        log.exception("清理历史升级前备份失败（不影响升级）")
 
 
 def run_startup_check(bind: Engine, session_factory: Callable[[], Any] | None = None) -> dict:
@@ -191,7 +270,12 @@ def _persist_report(report: dict, message: str, session_factory: Callable[[], An
 
 __all__ = [
     "BASELINE_MIGRATION",
+    "KEEP_PRE_UPGRADE",
+    "PRE_UPGRADE_DIRNAME",
     "SCHEMA_CHECK_KV",
+    "PathType",
+    "auto_backup_before_upgrade",
+    "pending_upgrade",
     "run_startup_check",
     "applied_migrations",
     "ensure_baseline",

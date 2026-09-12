@@ -72,6 +72,9 @@
   + 24 个幂等 `_migrate_*`（`PRAGMA table_info` 判存在 → `ALTER TABLE ADD COLUMN`，新列 `NOT NULL` 必须带 `DEFAULT`）
   + `ensure_defaults`（seed 默认提示词）。
   - **注意**：`create_all` **不会给已存在的表补列** —— 所以「往模型加字段」必须手写迁移，否则线上 `no such column`。
+  - **启动顺序（R-145）**：`pending_upgrade()` 判断是否有待应用变更（库文件不存在=全新安装→跳过；结构已最新→跳过）
+    → 有变更则 `auto_backup_before_upgrade()` 先备份到 `data/backups/pre_upgrade/<时间戳>.db`（SQLite backup API +
+    `integrity_check`，保留 5 份，失败只告警不阻断）→ `init_db()` 升级 → 结构自检。这样「打包上去、启动就好」才安全可回滚。
   - `core/schema_guard.py`：① `missing_schema(bind)` 把模型声明的表/列与实际库对一遍；启动时 `run_startup_check()`
     跑一次，缺了就日志 error + 站内通知 + 落 `app_kv`（**绝不阻塞启动**）；② 迁移记账 `record_migration` / `migration_status`，
     表 `schema_migrations`（首次写基线 `baseline_pre_r144`），启动日志打印「库结构版本」。
