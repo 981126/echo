@@ -13,7 +13,7 @@ from app.core.metrics import engagement_rate, normalize_snapshot, retention_cuto
 from app.core.review import best_topic_by_engagement, heuristic_direction  # noqa: E402
 from app.core.matching import keyword_fallback_match  # noqa: E402
 from app.core.pipeline import can_run, today_key  # noqa: E402
-from app.core.requirement_file import next_requirement_id, parse_requirement_file  # noqa: E402
+from app.core.requirement_file import parse_requirement_file  # noqa: E402
 from app.core.retrieval import TfidfIndex  # noqa: E402
 from app.core.topics import is_valid_platform, normalize_main_topic  # noqa: E402
 from app.core.platform_links import build_platform_page_url, extract_raw_field  # noqa: E402
@@ -66,12 +66,6 @@ def test_parse_requirement_file():
     assert data["title"] == "微信推送"
     assert data["status"] == "已确认"
     assert data["summary"] == "测试摘要"
-
-
-def test_next_requirement_id():
-    assert next_requirement_id([]) == "R-001"
-    assert next_requirement_id(["R-001.md", "R-003.md"]) == "R-004"
-    assert next_requirement_id(["README.md"]) == "R-001"
 
 
 

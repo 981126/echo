@@ -1,5 +1,22 @@
 # 变更记录
 
+## [M138 / R-149] 2026-09-12 — 下线「需求管理」网页（保留需求归档与 AI 查需求工具）
+> 作者：「需求管理这个菜单不用了」。按询问确认的范围 **A（正式下线网页）** 实施，沿用 R-136 下线复盘时
+> 「不留死代码」的口径。
+
+- **前端删除**：`App.vue` 菜单项、`router.js` 路由、`views/RequirementsView.vue`（构建 0 error）。
+- **后端删除**：`api/requirements.py`（4 条路由）、`schemas/requirement.py`、`main.py` 的 router 注册；
+  `requirements_service` 只保留 `list_requirements`；`core/requirement_file` 只保留 H1 解析
+  （删掉只服务「网页新建」的 `next_requirement_id` / `STATUSES` / `ID_RE` 及其单测）。
+- **保留**：`requirements/R-xxx.md` + `README.md`（工作流事实源，AGENTS.md 强制、`verify.sh` 校验、
+  `backup.sh` 快照）、AI 对话的 `list_requirements` 工具（问「R-146 是什么需求」仍能答），
+  以及 R-148 的标题清洗与「真实归档全量」护栏（AI 读归档同样受益）。
+- 口径同步：`docs/API.md` 删 4 条路由（**127 → 123**，`check_doc_consistency.py` 实测一致）、
+  PRD 的页面清单与「事实源」描述、PRODUCT 的能力表、milestones。
+- 死代码检查：全仓无 `RequirementsView` / `api/requirements` / `next_requirement_id` 残留引用。
+- 测试：删掉随页面一起消失的 2 条页面样式契约用例；总数 **315 例**；verify 全绿。
+- 须知：下线后**网页不能再登记/改状态**；新需求按 AGENTS.md 既定流程由 AI 直接写入归档文件（不受影响）。
+
 ## [M137 / R-148] 2026-09-12 — 需求管理页整页横向溢出修复（真实布局修复，非隐藏）
 > 作者反馈：「需求管理这个页面，ui都超出了浏览器边界了」。第一版只做了「换行 + 外套滚动容器」，
 > 被作者当场指出 **「你这只是单独溢出隐藏了」** —— 用 headless Chrome 量了渲染宽度，确认作者是对的。

@@ -9,7 +9,6 @@ const routes = [
   { path: '/drafts', component: () => import('./views/DraftsView.vue'), meta: { title: '脚本工作台' } },
   { path: '/chat', component: () => import('./views/ChatView.vue'), meta: { title: 'AI 对话' } },
   { path: '/persona', component: () => import('./views/PersonaView.vue'), meta: { title: '人设档案' } },
-  { path: '/requirements', component: () => import('./views/RequirementsView.vue'), meta: { title: '需求管理' } },
   { path: '/prompts', component: () => import('./views/PromptsView.vue'), meta: { title: 'AI 设置' } },
   { path: '/benchmark', component: () => import('./views/BenchmarkView.vue'), meta: { title: '博主对标' } },
   { path: '/creators', component: () => import('./views/CreatorsView.vue'), meta: { title: '博主管理' } }

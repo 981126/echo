@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import benchmark, chat, creators, drafts, events, works, notifications, persona, pipeline, platform, prompts, requirements, settings, tasks, topics, uploads, videos
+from .api import benchmark, chat, creators, drafts, events, works, notifications, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .core.log import get_logger, setup_logging
 from .db import init_db
@@ -70,9 +70,6 @@ app.include_router(events.router, prefix="/api", tags=["events"], dependencies=A
 app.include_router(benchmark.router, prefix="/api/benchmark", tags=["benchmark"], dependencies=API_DEPENDENCIES)
 app.include_router(drafts.router, prefix="/api/drafts", tags=["drafts"], dependencies=API_DEPENDENCIES)
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"], dependencies=API_DEPENDENCIES)
-app.include_router(
-    requirements.router, prefix="/api/requirements", tags=["requirements"], dependencies=API_DEPENDENCIES
-)
 app.include_router(topics.router, prefix="/api/topics", tags=["topics"], dependencies=API_DEPENDENCIES)
 app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"], dependencies=API_DEPENDENCIES)
 app.include_router(uploads.router, prefix="/api/uploads", tags=["uploads"], dependencies=API_DEPENDENCIES)

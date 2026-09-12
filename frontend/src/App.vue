@@ -61,7 +61,6 @@ const navs = [
   { to: '/chat', label: 'AI 对话' },
   { to: '/persona', label: '人设档案' },
   { to: '/benchmark', label: '博主对标' },
-  { to: '/requirements', label: '需求管理' },
   { to: '/prompts', label: 'AI 设置' },
   { to: '/creators', label: '博主管理' }
 ]

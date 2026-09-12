@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 127 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 123 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -668,55 +668,6 @@ SSE 流式问答：先按非流式求解（含工具调用），再逐段下发�
 **返回 200**：application/json → object
 
 ## requirements
-
-### GET /api/requirements
-
-List Reqs
-
-**参数**
-
-- `x-access-token`（header）string
-**返回 200**：application/json → array
-
-### POST /api/requirements
-
-Create Req
-
-**参数**
-
-- `x-access-token`（header）string
-**请求体**（application/json，`RequirementCreate`）
-
-字段：
-  - `title` string（必填）
-  - `summary` string
-
-**返回 200**：application/json → RequirementOut
-
-### GET /api/requirements/{rid}
-
-Get Req
-
-**参数**
-
-- `rid`（path）string，必填
-- `x-access-token`（header）string
-**返回 200**：application/json → object
-
-### PATCH /api/requirements/{rid}
-
-Update Req
-
-**参数**
-
-- `rid`（path）string，必填
-- `x-access-token`（header）string
-**请求体**（application/json，`RequirementUpdate`）
-
-字段：
-  - `status` string（必填）
-
-**返回 200**：application/json → RequirementOut
 
 ## topics
 
