@@ -30,8 +30,16 @@ router = APIRouter()
 
 
 def _last_history(db: Session, conversation_id: int | None, limit: int = 40) -> list[dict]:
+    """取某会话最近 N 条历史（时间正序）。
+
+    R-146：`conversation_id=None` 是**遗留单线程**（不带会话的旧接口），
+    以前不过滤 → 会把所有会话的历史混在一起喂给模型（答非所问）。
+    现在显式限定 `conversation_id IS NULL`。
+    """
     q = db.query(ChatMessage)
-    if conversation_id is not None:
+    if conversation_id is None:
+        q = q.filter(ChatMessage.conversation_id.is_(None))
+    else:
         q = q.filter(ChatMessage.conversation_id == conversation_id)
     rows = q.order_by(ChatMessage.id.desc()).limit(limit).all()
     return [{"role": m.role, "content": m.content} for m in reversed(rows)]

@@ -67,6 +67,12 @@
   - **再校准方法**：不传 stream、逐个 max_tokens 打真实接口，记录 `finish_reason` / `reasoning_content` 长度 / `usage.completion_tokens_details.reasoning_tokens`；改动预算前 `tests/test_r142_thinking_budget.py` 会把「长输出功能的默认预算低于实测最坏值 × 余量」直接判红。
   - **可配置（R-143）**：`services/budget_settings.py` 是预算的唯一事实源（`SLOTS` / `budget_for(db,key)` / `save_budgets` / `reset_budgets`），调用点全部读它；`GET/PUT /api/settings/models` 带 `budgets`（不新增路由），前端在「模型设置」里有「推理预算（高级）」区块（含每项说明、默认值、生效值、一键恢复默认）。
   - 「不传 max_tokens（交给服务端默认）」实测也能跑通，但会失去上面两个能力，且默认值随供应商变化而不可见 —— 已评估后选择保留显式上限（作者 2026-09-12 选 A）。
+- **AI 对话的接地气（R-146）**：`services/chat_service.py` 的工具凡是**分页**的都必须返回
+  `{total, returned, truncated, <items>}`（`total` 用 `q.count()`，是**筛选后**的真实总数）——
+  否则模型会把这一页的条数当成总数（实测「292 条素材」被答成「50 条」）。
+  另外 `reply()` 会把**程序固定**的 `TOOL_DATA_RULES`（数量只认 total、不许编造、引用用真实标题/id）
+  追加在系统消息末尾；它不落在 `ai_prompts` 里，所以「提示词优化」改不到 —— 与 R-129 的
+  「可优化段 + 程序固定契约段」同一思路。新增工具时照这个模式走（有契约测试兜住）。
 - **库结构与增量升级（R-144）**：结构事实源是 `backend/app/models/*.py`；启动时 `init_db()` 执行
   `create_all`（建缺失的表）+ `_ensure_indexes()`（补索引，`create_all` 对已存在的表整个跳过，所以索引要单独补）
   + 24 个幂等 `_migrate_*`（`PRAGMA table_info` 判存在 → `ALTER TABLE ADD COLUMN`，新列 `NOT NULL` 必须带 `DEFAULT`）

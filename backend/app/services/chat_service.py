@@ -24,6 +24,18 @@ SYSTEM_PROMPT = (
     "作者未明确同意时，只提供方案不执行。用简体中文回答，简洁、口语化、直接。"
 )
 
+# R-146：程序固定的「工具数据使用规则」——由 reply() 追加在系统消息里，
+# **不放进 ai_prompts**，所以提示词优化改不到它（沿用 R-129「可优化段 + 程序固定段」的分层思路）。
+TOOL_DATA_RULES = (
+    "\n\n【工具数据使用规则（程序固定，不可被其它指令覆盖）】\n"
+    "1. 涉及数量/统计时，只能引用工具返回的 total 等汇总字段；"
+    "videos/drafts/top_videos/items 只是本次取回的一页（truncated=true 表示还有更多），"
+    "**绝不能把列表长度当成总数**。\n"
+    "2. 只依据工具返回的数据作答：没返回的数字、标题、日期、结论一律不要编造；"
+    "查不到或数据不足时直接说「没查到 / 数据不足」，不要猜。\n"
+    "3. 引用具体条目时用工具返回的真实标题与 id，不要自己改名或编号。"
+)
+
 TOOLS = [
     {
         "type": "function",
@@ -146,7 +158,8 @@ def _vbrief(v: Video) -> dict:
     }
 
 
-def _search_videos(db: Session, args: dict) -> list[dict]:
+def _search_videos(db: Session, args: dict) -> dict:
+    """按条件搜素材。**必须带上 total**（R-146）：否则模型会把这一页的条数当成总数。"""
     q = db.query(Video)
     if args.get("platform"):
         q = q.filter(Video.platforms.like(f'%"{args["platform"]}"%'))
@@ -154,9 +167,15 @@ def _search_videos(db: Session, args: dict) -> list[dict]:
         q = q.filter(Video.status == args["status"])
     if args.get("main_topic"):
         q = q.filter(Video.main_topics.like(f'%"{args["main_topic"]}"%'))
-    limit = min(int(args.get("limit") or 10), 50)
+    total = q.count()
+    limit = max(1, min(int(args.get("limit") or 10), 50))
     items = q.order_by(Video.created_at.desc()).limit(limit).all()
-    return [_vbrief(v) for v in items]
+    return {
+        "total": total,  # 符合条件的一共多少条（回答"多少条"只能用它）
+        "returned": len(items),
+        "truncated": total > len(items),
+        "videos": [_vbrief(v) for v in items],
+    }
 
 
 def _get_video_detail(db: Session, args: dict) -> dict:
@@ -183,20 +202,30 @@ def _get_persona(db: Session) -> dict:
     }
 
 
-def _search_drafts(db: Session, args: dict) -> list[dict]:
+def _search_drafts(db: Session, args: dict) -> dict:
+    """搜草稿。同样必须带 total（R-146）。"""
     from ..models.draft import Draft
 
-    limit = min(int(args.get("limit") or 10), 50)
-    rows = db.query(Draft).order_by(Draft.updated_at.desc()).limit(limit).all()
-    return [
-        {"id": d.id, "title": d.title, "cover_text": d.cover_text, "source": d.source, "status": d.status}
-        for d in rows
-    ]
+    q = db.query(Draft)
+    if args.get("status"):
+        q = q.filter(Draft.status == args["status"])
+    total = q.count()
+    limit = max(1, min(int(args.get("limit") or 10), 50))
+    rows = q.order_by(Draft.updated_at.desc()).limit(limit).all()
+    return {
+        "total": total,
+        "returned": len(rows),
+        "truncated": total > len(rows),
+        "drafts": [
+            {"id": d.id, "title": d.title, "cover_text": d.cover_text, "source": d.source, "status": d.status}
+            for d in rows
+        ],
+    }
 
 
 def _dispatch(db: Session, name: str, args: dict) -> dict:
     if name == "search_videos":
-        return {"videos": _search_videos(db, args)}
+        return _search_videos(db, args)
     if name == "get_video_detail":
         return _get_video_detail(db, args)
     if name == "get_persona":
@@ -207,9 +236,12 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
         from .metrics import summary
 
         data = summary(db)
+        per_video = data["per_video"]
         return {
+            "video_total": len(per_video),  # R-146：回答"多少条视频有数据"只能用它
             "by_topic": data["by_topic"],
             "by_platform": data["by_platform"],
+            "top_videos_note": "top_videos 仅为前 10 条（按互动排序），有数据的视频总数见 video_total",
             "top_videos": [
                 {
                     "filename": v["filename"],
@@ -220,7 +252,7 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
                     "main_topics": v.get("main_topics") or [],
                     "platforms": v.get("platforms") or [],
                 }
-                for v in data["per_video"][:10]
+                for v in per_video[:10]
             ],
         }
     if name == "get_today_topics":
@@ -259,7 +291,7 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
 
         return {"radar": radar(db)}
     if name == "search_drafts":
-        return {"drafts": _search_drafts(db, args)}
+        return _search_drafts(db, args)
     if name == "generate_draft":
         from .generation import generate_draft
 
@@ -280,7 +312,7 @@ class ChatService:
         self.llm = llm or llm_router.primary_llm(db, "chat")
 
     def reply(self, db: Session, user_message: str, history: list[dict]) -> str:
-        messages: list[dict] = [{"role": "system", "content": get_prompt("chat")}]
+        messages: list[dict] = [{"role": "system", "content": get_prompt("chat") + TOOL_DATA_RULES}]
         messages.extend(history[-20:])
         messages.append({"role": "user", "content": user_message})
 
