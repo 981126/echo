@@ -79,15 +79,15 @@ def _content_or_reason(message: dict) -> str:
 class OpenAIClient:
     """OpenAI 兼容客户端（chat completions）。
 
-    调用有**硬性墙钟上限**（`timeout_seconds`，默认取 `.env` `ECHO_LLM_TIMEOUT_SECONDS`）：
-    只靠 httpx 的 read timeout 不够——实测 DeepSeek 思考时偶发长时间挂起
-    （一次真实调用挂了 39 分钟才超时），会让「超时降级」这条兜底形同虚设。
-    所以这里用流式读取 + 每次收到数据检查墙钟，超限立即按超时失败交给上层降级（R-139）。
+    调用有**硬性墙钟上限**（`timeout_seconds`，默认取 `.env` `ECHO_LLM_TIMEOUT_SECONDS` = 600s）：
+    - 请求没设 `stream`，所以服务端要等生成完才吐字节 → `read` 超时实际就是「这次调用必须在这个时间内完成」；
+      推理模型的思考时间随预算增长（实测 Kimi 拉到 12000 预算时会跑到 180s 以上），
+      所以 `read` 与墙钟取同一个值，单一语义：**单次调用最多 `timeout_seconds` 秒**。
+    - 只靠 httpx 的 read timeout 也不够：实测 DeepSeek 思考时偶发「一直有零碎字节但永不结束」，
+      一次真实调用挂了 39 分钟。因此流式读取时逐块检查墙钟，超限立即按超时失败交给上层降级（R-139/R-142）。
     """
 
     DEFAULT_TIMEOUT_SECONDS = 600
-    # 单次「无数据到达」上限：必须大于推理模型最长静默思考时间（实测 Kimi 会静默 >30s）
-    READ_TIMEOUT_SECONDS = 180.0
 
     def __init__(
         self,
@@ -112,10 +112,9 @@ class OpenAIClient:
         url = f"{self.base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}"}
         deadline = time.monotonic() + self.timeout_seconds
-        # read：多久没有任何数据到达就认为是死连接。推理模型「思考中」可能长时间不吐字节
-        # （实测 Kimi 用 read=30 会稳定超时，40s 就被判死），所以给足 180s；
-        # 「连接一直有字节但永远不结束」由上面的墙钟 deadline 兜底（实测曾挂 39 分钟）。
-        timeout = httpx.Timeout(connect=15.0, read=self.READ_TIMEOUT_SECONDS, write=60.0, pool=30.0)
+        # read 与墙钟同值（见类注释）：不设 stream 时它等价于「单次调用总时限」。
+        # connect 单独给短值，连不上时快速失败。
+        timeout = httpx.Timeout(connect=15.0, read=float(self.timeout_seconds), write=60.0, pool=30.0)
         try:
             with httpx.Client(timeout=timeout) as client:
                 with client.stream("POST", url, headers=headers, json=payload) as resp:

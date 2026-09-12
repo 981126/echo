@@ -19,6 +19,8 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+import httpx
+
 from ..core.log import get_logger
 from . import model_settings
 from .llm import LLMError, LLMUnusableOutput, OpenAIClient
@@ -43,8 +45,17 @@ FEATURE_LABELS: dict[str, str] = {
     "misc": "AI 调用",
 }
 
-# 单次调用 max_tokens 上限（防手写参数把成本打爆）
-MAX_TOKENS_CEILING = 16000
+# 单次调用 max_tokens 上限（防手写参数把成本打爆）。
+# R-142：推理模型的思考会让「预算翻倍重试」把值推高，封顶给到 32000 仍留有余地。
+MAX_TOKENS_CEILING = 32000
+# 连接级瞬时错误（连接被重置/写失败等）同类重试 1 次，避免把网络抖动当成模型降级；
+# 超时（ReadTimeout）不重试——重试只会把等待翻倍。
+RETRYABLE_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.RemoteProtocolError,
+)
 # 同一功能降级通知冷却（秒）：故障持续时不刷屏
 NOTIFY_COOLDOWN_SECONDS = 1800
 _LAST_NOTIFY: dict[str, float] = {}
@@ -204,8 +215,9 @@ class RoutedLLM:
     def _run(self, method: str, kwargs: dict, validate: Callable[[Any], str]) -> Any:
         """主模型 → 降级模型；`validate` 返回失败原因，空串表示通过。
 
-        「输出不合法」再试一次时把 `max_tokens` 翻倍（R-139）：推理模型的思考会吃满预算导致
-        正文为空，这是「重试/降级后像退化了」最常见的伪装。每个槽位各自套用自己的厂家下限。
+        「输出不合法」再试一次时把 `max_tokens` 翻倍（R-139/R-142）：推理模型的思考会吃满预算导致
+        正文为空，这是「重试/降级后像退化了」最常见的伪装。每个槽位各自套用自己的厂家下限；
+        连接级瞬时错误（连接重置等）同类重试一次再降级，避免把网络抖动记成模型降级。
         """
         started = time.time()
         problems: list[str] = []
@@ -228,7 +240,13 @@ class RoutedLLM:
                 except LLMError as exc:
                     problems.append(f"{_slot_label(slot)} 报错：{exc}")
                     break  # 协议层错误（无 Key / 服务不可用）不重试，直接降级
-                except Exception as exc:  # noqa: BLE001 超时/网络/HTTP 错误
+                except RETRYABLE_TRANSPORT_ERRORS as exc:
+                    # 连接被重置这类瞬时问题：同类重试一次（不翻预算），仍失败才降级
+                    problems.append(f"{_slot_label(slot)} 连接异常：{type(exc).__name__}: {exc}")
+                    if i == 0 and allow_retry:
+                        continue
+                    break
+                except Exception as exc:  # noqa: BLE001 超时/HTTP/其它错误
                     problems.append(f"{_slot_label(slot)} 调用失败：{type(exc).__name__}: {exc}")
                     break
                 reason = validate(out)

@@ -281,9 +281,13 @@ def test_thinking_budget_exhausted_escalates_before_fallback(db, monkeypatch):
 
 
 def test_escalated_retry_exhausted_then_falls_back_with_per_vendor_floor(db, monkeypatch):
-    """主模型两次都不行才降级；备用槽位用**自己厂家**的下限，不是主模型翻倍后的预算。"""
+    """主模型两次都不行才降级；备用槽位用**自己厂家**的下限，不是照搬主模型翻倍后的预算。
+
+    R-142：预算下限按实测定标，断言从 `VENDORS` 读取，避免以后再漂移。
+    """
     from app.services.llm import LLMUnusableOutput
 
+    floors = {name: meta["min_max_tokens"] for name, meta in model_settings.VENDORS.items()}
     notifier = _RecordingNotifier()
     llm = _routed(db, notifier=notifier)
     seen: list[tuple[str, int]] = []
@@ -300,10 +304,59 @@ def test_escalated_retry_exhausted_then_falls_back_with_per_vendor_floor(db, mon
 
     monkeypatch.setattr(llm_router, "build_client", lambda slot: _Client(slot))
     assert llm.chat([{"role": "user", "content": "hi"}]) == "备用模型正文"
-    assert seen == [("model1", 4000), ("model1", 8000), ("model2", 6000)]
+    ds = floors["deepseek"]
+    km = floors["kimi"]
+    assert seen == [("model1", ds), ("model1", ds * 2), ("model2", km)]
     assert llm.degraded is True and llm.used_slot == "model2"
     assert len(notifier.calls) == 1
     assert "思考吃光" in notifier.calls[0][1]
+
+
+def test_transient_connection_error_is_retried_once(db, monkeypatch):
+    """连接被重置这类瞬时错误要同类重试一次，别直接记成模型降级（R-142）。"""
+    import httpx as _httpx
+
+    notifier = _RecordingNotifier()
+    llm = _routed(db, notifier=notifier)
+    calls = {"n": 0}
+
+    class _Client:
+        def __init__(self, slot):
+            self.slot = slot
+
+        def chat(self, *_a, **_k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _httpx.ReadError("Connection reset by peer")
+            return "重试后的正文"
+
+    monkeypatch.setattr(llm_router, "build_client", lambda slot: _Client(slot))
+    assert llm.chat([{"role": "user", "content": "hi"}]) == "重试后的正文"
+    assert calls["n"] == 2, "连接级错误应重试一次"
+    assert llm.degraded is False, "瞬时网络抖动不该报降级"
+    assert notifier.calls == []
+
+
+def test_timeout_is_not_retried(db, monkeypatch):
+    """超时不重试（重试只会把等待翻倍），直接降级。"""
+    import httpx as _httpx
+
+    llm = _routed(db, notifier=_RecordingNotifier())
+    seen: list[str] = []
+
+    class _Client:
+        def __init__(self, slot):
+            self.slot = slot
+
+        def chat(self, *_a, **_k):
+            seen.append(self.slot["slot"])
+            if self.slot["slot"] == "model1":
+                raise _httpx.ReadTimeout("timed out")
+            return "备用正文"
+
+    monkeypatch.setattr(llm_router, "build_client", lambda slot: _Client(slot))
+    assert llm.chat([{"role": "user", "content": "hi"}]) == "备用正文"
+    assert seen == ["model1", "model2"], "超时不该重试同一个模型"
 
 
 def test_call_deadline_is_enforced(monkeypatch):
@@ -394,15 +447,18 @@ def test_gzip_encoded_response_is_decoded(monkeypatch):
     assert client._post({"model": "kimi-k2.6", "messages": []})["content"] == "压缩过的正文"
 
 
-def test_read_timeout_is_generous_enough_for_reasoning_models():
-    """单次「无数据到达」上限必须大于推理模型的静默思考时间（实测 Kimi >30s 才吐第一字节）。"""
+def test_read_timeout_equals_call_deadline():
+    """read 超时与墙钟同值（不设 stream 时它等价于「单次调用总时限」）。
+
+    实测：预算抬到 12000 后 Kimi 一次调用跑到 183.6s，此时 read=180 会把正常调用判成超时（R-142）。
+    """
     from app.services.llm import OpenAIClient
 
-    assert OpenAIClient.READ_TIMEOUT_SECONDS >= 120
     client = OpenAIClient("https://example.invalid", "sk-x", "kimi-k2.6", timeout_seconds=600)
-    assert client.READ_TIMEOUT_SECONDS >= 120
-    # 整体墙钟上限仍然生效（防「一直有字节但永不结束」）
     assert client.timeout_seconds == 600
+    assert client.timeout_seconds >= 300, "推理模型的长调用不能被 read 超时误杀"
+    small = OpenAIClient("https://example.invalid", "sk-x", "kimi-k2.6", timeout_seconds=10)
+    assert small.timeout_seconds == 30, "仍保留下限，避免配成 0/负数"
 
 
 def test_read_timeout_becomes_readable_error(monkeypatch):

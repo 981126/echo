@@ -22,9 +22,10 @@ VENDORS: dict[str, dict] = {
         "default_model": "deepseek-flash",
         "supports_temperature": True,
         # V4.1 Flash 也是**推理模型**：max_tokens 同时含思考与正文。
-        # 实测 max_tokens=3000 时 finish_reason=length 且正文为空（思考吃满 3001 tokens），
-        # 4000 才有正文 → 下限设 4000，避免「输出空正文」被误判成模型坏了（R-139）。
-        "min_max_tokens": 4000,
+        # R-139/R-142 实测（同一份评审提示词）：思考量在 2418～8023+ tokens 间大幅波动，
+        # 4000 时会 finish_reason=length 且正文为空。下限设 8000 覆盖实测最坏值，
+        # 让所有调用方（人设提取/评审/优化…）都有余量；不够时 llm_router 还会翻倍重试。
+        "min_max_tokens": 8000,
         "key_env": "deepseek_api_key",
         "base_env": "deepseek_base_url",
         "key_hint": "platform.deepseek.com 的 API Key（sk-…）",
@@ -35,10 +36,10 @@ VENDORS: dict[str, dict] = {
         "models": ["kimi-k2.6"],
         "default_model": "kimi-k2.6",
         # 推理模型只接受 temperature=1；给小 max_tokens 会把预算耗在思考上导致正文为空。
-        # 实测：长上下文下 Kimi 的思考可吃掉 4000+ tokens（6971 字思考、正文为空），故下限设 6000，
-        # 不够时 `llm_router` 还会翻倍重试（R-139）。
+        # 实测：长上下文下 Kimi 修订任务的思考达 6971 字（≈4600+ tokens）且正文为空，
+        # 故下限设 10000（R-139/R-142），不够时 `llm_router` 还会翻倍重试。
         "supports_temperature": False,
-        "min_max_tokens": 6000,
+        "min_max_tokens": 10000,
         "key_env": "kimi_api_key",
         "base_env": "kimi_base_url",
         "key_hint": "platform.moonshot.cn 的 API Key（sk-…）",

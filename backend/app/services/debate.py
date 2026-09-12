@@ -148,11 +148,12 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
                     {"role": "user", "content": initial_user},
                 ],
                 temperature=0.8,
-                max_tokens=3200,
+                max_tokens=12000,  # R-142：推理模型的思考量波动很大，预算按实测定标
                 require=("script",),
             )
             initial = {
-                "model": name,
+                # R-142：留痕要记**实际出结果**的槽位（内部降级后 name 会与事实不符）
+                "model": getattr(llm, "used_slot", None) or name,
                 "title": str(data.get("title", "")).strip() or topic,
                 "cover_text": str(data.get("cover_text", "")).strip(),
                 "script": str(data.get("script", "")).strip(),
@@ -189,7 +190,7 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
     for r in range(1, rounds_total + 1):
         _status(db, draft.id, f"{critic} 正在评审第 {r}/{rounds_total} 轮…")
         try:
-            critique = _chat_once(critic_llm, critic_system, f"当前脚本：\n{latest}", 0.4, 3000)
+            critique = _chat_once(critic_llm, critic_system, f"当前脚本：\n{latest}", 0.4, 14000)
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
             break
@@ -201,7 +202,7 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
                 revise_system,
                 f"评审意见：\n{critique}\n\n当前脚本：\n{latest}",
                 0.7,
-                4200,
+                16000,
             )
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")
@@ -223,7 +224,7 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
             + f"\n\n作者语言习惯（必须模仿）：\n{style_note}"
         )
         try:
-            fixed = _chat_once(gen_llm, revise_system, fix_user, 0.6, 4200)
+            fixed = _chat_once(gen_llm, revise_system, fix_user, 0.6, 16000)
             latest = fixed
             draft.script = latest
             db.commit()
@@ -342,7 +343,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             data = llm.chat_json(
                 [{"role": "system", "content": rewrite_system}, {"role": "user", "content": rewrite_user}],
                 temperature=0.7,
-                max_tokens=4200,
+                max_tokens=12000,  # R-142
                 require=("script",),
             )
             latest = str(data.get("script", "")).strip()
@@ -382,7 +383,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
                 critic_system,
                 f"参考原文：\n{source_text[:2000]}\n\n当前脚本：\n{latest}",
                 0.4,
-                3000,
+                14000,
             )
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
@@ -395,7 +396,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
                 revise_system,
                 f"评审意见：\n{critique}\n\n当前脚本：\n{latest}",
                 0.7,
-                4200,
+                16000,
             )
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")
