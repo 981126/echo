@@ -44,8 +44,10 @@ class ModelsIn(BaseModel):
     asr_model: str = ""
     debate_rounds: int | None = Field(default=None, ge=1, le=10)
     topics_count: int | None = Field(default=None, ge=1, le=10)
-    # R-143：各功能推理预算（键见 budget_settings.SLOTS）；reset_budgets=true 一键回默认
-    budgets: dict[str, int] | None = None
+    # R-143：各功能推理预算（键见 budget_settings.SLOTS）；reset_budgets=true 一键回默认。
+    # 故意用 object 而不是 int：让「非整数」也走 budget_settings 的校验，
+    # 与「未知键 / 越界」统一返回 400 + 中文可读原因（而不是 FastAPI 的 422 英文结构）。
+    budgets: dict[str, object] | None = None
     reset_budgets: bool = False
 
 
