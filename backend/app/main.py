@@ -29,10 +29,8 @@ async def lifespan(app: FastAPI):
 
     pending = schema_guard.pending_upgrade(engine)
     if pending:
-        log.warning(
-            "检测到待应用的结构变更（%s），升级前先自动备份",
-            "、".join(pending.get("missing_tables") or []) + "、" + "、".join(pending.get("missing_columns") or []),
-        )
+        changed = list(pending.get("missing_tables") or []) + list(pending.get("missing_columns") or [])
+        log.warning("检测到待应用的结构变更（%s），升级前先自动备份", "、".join(changed) or "未知")
         schema_guard.auto_backup_before_upgrade(engine)
     init_db()
     # R-144 B：结构自检（模型声明的列 vs 实际库）——缺列时日志 + 站内通知，绝不阻塞启动
