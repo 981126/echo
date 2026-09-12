@@ -13,7 +13,7 @@ from ..config import get_settings
 from ..core.log import get_logger
 from ..db import get_db
 from ..models.kv import Kv
-from ..services import model_health, model_settings
+from ..services import budget_settings, model_health, model_settings
 
 router = APIRouter()
 log = get_logger("settings")
@@ -44,6 +44,9 @@ class ModelsIn(BaseModel):
     asr_model: str = ""
     debate_rounds: int | None = Field(default=None, ge=1, le=10)
     topics_count: int | None = Field(default=None, ge=1, le=10)
+    # R-143：各功能推理预算（键见 budget_settings.SLOTS）；reset_budgets=true 一键回默认
+    budgets: dict[str, int] | None = None
+    reset_budgets: bool = False
 
 
 def _effective_key(config_slot: dict, vendor: str) -> tuple[bool, bool]:
@@ -95,6 +98,7 @@ def _models_payload(db: Session) -> dict:
             *([f"双模型兼容性自检：{w}" for w in (model_health.last_result(db) or {}).get("warnings", [])]),
         ],
         "selfcheck": model_health.last_result(db),
+        "budgets": budget_settings.budget_map(db),  # R-143：各功能推理预算
         "migrated_from_legacy": bool(config.get("migrated_from_legacy")),
     }
 
@@ -124,6 +128,14 @@ def put_models(payload: ModelsIn, db: Session = Depends(get_db)):
         set_rounds(RoundsIn(rounds=payload.debate_rounds), db)
     if payload.topics_count is not None:
         model_settings.save_topics_count(db, payload.topics_count)
+    # R-143：推理预算（非法输入 400）
+    try:
+        if payload.reset_budgets:
+            budget_settings.reset_budgets(db)
+        elif payload.budgets:
+            budget_settings.save_budgets(db, payload.budgets)
+    except budget_settings.BudgetConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     # R-139：保存后异步跑一次双模型兼容性自检（不阻塞界面；结果回到 GET /models 的 selfcheck）
     try:
         from ..tasks import start_task

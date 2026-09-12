@@ -1586,7 +1586,7 @@ Get Models
 
 AI 设置 → 模型设置：当前模型1/2（厂家/模型/Key）、生成方/评审方、ASR 服务商与模型、讨论轮次、每日篇数（R-138）。
 
-返回还包含：`vendors`（厂家目录：可选模型 / 默认模型 / 是否已有 .env Key）、`warnings`（含双模型兼容性自检告警）、`selfcheck`（最近一次自检结果，R-139）、`migrated_from_legacy`。
+返回还包含：`vendors`（厂家目录：可选模型 / 默认模型 / 是否已有 .env Key）、`warnings`（含双模型兼容性自检告警）、`selfcheck`（最近一次自检结果，R-139）、`budgets`（各功能推理预算，R-143：每项含 `label/desc/default/requested/value/floor/ceiling/custom`，`value` 是实际生效值）、`migrated_from_legacy`。
 
 **参数**
 
@@ -1614,5 +1614,7 @@ Put Models
   - `asr_model` string
   - `debate_rounds` integer
   - `topics_count` integer
+  - `budgets` object（可选，R-143：`{预算项: 整数}`，键见 GET 返回的 `budgets`；未知键 / 非整数 / 越界 → 400）
+  - `reset_budgets` boolean（可选，R-143：`true` 表示把全部预算恢复为代码默认）
 
 **返回 200**：application/json → object

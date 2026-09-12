@@ -17,7 +17,7 @@ from ..config import get_settings
 from ..models.discussion import DraftDiscussion
 from ..models.draft import Draft
 from ..models.kv import Kv
-from . import llm_router
+from . import budget_settings, llm_router
 from .generation import _persona_context, _style_profile_lines, _style_samples, generation_user_message
 from .llm import LLMError
 from .prompt_service import get_prompt, get_prompt_version
@@ -79,15 +79,11 @@ def _clear_status(db: Session, draft_id: int) -> None:
         db.commit()
 
 
-# ---------- 各步推理预算（R-142：按实测定标，别拍脑袋） ----------
-# 实测（同一份评审提示词 + 同一篇真实脚本，连测）：推理模型的思考量在
-# 2418～8023+ tokens 间大幅波动；预算取到波动区间内时，同一调用约一半概率
-# 被截断成「空正文」，进而被误判为「模型不可用 → 降级」。
-# 因此各步预算取「实测最坏值 + 余量」，下限由 model_settings.VENDORS.min_max_tokens 兜底；
-# 改小这里之前请先重跑 `tests/test_r142_thinking_budget.py` 里的量测方法。
-BUDGET_INITIAL = 12000   # 初稿（JSON：title/cover_text/script/shells）
-BUDGET_CRITIQUE = 14000  # 评审意见（实测最坏 8023 reasoning tokens + 正文）
-BUDGET_REVISE = 16000    # 整篇重写 / 自检收口
+# 各步推理预算（R-142 定标 / R-143 起可在「AI 设置 → 推理预算」里改）：
+# 默认值见 `budget_settings.SLOTS`，生效值 = max(设置, 厂家下限)，下限有校准护栏测试保护。
+# 实测依据：同一份评审提示词的思考量在 2418～8023+ tokens 间波动，预算落在波动区间内
+# 就有一半概率被截断成「空正文」→ 误判降级。改默认值前请先重跑
+# `tests/test_r142_thinking_budget.py` 头部记录的量测方法。
 
 PLACEHOLDER_SCRIPT = "（双模型讨论生成中…）"
 FAILED_SCRIPT = "（生成失败，请重试或删除本稿）"
@@ -158,7 +154,7 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
                     {"role": "user", "content": initial_user},
                 ],
                 temperature=0.8,
-                max_tokens=BUDGET_INITIAL,
+                max_tokens=budget_settings.budget_for(db, "debate_initial"),
                 require=("script",),
             )
             initial = {
@@ -200,7 +196,13 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
     for r in range(1, rounds_total + 1):
         _status(db, draft.id, f"{critic} 正在评审第 {r}/{rounds_total} 轮…")
         try:
-            critique = _chat_once(critic_llm, critic_system, f"当前脚本：\n{latest}", 0.4, BUDGET_CRITIQUE)
+            critique = _chat_once(
+                critic_llm,
+                critic_system,
+                f"当前脚本：\n{latest}",
+                0.4,
+                budget_settings.budget_for(db, "debate_critique"),
+            )
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
             break
@@ -212,7 +214,7 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
                 revise_system,
                 f"评审意见：\n{critique}\n\n当前脚本：\n{latest}",
                 0.7,
-                BUDGET_REVISE,
+                budget_settings.budget_for(db, "debate_revise"),
             )
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")
@@ -234,7 +236,9 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
             + f"\n\n作者语言习惯（必须模仿）：\n{style_note}"
         )
         try:
-            fixed = _chat_once(gen_llm, revise_system, fix_user, 0.6, BUDGET_REVISE)
+            fixed = _chat_once(
+                gen_llm, revise_system, fix_user, 0.6, budget_settings.budget_for(db, "debate_revise")
+            )
             latest = fixed
             draft.script = latest
             db.commit()
@@ -353,7 +357,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             data = llm.chat_json(
                 [{"role": "system", "content": rewrite_system}, {"role": "user", "content": rewrite_user}],
                 temperature=0.7,
-                max_tokens=BUDGET_INITIAL,
+                max_tokens=budget_settings.budget_for(db, "rewrite"),  # 洗稿走自己的预算项
                 require=("script",),
             )
             latest = str(data.get("script", "")).strip()
@@ -393,7 +397,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
                 critic_system,
                 f"参考原文：\n{source_text[:2000]}\n\n当前脚本：\n{latest}",
                 0.4,
-                BUDGET_CRITIQUE,
+                budget_settings.budget_for(db, "debate_critique"),
             )
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
@@ -406,7 +410,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
                 revise_system,
                 f"评审意见：\n{critique}\n\n当前脚本：\n{latest}",
                 0.7,
-                BUDGET_REVISE,
+                budget_settings.budget_for(db, "debate_revise"),
             )
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")

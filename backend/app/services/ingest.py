@@ -8,7 +8,7 @@ from ..config import get_settings
 from ..core.transcript import normalize_text
 from ..models.persona import PersonaCheck
 from ..models.video import Transcript, Video
-from . import llm_router, model_settings
+from . import budget_settings, llm_router, model_settings
 from .llm import LLMError
 from .persona import PersonaService
 from .prompt_service import get_prompt
@@ -72,7 +72,7 @@ def correct_transcript(transcript_text: str, source_text: str = "", llm=None, db
                 {"role": "user", "content": user},
             ],
             temperature=0.2,
-            max_tokens=3000,
+            max_tokens=budget_settings.budget_for(db, "correct"),
         )
         return normalize_text(corrected) or text
     except LLMError:

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models.persona import PersonaTag
 from ..models.video import Video
-from . import llm_router
+from . import budget_settings, llm_router
 from .llm import LLMError
 from .prompt_service import get_prompt
 from .requirements_service import list_requirements
@@ -286,7 +286,12 @@ class ChatService:
 
         for _ in range(3):
             try:
-                message = self.llm.chat_completion(messages, temperature=0.5, tools=TOOLS)
+                message = self.llm.chat_completion(
+                    messages,
+                    temperature=0.5,
+                    max_tokens=budget_settings.budget_for(db, "chat"),
+                    tools=TOOLS,
+                )
             except LLMError:
                 return "（AI 服务暂时不可用：模型1 与模型2 都没能给出结果，请到「AI 设置」检查 API Key。）"
             except Exception as exc:  # noqa: BLE001 外部服务失败统一降级，不让对话页报裸错

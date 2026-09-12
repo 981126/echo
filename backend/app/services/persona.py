@@ -16,7 +16,7 @@ from typing import Any, cast
 from sqlalchemy.orm import Session
 
 from ..core.topics import normalize_topics
-from . import llm_router
+from . import budget_settings, llm_router
 from .prompt_service import get_prompt
 from .llm import LLMError
 
@@ -331,7 +331,7 @@ class PersonaService:
                     {"role": "user", "content": user},
                 ],
                 temperature=0.3,
-                max_tokens=8000,
+                max_tokens=budget_settings.budget_for(self._db, "persona_merge"),
             )
         except Exception:  # noqa: BLE001 外部服务任何异常都降级，不拖垮整条管线
             return None

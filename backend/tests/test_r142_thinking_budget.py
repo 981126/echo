@@ -26,7 +26,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.services import debate as debate_mod
 from app.services import llm_router, model_settings
 
 # 实测基准：同一步骤的思考量波动区间上界（reasoning_tokens）
@@ -35,25 +34,32 @@ MEASURED_WORST_REASONING_TOKENS = 8023
 HEADROOM = 1.2
 
 
-def test_vendor_floors_cover_measured_worst_case():
-    """厂家下限必须覆盖实测最坏思考量，否则任何调用方都可能被截断。"""
+def test_vendor_floor_is_a_sane_safety_net():
+    """厂家下限是安全网（兜住「有人随手写 300」），不是按任务标定的替代品。
+
+    R-143 起「每个功能要多少」由 `budget_settings.SLOTS` 按任务标定且可配置；
+    下限只需要「给推理模型留出基本思考空间」，过高的下限会把所有小功能的配置压平。
+    """
     for vendor, meta in model_settings.VENDORS.items():
-        assert meta["min_max_tokens"] >= MEASURED_WORST_REASONING_TOKENS, (
-            f"{vendor} 的 min_max_tokens={meta['min_max_tokens']} 低于实测最坏思考量 "
-            f"{MEASURED_WORST_REASONING_TOKENS}（见本文件头部的量测表）"
+        assert 2000 <= meta["min_max_tokens"] <= 12000, (
+            f"{vendor} 的 min_max_tokens={meta['min_max_tokens']} 不合理："
+            "低于 2000 会饿死推理模型，高于 12000 会把各功能按任务标定的预算压平"
         )
 
 
-def test_debate_step_budgets_cover_measured_worst_case():
-    """双模型讨论各步预算必须覆盖实测最坏思考量（这是「评审总是降级」的直接原因）。"""
+# 长输出 / 长思考类功能：默认预算必须覆盖实测最坏值（这些才是「被截断 → 降级」的高危项）
+LONG_OUTPUT_SLOTS = ("debate_initial", "debate_critique", "debate_revise", "rewrite", "correct")
+
+
+def test_long_output_budgets_cover_measured_worst_case():
+    """这些功能的默认预算必须 ≥ 实测最坏思考量 × 余量（R-142 的直接教训）。"""
+    from app.services import budget_settings
+
     required = int(MEASURED_WORST_REASONING_TOKENS * HEADROOM)
-    for name, value in (
-        ("BUDGET_INITIAL", debate_mod.BUDGET_INITIAL),
-        ("BUDGET_CRITIQUE", debate_mod.BUDGET_CRITIQUE),
-        ("BUDGET_REVISE", debate_mod.BUDGET_REVISE),
-    ):
+    for key in LONG_OUTPUT_SLOTS:
+        value = int(budget_settings.SLOTS[key]["default"])
         assert value >= required, (
-            f"{name}={value} 低于「实测最坏 {MEASURED_WORST_REASONING_TOKENS} tokens × {HEADROOM} 余量」"
+            f"{key} 默认预算={value} 低于「实测最坏 {MEASURED_WORST_REASONING_TOKENS} tokens × {HEADROOM}」"
             f"＝{required}；改小之前请先重跑本文件头部的量测"
         )
 

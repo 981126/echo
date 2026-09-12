@@ -14,6 +14,7 @@ from ..core.pipeline import today_key  # noqa: F401 保留：未来可扩展
 from ..models.kv import Kv
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video import Video
+from . import budget_settings
 
 # 互动权重：点赞1 + 收藏2 + 评论5（播放量只做参考不做主排序）
 W_LIKE, W_FAV, W_COMMENT = 1, 2, 5
@@ -340,7 +341,7 @@ def analyze_talkable(db: Session, owner: Creator, unit: dict) -> dict:
                 {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
             ],
             temperature=0.4,
-            max_tokens=2000,
+            max_tokens=budget_settings.budget_for(db, "benchmark_analyze"),
         )
         return {"can": bool(res.get("can")), "reason": str(res.get("reason") or ""), "suggestion": str(res.get("suggestion") or "")}
     except Exception as exc:  # noqa: BLE001
@@ -360,7 +361,7 @@ def rewrite_script(db: Session, owner: Creator, unit: dict, title: str = "") -> 
             {"role": "user", "content": f"我的人设：\n{persona}\n\n参考素材标题：{title or unit['post'].title}\n参考素材文案：\n{text[:4000]}"},
         ],
         temperature=0.7,
-        max_tokens=2500,
+        max_tokens=budget_settings.budget_for(db, "rewrite"),
     ).strip()
     new_title = title or (unit["post"].title or "")[:60]
     # 存脚本草稿（归属当前主博主，标注对标来源）
@@ -397,7 +398,7 @@ def analyze_text(db: Session, owner: Creator, text: str) -> dict:
                 {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
             ],
             temperature=0.4,
-            max_tokens=2000,
+            max_tokens=budget_settings.budget_for(db, "benchmark_analyze"),
         )
         return {"can": bool(res.get("can")), "reason": str(res.get("reason") or ""), "suggestion": str(res.get("suggestion") or "")}
     except Exception as exc:  # noqa: BLE001
@@ -416,7 +417,7 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref:
             {"role": "user", "content": f"我的人设：\n{persona}\n\n参考素材标题：{title}\n参考素材文案：\n{text[:4000]}"},
         ],
         temperature=0.7,
-        max_tokens=2500,
+        max_tokens=budget_settings.budget_for(db, "rewrite"),
     ).strip()
     new_title = (title or "")[:60] or "对标洗稿"
     from ..models.draft import Draft

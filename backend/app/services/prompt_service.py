@@ -368,7 +368,7 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
     通过与程序固定的契约段拼成完整候选 → 自动排队金样本回放评分。
     样本不足或自检两次都不过时抛 PromptOptimizeError（带可读原因）。
     """
-    from . import prompt_contract
+    from . import budget_settings, prompt_contract
 
     current = get_prompt(key, db)
     if not current:
@@ -405,7 +405,7 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
             raw = llm.chat(
                 [{"role": "system", "content": OPT_SYSTEM}, {"role": "user", "content": user}],
                 temperature=0.3,
-                max_tokens=3000,
+                max_tokens=budget_settings.budget_for(db, "prompt_optimize"),
             )
         except Exception as exc:  # noqa: BLE001 外部失败不破坏当前版
             last_reason = f"AI 服务异常：{str(exc)[:150]}"

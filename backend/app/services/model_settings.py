@@ -21,12 +21,10 @@ VENDORS: dict[str, dict] = {
         "models": ["deepseek-flash", "deepseek-v4-pro"],
         "default_model": "deepseek-flash",
         "supports_temperature": True,
-        # V4.1 Flash 也是**推理模型**：max_tokens 同时含思考与正文。
-        # R-139/R-142 实测（同一份评审提示词）：思考量在 2418～8023+ tokens 间大幅波动，
-        # 4000 时 finish_reason=length 且正文为空。
-        # 下限设 12000（> 实测最坏 8023 × 1.2 余量）：覆盖所有调用方（人设提取/评审/优化…）；
-        # 不够时 llm_router 还会翻倍重试。改小前请先重跑 tests/test_r142_thinking_budget.py 的量测方法。
-        "min_max_tokens": 12000,
+        # V4.1 Flash 也是**推理模型**：max_tokens 同时含思考与正文，给小了会「思考吃光预算、正文为空」。
+        # R-143 起「每个功能要多少」由 budget_settings.SLOTS 按任务标定（可配置），
+        # 这里的下限只是**安全网**：兜住「有人随手写 300」这类情况，不再用它替代按任务标定。
+        "min_max_tokens": 4000,
         "key_env": "deepseek_api_key",
         "base_env": "deepseek_base_url",
         "key_hint": "platform.deepseek.com 的 API Key（sk-…）",
@@ -39,9 +37,9 @@ VENDORS: dict[str, dict] = {
         # 推理模型只接受 temperature=1；给小 max_tokens 会把预算耗在思考上导致正文为空。
         # 实测：长上下文下 Kimi 修订任务的思考达 6971 字（≈4600+ tokens）且正文为空；
         # 预算 12000 时单次调用实测要 180.3s（所以 read 超时与墙钟同值，见 llm.py）。
-        # 下限与 DeepSeek 对齐为 12000（R-139/R-142），不够时 `llm_router` 还会翻倍重试。
+        # 下限同 DeepSeek：只是安全网，按任务标定见 budget_settings.SLOTS。
         "supports_temperature": False,
-        "min_max_tokens": 12000,
+        "min_max_tokens": 4000,
         "key_env": "kimi_api_key",
         "base_env": "kimi_base_url",
         "key_hint": "platform.moonshot.cn 的 API Key（sk-…）",

@@ -51,7 +51,8 @@
 - `siliconflow_asr.py`（R-108）：`POST {base}/audio/transcriptions` 直传音频转写（multipart file+model，无需 OSS 中转）；视频先抽音轨、纯音频直传；平台限制单文件 ≤50MB / ≤1 小时（`media_tools.probe_duration_seconds` 探测），超限明确报错走失败通知、**不自动切换其它服务商**。
 - `pipeline.py`：每日流水线（R-140 起组候选与生成切片统一用 `model_settings.topics_count(db)`，即「AI 设置」的每日篇数）。`generation.py`：生成草稿（R-139 起统一调用 `debate.run_debate`：生成方初稿 + 评审方 N 轮 + 自检收口；不再单模型直出）；上下文 = 人设(tags+维度+红线+禁词) + 风格画像 + 检索到的风格样本（条数可配置 3~8，R-131） + **作者指定的风格范本**（必定注入） + **高表现内容的开场/结尾结构模板** + **作者改写稿 few-shot**（R-131） + 金句/最佳实践 + 对标风格卡；`generation_user_message` 抽出供评测复用；生成后**自检**（红线/禁词/口癖覆盖率）不达标自动重写 1 次，结果落 `drafts.quality`；草稿写入 `prompt_version`（R-129）与 `persona_version`（R-130）做归因。`_all_texts`（全量素材加权语料）供优化与每周重建（R-064）。
 - **推理预算定标（R-142）**：`max_tokens` 不是消费额而是**上限**（只按实际生成量计费），所以「给足」几乎不增成本，但能保住两个能力：① 用 `finish_reason=length` 判断「被截断」（整套「识别思考吃光 → 抬预算重试 → 再降级」都靠它）；② 单次调用的成本天花板（区别于墙钟那种「花之后」的边界）。
-  - 现状：厂家下限 `min_max_tokens` = 12000（DeepSeek / Kimi 对齐）；`debate.py` 各步预算 `BUDGET_INITIAL=12000` / `BUDGET_CRITIQUE=14000` / `BUDGET_REVISE=16000`；翻倍重试封顶 `MAX_TOKENS_CEILING=32000`。
+  - 现状（R-143 起分两层）：**按任务标定的预算**在 `budget_settings.SLOTS`（可配置、存 `app_kv`、保存即生效）——脚本初稿 12000 / 评审 14000 / 修订 16000 / 对标洗稿 12000 / 转写校对 12000 / 人设归纳 8000 / 提示词优化 8000 / AI 对话 8000 / 对标可讲分析 4000；
+    **厂家下限** `min_max_tokens` 退回成**安全网** 4000（只兜「有人随手写 300」，不再用它替代按任务标定）；生效值 = `max(设置, 下限)`，界面显示真实生效值；翻倍重试封顶 `MAX_TOKENS_CEILING=32000`。
   - 定标依据（实测，同一份评审提示词只改 max_tokens）：
 
     | max_tokens | finish | 思考 | 正文 | reasoning_tokens |
@@ -63,7 +64,8 @@
     | 4000（复测） | stop | 3945 字 | 1286 字 | 2418 |
 
     同一提示词的思考量波动 **2418～8023+ tokens**；预算落在波动区间内 → 约一半概率截断成空正文 → 误判降级。
-  - **再校准方法**：不传 stream、逐个 max_tokens 打真实接口，记录 `finish_reason` / `reasoning_content` 长度 / `usage.completion_tokens_details.reasoning_tokens`；改动预算前 `tests/test_r142_thinking_budget.py` 会把「低于实测最坏值」直接判红。
+  - **再校准方法**：不传 stream、逐个 max_tokens 打真实接口，记录 `finish_reason` / `reasoning_content` 长度 / `usage.completion_tokens_details.reasoning_tokens`；改动预算前 `tests/test_r142_thinking_budget.py` 会把「长输出功能的默认预算低于实测最坏值 × 余量」直接判红。
+  - **可配置（R-143）**：`services/budget_settings.py` 是预算的唯一事实源（`SLOTS` / `budget_for(db,key)` / `save_budgets` / `reset_budgets`），调用点全部读它；`GET/PUT /api/settings/models` 带 `budgets`（不新增路由），前端在「模型设置」里有「推理预算（高级）」区块（含每项说明、默认值、生效值、一键恢复默认）。
   - 「不传 max_tokens（交给服务端默认）」实测也能跑通，但会失去上面两个能力，且默认值随供应商变化而不可见 —— 已评估后选择保留显式上限（作者 2026-09-12 选 A）。
 - `notify.py`（R-141）：`mail_config_problem(settings)` 是邮件配置的唯一体检入口（缺失 / 非 ASCII 占位符 / 非法邮箱 → 可读原因）；`_send` 把配置非法与 SMTP 异常都收敛成「log + 返回 False」，中文主题用 `Header(...,'utf-8').encode()` 做 RFC2047 编码，正文用 `msg.as_bytes()` 发送。因此邮件是**次要通道**：`run_daily_pipeline` 只在稿子生成失败时才置 failed。
 - `platform_sync.py` 的灵感池入池（R-140）：`pool_ideas_from_comments(db, post, comments, *, account=None, per_post=None)` 是「评论 → 选题池」的**唯一实现**——`_collect_comments()`（全量/每周，非队列）与 `sync_post_comments()`（daily 逐素材队列 / 单帖）都调用它。限量：单帖 `ECHO_POOL_IDEAS_PER_POST`（默认 8，按点赞降序）、单博主每天 `ECHO_POOL_IDEAS_PER_DAY`（默认 40，`0`=不限）；保留「标题 ≥4 字」、按 `(source,title,snapshot_date)` 去重、重复点赞取大。`_pool_quota()` 负责当天剩余配额。同步说明与 payload 汇报 `pool_ideas`（灵感池新增 N 条）。

@@ -88,6 +88,30 @@
             </span>
           </div>
 
+          <div class="budget-box">
+            <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
+              <strong style="font-size: 13px">推理预算（高级）</strong>
+              <n-tag size="tiny" :bordered="false" round>max_tokens 是上限，不是消费额：只按实际生成量计费</n-tag>
+              <div class="grow" />
+              <n-button size="tiny" secondary @click="resetBudgets">全部恢复默认</n-button>
+            </div>
+            <p class="muted" style="font-size: 12px; margin: 6px 0 8px">
+              推理模型会先「思考」再写正文，两者共用这个预算；预算给小了会出现「思考吃光预算 → 正文为空」。
+              低于厂家下限 {{ budgets.floor }} 会被自动抬到下限（下限是防截断的护栏），下表显示的是**实际生效值**。
+            </p>
+            <div class="budget-grid">
+              <div v-for="(b, key) in budgets.items" :key="key" class="budget-item">
+                <span class="budget-label">{{ b.label }}</span>
+                <n-input-number v-model:value="budgetEdits[key]" :min="256" :max="budgets.ceiling" size="small" style="width: 120px" />
+                <span class="muted" style="font-size: 11px">
+                  默认 {{ b.default }}<template v-if="b.value !== b.default"> · 生效 {{ b.value }}</template>
+                  <template v-if="b.custom"> · 已改</template>
+                </span>
+                <span class="muted" style="font-size: 11px; display: block">{{ b.desc }}</span>
+              </div>
+            </div>
+          </div>
+
           <div class="row" style="gap: 8px; margin-top: 16px">
             <n-button type="primary" :loading="savingModels" @click="saveModels">保存（立即生效）</n-button>
             <n-button secondary :loading="loadingModels" @click="loadModels">重新读取</n-button>
@@ -268,6 +292,8 @@ const asrOptions = ref({})
 const asrModelList = ref([])
 const modelWarnings = ref([])
 const selfcheck = ref(null)
+const budgets = ref({ items: {}, floor: 0, ceiling: 0 })
+const budgetEdits = ref({})
 const loadingModels = ref(false)
 const savingModels = ref(false)
 
@@ -311,6 +337,17 @@ async function loadModels() {
     asrModelList.value = (r.asr && r.asr.siliconflow_models) || []
     modelWarnings.value = r.warnings || []
     selfcheck.value = r.selfcheck || null
+    // R-143：推理预算（每项含 label/desc/default/requested/value/floor/ceiling/custom）
+    const items = r.budgets || {}
+    const firstBudget = Object.values(items)[0] || {}
+    budgets.value = {
+      items,
+      floor: Number(firstBudget.floor || 0),
+      ceiling: Number(firstBudget.ceiling || 0)
+    }
+    const edits = {}
+    for (const [k, v] of Object.entries(items)) edits[k] = v.value
+    budgetEdits.value = edits
     models.value = {
       model1: {
         vendor: r.model1.vendor, model: r.model1.model, key: r.model1.key || '',
@@ -335,19 +372,41 @@ async function loadModels() {
   }
 }
 
+// 统一的保存体（R-143：saveModels 与 resetBudgets 共用，避免两处漂移）
+function modelsBody(extra = {}) {
+  return {
+    model1: { vendor: models.value.model1.vendor, model: models.value.model1.model, key: models.value.model1.key },
+    model2: { vendor: models.value.model2.vendor, model: models.value.model2.model, key: models.value.model2.key },
+    gen_role: models.value.genRole,
+    referee_role: models.value.refereeRole,
+    asr_mode: models.value.asrMode,
+    asr_model: models.value.asrModel,
+    topics_count: models.value.topicsCount,
+    debate_rounds: debateRounds.value,
+    ...extra
+  }
+}
+
+async function resetBudgets() {
+  savingModels.value = true
+  try {
+    await api('/api/settings/models', {
+      method: 'PUT',
+      body: JSON.stringify(modelsBody({ reset_budgets: true }))
+    })
+    await loadModels()
+    message.success('已恢复默认预算')
+  } catch (e) {
+    message.error(e.message || '恢复默认失败')
+  } finally {
+    savingModels.value = false
+  }
+}
+
 async function saveModels() {
   savingModels.value = true
   try {
-    const body = {
-      model1: { vendor: models.value.model1.vendor, model: models.value.model1.model, key: models.value.model1.key },
-      model2: { vendor: models.value.model2.vendor, model: models.value.model2.model, key: models.value.model2.key },
-      gen_role: models.value.genRole,
-      referee_role: models.value.refereeRole,
-      asr_mode: models.value.asrMode,
-      asr_model: models.value.asrModel,
-      topics_count: models.value.topicsCount,
-      debate_rounds: debateRounds.value
-    }
+    const body = modelsBody({ budgets: { ...budgetEdits.value } })
     await api('/api/settings/models', { method: 'PUT', body: JSON.stringify(body) })
     await loadModels()
     message.success('已保存，立即生效（无需重启）')
@@ -592,6 +651,25 @@ onUnmounted(() => {
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.5);
 }
+.budget-box {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(219, 163, 125, 0.04);
+}
+.budget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 8px 16px;
+}
+.budget-item {
+  display: grid;
+  grid-template-columns: 120px 130px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.budget-label { font-size: 12.5px; }
 .selfcheck-box {
   margin-top: 12px;
   padding: 10px 12px;
