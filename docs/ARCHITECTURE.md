@@ -108,7 +108,7 @@ background_tasks / sync_jobs / notifications / app_kv
 ## 7. 关键数据流
 1. **导入学习**：上传/inbox → videos 行 → 编辑页手动「语音转文字」（抽音轨→按 .env 选 阿里云 FileTrans(OSS 中转) 或 硅基流动直传，R-108→校对稿回填）→ 确认标签 → 进入人设/风格语料
 2. **平台同步**：run_sync（daily top15 带视频下载转写 / weekly 3 / initial 全量）→ 账号并发（每平台独立线程/会话）→ 作品 upsert + 指标按天 upsert + 评论 Top50 → auto_merge 合并 work → daily 再对前15条媒体补齐（下载+转写，R-085）→ 进度实时写 sync_jobs → 完成通知
-3. **选题/生成**：热点/灵感 → 人设+风格检索加权（TF-IDF/RAG）→ 双模型讨论（生成方 × 评审方）→ 草稿 → 作者改写 → 反馈回流
+3. **选题/生成**：热点/灵感（灵感池入池：daily 逐素材队列与全量/每周同步共用 `pool_ideas_from_comments`，限量 单帖≤8 / 每博主每天≤40，R-140）→ 人设+风格检索加权（TF-IDF/RAG）→ 双模型讨论（生成方 × 评审方）→ 草稿 → 作者改写 → 反馈回流
    - 非脚本生成的 AI 功能（人设/预打标/校对/差异/对话/提示词优化/金样本评测/对标分析）统一走 `llm_router.primary_llm`：**模型1 主用 → 模型2 降级**（报错/超时/空正文/输出不合法），参数按厂家归一化，降级写日志 + 站内通知
 4. ~~复盘~~：已下线（R-097/R-136）；赛道雷达保留在 `services/metrics.radar`，可经 AI 对话查询
 

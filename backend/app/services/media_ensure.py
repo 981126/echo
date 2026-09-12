@@ -400,7 +400,7 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
     - 每条：采集评论/素材数据 →（daily 带媒体）缺视频下载/自动转写 → 完成/失败；
     - 任何非正常结束（失败/超时/无有效语音）都会 push 通知。
     """
-    stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0}
+    stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0, "pool": 0}
     prio = {"douyin": 0, "xiaohongshu": 1, "bilibili": 2}
     ordered = []
     for post_id, tid in items:
@@ -478,6 +478,7 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
 
             cres = sync_post_comments(db, post, limit=50, charge=True)
             stats["comments"] += int(cres.get("added") or 0) + int(cres.get("updated") or 0)
+            stats["pool"] += int(cres.get("pool_added") or 0)  # R-140：评论按限量进灵感池
             if with_media:
                 res = platform_media_task(db, {"post_id": post_id}, _up)
                 if res.get("status") == "done":

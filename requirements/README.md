@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-140 | 2026-09-12 | 每日同步队列补回灵感池写入（修 R-093 回归：daily 带媒体走队列后 `_collect_comments` 被跳过，评论只入库不进池）+ 进池限量（单帖 ≤8、单博主每天 ≤40，可 `.env` 覆盖）+ 同步说明汇报入池条数 + 每日篇数口径对齐（组候选与生成切片都用 app_kv 设置） | ✅ 已完成 | M129（已完成） | platform_sync、media_ensure、pipeline、config |
 | R-139 | 2026-09-11 | 统一模型路由与降级层：非脚本生成功能默认模型1、失败（报错/超时/空正文/输出不合法）降级模型2 且可见（日志+通知+稿子标记）；参数按厂家归一化；脚本生成（含每日自动）统一走生成方/评审方双模型讨论、轮次取设置；双模型兼容性自检 | ✅ 已完成 | M128（已完成） | llm_router、model_health、debate、persona、ingest、chat_service、prompt_service、prompt_eval、benchmark、pipeline |
 | R-138 | 2026-09-11 | 「AI 提示词」改名「AI 设置」；首个 tab「模型设置」：模型1/模型2 各自配厂家+模型+Key（明文存 DB 可回显）、生成方/评审方两个下拉、ASR 服务商+模型、讨论轮次迁入、每日自动生成篇数；app_kv 存储、保存即生效 | ✅ 已完成 | M127（已完成） | api/settings、model_settings、PromptsView、R-023/108/135 |
 | R-137 | 2026-09-11 | DeepSeek 模型切换到 DeepSeek-V4.1-Flash（官方 ID `deepseek-flash`）；顺带修掉已停用的旧模型名 `deepseek-chat` | ✅ 已完成 | M126（已完成） | config.py、.env、.env.example、AGENTS/PRD/PRODUCT/DECISIONS |

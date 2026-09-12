@@ -13,6 +13,7 @@ from ..core.timeutil import now as _app_now
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..core.pipeline import today_key
 from ..models.hot_topic import TopicIdea
 from ..models.task import BackgroundTask
@@ -243,21 +244,130 @@ def _upsert_comments(db: Session, post: PlatformPost, comments: list[CommentData
     return {"added": added, "updated": updated}
 
 
-def sync_post_comments(db: Session, post: PlatformPost, *, limit: int = 50, client: DataSource | None = None, account=None, charge: bool = True) -> dict:
-    """拉取单帖评论并入库（点赞 Top limit；R-067）。charge=True 时计一次预算。"""
+def _pool_quota(db: Session, creator_id: int | None, date_key: str) -> int:
+    """该博主今天还能进池几条（R-140 限量；0/负数表示不限量）。"""
+    per_day = int(getattr(get_settings(), "pool_ideas_per_day", 0) or 0)
+    if per_day <= 0:
+        return 10**9
+    used = (
+        db.query(TopicIdea)
+        .filter(
+            TopicIdea.source == "comment",
+            TopicIdea.snapshot_date == date_key,
+            TopicIdea.creator_id == creator_id,
+        )
+        .count()
+    )
+    return max(0, per_day - used)
+
+
+def pool_ideas_from_comments(
+    db: Session,
+    post: PlatformPost,
+    comments: list,
+    *,
+    account: CreatorAccount | None = None,
+    per_post: int | None = None,
+) -> int:
+    """把**已入库**的评论按限量写进灵感池（R-140）。
+
+    这是「评论 → 选题池」的唯一实现：全量/每周同步（`_collect_comments`）与
+    逐素材队列/单帖同步（`sync_post_comments`）都走这里，避免再出现
+    「R-093 队列模式只入库不进池」这种一边有一边没有的回归。
+
+    限量：单帖最多 `ECHO_POOL_IDEAS_PER_POST` 条（按点赞降序）、
+    单博主每天最多 `ECHO_POOL_IDEAS_PER_DAY` 条；仍保留「标题 ≥4 字」与按天去重。
+    返回本次新增条数。
+    """
+    if account is None and post.account_id:
+        account = db.get(CreatorAccount, post.account_id)
+    creator_id = account.creator_id if account is not None else None
+    platform = (account.platform if account is not None else post.platform) or ""
+    nickname = (account.nickname if account is not None else "") or platform
+    limit_post = int(
+        per_post if per_post is not None else getattr(get_settings(), "pool_ideas_per_post", 0) or 0
+    )
+    date_key = today_key()
+    quota = _pool_quota(db, creator_id, date_key)
+    if quota <= 0:
+        return 0
+
+    usable = [c for c in comments if len((c.text or "").strip()) >= 4]
+    usable.sort(key=lambda c: int(c.likes or 0), reverse=True)
+    if limit_post > 0:
+        usable = usable[:limit_post]
+
+    added = 0
+    for c in usable:
+        if added >= quota:
+            break
+        text = (c.text or "").strip()
+        likes = int(c.likes or 0)
+        exists = (
+            db.query(TopicIdea)
+            .filter(
+                TopicIdea.source == "comment",
+                TopicIdea.title == text,
+                TopicIdea.snapshot_date == date_key,
+            )
+            .first()
+        )
+        if exists is None:
+            db.add(
+                TopicIdea(
+                    source="comment",
+                    platform=platform,
+                    title=text,
+                    detail=f"来自{nickname}作品《{(post.title or '')[:40]}》的评论",
+                    post_id=post.id,
+                    post_title=post.title,
+                    creator_id=creator_id,
+                    snapshot_date=date_key,
+                    likes=likes,
+                )
+            )
+            added += 1
+        elif likes > int(exists.likes or 0):
+            exists.likes = likes
+    db.commit()
+    return added
+
+
+def sync_post_comments(
+    db: Session,
+    post: PlatformPost,
+    *,
+    limit: int = 50,
+    client: DataSource | None = None,
+    account=None,
+    charge: bool = True,
+    pool: bool = True,
+) -> dict:
+    """拉取单帖评论并入库（点赞 Top limit；R-067）。charge=True 时计一次预算。
+
+    R-140：入库后同时按限量写灵感池（`pool=False` 可关闭），这样 daily 走
+    「逐素材队列」时灵感池也会被持续填充。
+    """
     client = client or make_source(post.platform)
-    comments = client.fetch_comments(
-        post.platform, post.platform_post_id, max(1, int(limit)), account, raw=_raw_of(post)
+    comments = _norm_comment_items(
+        client.fetch_comments(
+            post.platform, post.platform_post_id, max(1, int(limit)), account, raw=_raw_of(post)
+        )
     )
     if charge:
         _charge(db)
-    return _upsert_comments(db, post, comments, limit=limit)
+    result = _upsert_comments(db, post, comments, limit=limit)
+    if pool:
+        result["pool_added"] = pool_ideas_from_comments(db, post, comments, account=account)
+    return result
 
 
 def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, posts: list[PlatformPost], per_post: int = 20) -> int:
-    """抓取评论区进选题池（R-028）：评论入库（含点赞）+ 选题池去重新增。"""
+    """抓取评论区进选题池（R-028）：评论入库（含点赞）+ 选题池去重新增。
+
+    R-140：进池逻辑统一走 `pool_ideas_from_comments`（限量），本函数只负责抓取与入库。
+    """
     added = 0
-    date_key = today_key()
     for post in posts[:]:
         try:
             comments = _norm_comment_items(
@@ -273,38 +383,7 @@ def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, 
         except Exception:  # noqa: BLE001 入库失败不中断
             db.rollback()
             continue
-        for c in comments:
-            text = (c.text or "").strip()
-            if not text or len(text) < 4:
-                continue
-            likes = int(c.likes or 0)
-            exists = (
-                db.query(TopicIdea)
-                .filter(
-                    TopicIdea.source == "comment",
-                    TopicIdea.title == text,
-                    TopicIdea.snapshot_date == date_key,
-                )
-                .first()
-            )
-            if exists is None:
-                db.add(
-                    TopicIdea(
-                        source="comment",
-                        platform=account.platform,
-                        title=text,
-                        detail=f"来自{account.nickname or account.platform}作品《{(post.title or '')[:40]}》的评论",
-                        post_id=post.id,
-                        post_title=post.title,
-                        creator_id=account.creator_id,
-                        snapshot_date=date_key,
-                        likes=likes,
-                    )
-                )
-                added += 1
-            elif likes > int(exists.likes or 0):
-                exists.likes = likes
-    db.commit()
+        added += pool_ideas_from_comments(db, post, comments, account=account, per_post=per_post)
     return added
 
 
@@ -432,7 +511,9 @@ def sync_account(
         targets = synced[:10]
         if targets:
             _job_progress(db, job_id, note=f"{label}：拉取评论…")
+            # 非队列路径下 _collect_comments 返回的就是「进池条数」（R-140 起走统一限量实现）
             stats["comments"] = _collect_comments(db, account, client, targets, per_post=50)
+            stats["pool"] = stats["comments"]
     if account.platform == "bilibili":
         # B站列表不含赞/藏/评，全量时逐条详情太重；这里每轮补全最多 BACKFILL 条
         stats["backfilled"] = _backfill_bili_stats(db, account, client, job_id=job_id)
@@ -589,6 +670,7 @@ def run_sync(
                 results.append(fut.result())
         total_posts = sum(int(r.get("posts") or 0) for r in results)
         total_comments = sum(int(r.get("comments") or 0) for r in results)
+        total_pool = sum(int(r.get("pool") or 0) for r in results)  # R-140：进灵感池条数
         # R-093：账号分页阶段注册的逐素材队列（post_id, task_id）
         queue_items: list[tuple[int, int]] = []
         if queue_mode:
@@ -609,13 +691,16 @@ def run_sync(
         except Exception:  # noqa: BLE001
             db.rollback()
         # R-093：逐素材队列依次处理（每条：评论采集 → 缺视频下载/转写），素材库卡片全程显示状态
-        media = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0}
+        media = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0, "pool": 0}
         if queue_mode:
             from .media_ensure import run_card_sync_queue  # 延迟导入避免循环
 
             media = run_card_sync_queue(db, queue_items, with_media=True)
             total_comments += int(media.get("comments") or 0)
+            total_pool += int(media.get("pool") or 0)
         msg = f"同步 {len(results)} 个账号，更新作品 {total_posts}，采集评论 {total_comments}"
+        if total_pool:
+            msg += f"，灵感池新增 {total_pool}"
         if queue_mode and (media["downloaded"] or media["transcribed"] or media["errors"] or media["skipped"] or media.get("comments")):
             msg += f"；入队 {len(queue_items)} 条，下载视频 {media['downloaded']}，转写 {media['transcribed']}"
             if media["errors"]:
@@ -623,11 +708,24 @@ def run_sync(
         fails = [f"{r.get('platform')}({str(r.get('error'))[:60]})" for r in results if r.get("error")]
         if fails:
             msg += "；失败账号：" + "、".join(fails) + "（可单独重试该账号）"
-        payload = {"accounts": results, "posts": total_posts, "comments": total_comments, "failed": len(fails)}
+        payload = {
+            "accounts": results,
+            "posts": total_posts,
+            "comments": total_comments,
+            "pool_ideas": total_pool,
+            "failed": len(fails),
+        }
         if with_media and scope == "daily":
             payload["media"] = media
         _finish_job(db, job, msg, payload)
-        return {"job_id": job.id, "message": msg, "accounts": results}
+        return {
+            "job_id": job.id,
+            "message": msg,
+            "accounts": results,
+            "posts": total_posts,
+            "comments": total_comments,
+            "pool_ideas": total_pool,
+        }
     except BudgetExceeded as exc:
         _finish_job(db, job, str(exc), failed=True)
         raise
@@ -866,10 +964,13 @@ def run_daily_sync_all(db: Session) -> dict:
     accounts = [a for res in results for a in (res.get("accounts") or [])]
     posts = sum(int(r.get("posts") or 0) for r in results)
     comments = sum(int(r.get("comments") or 0) for r in results)
+    pool_ideas = sum(int(r.get("pool_ideas") or 0) for r in results)  # R-140：进灵感池条数
     msg = (
         f"每日同步完成：主博主 + {len(benchmarks)} 个对标，共同步 {len(accounts)} 个账号，"
         f"更新作品 {posts}，采集评论 {comments}"
     )
+    if pool_ideas:
+        msg += f"，灵感池新增 {pool_ideas}"
     if isinstance(rerun, str) and rerun.startswith("started:"):
         msg += "；已自动触发「重新对标」"
     elif rerun == "already_running":
@@ -880,5 +981,6 @@ def run_daily_sync_all(db: Session) -> dict:
         "accounts": accounts,
         "posts": posts,
         "comments": comments,
+        "pool_ideas": pool_ideas,
         "rerun": rerun,
     }

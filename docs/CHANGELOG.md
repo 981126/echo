@@ -1,5 +1,33 @@
 # 变更记录
 
+## [M129 / R-140] 2026-09-12 — 灵感池入池修复与限量 + 每日篇数口径对齐
+> 起因：作者发现首页「灵感池」没数据。查证后确认是 **R-093 的回归**（非 R-138/R-139 引入），
+> 作者确认「要（每日队列同步也进池）」「限量」，并要求一并做「篇数口径对齐」与「端到端验证」。
+
+**根因（已查证）**
+- 全项目只有 `_collect_comments()` 会写 `topic_ideas`；它只在 `with_comments=True` 时被调用，
+  而 R-093（2026-09-06）把「daily + 带媒体」改成逐素材队列：`queue_mode = with_media and scope=="daily"`
+  → `with_comments = not queue_mode`。**所有每日同步路径都是「daily + 带媒体」**（定时 `run_daily_sync_all`、
+  博主页「同步前15条」），于是全部跳过 `_collect_comments`；队列里的 `sync_post_comments()` 只写
+  `platform_post_comments`，**从不写灵感池**。数据佐证：`topic_ideas` 787 行（09-05：81、09-06：706、之后 0 行），
+  而今天同步日志写着「采集评论 124/163 条」——注释「评论也由队列逐条采集」只兑现了入库，漏了进池。
+- 热榜半边为空是另一回事：热榜靠每日流水线 `fetch_and_store()` 或首页「抓取更新」刷新，
+  该库 `pipeline_runs` / `topic_candidates` 均为 0 行（流水线从未跑过），`hot_topics` 停在 09-08 而接口只查当天。
+  手动 `POST /api/topics/refresh` 实测恢复（fetched 161）——属运行环境问题，非代码缺陷。
+
+**修复**
+- 「评论 → 选题池」抽成唯一实现 `pool_ideas_from_comments()`：`_collect_comments()`（全量/每周）与
+  `sync_post_comments()`（队列/单帖）都调用它，杜绝「一边有一边没有」的再次发生。
+- **进池限量**（`.env` 可覆盖）：单帖最多 `ECHO_POOL_IDEAS_PER_POST=8` 条（按点赞降序）、
+  单博主每天最多 `ECHO_POOL_IDEAS_PER_DAY=40` 条；`0` = 不限量。仍保留「标题 ≥4 字」、
+  按 `(source,title,snapshot_date)` 去重、重复出现点赞取大。
+- **可观测**：同步任务说明新增「灵感池新增 N 条」（`sync_account` / `run_sync` / `run_daily_sync_all` 与
+  payload `pool_ideas`），不再只有「采集评论 N 条」。
+- **每日篇数口径对齐**：`run_daily_pipeline` 的组候选与生成切片统一用 `model_settings.topics_count(db)`
+  （此前组候选用 `.env` 的 `pipeline_topics_count`、生成用 `app_kv`，会出现「候选 3 条、实际生成 1 条」）。
+- 测试：新增 `tests/test_r140_pool_ideas.py`（10 例：队列模式进池、非队列不回退、单帖同步进池、
+  可关闭、单帖/单博主/按博主隔离限量、0=不限量、去重与点赞取大、篇数口径）；总 232 例通过。
+
 ## [M127+M128 / R-138+R-139] 2026-09-11 — AI 设置（模型1/2 槽位）+ 统一模型路由与降级层
 > 作者原话：①主模型和副模型改为模型1、模型2，可分别配置厂家/模型/Key；②脚本生成改为「生成方 / 评审方」两个下拉；
 > ③除脚本生成外其他 AI 功能默认用模型1，出问题降级模型2，**不能降级后像退化了**；④讨论轮次控制所有自动生成脚本的讨论轮数。

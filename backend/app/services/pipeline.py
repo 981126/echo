@@ -242,8 +242,13 @@ def _ai_candidate(db: Session, hot_cands: list[dict], profile: dict) -> dict | N
 
 
 def _compose_daily_candidates(db: Session, hot_items: list[dict], settings, count: int | None = None) -> list[dict]:
-    """组装每日候选：评论区 1 + 热榜 1 + AI 建议 1，缺源回退；其余空位用热榜/评论补充。"""
-    count = int(count if count is not None else getattr(settings, "pipeline_topics_count", 3))
+    """组装每日候选：评论区 1 + 热榜 1 + AI 建议 1，缺源回退；其余空位用热榜/评论补充。
+
+    R-140：每日篇数统一取「AI 设置」的运行时配置（`app_kv` > `.env` > 默认），
+    与真正生成时的切片口径一致（此前组候选用 `.env`、生成用 `app_kv`，会出现
+    「候选 3 条、实际只生成 1 条」的显示不一致）。
+    """
+    count = int(count if count is not None else model_settings.topics_count(db))
     profile = persona_profile(db)
     comments = _comment_candidates(db, profile)
     hots = _hot_candidates(db, hot_items, profile)
@@ -365,14 +370,15 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
 
     try:
         hot_items = fetch_and_store(db, settings)
-        candidates = _compose_daily_candidates(db, [h.to_dict() for h in hot_items], settings)
+        # R-138/R-139/R-140：每日生成篇数取「AI 设置」里的运行时配置（Kv > .env > 默认），
+        # 组候选与生成切片用同一个值，避免候选数与实际出稿数不一致。
+        topics = model_settings.topics_count(db)
+        candidates = _compose_daily_candidates(db, [h.to_dict() for h in hot_items], settings, count=topics)
         run.candidates_count = len(candidates)
         db.commit()
 
         drafts = []
-        # R-138/R-139：每日生成篇数取「AI 设置」里的运行时配置（Kv > .env > 默认）
-        topics = model_settings.topics_count(db)
-        for c in candidates[:topics]:
+        for c in candidates:
             draft = generate_draft(db, c["title"], settings)
             drafts.append(draft)
             db.add(
