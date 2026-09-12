@@ -8,6 +8,7 @@ from ..config import get_settings
 from ..core.transcript import normalize_text
 from ..models.persona import PersonaCheck
 from ..models.video import Transcript, Video
+from . import llm_router, model_settings
 from .llm import LLMError
 from .persona import PersonaService
 from .prompt_service import get_prompt
@@ -54,12 +55,15 @@ CORRECT_SYSTEM = (
 )
 
 
-def correct_transcript(transcript_text: str, source_text: str = "", llm=None) -> str:
-    """AI 校对：结合原始文案修正 ASR 行业词；无密钥时原样返回。"""
+def correct_transcript(transcript_text: str, source_text: str = "", llm=None, db=None) -> str:
+    """AI 校对：结合原始文案修正 ASR 行业词；无密钥时原样返回。
+
+    R-139：默认走模型1（失败降级模型2）；`llm` 仍可注入（测试/显式指定）。
+    """
     text = normalize_text(transcript_text)
     if not text:
         return ""
-    llm = llm or PersonaService().llm
+    llm = llm or llm_router.primary_llm(db, "correct")
     try:
         user = f"原始文案（仅供参考，可能与口播不一致）：\n{source_text or '无'}\n\n转写稿：\n{text}"
         corrected = llm.chat(
@@ -81,30 +85,31 @@ def import_video_task(db, payload: dict) -> None:
     if video is None:
         return
     settings = get_settings()
+    asr = model_settings.asr_config(db)  # R-138：ASR 走运行时配置 → 保存即生效
 
     if video.transcript is None or (
         not video.transcript.transcript_text and video.transcript.asr_status != "done"
     ):
         path = settings.videos_dir / video.filename
-        transcriber = Transcriber(settings)
+        transcriber = Transcriber(settings, mode=asr["mode"], model=asr["model"])
         try:
             text = transcriber.transcribe(path)
         except TranscriptionError as exc:
             # R-094：转写失败也落 asr_status=failed，并给可读原因
-            model = settings.siliconflow_asr_model if settings.asr_mode == "siliconflow" else ""
+            model = asr["model"] if asr["mode"] == "siliconflow" else ""
             if video.transcript is None:
-                video.transcript = Transcript(video_id=video.id, asr_status="failed", asr_provider=settings.asr_mode, asr_model=model)
+                video.transcript = Transcript(video_id=video.id, asr_status="failed", asr_provider=asr["mode"], asr_model=model)
                 db.add(video.transcript)
             else:
                 video.transcript.asr_status = "failed"
-                video.transcript.asr_provider = settings.asr_mode
+                video.transcript.asr_provider = asr["mode"]
                 video.transcript.asr_model = model
             db.commit()
             msg = str(exc) or "转写失败"
             if "识别结果为空" in msg:
                 msg += "（未识别到有效语音：视频可能无声/只有背景音乐/音量过低或音轨异常，可检查该视频音轨后重试）"
             raise TranscriptionError(msg) from exc
-        corrected = correct_transcript(text)
+        corrected = correct_transcript(text, db=db)
         if video.transcript is None:
             db.add(
                 Transcript(
@@ -112,16 +117,16 @@ def import_video_task(db, payload: dict) -> None:
                     transcript_text=text,
                     corrected_text=corrected,
                     asr_status="done",
-                    asr_provider=settings.asr_mode,
-                    asr_model=settings.siliconflow_asr_model if settings.asr_mode == "siliconflow" else "",
+                    asr_provider=asr["mode"],
+                    asr_model=asr["model"] if asr["mode"] == "siliconflow" else "",
                 )
             )
         else:
             video.transcript.transcript_text = text
             video.transcript.corrected_text = corrected
             video.transcript.asr_status = "done"
-            video.transcript.asr_provider = settings.asr_mode
-            video.transcript.asr_model = settings.siliconflow_asr_model if settings.asr_mode == "siliconflow" else ""
+            video.transcript.asr_provider = asr["mode"]
+            video.transcript.asr_model = asr["model"] if asr["mode"] == "siliconflow" else ""
         db.commit()
         db.refresh(video)
 

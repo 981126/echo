@@ -46,9 +46,12 @@ class Settings(BaseSettings):
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2-0711-preview"
 
-    # 生成策略（R-023）：deepseek | kimi | random | alternate（也可在页面切换）
+    # 旧生成策略（R-023）。R-138 起改用「AI 设置 → 模型设置」的 gen_role/referee_role，
+    # 这里只作为旧值迁移来源与 .env 兜底（random/alternate 已下线）。
     generation_model: str = "deepseek"
     debate_rounds: int = 5
+    # 单次 LLM 调用的硬性墙钟上限（秒）：超过即按超时处理 → 由 llm_router 降级到模型2（R-139）
+    llm_timeout_seconds: int = 600
 
     # ASR（R-108）：asr_mode = mock（开发/测试假转写）| aliyun | siliconflow
     asr_mode: str = "mock"  # mock | aliyun | siliconflow（.env 配置用哪家，重启生效）

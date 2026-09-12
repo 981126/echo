@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from ..models.persona import PersonaTag
 from ..models.video import Video
-from .llm import DeepSeekClient, LLMError
+from . import llm_router
+from .llm import LLMError
 from .prompt_service import get_prompt
 from .requirements_service import list_requirements
 
@@ -273,8 +274,10 @@ def _dispatch(db: Session, name: str, args: dict) -> dict:
 
 
 class ChatService:
-    def __init__(self, llm=None):
-        self.llm = llm or DeepSeekClient()
+    """AI 对话（R-139：默认模型1，失败自动降级模型2）。`llm=` 仍可注入（测试/显式指定）。"""
+
+    def __init__(self, llm=None, db: Session | None = None):
+        self.llm = llm or llm_router.primary_llm(db, "chat")
 
     def reply(self, db: Session, user_message: str, history: list[dict]) -> str:
         messages: list[dict] = [{"role": "system", "content": get_prompt("chat")}]
@@ -285,7 +288,7 @@ class ChatService:
             try:
                 message = self.llm.chat_completion(messages, temperature=0.5, tools=TOOLS)
             except LLMError:
-                return "（当前未配置 DeepSeek 密钥，暂无法回答。请先在 .env 配置 ECHO_DEEPSEEK_API_KEY。）"
+                return "（AI 服务暂时不可用：模型1 与模型2 都没能给出结果，请到「AI 设置」检查 API Key。）"
             except Exception as exc:  # noqa: BLE001 外部服务失败统一降级，不让对话页报裸错
                 return f"（AI 服务暂时不可用：{exc}）"
             tool_calls = message.get("tool_calls")

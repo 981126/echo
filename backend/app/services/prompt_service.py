@@ -347,14 +347,11 @@ def learning_material(db: Session, max_items: int = 16) -> str:
 
 
 def _optimize_llm(db: Session):
-    """优化所用模型**跟随**「生成模型策略」（R-129）；random/alternate 归到 DeepSeek。"""
-    from ..config import get_settings
-    from ..models.kv import Kv
-    from .llm import get_llm
+    """优化所用模型（R-139）：模型1 主用，失败自动降级模型2。"""
+    from . import llm_router
 
-    row = db.get(Kv, "generation_model")
-    mode = (row.value if row is not None and row.value else "") or get_settings().generation_model
-    return get_llm(mode), (mode or "deepseek")
+    client = llm_router.primary_llm(db, "prompt_optimize")
+    return client, client.used_model
 
 
 def _strip_fence(text: str) -> str:
@@ -423,7 +420,8 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
             continue
         ok, reason = prompt_contract.validate_candidate(key, candidate, db)
         if ok:
-            note = f"AI 微调候选（模型 {mode}；语料：{prompt_contract.material_summary(sources)}）"
+            used = getattr(llm, "used_model", "") or mode
+            note = f"AI 微调候选（模型 {used}；语料：{prompt_contract.material_summary(sources)}）"
             if change_note:
                 note += "\n变更说明：\n" + change_note
             row = create_candidate(db, key, candidate, note=note)

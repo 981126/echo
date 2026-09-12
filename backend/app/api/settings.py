@@ -10,11 +10,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..core.log import get_logger
 from ..db import get_db
 from ..models.kv import Kv
-from ..services import model_settings
+from ..services import model_health, model_settings
 
 router = APIRouter()
+log = get_logger("settings")
 
 MODES = ["deepseek", "kimi", "random", "alternate"]
 
@@ -90,9 +92,19 @@ def _models_payload(db: Session) -> dict:
         "warnings": [
             "API Key 以明文保存在本地数据库（app_kv）；备份文件会包含明文 Key，请限制备份目录权限。",
             "修改后立即生效，无需重启。",
+            *([f"双模型兼容性自检：{w}" for w in (model_health.last_result(db) or {}).get("warnings", [])]),
         ],
+        "selfcheck": model_health.last_result(db),
         "migrated_from_legacy": bool(config.get("migrated_from_legacy")),
     }
+
+
+def _selfcheck_task(db: Session, payload: dict) -> dict:
+    """后台任务：保存模型配置后跑一次双模型兼容性自检（R-139）。"""
+    res = model_health.run_selfcheck(db, triggered_by=str(payload.get("triggered_by") or "save"))
+    if res["ok"]:
+        return {"message": "模型1/2 在样例功能上均兼容"}
+    return {"message": "发现问题：" + "；".join(res["warnings"])[:200]}
 
 
 @router.get("/models", response_model=dict)
@@ -112,6 +124,13 @@ def put_models(payload: ModelsIn, db: Session = Depends(get_db)):
         set_rounds(RoundsIn(rounds=payload.debate_rounds), db)
     if payload.topics_count is not None:
         model_settings.save_topics_count(db, payload.topics_count)
+    # R-139：保存后异步跑一次双模型兼容性自检（不阻塞界面；结果回到 GET /models 的 selfcheck）
+    try:
+        from ..tasks import start_task
+
+        start_task("model_selfcheck", {"triggered_by": "save"}, _selfcheck_task)
+    except Exception as exc:  # noqa: BLE001 入队失败不能影响保存本身
+        log.warning("双模型兼容性自检入队失败：%s", exc)
     return _models_payload(db)
 
 

@@ -26,7 +26,8 @@
 - 数据库：SQLite + SQLAlchemy 2.x；运行时数据目录由 `.env` 的 `ECHO_DATA_DIR`/`ECHO_DB_PATH` 决定（当前 `echo_resource/`，**不是**仓库 `data/`）；schema 用幂等轻量迁移（Alembic 是 tech-debt，未落地）
 - 真实外部服务（2026-09-06 起全部 real，配置非法会启动报错，见 R-068）：
   - 平台数据：TikHub（抖音/B站/小红书，含主页/作品/统计/评论）
-  - LLM：DeepSeek（V4.1 Flash，模型 ID `deepseek-flash`）+ Kimi（生成默认 Kimi，可切 deepseek/alternate）
+  - LLM：模型1 / 模型2 两个可配置槽位（厂家 + 模型 ID + API Key，界面「AI 设置 → 模型设置」；当前默认 模型1=DeepSeek `deepseek-flash`、模型2=Kimi `kimi-k2.6`）。
+    脚本生成走「生成方 × 评审方」双模型讨论（可相同）；其余 AI 功能默认模型1，出错/超时/空正文/输出不合法自动降级模型2（R-139）
   - ASR：阿里云录音文件识别 FileTrans（+OSS 中转），上传前 ffmpeg 抽音轨
   - 热点：TikHub 热搜（real）
   - 邮件：QQ 邮箱 SMTP

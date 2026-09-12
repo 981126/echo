@@ -31,6 +31,8 @@ KIND_LABELS = {
     "benchmark_rerun": "重新对标",
     "benchmark_analyze": "AI 分析",
     "benchmark_rewrite": "洗稿",
+    "llm_fallback": "模型降级",
+    "model_selfcheck": "双模型兼容性自检",
 }
 
 
@@ -65,6 +67,8 @@ def _target(kind: str, payload: dict, result) -> str:
         return "/benchmark"
     if kind in ("benchmark_analyze", "benchmark_rewrite"):
         return "/benchmark"
+    if kind == "model_selfcheck":
+        return "/prompts"
     return "/home"
 
 

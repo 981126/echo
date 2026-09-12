@@ -20,6 +20,7 @@ from ..core.topics import MAIN_TOPICS
 from ..models.hot_topic import TopicCandidate, TopicIdea
 from ..models.pipeline import PipelineRun
 from .creator_service import current_creator_id
+from . import model_settings
 from .generation import generate_draft
 from .ideas_service import annotate_items, persona_profile
 from .llm import LLMError
@@ -79,7 +80,8 @@ def _match_candidates(db: Session, hot_items: list[dict], settings) -> list[dict
             '"score":0-100,"reason":"为什么匹配"}]}'
         )
         user = f"作者赛道/风格关键词：\n{tags}\n\n今日热点：\n{items_text}"
-        data = persona.llm.chat_json(
+        data = persona.call_json(
+            "ideas",
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             temperature=0.4,
         )
@@ -217,7 +219,8 @@ def _ai_candidate(db: Session, hot_cands: list[dict], profile: dict) -> dict | N
         f"今日热榜（可参考切入角度）：\n{hot_lines}"
     )
     try:
-        data = persona.llm.chat_json(
+        data = persona.call_json(
+            "ideas",
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             temperature=0.7,
         )
@@ -367,7 +370,9 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
         db.commit()
 
         drafts = []
-        for c in candidates[: max(1, int(settings.pipeline_topics_count or 3))]:
+        # R-138/R-139：每日生成篇数取「AI 设置」里的运行时配置（Kv > .env > 默认）
+        topics = model_settings.topics_count(db)
+        for c in candidates[:topics]:
             draft = generate_draft(db, c["title"], settings)
             drafts.append(draft)
             db.add(

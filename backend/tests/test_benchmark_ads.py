@@ -198,14 +198,14 @@ def test_unit_is_ad_uses_strict_judge(db, monkeypatch):
             assert "广告/商单/带货/引流" in messages[0]["content"]
             return {"is_ad": True, "reason": "推广自家小程序"}
 
-    monkeypatch.setattr(bm, "_llm", lambda: FakeLLM())
+    monkeypatch.setattr(bm, "_llm", lambda db=None: FakeLLM())
     assert bm._unit_is_ad(db, unit, "文案内容……") is True
 
     class FakeNo:
         def chat_json(self, messages, **kw):
             return {"is_ad": False}
 
-    monkeypatch.setattr(bm, "_llm", lambda: FakeNo())
+    monkeypatch.setattr(bm, "_llm", lambda db=None: FakeNo())
     assert bm._unit_is_ad(db, unit, "普通知识内容") is False
     # 已标记的帖子直接命中，不走 LLM
     post.is_ad = True

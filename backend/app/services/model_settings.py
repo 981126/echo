@@ -21,7 +21,10 @@ VENDORS: dict[str, dict] = {
         "models": ["deepseek-flash", "deepseek-v4-pro"],
         "default_model": "deepseek-flash",
         "supports_temperature": True,
-        "min_max_tokens": 400,
+        # V4.1 Flash 也是**推理模型**：max_tokens 同时含思考与正文。
+        # 实测 max_tokens=3000 时 finish_reason=length 且正文为空（思考吃满 3001 tokens），
+        # 4000 才有正文 → 下限设 4000，避免「输出空正文」被误判成模型坏了（R-139）。
+        "min_max_tokens": 4000,
         "key_env": "deepseek_api_key",
         "base_env": "deepseek_base_url",
         "key_hint": "platform.deepseek.com 的 API Key（sk-…）",
@@ -31,9 +34,11 @@ VENDORS: dict[str, dict] = {
         "base_url": "https://api.moonshot.cn/v1",
         "models": ["kimi-k2.6"],
         "default_model": "kimi-k2.6",
-        # 推理模型只接受 temperature=1；给小 max_tokens 会把预算耗在思考上导致正文为空
+        # 推理模型只接受 temperature=1；给小 max_tokens 会把预算耗在思考上导致正文为空。
+        # 实测：长上下文下 Kimi 的思考可吃掉 4000+ tokens（6971 字思考、正文为空），故下限设 6000，
+        # 不够时 `llm_router` 还会翻倍重试（R-139）。
         "supports_temperature": False,
-        "min_max_tokens": 3000,
+        "min_max_tokens": 6000,
         "key_env": "kimi_api_key",
         "base_env": "kimi_base_url",
         "key_hint": "platform.moonshot.cn 的 API Key（sk-…）",

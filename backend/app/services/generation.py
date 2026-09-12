@@ -14,9 +14,10 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..core.retrieval import TfidfIndex
 from ..core.style_profile import build_style_profile, default_avoid_words, format_style_profile
-from .prompt_service import get_prompt, get_prompt_version
+from .prompt_service import get_prompt_version
 from ..models.draft import Draft
 from ..models.metrics import MetricsSnapshot
 from ..models.persona import PersonaTag
@@ -410,22 +411,6 @@ def _dim_examples(db: Session, per_dim: int = 1) -> str:
     return "作者分节打分最高的范例（按维度学：开头怎么钩、节奏怎么走、结尾怎么收）：\n" + "\n".join(lines[: per_dim * 4])
 
 
-def _generation_llm(db: Session, settings=None):
-    """按「生成模型策略」选生成方模型（R-135）。
-
-    原来 `generate_draft` 固定用 DeepSeekClient，导致每日流水线自动生成、灵感池一键生成、
-    同步生成、回炉、AI 对话生成、提示词自测全部忽略该设置（PRD 写「默认 Kimi」）。
-    """
-    from .debate import choose_models  # 局部导入：debate 顶层依赖 generation，避免循环
-    from .llm import get_llm
-
-    try:
-        gen, _critic = choose_models(db)
-    except Exception:  # noqa: BLE001 策略解析失败退回 DeepSeek
-        gen = "deepseek"
-    return get_llm(gen, settings)
-
-
 def generation_user_message(db: Session, topic: str) -> str:
     """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
     ctx = _persona_context(db)
@@ -482,77 +467,75 @@ def _self_check(db: Session, script: str) -> tuple[list[str], float]:
     return issues, round(coverage, 4)
 
 
-def generate_draft(db: Session, topic: str, settings=None) -> Draft:
-    user = generation_user_message(db, topic)
-    system = get_prompt("generation", db)
-    llm = _generation_llm(db, settings)  # R-135：跟随「生成模型策略」（原来固定 DeepSeek）
-    attempts = 0
-    issues: list[str] = []
-    coverage = 0.0
-    is_mock = False
-    while attempts < 2:
-        attempts += 1
-        try:
-            data = llm.chat_json(
-                [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                temperature=0.8,
-                max_tokens=2500,
-            )
-            title = str(data.get("title", "")).strip()
-            cover = str(data.get("cover_text", "")).strip()
-            script = str(data.get("script", "")).strip()
-            shells = data.get("shells") if isinstance(data.get("shells"), dict) else {}
-        except LLMError:
-            is_mock = True
-            issues = []
-            title = f"{topic}（mock 标题）"
-            cover = (topic or "今日话题")[:8]
-            script = (
-                f"[mock 脚本] 大家好，今天想聊聊{topic}。"
-                "很多人对这件事有误区，其实只要抓住三个关键点，结果会完全不一样。"
-                "第一，先想清楚目标；第二，小步快跑试错；第三，持续复盘优化。"
-                "如果你也有类似困惑，评论区告诉我，我们下期见。"
-            )
-            shells = {
-                "douyin": f"#{topic} 短视频 干货分享",
-                "bilibili": f"{topic} | 亲测有效的 3 个方法",
-                "xiaohongshu": f"🔥 {topic}，建议收藏！",
-            }
-            break
-        issues, coverage = _self_check(db, script)
-        if not issues:
-            break
-        if attempts >= 2:
-            break
-        # 自检不通过：带上问题重写一次（R-131，最多 1 次）
-        user = user + "\n\n上一次生成存在这些问题，请重写并避免：\n" + "\n".join(f"- {i}" for i in issues)
+def _mock_payload(topic: str) -> tuple[str, str, str, dict]:
+    title = f"{topic}（mock 标题）"
+    cover = (topic or "今日话题")[:8]
+    script = (
+        f"[mock 脚本] 大家好，今天想聊聊{topic}。"
+        "很多人对这件事有误区，其实只要抓住三个关键点，结果会完全不一样。"
+        "第一，先想清楚目标；第二，小步快跑试错；第三，持续复盘优化。"
+        "如果你也有类似困惑，评论区告诉我，我们下期见。"
+    )
+    shells = {
+        "douyin": f"#{topic} 短视频 干货分享",
+        "bilibili": f"{topic} | 亲测有效的 3 个方法",
+        "xiaohongshu": f"🔥 {topic}，建议收藏！",
+    }
+    return title, cover, script, shells
 
+
+def generate_draft(db: Session, topic: str, settings=None) -> Draft:
+    """生成一篇脚本草稿（R-139：与工作台/每日自动生成完全相同的双模型讨论路径）。
+
+    流程：建占位稿 → `run_debate`（生成方初稿 + 评审方 N 轮挑刺 + 生成方修订 + 自检收口）
+    → 草稿上带 `quality`（含模型组合 / 是否降级 / 轮次 / 自检结果）。
+    无密钥或两个模型都不可用时回落到确定性 mock 稿（开发/离线可跑，`quality.mock=True`）。
+    """
+    from .debate import PLACEHOLDER_SCRIPT, debate_rounds, run_debate
+
+    settings = settings or get_settings()
     cid = _creator_filter(db)
     from .persona_profile import current_persona_version
 
-    quality = json.dumps(
-        {
-            "attempts": attempts,
-            "issues": issues,
-            "passed": not issues,
-            "style_coverage": coverage,
-            "mock": is_mock,
-        },
-        ensure_ascii=False,
-    )
     draft = Draft(
         creator_id=cid,
-        title=title or topic,
-        cover_text=cover,
-        script=script or topic,
-        platform_shells=json.dumps(shells, ensure_ascii=False),
+        title=topic,
+        cover_text="",
+        script=PLACEHOLDER_SCRIPT,
         source="ai",
-        original_script=script or topic,
         prompt_version=get_prompt_version("generation", db),  # R-129 M116：按提示词版本归因
         persona_version=current_persona_version(db, cid),  # R-130：人设变化可控
-        quality=quality,  # R-131：生成后自检留痕
     )
     db.add(draft)
+    db.commit()
+    db.refresh(draft)
+
+    try:
+        run_debate(db, draft, topic, settings)
+    except LLMError as exc:
+        # 无密钥 / 两个模型全挂 → 确定性 mock 稿（保留草稿，绝不静默丢稿）
+        db.rollback()
+        draft = db.get(Draft, draft.id) or draft
+        title, cover, script, shells = _mock_payload(topic)
+        draft.title = title
+        draft.cover_text = cover
+        draft.script = script
+        draft.platform_shells = json.dumps(shells, ensure_ascii=False)
+        draft.quality = json.dumps(
+            {
+                "mock": True,
+                "reason": str(exc)[:200],
+                "rounds": debate_rounds(db, settings),
+                "issues": [],
+                "passed": False,
+                "style_coverage": 0.0,
+            },
+            ensure_ascii=False,
+        )
+        db.commit()
+        db.refresh(draft)
+
+    draft.original_script = draft.script
     db.commit()
     db.refresh(draft)
     return draft

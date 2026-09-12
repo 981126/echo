@@ -153,7 +153,10 @@ def test_self_check_flags_redline_and_style_gap(db):
     assert coverage == 0.0
 
 
-def test_generate_draft_retries_once_and_records_quality(db, monkeypatch):
+def test_generate_draft_records_quality_and_model_pair(db, monkeypatch):
+    """R-139：generate_draft 走「生成方 + 评审方」双模型讨论，并记录模型组合与自检结果。"""
+    from app.services import llm_router, model_settings
+
     owner = _owner(db)
     db.add(
         PersonaTag(
@@ -165,14 +168,19 @@ def test_generate_draft_retries_once_and_records_quality(db, monkeypatch):
             version=7,
         )
     )
+    db.add(Kv(key="debate_rounds", value="1"))
     db.commit()
+    gen_slot, critic_slot = model_settings.generation_roles(db)
+    assert gen_slot != critic_slot  # 默认两方不同模型
 
-    class _FakeLLM:
-        def __init__(self, *a, **kw):
-            self.calls = 0
+    seen: list[str] = []
+
+    class _FakeClient:
+        def __init__(self, slot):
+            self.slot = slot
 
         def chat_json(self, messages, **kwargs):  # noqa: ANN001, ANN003
-            self.calls += 1
+            seen.append(self.slot)
             return {
                 "title": "标题",
                 "cover_text": "封面",
@@ -180,13 +188,25 @@ def test_generate_draft_retries_once_and_records_quality(db, monkeypatch):
                 "shells": {},
             }
 
-    monkeypatch.setattr(gen, "_generation_llm", lambda _db, _settings=None: _FakeLLM())  # R-135：改走模型策略解析
+        def chat(self, messages, **kwargs):  # noqa: ANN001, ANN003
+            seen.append(self.slot)
+            if self.slot == gen_slot:
+                return "我不卖课不收费割韭菜，修订后的脚本正文。"
+            return "评审意见：太像 AI，改口语。"
+
+    monkeypatch.setattr(llm_router, "build_client", lambda slot: _FakeClient(slot["slot"]))
     draft = gen.generate_draft(db, "测试选题")
     quality = json.loads(draft.quality)
-    assert quality["attempts"] == 2  # 第一次自检不过 → 自动重写一次
-    assert quality["passed"] is False
+    assert quality["models"]["gen"].startswith(gen_slot)
+    assert quality["models"]["critic"].startswith(critic_slot)
+    assert quality["rounds"] == 1
+    assert quality["rounds_done"] == 1  # 讨论真的跑了一轮
+    assert quality["fallback"] is False
+    assert quality["passed"] is False  # 自检收口后仍踩红线 → 如实记录
     assert any("红线" in i for i in quality["issues"])
+    assert gen_slot in seen and critic_slot in seen  # 两方都真的参与了讨论
     assert draft.persona_version == 7  # R-130：记录生成时的人设版本
+    assert draft.script  # 有正文
 
 
 def test_generate_draft_mock_path_records_version(db):

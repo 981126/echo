@@ -100,7 +100,7 @@ def chat(payload: ChatIn, db: Session = Depends(get_db)):
     """非流式问答（兼容旧调用）。"""
     user_msg = payload.message.strip()
     history = _last_history(db, None)
-    service = ChatService()
+    service = ChatService(db=db)
     reply = service.reply(db, user_msg, history)
     db.add(ChatMessage(role="user", content=user_msg))
     db.add(ChatMessage(role="assistant", content=reply))
@@ -129,7 +129,7 @@ def chat_stream(payload: ChatStreamIn):
             )
             db.commit()
 
-            reply = ChatService().reply(db, user_msg, history)
+            reply = ChatService(db=db).reply(db, user_msg, history)
             msg = ChatMessage(conversation_id=conversation_id, role="assistant", content=reply)
             db.add(msg)
             db.commit()

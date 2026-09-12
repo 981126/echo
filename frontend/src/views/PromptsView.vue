@@ -92,6 +92,32 @@
             <n-button type="primary" :loading="savingModels" @click="saveModels">保存（立即生效）</n-button>
             <n-button secondary :loading="loadingModels" @click="loadModels">重新读取</n-button>
           </div>
+          <p class="muted" style="font-size: 12px; margin: 8px 0 0">
+            保存后会自动跑一次「双模型兼容性自检」（各功能的极简样例 × 模型1/2，校验输出契约），
+            结果这里显示，也会发一条站内通知。
+          </p>
+          <div v-if="selfcheck" class="selfcheck-box">
+            <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
+              <strong style="font-size: 13px">双模型兼容性自检</strong>
+              <n-tag size="tiny" :bordered="false" round :type="selfcheck.ok ? 'success' : 'error'">
+                {{ selfcheck.ok ? '模型1/2 均兼容' : '发现问题' }}
+              </n-tag>
+              <span class="muted" style="font-size: 12px">{{ selfcheck.checked_at }}</span>
+            </div>
+            <div v-for="slotKey in ['model1', 'model2']" :key="slotKey" class="muted" style="font-size: 12px; margin-top: 6px">
+              <template v-if="selfcheck.slots && selfcheck.slots[slotKey]">
+                {{ selfcheck.slots[slotKey].label }}：
+                <template v-for="(p, pk) in selfcheck.slots[slotKey].probes" :key="pk">
+                  <n-tag size="tiny" :bordered="false" round :type="p.ok ? 'success' : 'error'" style="margin-right: 4px">
+                    {{ p.label }}{{ p.ok ? '✓' : '✗' }}
+                  </n-tag>
+                </template>
+              </template>
+            </div>
+            <ul v-if="selfcheck.warnings && selfcheck.warnings.length" style="margin: 6px 0 0; padding-left: 1.2em; color: var(--warn); font-size: 12px">
+              <li v-for="(w, i) in selfcheck.warnings" :key="i">{{ w }}</li>
+            </ul>
+          </div>
         </div>
       </n-tab-pane>
 
@@ -241,6 +267,7 @@ const vendors = ref({})
 const asrOptions = ref({})
 const asrModelList = ref([])
 const modelWarnings = ref([])
+const selfcheck = ref(null)
 const loadingModels = ref(false)
 const savingModels = ref(false)
 
@@ -283,6 +310,7 @@ async function loadModels() {
     asrOptions.value = (r.asr && r.asr.options) || {}
     asrModelList.value = (r.asr && r.asr.siliconflow_models) || []
     modelWarnings.value = r.warnings || []
+    selfcheck.value = r.selfcheck || null
     models.value = {
       model1: {
         vendor: r.model1.vendor, model: r.model1.model, key: r.model1.key || '',
@@ -563,5 +591,12 @@ onUnmounted(() => {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.5);
+}
+.selfcheck-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(219, 163, 125, 0.06);
 }
 </style>

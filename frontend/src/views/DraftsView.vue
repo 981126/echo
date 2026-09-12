@@ -13,6 +13,12 @@
           <div v-for="d in list('draft')" :key="d.id" class="card-tile" @click="open(d)">
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
             <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
+            <div v-if="modelInfo(d)" class="tile-models">
+              <n-tag size="tiny" :bordered="false" round>{{ modelInfo(d) }}</n-tag>
+              <n-tag v-if="d.quality && d.quality.fallback" size="tiny" :bordered="false" round type="warning">
+                由备用模型生成
+              </n-tag>
+            </div>
             <div class="tile-actions" @click.stop>
               <n-button size="small" secondary @click="markUsed(d)">✅ 采用</n-button>
               <n-button size="small" secondary @click="markArchived(d)">不采用</n-button>
@@ -148,6 +154,20 @@
                 <li v-for="(iss, i) in checkInfo.issues" :key="i">{{ iss }}</li>
               </ul>
             </div>
+            <div v-if="modelInfo(editing)" class="panel" style="margin-bottom: 10px">
+              <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
+                <span class="muted" style="font-size: 12px">本篇生成模型：{{ modelInfo(editing) }}</span>
+                <n-tag v-if="editing.quality && editing.quality.fallback" size="tiny" :bordered="false" round type="warning">
+                  由备用模型生成
+                </n-tag>
+                <n-tag v-if="editing.quality && editing.quality.rounds" size="tiny" :bordered="false" round>
+                  讨论 {{ editing.quality.rounds_done ?? editing.quality.rounds }}/{{ editing.quality.rounds }} 轮
+                </n-tag>
+                <n-tag v-if="editing.quality && editing.quality.mock" size="tiny" :bordered="false" round type="error">
+                  mock 稿（模型不可用）
+                </n-tag>
+              </div>
+            </div>
             <div class="row">
               <n-button type="primary" @click="save">保存</n-button>
               <n-button secondary @click="closeEdit">取消</n-button>
@@ -212,6 +232,15 @@ function srcLabel(d) {
 }
 function srcTitle(d) {
   return (d.source_ref && d.source_ref.source_title) || ''
+}
+// R-139：展示本篇的生成模型组合（生成方 / 评审方），便于核对「用的是哪个模型」
+function modelInfo(d) {
+  const models = d && d.quality && d.quality.models
+  if (!models) return ''
+  const gen = models.gen || ''
+  const critic = models.critic || ''
+  if (!gen) return ''
+  return critic && critic !== gen ? `${gen} × ${critic}` : gen
 }
 const editing = ref(null)
 const showEdit = ref(false)

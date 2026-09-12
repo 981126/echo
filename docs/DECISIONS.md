@@ -17,7 +17,7 @@
 - **代价**：并发写受限（单用户无感）；未来多用户再评估
 
 ## D-003：LLM 适配器 + DeepSeek/Kimi 可插拔
-- **决策**：所有 LLM 调用统一 OpenAI 兼容客户端（services/llm.py），模型名 env 可配（DeepSeek 侧为 V4.1 Flash：`deepseek-flash`，R-137）；生成默认 Kimi，可切 deepseek/random/alternate
+- **决策**：所有 LLM 调用统一 OpenAI 兼容客户端（services/llm.py），模型/Key 由「AI 设置 → 模型设置」的**模型1/模型2 槽位**配置（R-138，存 `app_kv`，保存即生效；`.env` 仅作 Key 回退）；默认 模型1=DeepSeek V4.1 Flash `deepseek-flash`、模型2=Kimi `kimi-k2.6`。厂家目录在代码 `services/model_settings.py::VENDORS`，加供应商只需加一行
 - **原因**：中文语气质量与成本可控；双模型交叉评审可压 AI 感（见 D-025/026）
 
 ## D-004：ASR 用阿里云录音文件识别（FileTrans 4.0）
@@ -101,11 +101,12 @@
 - **决策**：更像作者主要靠数据闭环；提示词自动优化**永不直接启用**（候选制 + 每 3 条素材节流 + 启用前 diff + 金样本自测提示）
 
 ## D-024：双模型讨论生成（R-023）
-- **决策**：LLM 统一 OpenAI 兼容适配；生成策略可切（固定/随机/轮流）；每篇「初稿 + 5 轮互评修订」逐轮写 draft_discussions；任一方不可用自动退单模型
+- **决策**：LLM 统一 OpenAI 兼容适配；生成方/评审方两个下拉显式指定（可相同，R-139 起取消随机/轮流）；每篇「初稿 + N 轮互评修订」逐轮写 draft_discussions（轮次由设置控制）；任一方不可用自动换另一方。**R-139 起所有脚本生成（手动/回炉/灵感池/AI 对话/提示词自测/每日自动）统一走这一条路径**
 
 ## D-025：默认生成组合 = Kimi 起草/修订 + DeepSeek 评审（R-023 实测）
-- **决策**：generation_model=kimi（可切 deepseek/random/alternate）；轮次默认 5（可调）
+- **决策**：默认生成方=模型2（Kimi）、评审方=模型1（DeepSeek）；轮次默认 5，可在「AI 设置」调（1–10）。旧 `generation_model` 会自动迁移成对应的生成方槽位（R-138）
 - **权衡**：Kimi 带思考较慢（约 6-10 分钟/篇），质量优先
+- **R-139 补充**：非脚本生成的 AI 功能默认用**模型1**，报错/超时/空正文/输出不合法时降级**模型2**；两个模型吃同一份上下文与提示词，参数按厂家归一化（推理模型不传 temperature、`max_tokens` 抬到厂家下限），所以「降级」不等于「退化」
 
 ## D-026：平台数据统一走 TikHub（R-027/R-029）
 - **决策**：抖音/B站/小红书主页、作品、指标、评论统一经 TikHub API（Bearer `ECHO_TIKHUB_API_KEY`），不做官方开放接口/自研爬虫

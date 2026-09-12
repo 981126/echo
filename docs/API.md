@@ -1561,7 +1561,7 @@ Debate Status
 
 Get Asr Config
 
-查看当前 ASR 服务商与模型配置。
+查看当前 ASR 服务商与模型配置（R-138 起读运行时配置 `app_kv`，设置页保存后立即生效）。
 
 **参数**
 
@@ -1586,6 +1586,8 @@ Get Models
 
 AI 设置 → 模型设置：当前模型1/2（厂家/模型/Key）、生成方/评审方、ASR 服务商与模型、讨论轮次、每日篇数（R-138）。
 
+返回还包含：`vendors`（厂家目录：可选模型 / 默认模型 / 是否已有 .env Key）、`warnings`（含双模型兼容性自检告警）、`selfcheck`（最近一次自检结果，R-139）、`migrated_from_legacy`。
+
 **参数**
 
 - `x-access-token`（header）string
@@ -1595,7 +1597,8 @@ AI 设置 → 模型设置：当前模型1/2（厂家/模型/Key）、生成方/
 
 Put Models
 
-保存模型设置（非法配置返回 400）；保存即生效、无需重启（R-138）。
+保存模型设置（厂家非法 / 缺少 Key / 生成方评审方非法 / ASR 配置非法 → 400 且带可读原因）；保存即生效、无需重启（R-138）。
+保存后会异步入队一次「双模型兼容性自检」（线程任务 kind=`model_selfcheck`），结果由 `GET /api/settings/models` 的 `selfcheck` 带回（R-139）。
 
 **参数**
 

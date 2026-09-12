@@ -184,7 +184,7 @@ def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
         return False
     try:
         title = (unit["post"].title or "")[:200]
-        llm = _llm()
+        llm = _llm(db)
         data = llm.chat_json(
             [
                 {"role": "system", "content": _AD_JUDGE_SYSTEM},
@@ -321,12 +321,11 @@ def persona_lines(db: Session, owner: Creator) -> list[str]:
     return lines
 
 
-def _llm():
-    from ..config import get_settings
-    from .llm import get_llm
+def _llm(db: Session | None = None):
+    """对标分析用模型（R-139）：模型1 主用，失败自动降级模型2。"""
+    from . import llm_router
 
-    settings = get_settings()
-    return get_llm((settings.generation_model or "kimi").strip().lower(), settings)
+    return llm_router.primary_llm(db, "benchmark")
 
 
 def analyze_talkable(db: Session, owner: Creator, unit: dict) -> dict:
@@ -335,7 +334,7 @@ def analyze_talkable(db: Session, owner: Creator, unit: dict) -> dict:
         return {"can": False, "reason": "该素材还没有可用文案（先转写补齐）", "suggestion": ""}
     persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
     try:
-        res = _llm().chat_json(
+        res = _llm(db).chat_json(
             [
                 {"role": "system", "content": "你是我的内容选题顾问。只输出 JSON：{\"can\":bool,\"reason\":string,\"suggestion\":string}"},
                 {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
@@ -354,7 +353,7 @@ def rewrite_script(db: Session, owner: Creator, unit: dict, title: str = "") -> 
     if not text:
         raise ValueError("该素材还没有可用文案（先转写补齐）")
     persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
-    llm = _llm()
+    llm = _llm(db)
     script = llm.chat(
         [
             {"role": "system", "content": "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"},
@@ -392,7 +391,7 @@ def analyze_text(db: Session, owner: Creator, text: str) -> dict:
         return {"can": False, "reason": "该素材还没有可用文案（先转写补齐）", "suggestion": ""}
     persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
     try:
-        res = _llm().chat_json(
+        res = _llm(db).chat_json(
             [
                 {"role": "system", "content": "你是我的内容选题顾问。只输出 JSON：{\"can\":bool,\"reason\":string,\"suggestion\":string}"},
                 {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
@@ -410,7 +409,7 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref:
     if not (text or "").strip():
         raise ValueError("该素材还没有可用文案（先转写补齐）")
     persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
-    llm = _llm()
+    llm = _llm(db)
     script = llm.chat(
         [
             {"role": "system", "content": "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"},

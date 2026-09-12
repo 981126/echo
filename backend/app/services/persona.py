@@ -11,10 +11,14 @@ from __future__ import annotations
 import json
 import re
 from difflib import SequenceMatcher
+from typing import Any, cast
+
+from sqlalchemy.orm import Session
 
 from ..core.topics import normalize_topics
+from . import llm_router
 from .prompt_service import get_prompt
-from .llm import DeepSeekClient, LLMError
+from .llm import LLMError
 
 PERSONA_INIT_SYSTEM = (
     "你是自媒体人设分析专家，长期为同一位作者做「人设画像」。"
@@ -257,8 +261,55 @@ def _profile_chunks(profile: dict, size: int) -> list[dict]:
 
 
 class PersonaService:
-    def __init__(self, llm=None):
-        self.llm = llm or DeepSeekClient()
+    """人设相关 AI 能力（R-139：默认模型1 主用 → 模型2 降级）。
+
+    - 传 `llm=` 走注入（测试/显式指定）；
+    - 传 `db=` 时先取一次模型配置快照再调用（快照可安全跨线程，见 `llm_router`）；
+    - 都不传时也用快照（自己开短连接取），因此 `PersonaService()` 的老写法仍然可用。
+    """
+
+    def __init__(self, llm=None, db: Session | None = None):
+        self._injected = llm
+        self._db = db
+        self._snapshot: llm_router.RouteSnapshot | None = None
+        self._active: llm_router.RoutedLLM | None = None
+        self.last_routing: dict = {}
+
+    def _route(self) -> llm_router.RouteSnapshot:
+        if self._snapshot is None:
+            if self._db is not None:
+                self._snapshot = llm_router.snapshot(self._db)
+            else:
+                from ..db import SessionLocal
+
+                db = SessionLocal()
+                try:
+                    self._snapshot = llm_router.snapshot(db)
+                finally:
+                    db.close()
+        return self._snapshot
+
+    def llm_for(self, feature: str) -> Any:
+        """按功能取模型1 主用 + 模型2 降级的客户端（注入的 llm 优先）。"""
+        if self._injected is not None:
+            return self._injected
+        client = llm_router.RoutedLLM(feature, self._route())
+        self._active = client
+        return client
+
+    @property
+    def llm(self) -> Any:
+        """兼容旧写法（`service.llm.chat_json(...)`）：等价于 feature=misc。"""
+        return self.llm_for("misc")
+
+    def call_json(self, feature: str, messages: list[dict], **kwargs: Any) -> dict[str, Any]:
+        """按功能调 JSON（模型1 主用 → 模型2 降级），并记录本次实际使用的模型。"""
+        client = self.llm_for(feature)
+        try:
+            return client.chat_json(messages, **kwargs)
+        finally:
+            if isinstance(client, llm_router.RoutedLLM):
+                self.last_routing = client.routing()
 
     def analyze_one(self, transcript: str) -> dict:
         """单篇文案提炼人设（R-126）：一次调用只喂一篇；LLMError 由调用方逐篇兜底。"""
@@ -266,14 +317,15 @@ class PersonaService:
             {"role": "system", "content": get_prompt("persona_init")},
             {"role": "user", "content": transcript or ""},
         ]
-        data = self.llm.chat_json(messages)
+        data = self.call_json("persona_init", messages)
         return parse_persona_result(data)
 
-    def _llm_merge(self, key: str, parts: list[dict]) -> dict | None:
+    def _llm_merge(self, key: str, parts: list[dict]) -> dict[str, Any] | None:
         """调 LLM 做归纳合并；失败/空结果返回 None（由调用方决定降级策略）。"""
         user = "待归纳的人设信号（JSON 数组）：\n" + json.dumps(parts, ensure_ascii=False)
         try:
-            data = self.llm.chat_json(
+            data = self.call_json(
+                key,
                 [
                     {"role": "system", "content": get_prompt(key)},
                     {"role": "user", "content": user},
@@ -340,7 +392,8 @@ class PersonaService:
             + json.dumps(b or empty_profile(), ensure_ascii=False)
         )
         try:
-            data = self.llm.chat_json(
+            data = self.call_json(
+                "persona_compare",
                 [
                     {"role": "system", "content": get_prompt("persona_compare")},
                     {"role": "user", "content": user},
@@ -351,7 +404,7 @@ class PersonaService:
         except Exception:  # noqa: BLE001 语义复核失败不阻断（仅按覆盖率判定）
             return {"score": None, "reason": "语义复核不可用（AI 服务异常），本次仅按集合覆盖率判定"}
         try:
-            score = float(data.get("score"))
+            score = float(cast(Any, data.get("score")))
         except (TypeError, ValueError):
             return {"score": None, "reason": "语义复核返回异常，本次仅按集合覆盖率判定"}
         score = max(0.0, min(100.0, score))
@@ -364,7 +417,7 @@ class PersonaService:
             {"role": "user", "content": transcript},
         ]
         try:
-            data = self.llm.chat_json(messages)
+            data = self.call_json("video_tags", messages)
         except LLMError:
             data = {}
         values = data.get("main_topics") or data.get("main_topic") or []

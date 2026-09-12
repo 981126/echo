@@ -301,19 +301,20 @@ def _store(db: Session, key: str, cand_version: int, base_version: int, supporte
 
 
 def _eval_llm(db: Session, key: str):
-    """评测用模型与该 key 在生产里的模型保持一致（R-129）：
+    """评测用模型与该 key 在生产里的模型保持一致（R-129/R-139）。
 
-    只有 generation 跟随「生成模型策略」，其余功能生产里都走 DeepSeek；
-    用错模型会得到与线上不同的结果（实测：kimi 推理模型跑长文本校对会返回空正文）。
+    - generation 走「生成方/评审方」里的生成方模型；
+    - 其余功能生产里都走模型1（失败才降级模型2），评测同样走模型1。
     """
-    from .llm import DeepSeekClient
+    from . import llm_router
 
     if key == "generation":
         from .prompt_service import _optimize_llm
 
         llm, mode = _optimize_llm(db)
         return llm, mode
-    return DeepSeekClient(), "deepseek"
+    client = llm_router.primary_llm(db, "prompt_eval")
+    return client, client.used_model
 
 
 def evaluate(db: Session, key: str, candidate_version: int, update=None) -> PromptEval | None:

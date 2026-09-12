@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from ..core.diff import has_meaningful_change
 from ..models.persona import PersonaTag
-from .llm import DeepSeekClient, LLMError
+from . import llm_router
+from .llm import LLMError
 from .prompt_service import get_prompt
 
 DIFF_SYSTEM = (
@@ -17,10 +18,10 @@ DIFF_SYSTEM = (
 )
 
 
-def analyze_diff(original: str, edited: str, llm=None) -> list[dict]:
+def analyze_diff(original: str, edited: str, llm=None, db: Session | None = None) -> list[dict]:
     if not has_meaningful_change(original, edited):
         return []
-    llm = llm or DeepSeekClient()
+    llm = llm or llm_router.primary_llm(db, "diff")  # R-139：模型1 主用，失败降级模型2
     user = f"AI 原稿：\n{original}\n\n作者改后：\n{edited}"
     try:
         data = llm.chat_json(
@@ -50,7 +51,7 @@ def apply_diff_suggestions(db: Session, draft) -> int:
     """将改稿差异建议写入人设（suggested，待作者确认）。返回新增条数。"""
     if not draft.original_script or not draft.script:
         return 0
-    suggestions = analyze_diff(draft.original_script, draft.script)
+    suggestions = analyze_diff(draft.original_script, draft.script, db=db)
     if not suggestions:
         return 0
     current_version = 1

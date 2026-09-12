@@ -36,8 +36,10 @@ def _clean_sensevoice_text(text: str) -> str:
 
 
 class SiliconFlowASR:
-    def __init__(self, settings=None):
+    def __init__(self, settings=None, model: str | None = None):
         self.settings = settings or get_settings()
+        # R-138：模型可由「AI 设置」运行时指定，保存即生效（不再只认 .env）
+        self.model = (model or "").strip()
 
     def transcribe_file(self, video_path: Path | str) -> str:
         """抽音轨(视频) → 校验平台限制 → 直传转写 → 返回文本。
@@ -83,7 +85,7 @@ class SiliconFlowASR:
         api_key = (settings.siliconflow_api_key or "").strip()
         if not api_key:
             raise TranscriptionError("未配置硅基流动 ASR（需 .env 配 ECHO_SILICONFLOW_API_KEY）")
-        model = (settings.siliconflow_asr_model or DEFAULT_MODEL).strip()
+        model = (self.model or settings.siliconflow_asr_model or DEFAULT_MODEL).strip()
         base = (settings.siliconflow_base_url or "https://api.siliconflow.cn/v1").rstrip("/")
         url = f"{base}/audio/transcriptions"
         timeout = max(60, int(getattr(settings, "asr_poll_timeout", 0) or 3600))

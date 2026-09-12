@@ -141,7 +141,8 @@ def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
     if refs:
         user_parts.append("参考风格（仅借鉴语气/结构，观点用你自己的）：\n" + refs)
     try:
-        data = persona.llm.chat_json(
+        data = persona.call_json(
+            "ideas",
             [{"role": "system", "content": system}, {"role": "user", "content": "\n".join(user_parts)}],
             temperature=0.8,
         )

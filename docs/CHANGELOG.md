@@ -1,5 +1,54 @@
 # 变更记录
 
+## [M127+M128 / R-138+R-139] 2026-09-11 — AI 设置（模型1/2 槽位）+ 统一模型路由与降级层
+> 作者原话：①主模型和副模型改为模型1、模型2，可分别配置厂家/模型/Key；②脚本生成改为「生成方 / 评审方」两个下拉；
+> ③除脚本生成外其他 AI 功能默认用模型1，出问题降级模型2，**不能降级后像退化了**；④讨论轮次控制所有自动生成脚本的讨论轮数。
+> 另要求：菜单「AI 提示词」→「AI 设置」，其余功能不改；保存**实时生效**。
+
+**模型槽位与设置页（R-138 / M127）**
+- 新增 `services/model_settings.py`：厂家目录（DeepSeek / Kimi，加供应商只需加一行）+ 槽位（厂家/模型/Key）+
+  ASR 服务商与模型 + 每日篇数，全部存 `app_kv` → **保存即生效（无需重启）**；旧 `generation_model` 自动无感迁移
+  （`kimi` → 生成方=模型2），默认 模型1=DeepSeek `deepseek-flash`、模型2=Kimi `kimi-k2.6`，复现原生产行为。
+- 新增 `GET/PUT /api/settings/models`（非法配置 400 + 可读原因）；`GET /api/settings/asr` 改读运行时配置；
+  旧 `/generation-model` 保留兼容，`random/alternate` 明确 400 下线（作者选择「只留显式生成方/评审方」）。
+- 前端「AI 提示词」→「AI 设置」：首 tab「模型设置」（模型1/2 行内选厂家/模型/Key、生成方/评审方、ASR 服务商+模型、
+  每日自动生成篇数、保存/重新读取），讨论轮次留在工具栏；**Key 明文存 DB 并可回显**（作者明确接受该权衡，界面提示备份风险）。
+- ASR 实时生效：`Transcriber(mode=…, model=…)` 与 `SiliconFlowASR(model=…)` 接受运行时覆盖，转写不再只认 `.env`。
+- 每日自动生成篇数改为 `model_settings.topics_count`（Kv > `.env` > 默认），控制双模型讨论的成本（≈ 篇数 × 轮次 × 2 次调用）。
+
+**统一模型路由与降级（R-139 / M128）**
+- 新增 `services/llm_router.py`：`snapshot(db)` 取线程安全配置快照；`RoutedLLM` 与 `OpenAIClient` 接口兼容
+  （`chat` / `chat_json` / `chat_completion`）；**模型1 主用 → 模型2 降级**，触发条件=报错/超时/空正文/缺契约字段
+  （`chat_json(require=(...))`）；主模型「输出不合法」可重试 1 次；降级**可见**：`log.warning` + 站内通知
+  （`llm_fallback`，同功能 30 分钟冷却避免刷屏，自己开短连接所以跨线程安全）+ `RoutedLLM.degraded`。
+- **参数按厂家归一化**（作者要求「降级后不能像退化」）：不支持 temperature 的推理模型不传该参数；
+  `max_tokens` 抬到厂家下限（Kimi ≥3000）——此前 Kimi 拿到小 max_tokens 会把预算耗在思考上返回空正文。
+- 接入全部非脚本生成的 AI 功能：人设（逐篇/合并/增量/语义复核）、视频预打标、转写校对、改稿差异、AI 对话（含 tools）、
+  提示词优化、金样本评测、对标分析（可讲分析/洗稿初稿/广告判定）→ 默认模型1。
+- **脚本生成统一**：`debate.run_debate` 成为唯一路径，手动工作台、一键回炉、灵感池一键、AI 对话生成、
+  提示词自测、每日自动生成全部走「生成方初稿 → 评审方 N 轮 → 生成方修订 → 自检收口」，
+  轮次取设置（`debate_rounds`，1–10）；初稿用 `generation_user_message`（与金样本回放同一份输入）。
+  `Draft.quality` 记录 `models`（生成方×评审方）/`used`/`fallback`/`rounds`/`rounds_done`/`issues`/`passed`/`style_coverage`，
+  草稿列表与详情页显示模型组合与「由备用模型生成」标记。
+- 新增 `services/model_health.py`：保存模型配置后**异步**跑双模型兼容性自检（3 个极简样例 × 2 槽位，校验文本/JSON 契约），
+  结果写 Kv 并由 `GET /api/settings/models` 的 `selfcheck` 回到设置页，不兼容时给出「模型2 在 X 功能上不兼容」告警 + 站内通知。
+- **实测暴露并修掉两个真实缺陷（都是「降级后像退化」的真凶）**：
+  1. **DeepSeek 也是推理模型**：实测 `max_tokens=1500/3000` 时 `finish_reason=length`、`reasoning_tokens` 吃满预算、
+     **正文为空**；4000 才出正文。原 `min_max_tokens=400` 形同虚设 → 提到 4000（Kimi 提到 6000，实测长上下文下
+     思考可吃掉 4000+ tokens）。同时把「空正文 + 有思考内容」从「服务故障」区分为 `LLMUnusableOutput`：
+     先**翻倍 max_tokens 重试同一模型**，仍不行才降级，并在错误信息里写清「推理预算被思考吃光」。
+  2. **httpx read timeout 挡不住长时间挂起**：一次真实评审调用挂了 **39 分钟**才超时（服务端持续吐字节，
+     read timeout 被不断重置），「超时降级」形同虚设。`OpenAIClient._post` 改为**流式读取 + 墙钟上限**
+     （`ECHO_LLM_TIMEOUT_SECONDS`，默认 600s），每收到一段数据检查是否超期；HTTP 4xx/5xx 与响应结构异常
+     也直接转成可读 `LLMError`（通知里能一眼看出是 Key 失效还是限流）。
+- 测试：新增 `tests/test_r139_llm_router.py`（26 例：降级四种触发、输出不可用先抬预算重试、参数归一化与厂家下限、
+  墙钟上限/HTTP 错误可读、通知落地、双模型讨论与轮次、运行时篇数、ASR 运行时接线、非脚本功能默认模型1、
+  注入 llm 不被路由破坏）；`tests/test_r138_model_settings.py`（7 例）；总 219 例通过。
+- **真实链路实测**（非 mock）：双模型兼容性自检 6 次调用全通过（模型1 DeepSeek 0.9–1.5s / 模型2 Kimi 4.9–13.9s）；
+  人为把模型1 Key 改错后调 `/api/drafts/angles` → 自动降级模型2 并产出 3 个可用角度（8.5s 正常路径，
+  降级路径 29s），站内出现 `llm_fallback` 通知；真实双模型讨论生成 3 篇（生成方 Kimi + 评审方 DeepSeek，1 轮），
+  `draft_discussions` 留痕完整（初稿/评审/修订），`Draft.quality` 记录模型组合与降级标记。
+
 ## [M126 / R-137] 2026-09-11 — DeepSeek 模型切换到 DeepSeek-V4.1-Flash
 - 官方 2026-09-10 发布 V4.1 Flash，规范 API 模型名为 **`deepseek-flash`**（`deepseek-v4-flash` 等仅为临时兼容别名）。
 - `.env` / `.env.example` / `config.py` 默认值三处统一改为 `deepseek-flash`；**顺带修掉已停用的旧模型名 `deepseek-chat`**（官方 2026-07-24 停用）。

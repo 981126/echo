@@ -12,16 +12,22 @@ class TranscriptionError(RuntimeError):
 
 
 class Transcriber:
-    """统一转写入口：根据 asr_mode 选择实现。"""
+    """统一转写入口：根据 asr_mode 选择实现。
 
-    def __init__(self, settings=None):
+    R-138/R-139：`mode` / `model` 可由调用方从运行时配置（`app_kv`）传入，
+    这样在「AI 设置」里改 ASR 后**下一次转写立即生效**，无需重启。
+    """
+
+    def __init__(self, settings=None, mode: str | None = None, model: str | None = None):
         self.settings = settings or get_settings()
+        self.mode = mode
+        self.model = model
 
     def transcribe(self, video_path: Path | str) -> str:
         path = Path(video_path)
         if not path.exists():
             raise TranscriptionError(f"视频不存在: {path}")
-        mode = (self.settings.asr_mode or "mock").strip().lower()
+        mode = (self.mode or self.settings.asr_mode or "mock").strip().lower()
         if mode == "mock":
             return self._mock_transcript(path)
         if mode == "aliyun":
@@ -31,7 +37,7 @@ class Transcriber:
         if mode == "siliconflow":
             from .siliconflow_asr import SiliconFlowASR  # 延迟导入，避免循环
 
-            return SiliconFlowASR(settings=self.settings).transcribe_file(path)
+            return SiliconFlowASR(settings=self.settings, model=self.model).transcribe_file(path)
         raise TranscriptionError(f"未知 asr_mode: {mode}")
 
     def _mock_transcript(self, path: Path) -> str:

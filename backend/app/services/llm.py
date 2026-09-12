@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 import httpx
 
@@ -44,31 +45,98 @@ def _parse_json(raw: str):
 
 
 class LLMError(RuntimeError):
-    pass
+    """LLM 不可用（未配置 Key、网络/HTTP 失败等）或输出不可用。"""
+
+
+class LLMUnusableOutput(LLMError):
+    """拿到了响应但输出不可用（空正文 / 思考吃光预算 / 非法 JSON）。
+
+    这类失败**值得抬预算或重试**（推理模型的思考长度有随机性），所以与"服务不可用"区分开：
+    `llm_router` 会先翻倍 max_tokens 重试，再降级到另一个模型（R-139）。
+    """
+
+
+def _content_or_reason(message: dict) -> str:
+    """取正文；正文为空但模型写了思考内容时，给出可读原因（R-139）。
+
+    DeepSeek V4.1 Flash 与 Kimi 都是**推理模型**：`max_tokens` 同时包含思考与正文，
+    预算不够时会 `finish_reason=length` 且 `content` 为空、`reasoning_content` 却很长。
+    这会让上层误以为是「服务挂了」，所以这里明确抛出可读错误，交由 `llm_router` 抬高预算重试/降级。
+    """
+    content = (message.get("content") or "").strip()
+    if content:
+        return content
+    reasoning = (message.get("reasoning_content") or "").strip()
+    if reasoning:
+        raise LLMUnusableOutput(
+            f"推理预算被思考吃光（思考 {len(reasoning)} 字、正文为空），需要更大的 max_tokens"
+        )
+    if message.get("tool_calls"):
+        return ""  # AI 对话的工具调用轮：正文可以为空
+    return ""
 
 
 class OpenAIClient:
-    """OpenAI 兼容客户端（chat completions）。"""
+    """OpenAI 兼容客户端（chat completions）。
 
-    def __init__(self, base_url: str, api_key: str, model: str, supports_temperature: bool = True):
+    调用有**硬性墙钟上限**（`timeout_seconds`，默认取 `.env` `ECHO_LLM_TIMEOUT_SECONDS`）：
+    只靠 httpx 的 read timeout 不够——实测 DeepSeek 思考时偶发长时间挂起
+    （一次真实调用挂了 39 分钟才超时），会让「超时降级」这条兜底形同虚设。
+    所以这里用流式读取 + 每次收到数据检查墙钟，超限立即按超时失败交给上层降级（R-139）。
+    """
+
+    DEFAULT_TIMEOUT_SECONDS = 600
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        supports_temperature: bool = True,
+        timeout_seconds: int | None = None,
+    ):
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = api_key or ""
         self.model = model or ""
-        # 推理模型（如 kimi-k3）只允许 temperature=1 → 不传该参数
+        # 推理模型（如 kimi-k2.6）只允许 temperature=1 → 不传该参数
         self.supports_temperature = supports_temperature
+        if timeout_seconds is None:
+            timeout_seconds = int(getattr(get_settings(), "llm_timeout_seconds", 0) or 0) or self.DEFAULT_TIMEOUT_SECONDS
+        self.timeout_seconds = max(30, int(timeout_seconds))
 
     def _post(self, payload: dict) -> dict:
         if not self.api_key:
             raise LLMError("未配置 API Key")
-        with httpx.Client(timeout=180) as client:
-            resp = client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        return data["choices"][0]["message"]
+        url = f"{self.base_url}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        deadline = time.monotonic() + self.timeout_seconds
+        # read=30：30 秒没有**任何**数据到达就认为连接废了；整体上限由 deadline 兜底
+        timeout = httpx.Timeout(connect=15.0, read=30.0, write=60.0, pool=30.0)
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                with client.stream("POST", url, headers=headers, json=payload) as resp:
+                    if resp.status_code >= 400:
+                        resp.read()
+                        raise LLMError(f"HTTP {resp.status_code}：{(resp.text or '')[:200]}")
+                    chunks: list[bytes] = []
+                    for chunk in resp.iter_raw():
+                        chunks.append(chunk)
+                        if time.monotonic() > deadline:
+                            raise LLMError(
+                                f"调用超过 {self.timeout_seconds}s 仍未返回（模型：{self.model}），按超时处理"
+                            )
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"调用超时（模型：{self.model}）：{type(exc).__name__}") from exc
+        if time.monotonic() > deadline:
+            raise LLMError(f"调用超过 {self.timeout_seconds}s 仍未返回（模型：{self.model}），按超时处理")
+        try:
+            data = json.loads(b"".join(chunks).decode("utf-8", "replace"))
+        except json.JSONDecodeError as exc:
+            raise LLMUnusableOutput(f"响应不是合法 JSON（模型：{self.model}）：{exc}") from exc
+        try:
+            return data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMUnusableOutput(f"响应缺少 choices[0].message（模型：{self.model}）：{str(data)[:200]}") from exc
 
     def chat_completion(
         self,
@@ -95,7 +163,7 @@ class OpenAIClient:
             message = self._chat_json(messages, temperature, max_tokens)
         else:
             message = self.chat_completion(messages, temperature=temperature, max_tokens=max_tokens)
-        return (message.get("content") or "").strip()
+        return _content_or_reason(message)
 
     def _chat_json(self, messages: list[dict], temperature: float, max_tokens: int) -> dict:
         payload = {"model": self.model, "messages": messages, "max_tokens": max_tokens}
@@ -104,17 +172,23 @@ class OpenAIClient:
             payload["response_format"] = {"type": "json_object"}
         return self._post(payload)
 
+    def _json_message(self, messages: list[dict], temperature: float, max_tokens: int) -> dict:
+        """JSON 调用的原始 message（带推理预算耗尽的明确报错，R-139）。"""
+        message = self._chat_json(messages, temperature, max_tokens)
+        _content_or_reason(message)  # 空正文 + 有思考 → 抛出可读原因，而不是「未返回合法 JSON」
+        return message
+
     def chat_json(
         self,
         messages: list[dict],
         temperature: float = 0.3,
         max_tokens: int = 2000,
     ) -> dict:
-        message = self._chat_json(messages, temperature, max_tokens)
+        message = self._json_message(messages, temperature, max_tokens)
         raw = (message.get("content") or "").strip()
         result = _parse_json(raw)
         if not isinstance(result, dict):
-            raise LLMError("模型未返回合法 JSON")
+            raise LLMUnusableOutput("模型未返回合法 JSON")
         return result
 
 

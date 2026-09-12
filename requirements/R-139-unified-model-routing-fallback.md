@@ -1,7 +1,7 @@
 # R-139 统一模型路由与降级层：模型1 主用 → 模型2 降级；自动生成也走双模型讨论
 
 - **日期**: 2026-09-11
-- **状态**: 已确认（待作者说「继续」后实施）
+- **状态**: ✅ 已完成（2026-09-11，M128）
 - **排期**: M128
 - **关联**: R-138（模型槽位配置）、R-023（双模型讨论）、R-129（输出契约校验）、`services/llm.py`、`debate.py`、`persona.py`、`ingest.py`、`prompt_service.py`、`prompt_eval.py`、`chat_service.py`、`transcription.py`、`pipeline.py`
 
@@ -28,6 +28,15 @@
    - 参数按厂家归一化（不能因参数不匹配而"看起来退化"）；
    - 输出契约校验 + 同模型重试后再降级；
    - **（建议项，默认做）双模型兼容性自检**：保存模型配置后，用每个功能的极简样例各跑一次模型1/模型2，校验输出契约；不通过则在设置页告警"模型2 在 X 功能上不兼容"。
+
+## 实施补充（2026-09-11 实测发现，已修）
+1. **DeepSeek V4.1 Flash 也是推理模型**：`max_tokens` 同时含思考与正文。实测 `max_tokens=3000` 时
+   `finish_reason=length`、`reasoning_tokens=3001`、**正文为空**；4000 才有正文。故 `min_max_tokens`
+   DeepSeek=4000、Kimi=6000，且「空正文但有思考内容」归类为 `LLMUnusableOutput` →
+   **同模型翻倍 max_tokens 重试**，仍失败才降级。
+2. **单次调用需要硬性墙钟上限**：httpx 的 read timeout 会被长连接的持续字节重置，实测一次真实评审
+   调用挂了 **39 分钟**才失败。`OpenAIClient._post` 改为流式读取 + `ECHO_LLM_TIMEOUT_SECONDS`（默认 600s）
+   墙钟上限，超期即按「超时」失败并降级。
 
 ## 不包含
 - 不引入第三方供应商（厂家目录本次为 DeepSeek / Kimi，加供应商只需在目录加一行）；

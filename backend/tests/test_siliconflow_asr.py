@@ -175,8 +175,9 @@ def test_duration_over_limit_raises(tmp_path, monkeypatch):
 def test_transcriber_routes_siliconflow(tmp_path, monkeypatch):
     """Transcriber 按 asr_mode=siliconflow 路由到硅基流动实现。"""
     class _FakeClient:
-        def __init__(self, settings=None):
+        def __init__(self, settings=None, model=None):
             self.settings = settings
+            self.model = model
 
         def transcribe_file(self, path):
             return "硅基流动转写结果"

@@ -117,6 +117,7 @@ a { color: inherit; text-decoration: none; }
 .card-tile:hover { border-color: var(--line-strong); box-shadow: 0 4px 14px rgba(43,40,35,.06); }
 .card-tile .tile-title { font-weight: 600; margin: 0 0 4px; font-size: 14.5px; }
 .card-tile .tile-meta { color: var(--muted); font-size: 12.5px; margin: 2px 0 8px; }
+.card-tile .tile-models { display: flex; gap: 6px; flex-wrap: wrap; margin: -4px 0 6px; }
 .card-tile .tile-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 
 .empty { color: var(--muted); text-align: center; padding: 44px 0; font-size: 13px; }
