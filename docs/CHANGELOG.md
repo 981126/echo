@@ -29,6 +29,12 @@
 - 测试：`tests/test_r139_llm_router.py` 预算断言改为从 `VENDORS` 读取；新增「连接错误重试一次」「超时不重试」
   「read 超时=墙钟」3 例；总 **238 例**。
 
+**补充（同日，作者选定「保留显式上限」方案 A 后）**
+- 各步预算抽成具名常量（`debate.BUDGET_INITIAL/BUDGET_CRITIQUE/BUDGET_REVISE`），并新增
+  `tests/test_r142_thinking_budget.py` **校准护栏**：厂家下限与各步预算低于「实测最坏 8023 tokens × 1.2 余量」直接判红
+  —— 护栏上线即抓到 DeepSeek 下限 8000 比实测最坏值还低 23 tokens，已一并抬到 **12000**（Kimi 对齐）。
+- `docs/DESIGN.md` 记录量测表 + 再校准方法 + 「为什么不干脆去掉 max_tokens」的评估结论。
+
 **验证**
 - 评审步骤按新预算连跑 4 次：正文 984 / 681 / 881 / 955 字，**0 次截断**（旧预算下约一半被截断）。
 - Kimi 修订在 12000 预算下实测 180.3s / 106.8s —— 证明 `read=180` 确实会误杀，`read=600` 正常。
