@@ -88,6 +88,29 @@ def _clear_status(db: Session, draft_id: int) -> None:
 PLACEHOLDER_SCRIPT = "（双模型讨论生成中…）"
 FAILED_SCRIPT = "（生成失败，请重试或删除本稿）"
 
+# R-155：基于原文重新讨论时的初稿提示词（比对标洗稿多产出 tags）
+SOURCE_REWRITE_SYSTEM = (
+    "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；"
+    "不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"
+    '只输出 JSON：{"title": string, "cover_text": string, "script": string, "tags": string[]}；'
+    "title 必须与素材原标题不同；cover_text 是 3-8 字封面字（与 title 不同）；"
+    "script 是脚本正文；tags 是 3-6 个内容标签（如 求职/面试/赚钱/知识，可含具体主题词）。"
+)
+
+
+def merge_tags(raw: str, new_tags: list[str]) -> str:
+    """R-155：把 AI 新标签并入现有 JSON 标签（去重、保留现有顺序），返回 JSON 文本。"""
+    try:
+        cur = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        cur = []
+    out = [str(t) for t in cur if t] if isinstance(cur, list) else []
+    for tag in new_tags or []:
+        t = str(tag).strip()
+        if t and t not in out:
+            out.append(t)
+    return json.dumps(out, ensure_ascii=False)
+
 
 def clear_debate_state(db: Session, draft_id: int) -> None:
     """讨论失败/中断后的清理（R-134）：清进度状态；占位稿改成可读的失败提示，避免永久「生成中…」。"""
@@ -118,8 +141,19 @@ def _chat_once(llm, system: str, user: str, temperature: float, max_tokens: int)
     return text
 
 
-def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
+def run_debate(
+    db: Session,
+    draft: Draft,
+    topic: str,
+    settings=None,
+    source_text: str = "",
+    source_title: str = "",
+) -> dict:
     """在已有草稿上跑一次完整双模型讨论（所有脚本生成的唯一路径，R-139）。
+
+    R-155：传入 `source_text` 时走「基于原文」讨论——初稿按原文改写成作者口吻，产出
+    标题/封面字/正文/标签；写回 `original_script` 供【原文对照】，标签与现有合并去重。
+    不传 `source_text` 时行为与原来完全一致（按选题生成）。
 
     返回 {draft_id, title, models, fallback, rounds, degraded}，其中 origin 信息用于
     写入 `Draft.quality`，让作者一眼看出这篇稿子由哪两个模型产出、是否降级。
@@ -143,8 +177,20 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
 
     # 1) 初稿：优先生成方，失败自动换评审方（降级留痕）
     initial = None
-    initial_system = get_prompt("generation", db)
-    initial_user = generation_user_message(db, topic)  # R-129：与金样本回放评分同一份输入
+    if source_text:
+        # R-155：基于原文讨论——原文可能是洗稿素材 ASR 文案（original_script）或自建稿正文
+        if db.query(DraftDiscussion).filter(DraftDiscussion.draft_id == draft.id).count() > 0:
+            _note(db, draft.id, 0, "—— 重新讨论（基于原文）——")
+        initial_system = SOURCE_REWRITE_SYSTEM
+        initial_user = (
+            f"作者人设：\n{persona_text}\n\n参考素材标题：{source_title or topic}\n"
+            f"参考素材原文：\n{source_text[:4000]}"
+        )
+        initial_budget = budget_settings.budget_for(db, "rewrite")
+    else:
+        initial_system = get_prompt("generation", db)
+        initial_user = generation_user_message(db, topic)  # R-129：与金样本回放评分同一份输入
+        initial_budget = budget_settings.budget_for(db, "debate_initial")
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
         _status(db, draft.id, f"{name} 正在起草初稿…（生成方 {gen}）")
         try:
@@ -153,8 +199,8 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
                     {"role": "system", "content": initial_system},
                     {"role": "user", "content": initial_user},
                 ],
-                temperature=0.8,
-                max_tokens=budget_settings.budget_for(db, "debate_initial"),
+                temperature=0.8 if not source_text else 0.7,
+                max_tokens=initial_budget,
                 require=("script",),
             )
             initial = {
@@ -164,6 +210,7 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
                 "cover_text": str(data.get("cover_text", "")).strip(),
                 "script": str(data.get("script", "")).strip(),
                 "shells": data.get("shells") if isinstance(data.get("shells"), dict) else {},
+                "tags": [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()] if source_text else [],
             }
             break
         except Exception as exc:  # noqa: BLE001
@@ -176,6 +223,9 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
     draft.script = initial["script"] or topic
     if initial["shells"]:
         draft.platform_shells = json.dumps(initial["shells"], ensure_ascii=False)
+    if source_text:
+        draft.original_script = source_text  # R-155：原文对照展示「原文 vs 讨论后」
+        draft.tags = merge_tags(draft.tags, initial["tags"])  # R-155：标签合并去重
     db.commit()
     _add(db, draft.id, 0, initial["model"], "draft", draft.script)
 
@@ -185,6 +235,8 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
         "哪些有 AI 感，并给出具体可执行的修改建议（每轮简短、直给）。\n"
         f"作者人设：\n{persona_text}\n红线（不得违反）：\n{red_text}\n作者语言习惯：\n{ctx['profile']}"
     )
+    if source_text:
+        critic_system += f"\n参考原文（检查是否照搬/重复）：\n{source_text[:1500]}"
     revise_system = (
         "你是撰稿模型。根据评审意见，用作者的口吻重写整篇口播脚本，"
         "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。\n"
@@ -271,6 +323,7 @@ def run_debate(db: Session, draft: Draft, topic: str, settings=None) -> dict:
         "models": {"gen": gen, "critic": critic},
         "fallback": degraded,
         "rounds": rounds_total,
+        "tags": json.loads(draft.tags or "[]") if source_text else [],
     }
 
 

@@ -29,7 +29,7 @@
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
 | benchmark.py | /api/benchmark | 博主对标：前2+最新展示（R-152）/转写补齐/AI可讲/洗稿（R-152 增 `rewrite-source`：素材库非主博主素材一键洗稿）；「重新对标」一键重跑（R-102，后台任务） |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选/增量校验结果（R-128：`/check/latest`、`/recheck`）；R-131：`/style` 扩展风格范本与样本条数 |
-| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags` |
+| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags`；`POST /{id}/discuss` 基于原文重新讨论（R-155） |
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
 | pipeline.py | /api/pipeline | 每日流水线手动触发/热点刷新/运行记录 |
 | topics.py | /api/topics | 热点/话题缺口/匹配选题 |
@@ -102,7 +102,7 @@
     用它模拟老库跑 `init_db()` 并断言「模型每一列都存在」—— 治「本地测试全用全新库，漏写迁移 100% 绿」。
 - `notify.py`（R-141）：`mail_config_problem(settings)` 是邮件配置的唯一体检入口（缺失 / 非 ASCII 占位符 / 非法邮箱 → 可读原因）；`_send` 把配置非法与 SMTP 异常都收敛成「log + 返回 False」，中文主题用 `Header(...,'utf-8').encode()` 做 RFC2047 编码，正文用 `msg.as_bytes()` 发送。因此邮件是**次要通道**：`run_daily_pipeline` 只在稿子生成失败时才置 failed。
 - `platform_sync.py` 的灵感池入池（R-140）：`pool_ideas_from_comments(db, post, comments, *, account=None, per_post=None)` 是「评论 → 选题池」的**唯一实现**——`_collect_comments()`（全量/每周，非队列）与 `sync_post_comments()`（daily 逐素材队列 / 单帖）都调用它。限量：单帖 `ECHO_POOL_IDEAS_PER_POST`（默认 8，按点赞降序）、单博主每天 `ECHO_POOL_IDEAS_PER_DAY`（默认 40，`0`=不限）；保留「标题 ≥4 字」、按 `(source,title,snapshot_date)` 去重、重复点赞取大。`_pool_quota()` 负责当天剩余配额。同步说明与 payload 汇报 `pool_ideas`（灵感池新增 N 条）。
-- `debate.py`：**所有脚本生成的唯一路径**（R-139）。`debate_rounds(db)` 取「AI 设置」轮次（Kv `debate_rounds` > `.env` > 5，夹 1–10）；`snapshot(db).generation_pair()` 解析生成方/评审方（可相同）；`_side_llm` 把某一方包成「该槽位主用 + 另一方兜底」；初稿用 `generation_user_message`（与金样本回放同一输入），自检不通过再做一次收口修订；结果写 `draft_discussions` 与 `Draft.quality`（models/used/fallback/rounds/rounds_done/issues/passed/style_coverage）。入口：`run_debate`（通用）、`run_debate_draft`（工作台后台任务）、`run_rewrite_debate`（对标洗稿，R-118）。
+- `debate.py`：**所有脚本生成的唯一路径**（R-139）。`debate_rounds(db)` 取「AI 设置」轮次（Kv `debate_rounds` > `.env` > 5，夹 1–10）；`snapshot(db).generation_pair()` 解析生成方/评审方（可相同）；`_side_llm` 把某一方包成「该槽位主用 + 另一方兜底」；初稿用 `generation_user_message`（与金样本回放同一输入），自检不通过再做一次收口修订；结果写 `draft_discussions` 与 `Draft.quality`（models/used/fallback/rounds/rounds_done/issues/passed/style_coverage）。入口：`run_debate`（通用；R-155 增可选 `source_text/source_title`：传了就按原文改写出 标题/封面字/正文/标签，写回 `original_script` 供原文对照、`merge_tags` 合并去重，随后同样 N 轮+自检）、`run_debate_draft`（工作台后台任务）、`run_rewrite_debate`（对标洗稿，R-118）。原文讨论的入队/解析在 `draft_flow.resolve_discussion_source` / `start_discussion` / `discussion_task`（任务 kind=`draft_discuss`）。
 - `llm_router.py`（R-139）：统一模型路由与降级层。`snapshot(db)` 取线程安全的配置快照（普通 dict，无 Session）；`RoutedLLM` 接口与 `OpenAIClient` 兼容（`chat`/`chat_json`/`chat_completion`），主模型「输出不合法」可重试 1 次，随后降级到备用槽位；降级触发=报错/超时/空正文/缺契约字段（`chat_json(require=(...))`）；参数归一化=不支持 temperature 的厂家不传该参数 + `max_tokens` 抬到厂家下限（防推理模型正文被思考吃光）；降级写日志 + 站内通知（`_default_notify`，同功能 30 分钟冷却，自己开短连接所以跨线程安全）；`RoutedLLM.degraded/used_slot/routing()` 供调用方标记。`primary_llm(db, feature)` 是非脚本生成功能的统一入口。
 - `llm.py` 的两个关键健壮性设定（R-139）：① `min_max_tokens` 归一化保证推理模型的思考不把正文预算吃光（R-142 实测定标：DeepSeek 8000 / Kimi 10000——同一步骤思考量波动 2418～8023+ tokens，定低了就会「评审总是降级」）；② `_post` 用**流式读取（`iter_bytes`，httpx 负责解压 gzip）+ 墙钟上限**（`ECHO_LLM_TIMEOUT_SECONDS`，默认 600s）；不设 stream 时 `read` 等价于「单次调用总时限」，故与墙钟同值，语义为「单次调用最多 600s」。连接级瞬时错误由 `llm_router` 重试一次（超时不重试）——httpx 的 read timeout 会被长连接的持续字节重置，实测一次调用挂过 39 分钟；HTTP 4xx/5xx、响应结构异常、空正文+有思考分别转成可读的 `LLMError` / `LLMUnusableOutput`。
 - `model_settings.py`（R-138）：模型槽位配置（`VENDORS` 厂家目录、`SLOT_KEYS`、`ROLES`、`ASR_MODES`）；`get_model_config` 含旧 `generation_model` 无感迁移；`resolve_slots/generation_roles/asr_config/topics_count` 供运行时读取；全部存 `app_kv` → **保存即生效**（`Transcriber(mode=..., model=...)`、`SiliconFlowASR(model=...)` 也改为接受运行时覆盖）。
@@ -180,7 +180,7 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
   **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，

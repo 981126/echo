@@ -150,18 +150,28 @@
 
           <n-tab-pane name="discuss" tab="讨论（双模型留痕）">
             <div class="discuss-box">
-              <div v-if="!discussions.length" class="empty" style="padding: 30px 0">
-                暂无讨论记录{{ isPending ? '（生成中…）' : '' }}
+              <div v-if="!editing.id" class="empty" style="padding: 30px 0">
+                先保存草稿，再让双模型基于原文讨论
               </div>
-              <div v-for="m in discussions" :key="m.id" class="discuss-msg" :class="m.actor">
-                <div class="discuss-head">
-                  <strong>{{ actorName(m) }}</strong>
-                  <span class="muted">{{ kindName(m.kind) }} · 第{{ m.round }}轮</span>
+              <template v-else>
+                <div v-if="!discussions.length" class="empty" style="padding: 24px 0">
+                  <div style="margin-bottom: 10px">暂无讨论记录{{ isPending ? '（生成中…）' : '' }}</div>
+                  <n-button v-if="!discussing" size="small" type="primary" :disabled="!canDiscuss" @click="startDiscussion">讨论</n-button>
+                  <div v-if="!canDiscuss" class="muted" style="font-size: 12px; margin-top: 8px">这篇草稿没有可讨论的原文或正文</div>
                 </div>
-                <div class="discuss-body" style="white-space: pre-wrap">{{ m.content }}</div>
-              </div>
-              <div v-if="debateStatus" class="empty" style="padding: 12px 0; color: var(--warn)">⏳ {{ debateStatus }}</div>
-              <div v-else-if="isPending" class="empty" style="padding: 12px 0">模型讨论中…</div>
+                <div v-for="m in discussions" :key="m.id" class="discuss-msg" :class="m.actor">
+                  <div class="discuss-head">
+                    <strong>{{ actorName(m) }}</strong>
+                    <span class="muted">{{ kindName(m.kind) }} · 第{{ m.round }}轮</span>
+                  </div>
+                  <div class="discuss-body" style="white-space: pre-wrap">{{ m.content }}</div>
+                </div>
+                <div v-if="debateStatus" class="empty" style="padding: 12px 0; color: var(--warn)">⏳ {{ debateStatus }}</div>
+                <div v-else-if="isPending" class="empty" style="padding: 12px 0">模型讨论中…</div>
+                <div v-if="discussions.length && !discussing" style="text-align: center; padding: 16px 0 4px">
+                  <n-button size="small" type="primary" secondary :disabled="!canDiscuss" @click="startDiscussion">重新讨论</n-button>
+                </div>
+              </template>
             </div>
           </n-tab-pane>
 
@@ -178,7 +188,7 @@
                 </div>
               </div>
             </div>
-            <div v-else class="empty" style="padding: 30px 0">暂无原文案（仅对标洗稿会记录）</div>
+            <div v-else class="empty" style="padding: 30px 0">暂无原文案（对标洗稿或「讨论」后会记录）</div>
           </n-tab-pane>
         </n-tabs>
       </div>
@@ -251,6 +261,16 @@ let pollTimer = null
 
 const isPending = computed(() => (editing.value?.script || '').includes('双模型讨论生成中'))
 
+// R-155：讨论 / 重新讨论（基于原文跑双模型多轮讨论）
+const discussRunning = ref(false)
+const discussSeen = ref(false)
+let discussTaskId = 0
+const discussing = computed(() => discussRunning.value || !!debateStatus.value)
+const canDiscuss = computed(() => {
+  const e = editing.value
+  return !!(e && e.id && ((e.original_script || '').trim() || (e.script || '').trim()))
+})
+
 function list(status) {
   if (status === 'archived') {
     return drafts.value.filter(d => d.status === 'archived' || d.status === 'deleted')
@@ -303,6 +323,9 @@ function open(d, isNew = false) {
   showEdit.value = true
   editTab.value = (d.original_script && d.source_ref && d.source_ref.source_title) ? 'compare' : 'edit'
   discussions.value = discussionsMap.value[d.id] || []
+  discussRunning.value = false
+  discussSeen.value = false
+  discussTaskId = 0
   if (!isNew && editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
   if (editing.value.id) runCheck(editing.value.id)
 }
@@ -329,12 +352,58 @@ async function rework(id) {
   }
 }
 
+// R-155：提交一次「基于原文」的双模型多轮讨论（后台任务，完成后通知 + 自动刷新本稿）
+async function startDiscussion() {
+  const e = editing.value
+  if (!e || !e.id) {
+    message.warning('先保存草稿再讨论')
+    return
+  }
+  if (discussRunning.value) return
+  discussRunning.value = true
+  discussSeen.value = false
+  try {
+    const d = await api(`/api/drafts/${e.id}/discuss`, { method: 'POST', body: '{}' })
+    discussTaskId = d.task_id || 0
+    message.success('已提交讨论，完成后会更新本篇并提醒')
+  } catch (err) {
+    discussRunning.value = false
+    discussTaskId = 0
+    message.error(err.message)
+  }
+}
+
+// R-155：讨论完成后把标题/封面字/正文/标签/原文案刷回弹窗，供【原文对照】展示
+async function refreshEditing(id) {
+  let d
+  try {
+    d = await api('/api/drafts/' + id)
+  } catch (e) {
+    return
+  }
+  if (!editing.value || editing.value.id !== id) return
+  editing.value = {
+    ...editing.value,
+    title: d.title,
+    cover_text: d.cover_text,
+    script: d.script,
+    tags: d.tags || [],
+    original_script: d.original_script || '',
+    source_ref: d.source_ref || {},
+    quality: d.quality || {}
+  }
+  runCheck(id)
+}
+
 // R-154：关闭弹窗（叉掉 / 取消 / 保存）都重新查询列表，避免要切页才看到新数据
 async function closeEdit() {
   showEdit.value = false
   editing.value = null
   debateStatus.value = ''
   checkInfo.value = null
+  discussRunning.value = false
+  discussSeen.value = false
+  discussTaskId = 0
   try {
     await load()
   } catch (e) {
@@ -441,6 +510,36 @@ async function poll() {
     await fetchStatus(id)
   } catch {
     /* ignore */
+  }
+  // R-155：讨论结束检测——优先看任务终态；重开弹窗等场景用「状态从有到无」兜底
+  if (discussTaskId) {
+    try {
+      const t = await api('/api/tasks/' + discussTaskId)
+      if (t.status === 'done' || t.status === 'failed') {
+        discussTaskId = 0
+        discussRunning.value = false
+        discussSeen.value = false
+        if (t.status === 'done') message.success('讨论完成，已更新本篇')
+        else message.error(t.error || '讨论失败')
+        await refreshEditing(id)
+        await load()
+        return
+      }
+    } catch {
+      /* 任务查询失败下轮再试 */
+    }
+    if (debateStatus.value) discussSeen.value = true
+    return
+  }
+  if (debateStatus.value) {
+    discussSeen.value = true
+    return
+  }
+  if (discussSeen.value) {
+    discussSeen.value = false
+    discussRunning.value = false
+    await refreshEditing(id)
+    await load()
   }
 }
 

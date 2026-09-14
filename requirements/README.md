@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-155 | 2026-09-14 | 脚本工作台讨论 tab：【暂无讨论记录】改【讨论】按钮、有留痕则底部【重新讨论】；点击后基于原文（洗稿稿用素材 ASR 文案，自建稿用正文）跑双模型多轮讨论，更新正文/标题/封面字/标签（标签合并）并写回 original_script 供【原文对照】；留痕追加不清空 | ✅ 已完成 | M144（已完成） | debate.py、draft_flow.py、api/drafts.py、DraftsView |
 | R-154 | 2026-09-14 | 脚本工作台草稿：新建草稿不再当场落库（内容全空则不创建，提示未保存）；新建/编辑弹窗的叉掉/取消/保存都调用列表查询刷新，无需切页；`DraftCreate` 补 `tags`；清理遗留空草稿（逻辑删除） | ✅ 已完成 | M143（已完成） | DraftsView、schemas/draft.py、api/drafts.py |
 | R-153 | 2026-09-14 | 素材库洗稿入口收敛：去掉素材卡片（云端/本地）「同步」旁的洗稿按钮，只保留编辑页 ASR「已转写」旁的洗稿（后端零改动） | ✅ 已完成 | M142（已完成） | MaterialCard、VideosView、R-152 |
 | R-152 | 2026-09-14 | 脚本工作台不再展示【废稿/已删除】tab（仅隐藏，逻辑与按钮保留）；博主对标改为「旧规则前2 + 第三篇=对标最新一篇」（重叠按互动分顺延保底3条，第三篇同样转写补齐）；素材库非主博主卡片「同步」旁 + 编辑页 ASR「已转写」旁加「洗稿」按钮（同博主对标洗稿：双模型讨论+存草稿+原文对照） | ✅ 已完成 | M141（已完成） | DraftsView、BenchmarkView、VideosView、MaterialCard、TranscribeSection、services/benchmark.py |

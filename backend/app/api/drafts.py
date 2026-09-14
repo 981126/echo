@@ -178,6 +178,22 @@ def draft_rework(draft_id: int, db: Session = Depends(get_db)):
 
 
 
+@router.post("/{draft_id}/discuss", response_model=dict)
+def draft_discuss(draft_id: int, db: Session = Depends(get_db)):
+    """R-155：基于原文（洗稿稿＝洗稿素材 ASR 文案 / 自建稿＝正文）跑双模型多轮讨论。
+
+    完成后更新 正文+标题+封面字+标签（标签合并去重）并写回 original_script 供【原文对照】；
+    讨论留痕追加、不清空旧记录。
+    """
+    if db.get(Draft, draft_id) is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    try:
+        task_id = draft_flow.start_discussion(db, draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"task_id": task_id, "message": "已提交讨论，完成后右上角通知"}
+
+
 @router.get("/{draft_id}/debate-status", response_model=dict)
 def debate_status(draft_id: int, db: Session = Depends(get_db)):
     """当前双模型讨论进行到哪一步（思考中提示）。"""

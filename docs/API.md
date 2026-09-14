@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 124 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 125 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -484,6 +484,18 @@ Update Draft
 Draft Check
 
 脚本体检（R-030⑦）：红线/钩子/结尾引导/篇幅。
+
+**参数**
+
+- `draft_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### POST /api/drafts/{draft_id}/discuss
+
+Draft Discuss
+
+R-155：基于原文（洗稿稿＝洗稿素材 ASR 文案 `original_script` / 自建稿＝当前正文）跑双模型多轮讨论；完成后更新 正文+标题+封面字+标签（合并去重）并写回 `original_script` 供【原文对照】，留痕追加不清空。无可讨论原文 → 400；草稿不存在 → 404。
 
 **参数**
 

@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy.orm import Session
 
 from ..models.draft import Draft
 from ..services.creator_service import current_creator_id
 from ..tasks import start_task
-from .debate import PLACEHOLDER_SCRIPT, clear_debate_state, run_debate_draft
+from .debate import PLACEHOLDER_SCRIPT, clear_debate_state, run_debate, run_debate_draft
 
 
 def debate_task(db: Session, payload: dict) -> dict:
@@ -62,4 +64,58 @@ def start_rework(db: Session, draft_id: int) -> int:
     return start_task("generate_draft", {"draft_id": draft.id, "topic": topic}, debate_task)
 
 
-__all__ = ["create_placeholder_draft", "debate_task", "start_generation", "start_rework"]
+def resolve_discussion_source(db: Session, draft: Draft) -> tuple[str, str]:
+    """R-155：讨论用的「原文」——洗稿稿用 original_script（=洗稿素材 ASR 文案），自建稿用当前正文。
+
+    返回 (原文文本, 原文标题)；都为空时返回空文本（由调用方判 400）。
+    """
+    src = (draft.original_script or "").strip()
+    if src:
+        title = (draft.title or "").strip()
+        try:
+            ref = json.loads(draft.source_ref or "{}")
+        except (TypeError, ValueError):
+            ref = {}
+        if isinstance(ref, dict) and ref.get("source_title"):
+            title = str(ref["source_title"]).strip()
+        return src, title
+    return (draft.script or "").strip(), (draft.title or "").strip()
+
+
+def discussion_task(db: Session, payload: dict) -> dict:
+    """后台任务体：基于原文跑双模型多轮讨论（R-155），完成后更新草稿并留痕。"""
+    draft = db.get(Draft, int(payload.get("draft_id") or 0))
+    if draft is None:
+        raise ValueError("草稿不存在")
+    if draft.creator_id is None:
+        draft.creator_id = current_creator_id(db)
+    source_text = str(payload.get("source_text") or "")
+    source_title = str(payload.get("source_title") or "")
+    topic = (draft.title or "").strip() or source_title or "重新讨论"
+    return run_debate(db, draft, topic, source_text=source_text, source_title=source_title)
+
+
+def start_discussion(db: Session, draft_id: int) -> int:
+    """基于原文入队一次讨论（R-155）；返回 task_id。无可讨论原文时抛 ValueError。"""
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise ValueError("草稿不存在")
+    source_text, source_title = resolve_discussion_source(db, draft)
+    if not source_text:
+        raise ValueError("这篇草稿没有可讨论的原文或正文")
+    return start_task(
+        "draft_discuss",
+        {"draft_id": draft.id, "source_text": source_text, "source_title": source_title},
+        discussion_task,
+    )
+
+
+__all__ = [
+    "create_placeholder_draft",
+    "debate_task",
+    "discussion_task",
+    "resolve_discussion_source",
+    "start_discussion",
+    "start_generation",
+    "start_rework",
+]
