@@ -258,7 +258,17 @@ def list_drafts(
 @router.post("", response_model=DraftOut)
 def create_draft(payload: DraftCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
+    # R-154：空白草稿不落库（前端保存前已拦截，这里兜底其它调用方）
+    if not (
+        (data.get("title") or "").strip()
+        or (data.get("cover_text") or "").strip()
+        or (data.get("script") or "").strip()
+        or data.get("tags")
+        or data.get("video_id")
+    ):
+        raise HTTPException(status_code=400, detail="草稿内容为空，未创建")
     data["platform_shells"] = json.dumps(data.get("platform_shells") or {}, ensure_ascii=False)
+    data["tags"] = json.dumps(data.get("tags") or [], ensure_ascii=False)  # R-154：新建也可带标签
     data["creator_id"] = current_creator_id(db)
     draft = Draft(**data)
     db.add(draft)

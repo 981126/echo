@@ -292,9 +292,9 @@ async function fetchStatus(id) {
   }
 }
 
-async function createDraft() {
-  const d = await api('/api/drafts', { method: 'POST', body: JSON.stringify({ title: '', cover_text: '', script: '' }) })
-  open(d, true)
+// R-154：新建草稿不落库——先打开本地空白稿，保存时仍有内容才创建
+function createDraft() {
+  open({ id: null, title: '', cover_text: '', script: '', tags: [], video_id: null, status: 'draft' }, true)
 }
 
 function open(d, isNew = false) {
@@ -329,11 +329,17 @@ async function rework(id) {
   }
 }
 
-function closeEdit() {
+// R-154：关闭弹窗（叉掉 / 取消 / 保存）都重新查询列表，避免要切页才看到新数据
+async function closeEdit() {
   showEdit.value = false
   editing.value = null
   debateStatus.value = ''
   checkInfo.value = null
+  try {
+    await load()
+  } catch (e) {
+    /* 刷新失败不打断关闭 */
+  }
 }
 
 async function setStatus(id, status) {
@@ -359,18 +365,40 @@ async function softDelete(d) {
   load()
 }
 
+// R-154：新建草稿「有任何一项内容」才算数；全空则不落库
+function draftHasContent(e) {
+  return !!(e && ((e.title || '').trim() || (e.cover_text || '').trim() || (e.script || '').trim()
+    || (e.tags || []).length || e.video_id))
+}
+
 async function save() {
-  const body = {
-    title: editing.value.title,
-    cover_text: editing.value.cover_text,
-    script: editing.value.script,
-    tags: editing.value.tags || [],
-    video_id: editing.value.video_id ?? null
+  const e = editing.value
+  if (!e) return
+  if (!e.id && !draftHasContent(e)) {
+    message.warning('草稿内容为空，未保存')
+    await closeEdit()
+    return
   }
-  await api(`/api/drafts/${editing.value.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+  const body = {
+    title: e.title,
+    cover_text: e.cover_text,
+    script: e.script,
+    tags: e.tags || [],
+    video_id: e.video_id ?? null
+  }
+  try {
+    if (e.id) {
+      await api(`/api/drafts/${e.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+    } else {
+      await api('/api/drafts', { method: 'POST', body: JSON.stringify(body) })
+      listTab.value = 'draft'  // 新稿必在草稿 tab，保存后直接可见
+    }
+  } catch (err) {
+    message.error(err.message)
+    return
+  }
   message.success('已保存')
-  closeEdit()
-  load()
+  await closeEdit()
 }
 
 async function rate(d, i) {

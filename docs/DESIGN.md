@@ -29,7 +29,7 @@
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
 | benchmark.py | /api/benchmark | 博主对标：前2+最新展示（R-152）/转写补齐/AI可讲/洗稿（R-152 增 `rewrite-source`：素材库非主博主素材一键洗稿）；「重新对标」一键重跑（R-102，后台任务） |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选/增量校验结果（R-128：`/check/latest`、`/recheck`）；R-131：`/style` 扩展风格范本与样本条数 |
-| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分 |
+| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags` |
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
 | pipeline.py | /api/pipeline | 每日流水线手动触发/热点刷新/运行记录 |
 | topics.py | /api/topics | 热点/话题缺口/匹配选题 |
@@ -180,7 +180,7 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
   **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，

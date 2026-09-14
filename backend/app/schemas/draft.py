@@ -88,6 +88,7 @@ class DraftCreate(BaseModel):
     cover_text: str = ""
     script: str = ""
     platform_shells: dict = {}
+    tags: list[str] = []
     status: str = Field(default="draft", pattern="^(draft|used|archived|deleted)$")
 
 

@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-154 | 2026-09-14 | 脚本工作台草稿：新建草稿不再当场落库（内容全空则不创建，提示未保存）；新建/编辑弹窗的叉掉/取消/保存都调用列表查询刷新，无需切页；`DraftCreate` 补 `tags`；清理遗留空草稿（逻辑删除） | ✅ 已完成 | M143（已完成） | DraftsView、schemas/draft.py、api/drafts.py |
 | R-153 | 2026-09-14 | 素材库洗稿入口收敛：去掉素材卡片（云端/本地）「同步」旁的洗稿按钮，只保留编辑页 ASR「已转写」旁的洗稿（后端零改动） | ✅ 已完成 | M142（已完成） | MaterialCard、VideosView、R-152 |
 | R-152 | 2026-09-14 | 脚本工作台不再展示【废稿/已删除】tab（仅隐藏，逻辑与按钮保留）；博主对标改为「旧规则前2 + 第三篇=对标最新一篇」（重叠按互动分顺延保底3条，第三篇同样转写补齐）；素材库非主博主卡片「同步」旁 + 编辑页 ASR「已转写」旁加「洗稿」按钮（同博主对标洗稿：双模型讨论+存草稿+原文对照） | ✅ 已完成 | M141（已完成） | DraftsView、BenchmarkView、VideosView、MaterialCard、TranscribeSection、services/benchmark.py |
 | R-151 | 2026-09-14 | 素材同步失败修复（169 条 `card_sync` 任务报 `TikHub 请求失败: [SSL: UNEXPECTED_EOF_WHILE_READING]`）：根因 = ①httpx 经 macOS 系统代理 `127.0.0.1:7890` 访问 TikHub，TLS 隧道被代理瞬时掐断（同时段 DeepSeek 也 ConnectTimeout/RemoteProtocolError），②TikHub 单路由限速 1 req/s（并发探测 40 次得 35 个 429），并行 daily 同步必然超限，③`_get()` 无重试/无限速/失败无日志 → 一次抖动 = 一条失败通知。修复：同路由最小间隔 1.2s 排队 + 瞬时故障与 429/5xx 有界重试（4 次尝试，退避 1.5s→4.0s→8.0s）+ 重试/失败写日志；4xx 永久错误不重试 | ✅ 已完成 | M140（已完成） | services/platform/tikhub.py、tests/test_r151_tikhub_retry.py |
