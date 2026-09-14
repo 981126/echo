@@ -144,6 +144,7 @@
             </div>
             <div class="row">
               <n-button type="primary" @click="save">保存</n-button>
+              <n-button type="info" secondary :loading="finalizing" @click="finalize">定稿</n-button>
               <n-button secondary @click="closeEdit">取消</n-button>
             </div>
           </n-tab-pane>
@@ -183,12 +184,49 @@
                   <div class="diff-body"><template v-for="(seg, i) in draftDiff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
                 </div>
                 <div class="cmp-col">
-                  <div class="cmp-h">洗稿后（绿 = 新增/修改）</div>
+                  <div class="cmp-h">修改后（绿 = 新增/修改）</div>
                   <div class="diff-body"><template v-for="(seg, i) in draftDiff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
                 </div>
               </div>
             </div>
             <div v-else class="empty" style="padding: 30px 0">暂无原文案（对标洗稿或「讨论」后会记录）</div>
+          </n-tab-pane>
+
+          <n-tab-pane name="versions" :tab="versions.length ? `版本 (${versions.length})` : '版本'">
+            <div v-if="!editing.id" class="empty" style="padding: 30px 0">先保存草稿，再进行定稿与版本比较</div>
+            <template v-else>
+              <div v-if="!versions.length" class="empty" style="padding: 24px 0">
+                还没有版本，点下方或编辑区的【定稿】保存一版
+              </div>
+              <template v-else>
+                <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 6px">
+                  <span class="muted" style="font-size: 12px">点选两个版本对比（已选 {{ verSel.length }}/2）</span>
+                  <span v-if="finalizedState" class="muted" style="font-size: 12px">{{ finalizedState }}</span>
+                </div>
+                <div
+                  v-for="ver in versionsDesc"
+                  :key="ver.id"
+                  class="ver-row"
+                  :class="{ on: verSel.includes(ver.id) }"
+                  @click="toggleVer(ver.id)"
+                >
+                  <n-tag size="tiny" :bordered="false" round :type="ver.source === 'ai_discuss' ? 'info' : 'success'">{{ verLabel(ver.source) }}</n-tag>
+                  <span class="ver-title">{{ ver.title || '（无标题）' }}</span>
+                  <span class="muted ver-time">{{ fmt(ver.created_at) }}</span>
+                </div>
+                <div v-if="verDiff" class="cmp-grid" style="margin-top: 10px">
+                  <div class="cmp-col">
+                    <div class="cmp-h">{{ verDiff.leftLabel }}</div>
+                    <div class="diff-body"><template v-for="(seg, i) in verDiff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
+                  </div>
+                  <div class="cmp-col">
+                    <div class="cmp-h">{{ verDiff.rightLabel }}</div>
+                    <div class="diff-body"><template v-for="(seg, i) in verDiff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
+                  </div>
+                </div>
+                <div v-else class="empty" style="padding: 16px 0">再选一个版本即可对比</div>
+              </template>
+            </template>
           </n-tab-pane>
         </n-tabs>
       </div>
@@ -197,7 +235,7 @@
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { fetchVideos } from '../composables/media'
@@ -271,6 +309,71 @@ const canDiscuss = computed(() => {
   return !!(e && e.id && ((e.original_script || '').trim() || (e.script || '').trim()))
 })
 
+// R-156：定稿 + 版本留痕（每次定稿存一条；可任选两版做差异比较）
+const versions = ref([])
+const verSel = ref([])
+const verLoadedFor = ref(0)
+const finalizing = ref(false)
+const versionsDesc = computed(() => [...versions.value].reverse())
+
+function verLabel(source) {
+  return source === 'ai_discuss' ? 'AI 讨论定稿' : '手动定稿'
+}
+
+async function loadVersions(id) {
+  verLoadedFor.value = id || 0
+  if (!id) {
+    versions.value = []
+    verSel.value = []
+    return
+  }
+  try {
+    versions.value = await api(`/api/drafts/${id}/versions`)
+  } catch {
+    versions.value = []
+  }
+  verSel.value = [...versions.value].reverse().slice(0, 2).map(v => v.id)  // 默认选最新两版
+}
+
+function toggleVer(id) {
+  const cur = verSel.value
+  if (cur.includes(id)) {
+    verSel.value = cur.filter(x => x !== id)
+  } else if (cur.length >= 2) {
+    verSel.value = [cur[1], id]  // 满两个则挤掉先选的
+  } else {
+    verSel.value = [...cur, id]
+  }
+}
+
+const verDiff = computed(() => {
+  if (verSel.value.length !== 2) return null
+  const picked = versions.value.filter(v => verSel.value.includes(v.id)).sort((a, b) => a.id - b.id)
+  if (picked.length !== 2) return null
+  const [older, newer] = picked
+  return {
+    ...buildDiff(older.script || '', newer.script || ''),
+    leftLabel: `#${older.id} · ${verLabel(older.source)}`,
+    rightLabel: `#${newer.id} · ${verLabel(newer.source)}`
+  }
+})
+
+const finalizedState = computed(() => {
+  const e = editing.value
+  if (!e || !versions.value.length) return ''
+  const last = versions.value[versions.value.length - 1]
+  const same = (last.script || '') === (e.script || '')
+    && (last.title || '') === (e.title || '')
+    && (last.cover_text || '') === (e.cover_text || '')
+  return same ? '当前正文与最新版本一致（已定稿）' : '当前正文有未定稿改动'
+})
+
+watch(editTab, (tab) => {
+  if (tab === 'versions' && editing.value?.id && verLoadedFor.value !== editing.value.id) {
+    loadVersions(editing.value.id)
+  }
+})
+
 function list(status) {
   if (status === 'archived') {
     return drafts.value.filter(d => d.status === 'archived' || d.status === 'deleted')
@@ -326,6 +429,9 @@ function open(d, isNew = false) {
   discussRunning.value = false
   discussSeen.value = false
   discussTaskId = 0
+  versions.value = []
+  verSel.value = []
+  verLoadedFor.value = 0
   if (!isNew && editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
   if (editing.value.id) runCheck(editing.value.id)
 }
@@ -404,6 +510,9 @@ async function closeEdit() {
   discussRunning.value = false
   discussSeen.value = false
   discussTaskId = 0
+  versions.value = []
+  verSel.value = []
+  verLoadedFor.value = 0
   try {
     await load()
   } catch (e) {
@@ -468,6 +577,40 @@ async function save() {
   }
   message.success('已保存')
   await closeEdit()
+}
+
+// R-156：定稿——先保存当前编辑，再记一条版本（正文+标题+封面字+标签）
+async function finalize() {
+  const e = editing.value
+  if (!e) return
+  if (!e.id && !draftHasContent(e)) {
+    message.warning('草稿内容为空，未定稿')
+    return
+  }
+  finalizing.value = true
+  try {
+    const body = {
+      title: e.title,
+      cover_text: e.cover_text,
+      script: e.script,
+      tags: e.tags || [],
+      video_id: e.video_id ?? null
+    }
+    if (!e.id) {
+      const created = await api('/api/drafts', { method: 'POST', body: JSON.stringify(body) })
+      e.id = created.id
+      listTab.value = 'draft'
+    }
+    const r = await api(`/api/drafts/${e.id}/finalize`, { method: 'POST', body: JSON.stringify(body) })
+    message.success(`已定稿（版本 #${r.version.id}）`)
+    await refreshEditing(e.id)
+    await loadVersions(e.id)
+    await load()
+  } catch (err) {
+    message.error(err.message)
+  } finally {
+    finalizing.value = false
+  }
 }
 
 async function rate(d, i) {
@@ -572,5 +715,9 @@ onUnmounted(() => {
 .diff-body { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; line-height: 1.7; }
 .diff-body .del { background: #ffe3e3; color: #c0392b; border-radius: 3px; }
 .diff-body .add { background: #dcf5dc; color: #1a7f37; border-radius: 3px; }
+.ver-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 4px; border: 1px solid var(--line, #eee5d8); border-radius: 8px; cursor: pointer; }
+.ver-row.on { border-color: #a34f2c; background: #fdf6ef; }
+.ver-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.ver-time { font-size: 11px; flex: none; }
 @media (max-width: 640px) { .cmp-grid { grid-template-columns: 1fr; } }
 </style>

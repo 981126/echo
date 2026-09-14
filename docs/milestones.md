@@ -23,6 +23,7 @@
 | M137 | 需求管理页 UI 溢出修复（R-148） | ✅ |
 | M138 | 下线「需求管理」网页（R-149） | ✅ |
 | M139 | 口播脚本编辑区换 Tiptap v3 块编辑器（R-150） | ✅ |
+| M145 | 草稿定稿与版本留痕：定稿按钮 + 版本 tab + 两版 diff + 版本链反哺 AI（R-156） | ✅ |
 | M144 | 草稿讨论 tab：【讨论/重新讨论】按钮 + 基于原文的双模型多轮讨论（R-155） | ✅ |
 | M143 | 脚本工作台草稿：空白新建不落库 + 弹窗关闭即刷新列表（R-154） | ✅ |
 | M142 | 素材库洗稿入口收敛：去掉卡片上的洗稿，只留编辑页（R-153） | ✅ |
@@ -39,6 +40,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
+| M145 / R-156 | 草稿定稿与版本：`draft_versions` 新表 + `GET /versions` + `POST /finalize`（先存后记，正文/标题/封面字/标签）；AI 讨论跑完自动记 `ai_discuss` 版本；前端【定稿】按钮 + 【版本】tab（选两版出 diff）；`analyze_diff`/`apply_diff_suggestions`/`_rewrite_examples` 接入版本链；「洗稿后」→「修改后」 | verify 全绿（359 例，含 14 新用例）+ 真实接口冒烟 + headless 点检（修改后/定稿按钮/版本两栏 diff/已定稿态） | ✅ |
 | M144 / R-155 | 草稿讨论 tab 入口：无留痕显示【讨论】、有留痕底部【重新讨论】；`run_debate` 增「基于原文」分支（洗稿稿用 `original_script`＝素材 ASR 文案，自建稿用正文）跑 N 轮+自检，更新 正文/标题/封面字/标签（合并）并写回 `original_script`；新增 `resolve_discussion_source`/`start_discussion` + `POST /api/drafts/{id}/discuss`；留痕追加不清空 | verify 全绿（345 例，含 9 新用例）；真实端到端：任务 done、3 轮跑满 passed、标签合并 6 个、留痕 7 条、original_script 写回；headless 点检三种入口状态正确 | ✅ |
 | M143 / R-154 | 脚本工作台：新建草稿改本地空白稿（不落库），保存时内容全空则提示「未保存」且不创建；`closeEdit`（叉掉/取消/保存）统一 `load()` 刷新列表；`DraftCreate` 补 `tags` + `POST` 空白兜底 400；清理 2 条遗留空草稿（逻辑删除） | verify 全绿（336 例，含 5 个新用例）；headless Chrome：新建空白叉掉后卡数不变、关闭触发 `/api/drafts` 查询、写入标题保存后立即可见 | ✅ |
 | M142 / R-153 | 素材库洗稿入口收敛：删除 `MaterialCard` 云端/本地卡「同步」旁的「洗稿」按钮与相关 props；`VideosView` 移除卡片洗稿接线；**保留**编辑页（ASR「已转写」旁）洗稿与 `rewrite-source` 后端 | verify 全绿（331 例）；headless Chrome 点检：对标素材卡片洗稿按钮 0 个（卡片动作＝同步/删除）、编辑页「已转写」旁有洗稿、主博主 0 个 | ✅ |

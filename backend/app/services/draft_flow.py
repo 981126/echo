@@ -83,7 +83,13 @@ def resolve_discussion_source(db: Session, draft: Draft) -> tuple[str, str]:
 
 
 def discussion_task(db: Session, payload: dict) -> dict:
-    """后台任务体：基于原文跑双模型多轮讨论（R-155），完成后更新草稿并留痕。"""
+    """后台任务体：基于原文跑双模型多轮讨论（R-155），完成后更新草稿并留痕。
+
+    R-156：讨论跑完把最新一版自动定稿留痕（source=ai_discuss），并异步分析版本链偏好。
+    """
+    from .diff_analysis import diff_task
+    from .draft_versions import snapshot_version
+
     draft = db.get(Draft, int(payload.get("draft_id") or 0))
     if draft is None:
         raise ValueError("草稿不存在")
@@ -92,7 +98,10 @@ def discussion_task(db: Session, payload: dict) -> dict:
     source_text = str(payload.get("source_text") or "")
     source_title = str(payload.get("source_title") or "")
     topic = (draft.title or "").strip() or source_title or "重新讨论"
-    return run_debate(db, draft, topic, source_text=source_text, source_title=source_title)
+    res = run_debate(db, draft, topic, source_text=source_text, source_title=source_title)
+    snapshot_version(db, draft, source="ai_discuss", note="AI 讨论定稿")
+    start_task("diff_analysis", {"draft_id": draft.id}, diff_task)
+    return res
 
 
 def start_discussion(db: Session, draft_id: int) -> int:

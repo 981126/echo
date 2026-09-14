@@ -12,8 +12,9 @@ from ..db import get_db
 from ..services.creator_service import current_creator_id
 from ..models.draft import Draft
 from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
-from ..services.diff_analysis import apply_diff_suggestions
 from ..services import draft_flow
+from ..services.draft_versions import list_versions, snapshot_version, version_payload
+from ..services.diff_analysis import diff_task
 from ..services.feedback import add_feedback
 from ..services.generation import generate_draft
 from ..services.persona import PersonaService
@@ -46,12 +47,6 @@ class FeedbackIn(BaseModel):
     pace_score: int | None = Field(default=None, ge=1, le=5)
     ending_score: int | None = Field(default=None, ge=1, le=5)
     style_score: int | None = Field(default=None, ge=1, le=5)
-
-
-def _diff_task(db: Session, payload: dict) -> None:
-    draft = db.get(Draft, int(payload["draft_id"]))
-    if draft:
-        apply_diff_suggestions(db, draft)
 
 
 def _rework_task(db: Session, payload: dict) -> dict:
@@ -315,7 +310,50 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
         setattr(draft, field, value)
     db.commit()
     db.refresh(draft)
-    # 改稿差异分析（异步，学习作者的改写偏好）
+    # 改稿差异分析（异步，学习作者的改写偏好；R-156 起按版本链分析）
     if draft.original_script and draft.script and draft.script != draft.original_script:
-        start_task("diff_analysis", {"draft_id": draft.id}, _diff_task)
+        start_task("diff_analysis", {"draft_id": draft.id}, diff_task)
     return draft
+
+
+class FinalizeIn(BaseModel):
+    title: str = ""
+    cover_text: str = ""
+    script: str = ""
+    tags: list[str] = []
+    video_id: int | None = None
+
+
+@router.get("/{draft_id}/versions", response_model=list[dict])
+def draft_versions(draft_id: int, db: Session = Depends(get_db)):
+    """R-156：草稿的定稿版本留痕（时间正序，含正文供前端本地做两版 diff）。"""
+    if db.get(Draft, draft_id) is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    return [version_payload(v) for v in list_versions(db, draft_id)]
+
+
+@router.post("/{draft_id}/finalize", response_model=dict)
+def draft_finalize(draft_id: int, payload: FinalizeIn, db: Session = Depends(get_db)):
+    """R-156：定稿——先保存当前编辑，再记一条版本（正文+标题+封面字+标签），并异步分析版本链偏好。"""
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    if not (
+        (payload.title or "").strip()
+        or (payload.cover_text or "").strip()
+        or (payload.script or "").strip()
+        or payload.tags
+        or payload.video_id
+    ):
+        raise HTTPException(status_code=400, detail="草稿内容为空，未定稿")
+    draft.title = payload.title
+    draft.cover_text = payload.cover_text
+    draft.script = payload.script
+    draft.tags = json.dumps(payload.tags or [], ensure_ascii=False)
+    draft.video_id = payload.video_id
+    db.commit()
+    db.refresh(draft)
+    version = snapshot_version(db, draft, source="manual")
+    # 版本链 → 改稿偏好（人设建议，后台任务）
+    start_task("diff_analysis", {"draft_id": draft.id}, diff_task)
+    return {"ok": True, "draft_id": draft.id, "version": version_payload(version)}

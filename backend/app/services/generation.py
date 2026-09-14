@@ -268,21 +268,27 @@ def _style_anchor_samples(db: Session, limit: int = 5) -> list[str]:
 def _rewrite_examples(db: Session, limit: int = 2) -> str:
     """作者对 AI 初稿的真实修改（R-131）：最强的"像作者"信号，作为 few-shot 注入。
 
-    优先取作者认可（高星/采用）的改稿；没有任何成对样本时返回空串（不注入、不影响生成）。
+    R-156：优先用**版本链**的首版 → 终版（能看到从初稿到定稿的整体走向）；
+    没有版本时退回 `original_script → script`（老行为）。没有任何成对样本时返回空串（不注入）。
     """
     from ..models.draft import Draft
     from ..models.feedback import Feedback
+    from .draft_versions import chains_for_drafts
 
     cid = _creator_filter(db)
     rated: dict[int, object] = {fb.draft_id: fb for fb in db.query(Feedback).all()}
     q = db.query(Draft).filter(Draft.source == "ai")
     if cid:
         q = q.filter(Draft.creator_id == cid)
+    drafts = q.order_by(Draft.id.desc()).limit(60).all()
+    chains = chains_for_drafts(db, drafts)
     pairs: list[tuple[int, int, str, str]] = []
-    for d in q.order_by(Draft.id.desc()).limit(60).all():
-        original = (d.original_script or "").strip()
-        edited = (d.script or "").strip()
-        if not original or not edited or original == edited:
+    for d in drafts:
+        stages = chains.get(d.id) or []
+        if len(stages) < 2:
+            continue
+        original, edited = stages[0], stages[-1]
+        if original == edited:
             continue
         fb = rated.get(d.id)
         score = 3

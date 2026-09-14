@@ -1,4 +1,8 @@
-"""改稿差异分析：作者把 AI 原稿改成了什么 → 提炼风格偏好（人设建议）。"""
+"""改稿差异分析：作者把 AI 原稿/初稿改成了什么 → 提炼风格偏好（人设建议）。
+
+R-156：从「原文 → 当前稿」两段升级为**版本链**（初稿 → … → 定稿），
+让 AI 看出逐版改了哪些地方；没有版本时退回原来的两段行为。
+"""
 
 from __future__ import annotations
 
@@ -11,18 +15,37 @@ from .llm import LLMError
 from .prompt_service import get_prompt
 
 DIFF_SYSTEM = (
-    "你是人设学习专家。对比作者对 AI 脚本的改写，提炼作者真实的风格偏好。"
-    "只输出 JSON："
-    '{"suggestions":[{"label":"简短标签(2-6字)","description":"具体偏好描述","reason":"依据哪处改写"}]}'
+    "你是人设学习专家。下面给出作者同一篇稿子从初稿到定稿的逐版修改（按时间顺序）。"
+    "请对比各版之间的变化，提炼作者真实的风格偏好：他反复在改什么、往哪个方向改"
+    "（更口语？更短？加钩子？删套话？）。只输出 JSON："
+    '{"suggestions":[{"label":"简短标签(2-6字)","description":"具体偏好描述","reason":"依据哪一版的哪处修改"}]}'
     "若看不出明显偏好，返回空数组。"
 )
 
 
-def analyze_diff(original: str, edited: str, llm=None, db: Session | None = None) -> list[dict]:
-    if not has_meaningful_change(original, edited):
+def normalize_stages(stages: list[str]) -> list[str]:
+    """去掉空白段与相邻重复（多次定稿但正文没变）。"""
+    uniq: list[str] = []
+    for raw in stages or []:
+        text = (raw or "").strip()
+        if text and (not uniq or text != uniq[-1]):
+            uniq.append(text)
+    return uniq
+
+
+def analyze_diff(stages: list[str], llm=None, db: Session | None = None) -> list[dict]:
+    """stages：按时间正序的稿子（≥2 段，含中间版本）。返回待确认的人设建议。"""
+    uniq = normalize_stages(stages)
+    if len(uniq) < 2:
+        return []
+    if not any(has_meaningful_change(a, b) for a, b in zip(uniq, uniq[1:])):
         return []
     llm = llm or llm_router.primary_llm(db, "diff")  # R-139：模型1 主用，失败降级模型2
-    user = f"AI 原稿：\n{original}\n\n作者改后：\n{edited}"
+    blocks: list[str] = []
+    for i, text in enumerate(uniq):
+        label = "初稿" if i == 0 else ("定稿" if i == len(uniq) - 1 else f"第 {i + 1} 稿")
+        blocks.append(f"【{label}】\n{text[:2200]}")
+    user = "作者对同一篇稿子的逐版修改（按时间顺序）：\n\n" + "\n\n".join(blocks)
     try:
         data = llm.chat_json(
             [
@@ -48,10 +71,13 @@ def analyze_diff(original: str, edited: str, llm=None, db: Session | None = None
 
 
 def apply_diff_suggestions(db: Session, draft) -> int:
-    """将改稿差异建议写入人设（suggested，待作者确认）。返回新增条数。"""
-    if not draft.original_script or not draft.script:
+    """按版本链提炼偏好并写入人设（suggested，待作者确认）。返回新增条数。"""
+    from .draft_versions import version_stages
+
+    stages = version_stages(db, draft)
+    if len(stages) < 2:
         return 0
-    suggestions = analyze_diff(draft.original_script, draft.script, db=db)
+    suggestions = analyze_diff(stages, db=db)
     if not suggestions:
         return 0
     current_version = 1
@@ -84,3 +110,14 @@ def apply_diff_suggestions(db: Session, draft) -> int:
     if added:
         db.commit()
     return added
+
+
+def diff_task(db: Session, payload: dict) -> int:
+    """后台任务体（R-156）：按版本链分析改稿偏好；草稿不存在返回 0。"""
+    from ..models.draft import Draft
+
+    draft = db.get(Draft, int(payload.get("draft_id") or 0))
+    if draft is None:
+        return 0
+    return apply_diff_suggestions(db, draft)
+

@@ -4,7 +4,7 @@
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（29 张）
+## 表总览（30 张）
 
 | 表 | 说明 |
 |---|---|
@@ -19,6 +19,7 @@
 | `creator_accounts` | 博主在某平台的账号配置：主页链接、解析出的平台 ID、增强配置(extra_config JSON)、同步开关/频率/最后同步时间/头像。 |
 | `creators` | 博主：kind=owner 主博主 / benchmark 对标（parent_id 挂主博主）；is_current 标记当前主博主，切换时素材/人设/复盘整套随动。 |
 | `draft_discussions` | 双模型讨论留痕（R-023）：围绕草稿的每轮讨论消息（模型/轮次/内容）。 |
+| `draft_versions` | 草稿版本留痕（R-156）：每次定稿保存一条当前稿快照（正文/标题/封面字/标签），source=manual 手动定稿 / ai_discuss 讨论后自动定稿；版本链供改稿差异分析与生成 few-shot。 |
 | `drafts` | 脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿；prompt_version 记录生成时启用的提示词版本（R-129 M116），用于按版本聚合反馈。 |
 | `feedback` | 作者反馈：草稿 1-5 星/采用与否，R-022 后含四维分节分（hook/pace/ending/style_score），信号回流人设学习。 |
 | `hot_topics` | 热点记录：平台+标题+日期去重；供选题匹配（R-025 扩充来源，R-065 后走 TikHub 热搜）。 |
@@ -227,6 +228,28 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
 **索引**：`ix_draft_discussions_draft_id`（draft_id）
+
+**外键**：`draft_id` → `drafts.id`
+
+---
+
+## `draft_versions`
+
+草稿版本留痕（R-156）：每次定稿保存一条当前稿快照（正文/标题/封面字/标签），`source` 区分手动定稿与 AI 讨论后自动定稿；版本链喂给改稿差异分析与生成 few-shot。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `draft_id` | INTEGER |  | 否 |  |
+| `title` | VARCHAR(255) |  | 否 |  |
+| `cover_text` | VARCHAR(100) |  | 否 |  |
+| `script` | TEXT |  | 否 |  |
+| `tags` | TEXT |  | 否 | `[]` |
+| `source` | VARCHAR(20) |  | 否 | manual |
+| `note` | VARCHAR(200) |  | 否 |  |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**索引**：`ix_draft_versions_draft_id`（draft_id）
 
 **外键**：`draft_id` → `drafts.id`
 

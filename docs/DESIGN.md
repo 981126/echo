@@ -29,7 +29,7 @@
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
 | benchmark.py | /api/benchmark | 博主对标：前2+最新展示（R-152）/转写补齐/AI可讲/洗稿（R-152 增 `rewrite-source`：素材库非主博主素材一键洗稿）；「重新对标」一键重跑（R-102，后台任务） |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选/增量校验结果（R-128：`/check/latest`、`/recheck`）；R-131：`/style` 扩展风格范本与样本条数 |
-| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags`；`POST /{id}/discuss` 基于原文重新讨论（R-155） |
+| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags`；`POST /{id}/discuss` 基于原文重新讨论（R-155）；`POST /{id}/finalize` 定稿 + `GET /{id}/versions` 版本列表（R-156） |
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
 | pipeline.py | /api/pipeline | 每日流水线手动触发/热点刷新/运行记录 |
 | topics.py | /api/topics | 热点/话题缺口/匹配选题 |
@@ -49,7 +49,7 @@
 - `transcription.py`：`Transcriber.transcribe` 按 `asr_mode` 路由：mock 假转写（离线）/ aliyun（`aliyun_filetrans` 泛化调用提交+轮询）/ siliconflow（`siliconflow_asr` 直传，R-108）。
 - `aliyun_filetrans.py / aliyun_oss.py`：FileTrans 4.0（CommonRequest）与 OSS 上传/预签名 URL；上传前由 `media_tools`/`media_naming` 用 ffmpeg 抽 16k 单声道 wav。
 - `siliconflow_asr.py`（R-108）：`POST {base}/audio/transcriptions` 直传音频转写（multipart file+model，无需 OSS 中转）；视频先抽音轨、纯音频直传；平台限制单文件 ≤50MB / ≤1 小时（`media_tools.probe_duration_seconds` 探测），超限明确报错走失败通知、**不自动切换其它服务商**。
-- `pipeline.py`：每日流水线（R-140 起组候选与生成切片统一用 `model_settings.topics_count(db)`，即「AI 设置」的每日篇数）。`generation.py`：生成草稿（R-139 起统一调用 `debate.run_debate`：生成方初稿 + 评审方 N 轮 + 自检收口；不再单模型直出）；上下文 = 人设(tags+维度+红线+禁词) + 风格画像 + 检索到的风格样本（条数可配置 3~8，R-131） + **作者指定的风格范本**（必定注入） + **高表现内容的开场/结尾结构模板** + **作者改写稿 few-shot**（R-131） + 金句/最佳实践 + 对标风格卡；`generation_user_message` 抽出供评测复用；生成后**自检**（红线/禁词/口癖覆盖率）不达标自动重写 1 次，结果落 `drafts.quality`；草稿写入 `prompt_version`（R-129）与 `persona_version`（R-130）做归因。`_all_texts`（全量素材加权语料）供优化与每周重建（R-064）。
+- `pipeline.py`：每日流水线（R-140 起组候选与生成切片统一用 `model_settings.topics_count(db)`，即「AI 设置」的每日篇数）。`generation.py`：生成草稿（R-139 起统一调用 `debate.run_debate`：生成方初稿 + 评审方 N 轮 + 自检收口；不再单模型直出）；上下文 = 人设(tags+维度+红线+禁词) + 风格画像 + 检索到的风格样本（条数可配置 3~8，R-131） + **作者指定的风格范本**（必定注入） + **高表现内容的开场/结尾结构模板** + **作者改写稿 few-shot**（R-131；R-156 起优先用版本链的首版→终版，无版本退回 `original_script→script`） + 金句/最佳实践 + 对标风格卡；`generation_user_message` 抽出供评测复用；生成后**自检**（红线/禁词/口癖覆盖率）不达标自动重写 1 次，结果落 `drafts.quality`；草稿写入 `prompt_version`（R-129）与 `persona_version`（R-130）做归因。`_all_texts`（全量素材加权语料）供优化与每周重建（R-064）。
 - **推理预算定标（R-142）**：`max_tokens` 不是消费额而是**上限**（只按实际生成量计费），所以「给足」几乎不增成本，但能保住两个能力：① 用 `finish_reason=length` 判断「被截断」（整套「识别思考吃光 → 抬预算重试 → 再降级」都靠它）；② 单次调用的成本天花板（区别于墙钟那种「花之后」的边界）。
   - 现状（R-143 起分两层）：**按任务标定的预算**在 `budget_settings.SLOTS`（可配置、存 `app_kv`、保存即生效）——脚本初稿 12000 / 评审 14000 / 修订 16000 / 对标洗稿 12000 / 转写校对 12000 / 人设归纳 8000 / 提示词优化 8000 / AI 对话 8000 / 对标可讲分析 4000；
     **厂家下限** `min_max_tokens` 退回成**安全网** 4000（只兜「有人随手写 300」，不再用它替代按任务标定）；生效值 = `max(设置, 下限)`，界面显示真实生效值；翻倍重试封顶 `MAX_TOKENS_CEILING=32000`。
@@ -124,7 +124,8 @@
 - `notify.py`：QQ SMTP 每日推送 digest/失败告警（HTML）。
 - `requirements_service.py`：以 `requirements/` 文件为事实源读写（列表/详情/新建/状态机）。
 - `media_naming.py / media_tools.py`：R-058「标题-视频/封面」命名、抽音轨工具。
-- `diff_analysis.py / feedback.py`：改稿差异分析、反馈回流。
+- `diff_analysis.py / feedback.py`：改稿差异分析、反馈回流。R-156：`analyze_diff` 接收**版本链**（初稿→…→定稿）看逐版修改；`apply_diff_suggestions` 版本链优先（无版本退回 `original_script→script`）；`diff_task` 为后台任务体。
+- `draft_versions.py`（R-156）：定稿快照 `snapshot_version`、`list_versions`、`chains_for_drafts`/`version_stages`（≥2 版用版本链，否则退回原文→当前稿）。人工讨论跑完由 `draft_flow.discussion_task` 自动记 `ai_discuss` 版本。
 
 ## 3. 核心算法（backend/app/core/）
 - `timeutil.py`：`now()/today()/tz`（默认 Asia/Shanghai，`ECHO_TIMEZONE` 覆盖）——全项目唯一时间来源。
@@ -180,7 +181,7 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`；R-156：【定稿】按钮 + 【版本】tab（版本列表选任意两版出左右 diff、默认最新两版、显示「已定稿/有未定稿改动」，原文对照「洗稿后」→「修改后」））、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
   **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，

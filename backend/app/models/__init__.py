@@ -4,6 +4,7 @@ from .agent_action import AgentAction
 from .chat import ChatMessage
 from .discussion import DraftDiscussion
 from .draft import Draft
+from .draft_version import DraftVersion
 from .feedback import Feedback
 from .hot_topic import HotTopic, TopicCandidate, TopicIdea
 from .kv import Kv
@@ -38,6 +39,7 @@ __all__ = [
     "SchemaMigration",
     "Draft",
     "DraftDiscussion",
+    "DraftVersion",
     "ChatMessage",
     "AgentAction",
     "HotTopic",
