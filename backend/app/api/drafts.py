@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..services.creator_service import current_creator_id
 from ..models.draft import Draft
+from ..models.draft_version import DraftVersion
 from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
 from ..services import draft_flow
-from ..services.draft_versions import list_versions, snapshot_version, version_payload
+from ..services.draft_versions import finalize_version, list_versions, version_payload
 from ..services.diff_analysis import diff_task
 from ..services.feedback import add_feedback
 from ..services.generation import generate_draft
@@ -50,14 +51,18 @@ class FeedbackIn(BaseModel):
 
 
 def _rework_task(db: Session, payload: dict) -> dict:
-    """一键回炉（R-030⑦）：按原选题重新生成，并把内容替换回原草稿（保留 id/反馈/讨论记录）。"""
+    """一键回炉（R-030⑦）：按原选题重新生成，并把内容替换回原草稿（保留 id/反馈/讨论记录）。
+
+    R-157：中间 fresh 稿不留版，回炉结果记到**原稿**上。
+    """
     from .generation import generate_draft
+    from ..services.draft_versions import finalize_version
 
     draft = db.get(Draft, int(payload.get("draft_id") or 0))
     if draft is None:
         return {"draft_id": 0}
     topic = (payload.get("topic") or draft.title or "").strip() or "重新生成一条口播脚本"
-    fresh = generate_draft(db, topic)
+    fresh = generate_draft(db, topic, snapshot=False)
     draft.title = fresh.title or draft.title
     draft.cover_text = fresh.cover_text or draft.cover_text
     draft.script = fresh.script or draft.script
@@ -66,6 +71,7 @@ def _rework_task(db: Session, payload: dict) -> dict:
     draft.source = "ai"
     db.delete(fresh)
     db.commit()
+    finalize_version(db, draft, source="ai_generate", note="一键回炉")
     return {"draft_id": draft.id, "title": draft.title}
 
 
@@ -353,7 +359,26 @@ def draft_finalize(draft_id: int, payload: FinalizeIn, db: Session = Depends(get
     draft.video_id = payload.video_id
     db.commit()
     db.refresh(draft)
-    version = snapshot_version(db, draft, source="manual")
-    # 版本链 → 改稿偏好（人设建议，后台任务）
-    start_task("diff_analysis", {"draft_id": draft.id}, diff_task)
+    version = finalize_version(db, draft, source="manual")  # R-157：≥2 版才触发差异分析
     return {"ok": True, "draft_id": draft.id, "version": version_payload(version)}
+
+
+@router.post("/{draft_id}/versions/{version_id}/rollback", response_model=dict)
+def draft_version_rollback(draft_id: int, version_id: int, db: Session = Depends(get_db)):
+    """R-157：回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存。
+
+    按作者口径：**只覆盖保存**，不额外留痕、不改草稿状态。
+    """
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    ver = db.get(DraftVersion, version_id)
+    if ver is None or ver.draft_id != draft_id:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    draft.title = ver.title or ""
+    draft.cover_text = ver.cover_text or ""
+    draft.script = ver.script or ""
+    draft.tags = ver.tags or "[]"
+    db.commit()
+    db.refresh(draft)
+    return {"ok": True, "draft_id": draft.id, "rolled_back_to": ver.id}

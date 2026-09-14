@@ -197,8 +197,8 @@ def test_finalize_updates_and_snapshots(db, monkeypatch):
     d = Draft(title="旧", script="旧正文")
     db.add(d)
     db.commit()
-    captured: dict = {}
-    monkeypatch.setattr("app.api.drafts.start_task", lambda kind, payload, fn: captured.update({"kind": kind}) or 5)
+    kinds: list[str] = []
+    monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 5)
 
     r = _client(db).post(f"/api/drafts/{d.id}/finalize", json={"title": "新", "cover_text": "封面", "script": "定稿正文", "tags": ["求职"]})
     assert r.status_code == 200, r.text
@@ -207,11 +207,15 @@ def test_finalize_updates_and_snapshots(db, monkeypatch):
     assert body["version"]["source"] == "manual"
     assert db.get(Draft, d.id).title == "新"
     assert db.get(Draft, d.id).tags == '["求职"]'
-    assert captured["kind"] == "diff_analysis"
+    assert kinds == [], "首版不触发差异分析（R-157）"
+
+    # 第二版起才触发版本链分析
+    _client(db).post(f"/api/drafts/{d.id}/finalize", json={"title": "新2", "script": "定稿正文改过", "tags": ["求职"]})
+    assert kinds == ["diff_analysis"]
 
     r2 = _client(db).get(f"/api/drafts/{d.id}/versions")
     assert r2.status_code == 200
-    assert len(r2.json()) == 1
+    assert len(r2.json()) == 2
 
 
 def test_finalize_rejects_blank(db):
@@ -241,11 +245,11 @@ def test_discussion_task_auto_snapshots_ai_version(db, monkeypatch):
     db.commit()
     monkeypatch.setattr(draft_flow, "run_debate", lambda db_, draft, topic, **kw: {"draft_id": draft.id})
     kinds: list[str] = []
-    monkeypatch.setattr(draft_flow, "start_task", lambda kind, payload, fn: kinds.append(kind) or 1)
+    monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 1)
 
     draft_flow.discussion_task(db, {"draft_id": d.id, "source_text": "原文", "source_title": "素材"})
     rows = list_versions(db, d.id)
-    assert len(rows) == 1
-    assert rows[0].source == "ai_discuss"
-    assert rows[0].script == "讨论后正文"
-    assert kinds == ["diff_analysis"]
+    # R-157：无版本时先留「讨论前」，跑完再留「讨论后」
+    assert [r.note for r in rows] == ["讨论前", "讨论后"]
+    assert all(r.source == "ai_discuss" for r in rows)
+    assert kinds == ["diff_analysis"]  # 2 版才触发

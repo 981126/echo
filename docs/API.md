@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 127 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 128 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -572,6 +572,19 @@ R-156：草稿的定稿版本留痕（时间正序，含正文，供前端本地
 - `draft_id`（path）integer，必填
 - `x-access-token`（header）string
 **返回 200**：application/json → array
+
+### POST /api/drafts/{draft_id}/versions/{version_id}/rollback
+
+Draft Version Rollback
+
+R-157：回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存；不额外留痕、不改草稿状态。草稿或版本不存在 → 404。
+
+**参数**
+
+- `draft_id`（path）integer，必填
+- `version_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
 
 ## chat
 

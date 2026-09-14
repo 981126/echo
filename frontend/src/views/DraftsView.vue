@@ -176,59 +176,71 @@
             </div>
           </n-tab-pane>
 
-          <n-tab-pane name="compare" tab="原文对照">
-            <div v-if="editing.original_script" class="source-box">
-              <div class="cmp-grid">
-                <div class="cmp-col">
-                  <div class="cmp-h">原文案（红 = 被改写/删除）</div>
-                  <div class="diff-body"><template v-for="(seg, i) in draftDiff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
-                </div>
-                <div class="cmp-col">
-                  <div class="cmp-h">修改后（绿 = 新增/修改）</div>
-                  <div class="diff-body"><template v-for="(seg, i) in draftDiff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
-                </div>
+          <n-tab-pane name="compare" tab="正文对比">
+            <div v-if="!editing.id" class="empty" style="padding: 30px 0">先保存草稿，再进行正文对比</div>
+            <div v-else-if="versions.length < 2" class="empty" style="padding: 30px 0">
+              至少要有两个版本才能对比（先【定稿】，或让洗稿 / 讨论 / AI 生成自动留版）
+            </div>
+            <div v-else class="cmp-grid">
+              <div class="cmp-col">
+                <n-select v-model:value="cmpLeftId" :options="verOptions" size="small" style="margin-bottom: 6px" />
+                <div class="diff-body"><template v-for="(seg, i) in bodyDiff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
+              </div>
+              <div class="cmp-col">
+                <n-select v-model:value="cmpRightId" :options="verOptions" size="small" style="margin-bottom: 6px" />
+                <div class="diff-body"><template v-for="(seg, i) in bodyDiff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
               </div>
             </div>
-            <div v-else class="empty" style="padding: 30px 0">暂无原文案（对标洗稿或「讨论」后会记录）</div>
           </n-tab-pane>
 
           <n-tab-pane name="versions" :tab="versions.length ? `版本 (${versions.length})` : '版本'">
-            <div v-if="!editing.id" class="empty" style="padding: 30px 0">先保存草稿，再进行定稿与版本比较</div>
+            <div v-if="!editing.id" class="empty" style="padding: 30px 0">先保存草稿，再进行定稿</div>
             <template v-else>
               <div v-if="!versions.length" class="empty" style="padding: 24px 0">
-                还没有版本，点下方或编辑区的【定稿】保存一版
+                还没有版本，点编辑区的【定稿】保存一版
               </div>
               <template v-else>
-                <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 6px">
-                  <span class="muted" style="font-size: 12px">点选两个版本对比（已选 {{ verSel.length }}/2）</span>
+                <div class="row" style="justify-content: flex-end; margin-bottom: 6px">
                   <span v-if="finalizedState" class="muted" style="font-size: 12px">{{ finalizedState }}</span>
                 </div>
-                <div
-                  v-for="ver in versionsDesc"
-                  :key="ver.id"
-                  class="ver-row"
-                  :class="{ on: verSel.includes(ver.id) }"
-                  @click="toggleVer(ver.id)"
-                >
-                  <n-tag size="tiny" :bordered="false" round :type="ver.source === 'ai_discuss' ? 'info' : 'success'">{{ verLabel(ver.source) }}</n-tag>
-                  <span class="ver-title">{{ ver.title || '（无标题）' }}</span>
+                <div v-for="ver in versionsDesc" :key="ver.id" class="ver-row">
+                  <n-tag size="tiny" :bordered="false" round :type="verTagType(ver.source)">{{ verLabel(ver.source) }}</n-tag>
+                  <span class="ver-title">
+                    {{ ver.title || '（无标题）' }}
+                    <span v-if="ver.note" class="muted" style="font-size: 11px">· {{ ver.note }}</span>
+                  </span>
                   <span class="muted ver-time">{{ fmt(ver.created_at) }}</span>
+                  <n-button size="tiny" secondary :loading="rollingBack === ver.id" @click="rollback(ver)">回滚到此版本</n-button>
+                  <n-button size="tiny" quaternary @click="viewVer(ver)">查看</n-button>
                 </div>
-                <div v-if="verDiff" class="cmp-grid" style="margin-top: 10px">
-                  <div class="cmp-col">
-                    <div class="cmp-h">{{ verDiff.leftLabel }}</div>
-                    <div class="diff-body"><template v-for="(seg, i) in verDiff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
-                  </div>
-                  <div class="cmp-col">
-                    <div class="cmp-h">{{ verDiff.rightLabel }}</div>
-                    <div class="diff-body"><template v-for="(seg, i) in verDiff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
-                  </div>
-                </div>
-                <div v-else class="empty" style="padding: 16px 0">再选一个版本即可对比</div>
               </template>
             </template>
           </n-tab-pane>
         </n-tabs>
+      </div>
+    </n-modal>
+
+    <n-modal v-model:show="showVerView" preset="card" :title="viewVersion ? `版本 #${viewVersion.id} · ${verLabel(viewVersion.source)}` : '版本'" style="width: min(760px, 94vw)">
+      <div v-if="viewVersion" style="max-height: 72vh; overflow-y: auto; padding-right: 4px">
+        <p class="muted" style="font-size: 12px; margin-top: 0">
+          {{ fmt(viewVersion.created_at) }}<template v-if="viewVersion.note"> · {{ viewVersion.note }}</template>
+        </p>
+        <div class="form-item">
+          <label class="form-label">标题</label>
+          <div>{{ viewVersion.title || '（无标题）' }}</div>
+        </div>
+        <div class="form-item">
+          <label class="form-label">封面字</label>
+          <div>{{ viewVersion.cover_text || '（无）' }}</div>
+        </div>
+        <div class="form-item">
+          <label class="form-label">标签</label>
+          <div>{{ (viewVersion.tags || []).join('、') || '（无）' }}</div>
+        </div>
+        <div class="form-item">
+          <label class="form-label">正文</label>
+          <div class="diff-body" style="max-height: 46vh">{{ viewVersion.script || '（空）' }}</div>
+        </div>
       </div>
     </n-modal>
   </div>
@@ -272,7 +284,6 @@ const showEdit = ref(false)
 const checkInfo = ref(null)
 const reworking = ref(false)
 const editTab = ref('edit')
-const draftDiff = computed(() => buildDiff(editing.value?.original_script || '', editing.value?.script || ''))
 const tagsText = computed({
   get: () => (editing.value?.tags || []).join(', '),
   set: (v) => { if (editing.value) editing.value.tags = (v || '').split(/[,，]/).map(x => x.trim()).filter(Boolean) }
@@ -309,22 +320,42 @@ const canDiscuss = computed(() => {
   return !!(e && e.id && ((e.original_script || '').trim() || (e.script || '').trim()))
 })
 
-// R-156：定稿 + 版本留痕（每次定稿存一条；可任选两版做差异比较）
+// R-156/R-157：定稿 + 版本留痕（正文对比在「正文对比」tab 里选两个版本）
 const versions = ref([])
-const verSel = ref([])
 const verLoadedFor = ref(0)
 const finalizing = ref(false)
+const rollingBack = ref(0)
+const viewVersion = ref(null)
+const showVerView = ref(false)
+const cmpLeftId = ref(null)
+const cmpRightId = ref(null)
 const versionsDesc = computed(() => [...versions.value].reverse())
+const verOptions = computed(() => versionsDesc.value.map(v => ({
+  label: `#${v.id} · ${verLabel(v.source)} · ${fmt(v.created_at)}${v.note ? ' · ' + v.note : ''}`,
+  value: v.id
+})))
 
 function verLabel(source) {
-  return source === 'ai_discuss' ? 'AI 讨论定稿' : '手动定稿'
+  return {
+    manual: '手动定稿',
+    ai_discuss: 'AI 讨论定稿',
+    ai_rewrite: 'AI 洗稿定稿',
+    ai_generate: 'AI 生成定稿'
+  }[source] || '定稿'
+}
+
+function verTagType(source) {
+  if (source === 'manual') return 'success'
+  if (source === 'ai_rewrite') return 'warning'
+  return 'info'
 }
 
 async function loadVersions(id) {
   verLoadedFor.value = id || 0
   if (!id) {
     versions.value = []
-    verSel.value = []
+    cmpLeftId.value = null
+    cmpRightId.value = null
     return
   }
   try {
@@ -332,30 +363,38 @@ async function loadVersions(id) {
   } catch {
     versions.value = []
   }
-  verSel.value = [...versions.value].reverse().slice(0, 2).map(v => v.id)  // 默认选最新两版
+  const desc = versionsDesc.value
+  cmpRightId.value = desc[0] ? desc[0].id : null          // 右 = 最新
+  cmpLeftId.value = desc[1] ? desc[1].id : (desc[0] ? desc[0].id : null)  // 左 = 次新
 }
 
-function toggleVer(id) {
-  const cur = verSel.value
-  if (cur.includes(id)) {
-    verSel.value = cur.filter(x => x !== id)
-  } else if (cur.length >= 2) {
-    verSel.value = [cur[1], id]  // 满两个则挤掉先选的
-  } else {
-    verSel.value = [...cur, id]
+function viewVer(ver) {
+  viewVersion.value = ver
+  showVerView.value = true
+}
+
+// R-157：回滚=把该版本快照覆盖回当前草稿并保存（不额外留痕、不改状态）
+async function rollback(ver) {
+  if (!editing.value?.id) return
+  rollingBack.value = ver.id
+  try {
+    await api(`/api/drafts/${editing.value.id}/versions/${ver.id}/rollback`, { method: 'POST', body: '{}' })
+    message.success(`已回滚到版本 #${ver.id}`)
+    await refreshEditing(editing.value.id)
+    await loadVersions(editing.value.id)
+    await load()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    rollingBack.value = 0
   }
 }
 
-const verDiff = computed(() => {
-  if (verSel.value.length !== 2) return null
-  const picked = versions.value.filter(v => verSel.value.includes(v.id)).sort((a, b) => a.id - b.id)
-  if (picked.length !== 2) return null
-  const [older, newer] = picked
-  return {
-    ...buildDiff(older.script || '', newer.script || ''),
-    leftLabel: `#${older.id} · ${verLabel(older.source)}`,
-    rightLabel: `#${newer.id} · ${verLabel(newer.source)}`
-  }
+// R-157：正文对比——左右各选一个版本
+const bodyDiff = computed(() => {
+  const left = versions.value.find(v => v.id === cmpLeftId.value)
+  const right = versions.value.find(v => v.id === cmpRightId.value)
+  return buildDiff(left ? left.script || '' : '', right ? right.script || '' : '')
 })
 
 const finalizedState = computed(() => {
@@ -369,7 +408,7 @@ const finalizedState = computed(() => {
 })
 
 watch(editTab, (tab) => {
-  if (tab === 'versions' && editing.value?.id && verLoadedFor.value !== editing.value.id) {
+  if ((tab === 'versions' || tab === 'compare') && editing.value?.id && verLoadedFor.value !== editing.value.id) {
     loadVersions(editing.value.id)
   }
 })
@@ -430,7 +469,8 @@ function open(d, isNew = false) {
   discussSeen.value = false
   discussTaskId = 0
   versions.value = []
-  verSel.value = []
+  cmpLeftId.value = null
+  cmpRightId.value = null
   verLoadedFor.value = 0
   if (!isNew && editing.value.id) location.hash = `#/drafts?id=${editing.value.id}`
   if (editing.value.id) runCheck(editing.value.id)
@@ -511,7 +551,8 @@ async function closeEdit() {
   discussSeen.value = false
   discussTaskId = 0
   versions.value = []
-  verSel.value = []
+  cmpLeftId.value = null
+  cmpRightId.value = null
   verLoadedFor.value = 0
   try {
     await load()
@@ -705,18 +746,14 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.source-box { margin: 8px 0; }
-.source-pre { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; }
 .source-banner { margin: 4px 0 10px; padding: 8px 10px; background: #fdf6ef; border: 1px solid #f0dfc8; border-radius: 8px; color: #8a5a2b; font-size: 13px; }
 .source-link { color: #a34f2c; text-decoration: none; font-weight: 600; }
 .source-link:hover { text-decoration: underline; }
 .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.cmp-h { font-size: 12px; color: #a34f2c; font-weight: 600; margin-bottom: 4px; }
 .diff-body { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 55vh; overflow: auto; font-size: 13px; line-height: 1.7; }
 .diff-body .del { background: #ffe3e3; color: #c0392b; border-radius: 3px; }
 .diff-body .add { background: #dcf5dc; color: #1a7f37; border-radius: 3px; }
-.ver-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 4px; border: 1px solid var(--line, #eee5d8); border-radius: 8px; cursor: pointer; }
-.ver-row.on { border-color: #a34f2c; background: #fdf6ef; }
+.ver-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 4px; border: 1px solid var(--line, #eee5d8); border-radius: 8px; }
 .ver-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .ver-time { font-size: 11px; flex: none; }
 @media (max-width: 640px) { .cmp-grid { grid-template-columns: 1fr; } }

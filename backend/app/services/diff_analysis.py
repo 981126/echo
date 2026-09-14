@@ -121,3 +121,14 @@ def diff_task(db: Session, payload: dict) -> int:
         return 0
     return apply_diff_suggestions(db, draft)
 
+
+def maybe_start_diff_analysis(db: Session, draft) -> bool:
+    """R-157：只有 ≥2 版（有可看的「逐版修改」）才入队分析，首版不空跑。"""
+    from ..tasks import start_task
+    from .draft_versions import version_stages
+
+    if len(version_stages(db, draft)) < 2:
+        return False
+    start_task("diff_analysis", {"draft_id": draft.id}, diff_task)
+    return True
+

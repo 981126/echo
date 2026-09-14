@@ -14,20 +14,46 @@ from ..models.draft import Draft
 from ..models.draft_version import DraftVersion
 
 
-def snapshot_version(db: Session, draft: Draft, source: str = "manual", note: str = "") -> DraftVersion:
-    """把草稿当前内容存成一条版本（正文 + 标题 + 封面字 + 标签）。"""
-    v = DraftVersion(
-        draft_id=draft.id,
-        title=draft.title or "",
-        cover_text=draft.cover_text or "",
-        script=draft.script or "",
-        tags=draft.tags or "[]",
-        source=source,
-        note=note,
-    )
+def snapshot_version(
+    db: Session,
+    draft: Draft,
+    source: str = "manual",
+    note: str = "",
+    content: dict | None = None,
+) -> DraftVersion:
+    """把草稿当前内容（或用 `content` 覆盖的指定内容）存成一条版本。
+
+    content 可覆盖 title/cover_text/script/tags——用于「洗稿前 ASR」这类
+    不是草稿当时状态的快照（R-157）。
+    """
+    data = {
+        "title": draft.title or "",
+        "cover_text": draft.cover_text or "",
+        "script": draft.script or "",
+        "tags": draft.tags or "[]",
+    }
+    for key in ("title", "cover_text", "script", "tags"):
+        if content and key in content and content[key] is not None:
+            data[key] = content[key]
+    v = DraftVersion(draft_id=draft.id, source=source, note=note, **data)
     db.add(v)
     db.commit()
     db.refresh(v)
+    return v
+
+
+def finalize_version(
+    db: Session,
+    draft: Draft,
+    source: str = "manual",
+    note: str = "",
+    content: dict | None = None,
+) -> DraftVersion:
+    """留一版 + 版本数 ≥2 时触发改稿差异分析（R-157：避免首版空跑）。"""
+    v = snapshot_version(db, draft, source=source, note=note, content=content)
+    from .diff_analysis import maybe_start_diff_analysis
+
+    maybe_start_diff_analysis(db, draft)
     return v
 
 

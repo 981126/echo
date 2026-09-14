@@ -490,12 +490,13 @@ def _mock_payload(topic: str) -> tuple[str, str, str, dict]:
     return title, cover, script, shells
 
 
-def generate_draft(db: Session, topic: str, settings=None) -> Draft:
+def generate_draft(db: Session, topic: str, settings=None, snapshot: bool = True) -> Draft:
     """生成一篇脚本草稿（R-139：与工作台/每日自动生成完全相同的双模型讨论路径）。
 
     流程：建占位稿 → `run_debate`（生成方初稿 + 评审方 N 轮挑刺 + 生成方修订 + 自检收口）
     → 草稿上带 `quality`（含模型组合 / 是否降级 / 轮次 / 自检结果）。
     无密钥或两个模型都不可用时回落到确定性 mock 稿（开发/离线可跑，`quality.mock=True`）。
+    R-157：默认生成完自动定稿留一版；`snapshot=False` 用于金样本自测 / 回炉中间稿（不留版）。
     """
     from .debate import PLACEHOLDER_SCRIPT, debate_rounds, run_debate
 
@@ -544,4 +545,8 @@ def generate_draft(db: Session, topic: str, settings=None) -> Draft:
     draft.original_script = draft.script
     db.commit()
     db.refresh(draft)
+    if snapshot:
+        from .draft_versions import finalize_version
+
+        finalize_version(db, draft, source="ai_generate", note="AI 生成")
     return draft

@@ -18,15 +18,24 @@ from .debate import PLACEHOLDER_SCRIPT, clear_debate_state, run_debate, run_deba
 
 
 def debate_task(db: Session, payload: dict) -> dict:
-    """后台任务体：跑双模型讨论；失败时清进度与占位稿（R-134），再抛出。"""
+    """后台任务体：跑双模型讨论；失败时清进度与占位稿（R-134），再抛出。
+
+    R-157：跑完自动定稿留一版（source=ai_generate）。
+    """
     try:
-        return run_debate_draft(db, payload)
+        res = run_debate_draft(db, payload)
     except Exception:
         try:
             clear_debate_state(db, int(payload.get("draft_id") or 0))
         except Exception:  # noqa: BLE001 清理失败不能掩盖原始错误
             db.rollback()
         raise
+    draft = db.get(Draft, int(payload.get("draft_id") or 0))
+    if draft is not None:
+        from .draft_versions import finalize_version
+
+        finalize_version(db, draft, source="ai_generate", note="AI 生成")
+    return res
 
 
 def create_placeholder_draft(db: Session, topic: str) -> Draft:
@@ -85,22 +94,23 @@ def resolve_discussion_source(db: Session, draft: Draft) -> tuple[str, str]:
 def discussion_task(db: Session, payload: dict) -> dict:
     """后台任务体：基于原文跑双模型多轮讨论（R-155），完成后更新草稿并留痕。
 
-    R-156：讨论跑完把最新一版自动定稿留痕（source=ai_discuss），并异步分析版本链偏好。
+    R-157：若该草稿**还没有任何版本**，先把当前正文记成第一版（`讨论前`）；
+    讨论跑完再把结果记为后一版（`讨论后`）；版本数 ≥2 才触发改稿差异分析。
     """
-    from .diff_analysis import diff_task
-    from .draft_versions import snapshot_version
+    from .draft_versions import finalize_version, list_versions
 
     draft = db.get(Draft, int(payload.get("draft_id") or 0))
     if draft is None:
         raise ValueError("草稿不存在")
     if draft.creator_id is None:
         draft.creator_id = current_creator_id(db)
+    if not list_versions(db, draft.id):
+        finalize_version(db, draft, source="ai_discuss", note="讨论前")
     source_text = str(payload.get("source_text") or "")
     source_title = str(payload.get("source_title") or "")
     topic = (draft.title or "").strip() or source_title or "重新讨论"
     res = run_debate(db, draft, topic, source_text=source_text, source_title=source_title)
-    snapshot_version(db, draft, source="ai_discuss", note="AI 讨论定稿")
-    start_task("diff_analysis", {"draft_id": draft.id}, diff_task)
+    finalize_version(db, draft, source="ai_discuss", note="讨论后")
     return res
 
 

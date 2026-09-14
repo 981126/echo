@@ -29,7 +29,7 @@
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
 | benchmark.py | /api/benchmark | 博主对标：前2+最新展示（R-152）/转写补齐/AI可讲/洗稿（R-152 增 `rewrite-source`：素材库非主博主素材一键洗稿）；「重新对标」一键重跑（R-102，后台任务） |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选/增量校验结果（R-128：`/check/latest`、`/recheck`）；R-131：`/style` 扩展风格范本与样本条数 |
-| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags`；`POST /{id}/discuss` 基于原文重新讨论（R-155）；`POST /{id}/finalize` 定稿 + `GET /{id}/versions` 版本列表（R-156） |
+| drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags`；`POST /{id}/discuss` 基于原文重新讨论（R-155）；`POST /{id}/finalize` 定稿 + `GET /{id}/versions` + `POST /{id}/versions/{vid}/rollback` 回滚（R-156/R-157） |
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
 | pipeline.py | /api/pipeline | 每日流水线手动触发/热点刷新/运行记录 |
 | topics.py | /api/topics | 热点/话题缺口/匹配选题 |
@@ -125,7 +125,11 @@
 - `requirements_service.py`：以 `requirements/` 文件为事实源读写（列表/详情/新建/状态机）。
 - `media_naming.py / media_tools.py`：R-058「标题-视频/封面」命名、抽音轨工具。
 - `diff_analysis.py / feedback.py`：改稿差异分析、反馈回流。R-156：`analyze_diff` 接收**版本链**（初稿→…→定稿）看逐版修改；`apply_diff_suggestions` 版本链优先（无版本退回 `original_script→script`）；`diff_task` 为后台任务体。
-- `draft_versions.py`（R-156）：定稿快照 `snapshot_version`、`list_versions`、`chains_for_drafts`/`version_stages`（≥2 版用版本链，否则退回原文→当前稿）。人工讨论跑完由 `draft_flow.discussion_task` 自动记 `ai_discuss` 版本。
+- `draft_versions.py`（R-156/R-157）：定稿快照 `snapshot_version`（支持 `content` 覆盖，用于「洗稿前 ASR」这类非当时状态的快照）、
+  `finalize_version`（留一版 + ≥2 版才触发差异分析）、`list_versions`、`chains_for_drafts`/`version_stages`（≥2 版用版本链，否则退回原文→当前稿）。
+  自动留版：洗稿 `run_rewrite_debate`（前=素材 ASR、后=洗稿稿）、讨论 `draft_flow.discussion_task`（无版本先留「讨论前」再留「讨论后」）、
+  AI 生成 `generation.generate_draft` 与 `draft_flow.debate_task`（`snapshot=False` 用于金样本自测 / 回炉中间稿，回炉结果记到原稿）。
+  回滚 = 把版本快照覆盖回草稿并保存（不额外留痕、不改状态）。
 
 ## 3. 核心算法（backend/app/core/）
 - `timeutil.py`：`now()/today()/tz`（默认 Asia/Shanghai，`ECHO_TIMEZONE` 覆盖）——全项目唯一时间来源。
@@ -181,7 +185,7 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`；R-156：【定稿】按钮 + 【版本】tab（版本列表选任意两版出左右 diff、默认最新两版、显示「已定稿/有未定稿改动」，原文对照「洗稿后」→「修改后」））、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`；R-156：【定稿】按钮 + 【版本】tab（版本列表），版本链反哺改稿差异分析与生成 few-shot；R-157：【版本】每条可【回滚到此版本】【查看】（回滚=覆盖保存），原【原文对照】改为【正文对比】（左右各一个版本下拉框选任意两版对比））、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
   **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，

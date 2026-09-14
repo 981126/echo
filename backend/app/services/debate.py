@@ -395,6 +395,21 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     db.commit()
     db.refresh(draft)
 
+    # R-157：洗稿前先把素材 ASR 文案记为第一版（洗稿后正文是第二版）
+    from .draft_versions import finalize_version
+
+    finalize_version(
+        db,
+        draft,
+        source="ai_rewrite",
+        note="洗稿前（素材 ASR）",
+        content={
+            "title": source_title,
+            "script": source_text,
+            "tags": json.dumps(source_tags, ensure_ascii=False),
+        },
+    )
+
     rewrite_system = (
         "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；"
         "不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"
@@ -474,6 +489,8 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         _add(db, draft.id, r, gen, "revise", latest)
 
     _clear_status(db, draft.id)
+    # R-157：洗稿完成后记第二版
+    finalize_version(db, draft, source="ai_rewrite", note="洗稿后")
     return {
         "draft_id": draft.id,
         "title": draft.title,

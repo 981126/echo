@@ -139,7 +139,7 @@ def _selfcheck_task(db: Session, payload: dict) -> None:
         made = 0
         for tp in topics:
             try:
-                generate_draft(db, tp)
+                generate_draft(db, tp, snapshot=False)  # R-157：金样本自测不留版本
                 made += 1
             except Exception:  # noqa: BLE001 单条失败不影响其余
                 db.rollback()
