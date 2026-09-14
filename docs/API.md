@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 123 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 124 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -1493,11 +1493,11 @@ Health
 
 ### GET /api/benchmark/top
 
-对标博主最新10条互动分 Top3。
+每个对标博主展示 3 条 = 最新15条里按互动分取前2 + 第三篇=该对标最新一篇（R-152；重叠按互动分顺延保底3条，展示时「有文案优先」R-106）。
 
 ### POST /api/benchmark/prepare
 
-转写补齐文案并返回有文案 Top3（无文案顺延）。
+转写补齐「前2+最新」文案并返回有文案的 3 条（无文案顺延，R-152）。
 
 ### POST /api/benchmark/analyze
 
@@ -1506,9 +1506,14 @@ AI 判断“我能不能讲”。
 ### POST /api/benchmark/rewrite
 
 按人设洗稿并存脚本草稿。
+
+### POST /api/benchmark/rewrite-source
+
+R-152：素材库非主博主素材一键洗稿——入参 `video_id` / `post_id` / `work_id` 三选一，服务端取该素材 ASR 文案后走同一洗稿链路（双模型讨论），返回 task_id。
+
 ### POST /api/benchmark/rerun
 
-R-102：页顶「重新对标」一键重跑——重捞所有对标最新10条 + 自动补 Top3 文案（长任务后台执行，返回 task_id）。
+R-102/R-152：页顶「重新对标」一键重跑——重捞所有对标最新15条 + 自动补「前2+最新」文案（长任务后台执行，返回 task_id）。
 
 ### GET /api/videos/{video_id}/media-meta
 

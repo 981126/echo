@@ -1,4 +1,4 @@
-"""博主对标（R-097）：Top3 展示 + 可讲分析 + 按人设洗稿存草稿。"""
+"""博主对标（R-097）：前2+最新展示（R-152） + 可讲分析 + 按人设洗稿存草稿。"""
 
 from __future__ import annotations
 
@@ -9,12 +9,10 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models.platform import Creator
 from ..services.benchmark import (
-    _stats_map,
-    _unit_text,
     benchmarks_of_owner,
-    candidates,
     ensure_top3_with_text,
-    score_unit,
+    resolve_rewrite_source,
+    target_units,
     unit_payload,
     analyze_worker,
     rerun_worker,
@@ -35,19 +33,15 @@ def _owner(db: Session) -> Creator:
 
 @router.get("/top", response_model=dict)
 def benchmark_top(db: Session = Depends(get_db)):
-    """每个对标博主：最新15条里按互动分取前3（R-109：10 → 15；尚未转写的可先展示占位，需先 prepare）。"""
+    """每个对标博主：最新15条里按互动分取前2 + 第三篇=该对标最新一篇（R-152）。
+
+    尚未转写的可先展示占位，需先 prepare；展示时仍「有文案优先」（R-106）。
+    """
     owner = _owner(db)
     out = []
     for bm in benchmarks_of_owner(db, owner):
-        units = candidates(db, bm, limit=15)
-        stats_map = _stats_map(db, units)
-        ranked = sorted(units, key=lambda u: score_unit(db, u, stats_map), reverse=True)
-        # R-106：有文案（含转写）的优先占位；空文案/空转写由下一条有文案的顶上，
-        # 仍不足 3 条时才用分数最高的无文案项补位展示（提示“暂无文案”）
-        with_text = [u for u in ranked if _unit_text(db, u)]
-        without_text = [u for u in ranked if not _unit_text(db, u)]
-        ordered = with_text + without_text
-        items = [unit_payload(db, u, stats_map, owner_id=owner.id) for u in ordered[:3]]
+        picked = target_units(db, bm, limit_candidates=15, with_text_first=True)
+        items = [unit_payload(db, u, owner_id=owner.id) for u in picked]
         out.append({"benchmark_id": bm.id, "name": bm.name, "note": bm.note or "", "items": items})
     return {"owner_id": owner.id, "owner_name": owner.name, "benchmarks": out}
 
@@ -58,7 +52,7 @@ class PrepareIn(BaseModel):
 
 @router.post("/prepare", response_model=dict)
 def benchmark_prepare(payload: PrepareIn, db: Session = Depends(get_db)):
-    """对某个对标博主补齐文案（缺转写自动下载+转写，无文案顺延），返回有文案的 Top3。
+    """对某个对标博主补齐文案（前2+最新缺转写自动下载+转写，无文案顺延），返回有文案的 3 条。
 
     同步执行，转写耗时可能几分钟；前端给 loading 提示。
     """
@@ -114,9 +108,36 @@ def benchmark_rewrite(payload: TextIn, db: Session = Depends(get_db)):
     return {"task_id": task_id}
 
 
+class RewriteSourceIn(BaseModel):
+    video_id: int | None = None
+    post_id: int | None = None
+    work_id: int | None = None
+
+
+@router.post("/rewrite-source", response_model=dict)
+def benchmark_rewrite_source(payload: RewriteSourceIn, db: Session = Depends(get_db)):
+    """R-152：素材库非主博主素材一键洗稿——服务端按素材取 ASR 文案，走同一洗稿链路。
+
+    入参三选一：本地素材 video_id / 云端作品 work_id / 云端单条 post_id。
+    """
+    owner = _owner(db)
+    try:
+        src = resolve_rewrite_source(
+            db,
+            owner,
+            video_id=int(payload.video_id or 0),
+            post_id=int(payload.post_id or 0),
+            work_id=int(payload.work_id or 0),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    task_id = start_task("benchmark_rewrite", {"owner_id": owner.id, **src}, rewrite_worker)
+    return {"task_id": task_id}
+
+
 @router.post("/rerun", response_model=dict)
 def benchmark_rerun(db: Session = Depends(get_db)):
-    """R-102/R-104/R-109：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新15条 + 自动补 Top3 文案。
+    """R-102/R-104/R-109/R-152：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新15条 + 自动补「前2+最新」文案。
 
     长任务（含同步与转写，可能较久）：落后台任务+进度+完成通知，返回 task_id 供前端轮询。
     """

@@ -25,6 +25,7 @@ class VideoOut(BaseModel):
     id: int
     filename: str
     title: str = ""
+    creator_id: Optional[int] = None  # R-152：归属博主（前端判断是否非主博主素材，决定洗稿入口）
     cover_url: Optional[str] = None
     platforms: list[str] = []
     status: str = "planned"

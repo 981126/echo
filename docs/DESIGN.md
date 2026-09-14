@@ -27,7 +27,7 @@
 | works.py | /api/works | 云端作品列表、to-local、meta、merge/split、auto-merge、删除、cleanup-tags |
 | platform.py | /api/platform | 云端作品/评论/指标/同步触发与任务/预算/选题池/主页快照；bind-links |
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
-| benchmark.py | /api/benchmark | 博主对标：Top3 展示/转写补齐/AI可讲/洗稿；「重新对标」一键重跑（R-102，后台任务） |
+| benchmark.py | /api/benchmark | 博主对标：前2+最新展示（R-152）/转写补齐/AI可讲/洗稿（R-152 增 `rewrite-source`：素材库非主博主素材一键洗稿）；「重新对标」一键重跑（R-102，后台任务） |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选/增量校验结果（R-128：`/check/latest`、`/recheck`）；R-131：`/style` 扩展风格范本与样本条数 |
 | drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分 |
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
@@ -116,7 +116,7 @@
 - `style_profile`（core）：口癖/句长/感叹反问占比等画像；R-057 表达风格面板 + 禁词注入。
 - `metrics.py`：`_platform_breakdown`（平台最新指标，供生成加权）/`summary`/`radar`（赛道雷达，R-136 自 review 迁入）/`apply_retention`（热点 30 天清理）；R-136 已删除无调用方的 upsert/import/fetch/series。
 - `chat_service.py`：只读工具集 + 流式问答；工具：search_videos/get_video_detail/get_persona/list_requirements/get_metrics_summary/get_today_topics/get_review_report/get_radar/search_drafts/generate_draft（写操作需明确同意）。SSE 由 api/chat 组装。
-- `benchmark.py`：对标聚合（最新15条按互动分 Top3，R-109：10→15；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `ensure_top3_with_text`（缺文案自动下载转写、无文案顺延；有文案后严格 AI 审核软广/商单/引流并落库排除，R-103/R-106）+ `rerun_benchmarks(db, owner, update, refetch)`（R-102/R-109：refetch=True 手动重捞最新15条；refetch=False 每日同步后自动触发、不重复拉取，只重算 Top3/补缺转写）；/top 有文案优先（空文案被下一条顶上，R-106）。
+- `benchmark.py`：对标聚合（**R-152：最新15条按互动分取前2 + 第三篇=该对标最新一篇**（重叠按互动分顺延保底3条），R-109：10→15；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `target_units`（R-152 统一的展示/补齐目标选取，`with_text_first` 保留 R-106 展示口径）+ `ensure_top3_with_text`（前2+最新缺文案自动下载转写、无文案顺延；有文案后严格 AI 审核软广/商单/引流并落库排除，R-103/R-106）+ `resolve_rewrite_source`（R-152：素材库按 video_id/post_id/work_id 解析 ASR 文案与来源，供 `/rewrite-source` 洗稿）+ `rerun_benchmarks(db, owner, update, refetch)`（R-102/R-109：refetch=True 手动重捞最新15条；refetch=False 每日同步后自动触发、不重复拉取，只重算前2+最新/补缺转写）；/top 有文案优先（空文案被下一条顶上，R-106）。
 - `platform_sync.py`：见 §4。
 - `works_service.py`：标题规范化（去话题/标点/空白/小写）+ 自动合并 + 手动合并/拆分 + `list_works`（合并作品含各平台）+ `post_item`（作品序列化）。
 - `creator_service.py`：当前博主/切换/账号元数据/全网粉丝汇总/删除保护。
@@ -180,13 +180,14 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并）、DraftsView（三 tab+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152 非主博主卡片与编辑页「洗稿」）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
+  **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，
   `drafts.script` 契约不变）；扩展 = StarterKit + Image + Placeholder + TableKit + TaskList/TaskItem + `@tiptap/markdown`；
   `onUpdate → editor.getMarkdown()` 回写，外部换稿走 `setContent({ contentType: 'markdown', emitUpdate: false })`；
   插图（工具栏/粘贴/拖拽）复用 `uploadImage()`；DraftsView 用 `defineAsyncComponent` 懒加载（ProseMirror 不进首屏）。
-- `composables/media.js`：fetchVideos/fetchWorks 统一入口。
+- `composables/media.js`：fetchVideos/fetchWorks 统一入口；`composables/rewrite.js`（R-152）：素材库「洗稿」发起 `POST /api/benchmark/rewrite-source` + 轮询任务，状态模块级跨页保留。
 - `lib/`：format.js（平台名/数字缩写）、options.js（平台/赛道/状态选项）、timeline.js。
 - dev：vite 5173 代理后端 8000（`vite.config`）；构建产物 dist 由后端托管。
 

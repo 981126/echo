@@ -9,7 +9,7 @@
     </div>
     <div v-if="loading" class="panel empty">加载中…</div>
     <div v-else-if="!benchmarks.length" class="panel empty">
-      还没有对标博主。去「博主管理」为当前主博主添加对标账号后，这里会自动展示其最新 10 条里数据最好的前 3 条。
+      还没有对标博主。去「博主管理」为当前主博主添加对标账号后，这里会自动展示其数据最好的前 2 条 + 最新发布的一篇。
     </div>
     <div v-else class="bm-list">
       <div v-for="b in benchmarks" :key="b.benchmark_id" class="panel" style="margin-bottom: 16px">
@@ -20,7 +20,7 @@
           </div>
           <div class="row" style="gap: 8px">
             <n-button size="small" secondary :loading="preparingId === b.benchmark_id" @click="prepare(b)">
-              转写补齐Top3（无文案自动顺延）
+              转写补齐（前2+最新）
             </n-button>
           </div>
         </div>
@@ -53,34 +53,23 @@
       </div>
     </div>
 
-    <n-modal v-model:show="showScript" preset="card" :title="'洗稿完成 · 已存入草稿 #' + (draftId || '')" style="width: min(980px, 96vw)">
-      <div v-if="sourceTitle" class="muted" style="margin-bottom: 8px">
-        来源素材：{{ sourceTitle }}<template v-if="benchmarkName"> · 对标「{{ benchmarkName }}」</template>
-      </div>
-      <div class="cmp-grid">
-        <div class="cmp-col">
-          <div class="cmp-h">原文案（红 = 被改写/删除）</div>
-          <div class="diff-body"><template v-for="(seg, i) in diff.left" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
-        </div>
-        <div class="cmp-col">
-          <div class="cmp-h">洗稿后（绿 = 新增/修改）</div>
-          <div class="diff-body"><template v-for="(seg, i) in diff.right" :key="i"><span :class="seg.type">{{ seg.text }}</span></template></div>
-        </div>
-      </div>
-      <div class="row" style="justify-content: flex-end; gap: 8px; margin-top: 8px">
-        <n-button size="small" @click="copyScript">复制洗稿后</n-button>
-        <n-button size="small" type="primary" @click="showScript = false">关闭</n-button>
-      </div>
-    </n-modal>
+    <RewriteDiffModal
+      v-model:show="showScript"
+      :script-text="scriptText"
+      :original-text="originalText"
+      :source-title="sourceTitle"
+      :benchmark-name="benchmarkName"
+      :draft-id="draftId"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, toRef, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, toRef, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { platformName } from '../lib/format'
-import { buildDiff } from '../lib/diff'
+import RewriteDiffModal from '../components/RewriteDiffModal.vue'
 
 const message = useMessage()
 
@@ -115,7 +104,6 @@ const sourceTitle = toRef(ui, 'sourceTitle')
 const benchmarkName = toRef(ui, 'benchmarkName')
 const draftId = toRef(ui, 'draftId')
 
-const diff = computed(() => buildDiff(originalText.value, scriptText.value))
 let analyzeSeq = 0
 let rewriteSeq = 0
 
@@ -139,11 +127,11 @@ async function load() {
 
 async function prepare(b) {
   preparingId.value = b.benchmark_id
-  message.info(`开始为「${b.name}」补齐文案并取 Top3（需几分钟，请稍候…）`)
+  message.info(`开始为「${b.name}」补齐文案（前2+最新，需几分钟，请稍候…）`)
   try {
     const d = await api('/api/benchmark/prepare', { method: 'POST', body: JSON.stringify({ benchmark_id: b.benchmark_id }) })
     b.items = d.items || []
-    message.success('Top3 文案已就绪')
+    message.success('文案已就绪')
     await load()
   } catch (e) {
     message.error(e.message)
@@ -156,7 +144,7 @@ async function rerunAll() {
   rerunning.value = true
   rerunPct.value = 0
   rerunNote.value = '准备中…'
-  message.info('开始重新对标：重捞各对标最新数据并自动补齐 Top3 文案，需几分钟，请稍候…')
+  message.info('开始重新对标：重捞各对标最新数据并自动补齐（前2+最新）文案，需几分钟，请稍候…')
   try {
     const d = await api('/api/benchmark/rerun', { method: 'POST' })
     await waitTask(d.task_id)
@@ -187,7 +175,7 @@ async function waitTask(taskId) {
       rerunNote.value = ''
       rerunning.value = false
       if (pollAlive) {
-        message.success('重新对标完成，Top3 已刷新')
+        message.success('重新对标完成，已刷新')
         await load()
       }
       return
@@ -237,7 +225,7 @@ async function resumeRunning() {
 
 async function analyze(b, it) {
   if (!it.text) {
-    message.warning('该条还没有文案，请先“转写补齐Top3”')
+    message.warning('该条还没有文案，请先「转写补齐（前2+最新）」')
     return
   }
   analyzingKey.value = it.key
@@ -332,15 +320,6 @@ async function watchRewrite(taskId, key) {
   }
 }
 
-async function copyScript() {
-  try {
-    await navigator.clipboard.writeText(scriptText.value)
-    message.success('已复制')
-  } catch {
-    message.warning('复制失败，请手动选择复制')
-  }
-}
-
 onMounted(async () => {
   await load()
   resumeRunning()
@@ -361,10 +340,4 @@ onUnmounted(() => {
 .can { color: #18a058; font-weight: 600; }
 .no { color: #d03050; font-weight: 600; }
 .script-pre { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 60vh; overflow: auto; }
-.diff-body { white-space: pre-wrap; word-break: break-word; background: #faf7f2; border-radius: 8px; padding: 12px; max-height: 60vh; overflow: auto; font-size: 13px; line-height: 1.7; }
-.diff-body .del { background: #ffe3e3; color: #c0392b; border-radius: 3px; }
-.diff-body .add { background: #dcf5dc; color: #1a7f37; border-radius: 3px; }
-.cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.cmp-h { font-size: 12px; color: #a34f2c; font-weight: 600; margin-bottom: 4px; }
-@media (max-width: 640px) { .cmp-grid { grid-template-columns: 1fr; } }
 </style>

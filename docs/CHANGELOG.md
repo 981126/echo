@@ -1,5 +1,31 @@
 # 变更记录
 
+## [M141 / R-152] 2026-09-14 — 脚本工作台隐藏废稿 tab + 对标「前2+最新」+ 素材库非主博主洗稿入口
+> 作者四条：①脚本工作台【废稿/已删除】tab 不再展示（只是不展示）；②博主对标沿用旧规则取两篇，第三篇为对标博主最新一篇；
+> ③素材库非主博主的卡片素材「同步」旁加洗稿；④素材库非主博主素材编辑页 ASR「已转写」旁也加洗稿。
+> 反问确认：第三篇与前2重叠 → 按互动分顺延保底3条；第三篇没有文案 → 也自动补齐转写；
+> 洗稿加在云端卡与本地卡（凡有「同步」的）；`DraftsView` 保留「不采用/移入废稿/删除」按钮，只隐藏 tab。
+
+- **① 脚本工作台**：`DraftsView.vue` 删除 `archived` tab-pane（只剩「草稿/待制作」）；后端 `drafts.status` 语义、接口、
+  `markArchived`/`softDelete` 与按钮**一律保留**（作者「只是不展示」）；深链打开废稿/已删除稿时不再切到已隐藏 tab
+  （弹窗照常可看），删除提示改为「已删除」。
+- **② 博主对标口径**（`services/benchmark.py` / `api/benchmark.py`）：新增 `target_units()` 统一目标选取
+  （`with_text_first` 保留 R-106「有文案优先」展示口径）——最新 15 条按互动分取**前 2** + 第三篇 = 该对标**最新一篇**
+  （重叠时按互动分顺延补第 3，保底 3 条；候选不足 3 条则给全部）；`/top`、`/prepare`、`rerun_benchmarks`（含每日同步后
+  自动重算）全部走同一口径；`ensure_top3_with_text` 同样对最新一篇补齐转写（无文案/广告顺延）。文案与页头提示同步改写。
+- **③④ 素材库洗稿入口**：新增 `resolve_rewrite_source()` + `POST /api/benchmark/rewrite-source`
+  （入参 `video_id` / `post_id` / `work_id` 三选一，服务端取该素材 ASR 文案 + 标题 + 对标名 + 来源 id），
+  复用现有双模型多轮讨论洗稿 `rewrite_worker`，落脚本草稿；主博主自己的素材拒绝（400）。
+  `VideoOut` 新增 `creator_id`（前端判断「非主博主」）；
+  前端新增 `composables/rewrite.js`（发起 + 轮询，状态模块级跨页保留）+ `components/RewriteDiffModal.vue`
+  （博主对标页与素材库共用的原文/洗稿对照弹窗，消除重复弹窗代码）；
+  `MaterialCard` 云端卡与本地卡「同步」旁、「TranscribeSection」「已转写」旁加「洗稿」（仅非主博主素材）。
+- **文档**：PRD §3.2/§3.3/§3.5、DESIGN（benchmark.py/composables/组件）、API.md（+1 路由，共 124）、
+  milestones（M141）、requirements/R-152。
+- **验证**：`scripts/verify.sh` 全绿（ruff + mypy + pytest **331 例**（新增 11 例：前2+最新/重叠顺延/有文案优先/
+  最新补转写/来源解析与主博主编拒/接口三态）+ 前端 lint 0 error + build + 文档一致 29 表/124 路由）；
+  接口冒烟与前端点检见里程碑记录。
+
 ## [M140 / R-151] 2026-09-14 — 素材同步失败修复：TikHub 同路由限速 + 瞬时故障重试
 > 作者报障：素材同步失败 ——「关于经济独立我的思考…」：`TikHub 请求失败: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol`。
 > 该次 daily 同步（09:22–09:34，5 个博主账号）注册的 `card_sync` 队列里 **169 条失败**，通知只显示到其中两条。

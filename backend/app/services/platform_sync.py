@@ -950,7 +950,7 @@ def run_daily_sync_all(db: Session) -> dict:
     主博主与对标博主同规格：每账号最新 15 条 + 下载视频 + 自动转写
     （已下载/已转写自动跳过，不重复花 ASR 钱）；同步完成后自动触发一次
     「重新对标」（refetch=False：不重复拉取 TikHub，只基于刚同步的数据重算
-    Top3/补齐极个别缺转写）。
+    前2+最新/补齐极个别缺转写）。
     """
     from .benchmark import benchmarks_of_owner, maybe_start_benchmark_rerun
 

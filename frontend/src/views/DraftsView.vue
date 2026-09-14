@@ -61,21 +61,6 @@
           </div>
         </div>
       </n-tab-pane>
-
-      <n-tab-pane name="archived" :tab="`废稿/已删除 (${list('archived').length})`">
-        <div v-if="!list('archived').length" class="panel empty">废稿箱是空的</div>
-        <div class="grid">
-          <div v-for="d in list('archived')" :key="d.id" class="card-tile" @click="open(d)">
-            <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
-            <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
-            <div class="tile-actions" @click.stop>
-              <n-tag v-if="d.status === 'deleted'" size="small" :bordered="false" round type="error">已删除</n-tag>
-              <n-button size="small" secondary @click="restore(d)">恢复为草稿</n-button>
-              <n-button v-if="d.status !== 'deleted'" size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
-            </div>
-          </div>
-        </div>
-      </n-tab-pane>
     </n-tabs>
 
     <n-modal
@@ -366,15 +351,11 @@ async function markArchived(d) {
   message.success('已移入废稿')
   load()
 }
-async function restore(d) {
-  await setStatus(d.id, 'draft')
-  message.success('已恢复为草稿')
-  load()
-}
 
 async function softDelete(d) {
   await setStatus(d.id, 'deleted')
-  message.success('已删除（逻辑删除，可在废稿/已删除中恢复）')
+  // R-152：【废稿/已删除】tab 不再展示，逻辑删除的稿子只能在后端数据里查到
+  message.success('已删除')
   load()
 }
 
@@ -442,7 +423,8 @@ onMounted(async () => {
     const d = drafts.value.find(x => x.id === Number(m[1]))
     if (d) {
       open(d)
-      listTab.value = d.status || 'draft'
+      // R-152：【废稿/已删除】tab 已不再展示，深链打开这类稿子时列表停留在草稿，弹窗照常可看
+      if (d.status === 'used') listTab.value = 'used'
     }
   }
   pollTimer = setInterval(poll, 3000)

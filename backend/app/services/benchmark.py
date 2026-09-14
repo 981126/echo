@@ -1,4 +1,4 @@
-"""R-097：博主对标——对标最新10条取数据 Top3 + “我能不能讲” + 按人设洗稿存草稿。
+"""R-097：博主对标——对标最新15条取前2 + 最新一篇（R-152）+ “我能不能讲” + 按人设洗稿存草稿。
 
 对标内容只做分析与改写来源，绝不进入主博主人设学习语料（D-028）；
 转写补齐产生的对标素材归属对标博主（R-082），天然被主博主语料过滤排除。
@@ -199,16 +199,57 @@ def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
         return False
 
 
+def _sorted_by_score(db: Session, units: list[dict]) -> list[dict]:
+    """按互动分降序（R-152 抽取，供展示/补齐/目标选取共用）。"""
+    stats_map = _stats_map(db, units)
+    return sorted(units, key=lambda u: score_unit(db, u, stats_map), reverse=True)
+
+
+def target_units(db: Session, bm: Creator, limit_candidates: int = 15, with_text_first: bool = False) -> list[dict]:
+    """R-152 对标展示口径：旧规则取前 2 + 第三篇 = 该对标最新一篇。
+
+    - 候选仍为最新 N 条（广告/同款漏标已在 candidates() 过滤）。
+    - 前 2 = 按互动分降序前两条；with_text_first=True 时先把「有文案」的排前（R-106 展示口径）。
+    - 第三篇 = 最新一篇（publish_time 最大）；若它已在前 2 里，则按互动分顺延补一条（保底 3 条）。
+    - 候选不足 3 条时返回可用的全部。
+    """
+    units = candidates(db, bm, limit=limit_candidates)
+    if not units:
+        return []
+    ranked = _sorted_by_score(db, units)
+    if with_text_first:
+        ranked = [u for u in ranked if _unit_text(db, u)] + [u for u in ranked if not _unit_text(db, u)]
+    latest = max(units, key=lambda u: (u["post"].publish_time or _EPOCH))
+    picked: list[dict] = list(ranked[:2])
+    if latest not in picked:
+        picked.append(latest)
+    for unit in ranked:  # 顺延补位（重叠或候选不足时保底 3 条）
+        if len(picked) >= 3:
+            break
+        if unit not in picked:
+            picked.append(unit)
+    return picked[:3]
+
+
 def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -> list[dict]:  # R-109：10 → 15
-    """最新 N 条按互动分排序，逐条补齐转写；取前 3 条“有文案”的。
+    """R-152：取「前 2（互动分）+ 最新一篇」，逐条补齐转写；广告/无文案顺延，保底 3 条有文案。
 
     转写后仍无文案（识别为空/无声等）→ 顺延下一条顶上（R-097 Q3）。
     """
     units = candidates(db, bm, limit=limit_candidates)
-    stats_map = _stats_map(db, units)
-    ranked = sorted(units, key=lambda u: score_unit(db, u, stats_map), reverse=True)
+    if not units:
+        return []
+    ranked = _sorted_by_score(db, units)
+    latest = max(units, key=lambda u: (u["post"].publish_time or _EPOCH))
+    order: list[dict] = list(ranked[:2])
+    if latest not in order:
+        order.append(latest)
+    for unit in ranked:  # 前 2 / 最新 之外的按分顺延，用于补位
+        if unit not in order:
+            order.append(unit)
+
     picked: list[dict] = []
-    for unit in ranked:
+    for unit in order:
         text = _unit_text(db, unit)
         if not text:
             # 缺转写：下载音频+转写（对标素材；失败/无语音则顺延）
@@ -226,7 +267,7 @@ def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 15) 
             _flag_unit_ad(db, unit)  # R-103：广告/商单不进对标，顺延下一条
             continue
         unit["text"] = text
-        unit["score"] = score_unit(db, unit, stats_map)
+        unit["score"] = score_unit(db, unit, _stats_map(db, [unit]))
         picked.append(unit)
         if len(picked) >= 3:
             break
@@ -442,6 +483,130 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref:
     return {"title": new_title, "script": script, "draft_id": draft.id, "original_script": text, "source_ref": source_ref or {}}
 
 
+def _json_list(raw: str) -> list[str]:
+    try:
+        arr = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [str(x) for x in arr if x] if isinstance(arr, list) else []
+
+
+def _posts_tags(posts: list[PlatformPost]) -> list[str]:
+    tags: list[str] = []
+    for p in posts:
+        for t in _json_list(p.tags):
+            if t not in tags:
+                tags.append(t)
+    return tags
+
+
+def _video_asr_text(video: Video) -> str:
+    tr = video.transcript
+    if tr is None:
+        return ""
+    return (tr.corrected_text or tr.transcript_text or "").strip()
+
+
+def _creator_of_posts(db: Session, posts: list[PlatformPost]) -> Creator | None:
+    post = posts[0]
+    if post.account_id:
+        acc = db.get(CreatorAccount, post.account_id)
+        if acc is not None:
+            return db.get(Creator, acc.creator_id)
+    if post.work_id:
+        from ..models.work import Work
+
+        work = db.get(Work, post.work_id)
+        if work is not None and work.creator_id:
+            return db.get(Creator, work.creator_id)
+    return None
+
+
+def _source_payload(
+    owner: Creator,
+    creator: Creator | None,
+    *,
+    title: str,
+    text: str,
+    key: str,
+    post_id: int | None,
+    work_id: int | None,
+    tags: list[str],
+) -> dict:
+    if creator is not None and creator.id == owner.id:
+        raise ValueError("这是主博主自己的素材，不需要洗稿")
+    if not (text or "").strip():
+        raise ValueError("该素材还没有可用文案（先把语音转成文字）")
+    return {
+        "title": (title or "").strip(),
+        "text": text.strip(),
+        "key": key,
+        "benchmark_name": creator.name if (creator is not None and creator.kind == "benchmark") else "",
+        "post_id": post_id,
+        "work_id": work_id,
+        "tags": tags,
+    }
+
+
+def resolve_rewrite_source(
+    db: Session, owner: Creator, video_id: int = 0, post_id: int = 0, work_id: int = 0
+) -> dict:
+    """R-152：素材库「洗稿」入口——解析出 rewrite_worker 需要的 payload。
+
+    支持三种来源：本地素材 video_id、云端作品 work_id、云端单条 post_id。
+    文案只取 ASR 转写稿（与对标口径一致，R-099）；非主博主素材才允许洗稿。
+    """
+    if video_id:
+        video = db.get(Video, video_id)
+        if video is None:
+            raise ValueError("素材不存在或已删除")
+        creator = db.get(Creator, video.creator_id) if video.creator_id else None
+        bound = db.query(PlatformPost).filter(PlatformPost.local_video_id == video.id).all()
+        if not bound and video.work_id:
+            bound = db.query(PlatformPost).filter(PlatformPost.work_id == video.work_id).all()
+        bound.sort(key=lambda m: (m.publish_time or _EPOCH), reverse=True)
+        first = bound[0] if bound else None
+        topics = _json_list(video.main_topics)
+        tags = topics + [t for t in _json_list(video.tags) if t not in topics]
+        return _source_payload(
+            owner,
+            creator,
+            title=video.title or (first.title if first else "") or "",
+            text=_video_asr_text(video),
+            key=f"v{video.id}",
+            post_id=first.id if first else None,
+            work_id=video.work_id or (first.work_id if first else None),
+            tags=tags,
+        )
+
+    posts: list[PlatformPost] = []
+    if work_id:
+        posts = db.query(PlatformPost).filter(PlatformPost.work_id == work_id).all()
+        key = f"w{work_id}"
+    elif post_id:
+        p = db.get(PlatformPost, post_id)
+        posts = [p] if p is not None else []
+        key = f"p{post_id}"
+    else:
+        raise ValueError("缺少素材标识")
+    if not posts:
+        raise ValueError("素材不存在或已删除")
+    posts.sort(key=lambda m: (m.publish_time or _EPOCH), reverse=True)
+    unit: dict = {"work_id": posts[0].work_id, "post": posts[0]}
+    if posts[0].work_id:
+        unit["members"] = posts
+    return _source_payload(
+        owner,
+        _creator_of_posts(db, posts),
+        title=posts[0].title or "",
+        text=_unit_text(db, unit),
+        key=key,
+        post_id=posts[0].id,
+        work_id=posts[0].work_id,
+        tags=_posts_tags(posts),
+    )
+
+
 def analyze_worker(db: Session, payload: dict, update=None) -> dict:
     """后台任务：AI 分析（R-116：落后台留痕，切页可恢复）。"""
     owner = db.get(Creator, int(payload.get("owner_id") or 0))
@@ -476,10 +641,10 @@ def rewrite_worker(db: Session, payload: dict, update=None) -> dict:
 
 
 def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = True) -> dict:
-    """R-102/R-109：重跑当前主博主所有对标——逐账号重捞最新15条 + 自动补 Top3 文案。
+    """R-102/R-109/R-152：重跑当前主博主所有对标——逐账号重捞最新15条 + 自动补「前2+最新」文案。
 
-    refetch=True（手动「重新对标」）：重捞最新 15 条后重算 Top3；
-    refetch=False（R-109 每日同步完成后自动触发）：不重复拉取，仅基于已同步数据重算 Top3/补缺转写。
+    refetch=True（手动「重新对标」）：重捞最新 15 条后重算「前2+最新」；
+    refetch=False（R-109 每日同步完成后自动触发）：不重复拉取，仅基于已同步数据重算/补缺转写。
     update(pct, note) 可选：由后台任务运行器注入，实时回写进度（R-081 同款）。
     """
     from ..core.timeutil import now as _app_now
@@ -503,7 +668,7 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
     for i, bm in enumerate(bms, start=1):
         name = bm.name or f"对标#{bm.id}"
         try:
-            _up(0, "捞数据中…" if refetch else "重算 Top3 中…")
+            _up(0, "捞数据中…" if refetch else "重算对标中…")
             accounts = (
                 db.query(CreatorAccount)
                 .filter(CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True))
@@ -524,13 +689,13 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
                         raise
                     except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
                         db.rollback()
-            _up(55, "计算 Top3 并补齐文案…")
+            _up(55, "计算「前2+最新」并补齐文案…")
             picked = ensure_top3_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
             n = len(picked)
             ok_count += 1
             text_count += n
             summary.append({"benchmark_id": bm.id, "name": name, "top3_with_text": n, "error": ""})
-            _up(100, f"完成（Top3 有文案 {n} 条）")
+            _up(100, f"完成（前2+最新有文案 {n} 条）")
         except BudgetExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 单个对标失败不阻断整体
@@ -538,7 +703,7 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
             summary.append({"benchmark_id": bm.id, "name": name, "top3_with_text": 0, "error": str(exc)[:200]})
             _up(100, "失败")
     return {
-        "title": f"共 {ok_count}/{total} 个对标已更新（Top3 有文案 {text_count} 条）",
+        "title": f"共 {ok_count}/{total} 个对标已更新（前2+最新有文案 {text_count} 条）",
         "summary": summary,
         "benchmark_count": total,
         "ok_count": ok_count,
@@ -550,7 +715,7 @@ def rerun_worker(db: Session, payload: dict, update=None) -> dict:
     """后台任务体（R-102/R-105/R-109）：按 owner_id 重跑当前主博主所有对标。
 
     refetch=True（默认，手动「重新对标」）重捞最新 15 条；
-    refetch=False（R-109：每日同步完成后自动触发）不重复拉取、只重算 Top3。
+    refetch=False（R-109：每日同步完成后自动触发）不重复拉取、只重算「前2+最新」。
     """
     from ..models.platform import Creator
 

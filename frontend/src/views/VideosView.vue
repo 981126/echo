@@ -44,11 +44,14 @@
         :note="cardNote[it.key] || ''"
         :syncing-id="syncing"
         :syncing-post-id="syncingPost"
+        :can-rewrite="canRewriteCard(it)"
+        :rewriting-key="rewritingKey"
         :click="onCardClick"
         :toggle="toggleSel"
         :play="onPlay"
         :sync-local="syncData"
         :sync-post="syncCloudPost"
+        :rewrite="rewriteCard"
         :confirm="confirmTags"
         :del-local="delLocal"
         :del-cloud="delCloud"
@@ -132,7 +135,10 @@
             :asr-provider="editing.asrProvider"
             :asr-model="editing.asrModel"
             :transcribing="transcribing"
+            :can-rewrite="canRewriteEditing"
+            :rewriting="rewritingKey === 'edit'"
             @start="startTranscribe"
+            @rewrite="rewriteEditing"
           />
           <TranscriptEditor :transcript-text="editing.transcriptText" :source-text="editing.sourceText" @update:sourceText="v => (editing.sourceText = v)" />
         </div>
@@ -190,6 +196,15 @@
       </div>
     </n-modal>
 
+    <RewriteDiffModal
+      v-model:show="showScript"
+      :script-text="scriptText"
+      :original-text="originalText"
+      :source-title="sourceTitle"
+      :benchmark-name="benchmarkName"
+      :draft-id="draftId"
+    />
+
   </div>
 </template>
 
@@ -212,8 +227,10 @@ import MetaFields from '../components/MetaFields.vue'
 import CloudVideoPicker from '../components/CloudVideoPicker.vue'
 import CloudActions from '../components/CloudActions.vue'
 import CloudTextArea from '../components/CloudTextArea.vue'
+import RewriteDiffModal from '../components/RewriteDiffModal.vue'
 import { adOptions, platformOptions, statusOptions, videoOptions } from '../lib/options'
 import { fetchVideos, fetchWorks } from '../composables/media'
+import { useRewrite } from '../composables/rewrite'
 import { platformName, parseTs, tsLocal, arrKey } from '../lib/format'
 import { busOn } from '../lib/eventbus'
 
@@ -261,6 +278,37 @@ const showPlayer = ref(false)
 const playerSrc = ref('')
 const playerTitle = ref('')
 const playerKind = ref('video')
+
+// R-152：非主博主素材洗稿（与博主对标同一后端链路 + 同一原文对照弹窗）
+const {
+  rewritingKey,
+  showScript,
+  scriptText,
+  originalText,
+  sourceTitle,
+  benchmarkName,
+  draftId,
+  rewriteSource
+} = useRewrite()
+
+// 非主博主 = 素材归属博主不是当前主博主（creator_id 由后端带出，深链也准）
+function isNonMain(creatorId) {
+  return !!currentCreatorId.value && !!creatorId && creatorId !== currentCreatorId.value
+}
+function canRewriteCard(it) {
+  return isNonMain(it.creator_id)
+}
+function rewriteCard(it) {
+  const source = it.kind === 'cloud'
+    ? (it.type === 'work' ? { work_id: it.id } : { post_id: it.id })
+    : { video_id: it.id }
+  rewriteSource(source, it.key)
+}
+const canRewriteEditing = computed(() => isNonMain(editing.value && editing.value.creator_id))
+function rewriteEditing() {
+  if (!editing.value) return
+  rewriteSource({ video_id: editing.value.id }, 'edit')
+}
 
 async function load() {
   loading.value = true
@@ -714,6 +762,7 @@ function cloudWorkToCard(w, videoById) {
     kind: 'cloud',
     id: w.id,
     type: w.type,
+    creator_id: w.creator_id,
     title: w.title || '（无标题）',
     cover_url: w.cover || '',
     tags,
@@ -745,6 +794,7 @@ function buildCards() {
     key: 'v' + v.id,
     kind: 'local',
     id: v.id,
+    creator_id: v.creator_id,
     title: v.title || v.filename || '',
     cover_url: v.cover_url || '',
     platforms: v.platforms || [],

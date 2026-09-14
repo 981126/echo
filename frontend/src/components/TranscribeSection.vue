@@ -6,6 +6,14 @@
         {{ transcribing ? '识别中…' : '开始转写' }}
       </n-button>
       <n-tag v-if="transcriptText" size="small" type="success" :bordered="false" round>已转写</n-tag>
+      <n-button
+        v-if="transcriptText && canRewrite"
+        size="tiny"
+        type="primary"
+        secondary
+        :loading="rewriting"
+        @click="$emit('rewrite')"
+      >洗稿</n-button>
       <span v-if="transcribing" class="muted">后台识别中，完成后会提醒并自动展示在下方</span>
       <span v-else-if="!transcriptText" class="muted">上传视频不会自动转写，点按钮把语音转成文字</span>
     </div>
@@ -20,9 +28,11 @@ const props = defineProps({
   transcriptText: { type: String, default: '' },
   transcribing: { type: Boolean, default: false },
   asrProvider: { type: String, default: '' },
-  asrModel: { type: String, default: '' }
+  asrModel: { type: String, default: '' },
+  canRewrite: { type: Boolean, default: false },
+  rewriting: { type: Boolean, default: false }
 })
-defineEmits(['start'])
+defineEmits(['start', 'rewrite'])
 
 const currentMode = ref('')
 const currentModel = ref('')
