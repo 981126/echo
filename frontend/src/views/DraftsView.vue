@@ -61,6 +61,20 @@
           </div>
         </div>
       </n-tab-pane>
+
+      <n-tab-pane name="archived" :tab="`废稿 (${list('archived').length})`">
+        <div v-if="!list('archived').length" class="panel empty">废稿箱是空的（点草稿的「不采用」/待制作的「移入废稿」会进这里）</div>
+        <div class="grid">
+          <div v-for="d in list('archived')" :key="d.id" class="card-tile" @click="open(d)">
+            <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
+            <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
+            <div class="tile-actions" @click.stop>
+              <n-button size="small" secondary @click="restore(d)">恢复为草稿</n-button>
+              <n-button size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
+            </div>
+          </div>
+        </div>
+      </n-tab-pane>
     </n-tabs>
 
     <n-modal
@@ -248,7 +262,7 @@
 
 <script setup>
 import { ref, computed, watch, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import { api } from '../api'
 import { fetchVideos } from '../composables/media'
 import { fmt } from '../lib/format'
@@ -306,6 +320,7 @@ const dimOpts = [
 ]
 const dims = ref({})
 const message = useMessage()
+const dialog = useDialog()
 let pollTimer = null
 
 const isPending = computed(() => (editing.value?.script || '').includes('双模型讨论生成中'))
@@ -414,9 +429,7 @@ watch(editTab, (tab) => {
 })
 
 function list(status) {
-  if (status === 'archived') {
-    return drafts.value.filter(d => d.status === 'archived' || d.status === 'deleted')
-  }
+  // R-158：废稿 tab 只列「不采用/移入废稿」的；逻辑删除（deleted）页面上不展示
   return drafts.value.filter(d => d.status === status)
 }
 function actorName(m) {
@@ -577,11 +590,25 @@ async function markArchived(d) {
   load()
 }
 
-async function softDelete(d) {
-  await setStatus(d.id, 'deleted')
-  // R-152：【废稿/已删除】tab 不再展示，逻辑删除的稿子只能在后端数据里查到
-  message.success('已删除')
+async function restore(d) {
+  await setStatus(d.id, 'draft')
+  message.success('已恢复为草稿')
   load()
+}
+
+// R-158：删除才做逻辑删除，且必须二次确认；删除后页面上不可见
+function softDelete(d) {
+  dialog.warning({
+    title: '删除草稿',
+    content: `确定删除「${d.title || '（无标题）'}」？删除后页面上不可见。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await setStatus(d.id, 'deleted')
+      message.success('已删除（页面上不可见）')
+      load()
+    }
+  })
 }
 
 // R-154：新建草稿「有任何一项内容」才算数；全空则不落库
@@ -734,8 +761,8 @@ onMounted(async () => {
     const d = drafts.value.find(x => x.id === Number(m[1]))
     if (d) {
       open(d)
-      // R-152：【废稿/已删除】tab 已不再展示，深链打开这类稿子时列表停留在草稿，弹窗照常可看
-      if (d.status === 'used') listTab.value = 'used'
+      // R-158：深链打开时切到对应 tab（已删除的不在任何 tab 里，留在草稿）
+      if (['draft', 'used', 'archived'].includes(d.status)) listTab.value = d.status
     }
   }
   pollTimer = setInterval(poll, 3000)
