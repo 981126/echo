@@ -4,7 +4,7 @@
 - SSL EOF / 连接重置这类瞬时故障 → 自动重试，重试成功则返回数据；
 - HTTP 429（TikHub 单路由限速 1 req/s）→ 自动重试；
 - 其它 4xx（参数/权限类永久错误）→ 不重试，立即抛 TikHubError；
-- 重试耗尽 → 抛 TikHubError，尝试次数 = 3，消息里带「已重试 2 次」；
+- 重试耗尽 → 抛 TikHubError，尝试次数 = `_MAX_ATTEMPTS`，消息里带「已重试 N 次」；
 - 同路由排队：同一 path 连续两次调用会等待，不同 path 互不阻塞。
 """
 
@@ -96,11 +96,11 @@ def test_retry_exhausted_raises_with_attempts(client, no_sleep, monkeypatch):
     calls = _patch_get(monkeypatch, [httpx.ConnectError(_SSL_EOF)])
     with pytest.raises(TikHubError) as ei:
         client._get("/xiaohongshu/app_v2/get_video_note_detail", {"note_id": "x"})
-    assert "已重试 2 次" in str(ei.value)
+    assert "已重试 3 次" in str(ei.value)
     assert "UNEXPECTED_EOF" in str(ei.value)
-    assert len(calls) == 3
-    assert client.requests_used == 3
-    assert no_sleep == [1.5, 4.0]
+    assert len(calls) == 4
+    assert client.requests_used == 4
+    assert no_sleep == [1.5, 4.0, 8.0]
 
 
 def test_without_api_key_raises_before_any_request(monkeypatch):

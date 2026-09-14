@@ -118,5 +118,5 @@ background_tasks / sync_jobs / notifications / app_kv
 - 密钥仅 .env（gitignore）；备份每日自动 + 手动脚本
 - 预算护栏：TikHub 每日请求预算（默认 2000，Kv 可覆盖），超限停止本轮并通知
 - 外部接口韧性（R-151）：TikHub 客户端按 **API path 限速 1.2s/次**（服务端单路由 1 req/s），
-  并对瞬时故障（`httpx.TransportError`：SSL EOF/连接重置/超时）与 `429/5xx` 做 3 次尝试、退避 1.5s→4.0s 的重试；
+  并对瞬时故障（`httpx.TransportError`：SSL EOF/连接重置/超时）与 `429/5xx` 做 4 次尝试、退避 1.5s→4.0s→8.0s 的重试；
   4xx 永久错误不重试；重试与最终失败都写日志（本机 httpx 会读 macOS 系统代理 `127.0.0.1:7890`，代理抖动是已知故障源）

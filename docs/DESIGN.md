@@ -151,7 +151,7 @@
 - 列表自带 stats 则不额外请求；B站列表无赞藏评 → `_backfill_bili_stats` 每轮最多 150 条单条详情补全。
 - **限速与重试（R-151）**：TikHub 限「单路由 1 请求/秒」（429 原文实测），而 daily 同步是多账号并行 + 逐条素材再打评论接口，必然超限；被限流时服务端有时回 429、有时**直接掐断 TLS 隧道**（本机 httpx 默认读 macOS 系统代理 `127.0.0.1:7890`，故报 `[SSL: UNEXPECTED_EOF_WHILE_READING]`）。`TikHubClient._get()` 因此：
   - `_throttle_route(path)`：进程内按 **API path** 排队（最小间隔 `_ROUTE_MIN_INTERVAL=1.2s`，`threading.Lock` 预留时间片、锁外 sleep），不同路由互不阻塞；
-  - 有界重试 3 次尝试、退避 `1.5s → 4.0s`，仅对 `httpx.TransportError`（SSL EOF/连接重置/超时）与 HTTP `429/500/502/503/504` 生效；**4xx 永久错误立即抛**；
+  - 有界重试 4 次尝试、退避 `1.5s → 4.0s → 8.0s`，仅对 `httpx.TransportError`（SSL EOF/连接重置/超时）与 HTTP `429/500/502/503/504` 生效；**4xx 永久错误立即抛**；
   - 重试 `warning` / 最终失败 `error` 写日志（R-133 logger），错误消息保持 `TikHub 请求失败:` 前缀并追加「（已重试 N 次）」。
 
 ### 幂等与去重

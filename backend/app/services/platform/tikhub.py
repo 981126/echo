@@ -38,8 +38,8 @@ PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B
 # 对策：同路由排队 + 瞬时故障有界重试，避免一次网络抖动就判一条素材同步失败。
 _ROUTE_MIN_INTERVAL = 1.2  # 秒；限速 1 req/s，留 0.2s 余量
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
-_MAX_ATTEMPTS = 3  # 首次 + 2 次重试
-_RETRY_DELAYS = (1.5, 4.0)
+_MAX_ATTEMPTS = 4  # 首次 + 3 次重试（实测：只重试 2 次时，补跑 60 条仍有 3 条撞上代理抖动窗口而失败）
+_RETRY_DELAYS = (1.5, 4.0, 8.0)
 _ROUTE_LAST: dict[str, float] = {}
 _ROUTE_LOCK = threading.Lock()
 
