@@ -180,7 +180,7 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152 非主博主卡片与编辑页「洗稿」）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-152：两 tab（草稿/待制作），【废稿/已删除】不再展示**+打分）、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
   **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，

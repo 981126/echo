@@ -1,5 +1,17 @@
 # 变更记录
 
+## [M142 / R-153] 2026-09-14 — 素材库洗稿入口收敛：去掉卡片上的洗稿，只留编辑页
+> 作者验收 R-152 后要求：保留编辑页的洗稿，去掉素材卡片上的洗稿按钮。
+
+- `MaterialCard.vue`：删除云端卡与本地卡上的「洗稿」按钮及 `canRewrite` / `rewritingKey` / `rewrite` 三个 props。
+- `VideosView.vue`：移除卡片洗稿接线（`canRewriteCard` / `rewriteCard` 与传给卡片的 props）；
+  **保留**编辑页链路——`canRewriteEditing` / `rewriteEditing`、`TranscribeSection` 的「洗稿」按钮、
+  `RewriteDiffModal`、`composables/rewrite.js`，以及后端 `POST /api/benchmark/rewrite-source` 与 `VideoOut.creator_id`
+  （因此**后端/接口/表结构零改动**）。
+- **验证**：`scripts/verify.sh` 全绿（ruff + mypy + pytest 331 例 + 前端 lint 0 error + build + 文档一致 29 表/124 路由）；
+  headless Chrome 点检：非主博主素材卡片洗稿按钮 **0** 个（卡片动作＝同步/删除）、编辑页「已转写」旁「洗稿」仍在、
+  切回主博主 0 个。
+
 ## [M141 / R-152] 2026-09-14 — 脚本工作台隐藏废稿 tab + 对标「前2+最新」+ 素材库非主博主洗稿入口
 > 作者四条：①脚本工作台【废稿/已删除】tab 不再展示（只是不展示）；②博主对标沿用旧规则取两篇，第三篇为对标博主最新一篇；
 > ③素材库非主博主的卡片素材「同步」旁加洗稿；④素材库非主博主素材编辑页 ASR「已转写」旁也加洗稿。

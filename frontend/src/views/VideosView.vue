@@ -44,14 +44,11 @@
         :note="cardNote[it.key] || ''"
         :syncing-id="syncing"
         :syncing-post-id="syncingPost"
-        :can-rewrite="canRewriteCard(it)"
-        :rewriting-key="rewritingKey"
         :click="onCardClick"
         :toggle="toggleSel"
         :play="onPlay"
         :sync-local="syncData"
         :sync-post="syncCloudPost"
-        :rewrite="rewriteCard"
         :confirm="confirmTags"
         :del-local="delLocal"
         :del-cloud="delCloud"
@@ -279,7 +276,7 @@ const playerSrc = ref('')
 const playerTitle = ref('')
 const playerKind = ref('video')
 
-// R-152：非主博主素材洗稿（与博主对标同一后端链路 + 同一原文对照弹窗）
+// R-152/R-153：非主博主素材洗稿（与博主对标同一后端链路 + 同一原文对照弹窗）——入口只在编辑页
 const {
   rewritingKey,
   showScript,
@@ -294,15 +291,6 @@ const {
 // 非主博主 = 素材归属博主不是当前主博主（creator_id 由后端带出，深链也准）
 function isNonMain(creatorId) {
   return !!currentCreatorId.value && !!creatorId && creatorId !== currentCreatorId.value
-}
-function canRewriteCard(it) {
-  return isNonMain(it.creator_id)
-}
-function rewriteCard(it) {
-  const source = it.kind === 'cloud'
-    ? (it.type === 'work' ? { work_id: it.id } : { post_id: it.id })
-    : { video_id: it.id }
-  rewriteSource(source, it.key)
 }
 const canRewriteEditing = computed(() => isNonMain(editing.value && editing.value.creator_id))
 function rewriteEditing() {
@@ -762,7 +750,6 @@ function cloudWorkToCard(w, videoById) {
     kind: 'cloud',
     id: w.id,
     type: w.type,
-    creator_id: w.creator_id,
     title: w.title || '（无标题）',
     cover_url: w.cover || '',
     tags,
