@@ -23,6 +23,7 @@
 | M137 | 需求管理页 UI 溢出修复（R-148） | ✅ |
 | M138 | 下线「需求管理」网页（R-149） | ✅ |
 | M139 | 口播脚本编辑区换 Tiptap v3 块编辑器（R-150） | ✅ |
+| M140 | 素材同步失败修复：TikHub 同路由限速 + 瞬时故障重试（R-151） | ✅ |
 | M136 | AI 对话升级为通用型 agent：多步可见 + 只读 SQL + 写操作确认（R-147） | ✅ |
 | M135 | AI 对话「瞎回复」修复：工具暴露总数 + 程序固定数据规则（R-146） | ✅ |
 | M134 | 一键打包/部署 + 升级前自动备份（R-145） | ✅ |
@@ -34,6 +35,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
+| M140 / R-151 | 素材同步失败（169 条 `card_sync` 报 `[SSL: UNEXPECTED_EOF_WHILE_READING]`）：根因＝本地系统代理 `127.0.0.1:7890` 掐断 TLS 隧道 + TikHub 单路由 1 req/s 限速（并发实测 35/40 得 429）+ `_get()` 无重试无限速无日志。修：同路由 1.2s 排队 + 3 次尝试退避 1.5s→4.0s（仅 TransportError 与 429/5xx）+ 重试/失败写日志 | verify 全绿（320 例，含 6 个新用例）；真实链路冒烟单条素材「同步数据」成功、无 429/SSL 报错 | ✅ |
 | M139 / R-150 | 口播脚本编辑区换 Tiptap v3 块编辑器（新增 `ScriptEditor.vue` 懒加载，Markdown v-model；补 TableKit/TaskList 防丢内容；删自研 textarea 工具栏；只换 DraftsView 一处，后端零改动） | verify 全绿（314 例）；MarkdownManager 往返：历史稿 18/18 逐字一致 + 14 类语法一致；Chrome headless 端到端 15/15（拦截 PATCH 未写库） | ✅ |
 | M138 / R-149 | 下线「需求管理」网页：删菜单/路由/视图 + 4 条 `/api/requirements` 与只服务该页的 create/update/get；保留需求归档与 AI 对话的查需求工具 | verify 全绿（123 路由）；AI 查需求冒烟通过；无残留引用 | ✅ |
 | M137 / R-148 | 需求页溢出：解析层剥掉 H1 里的英文 slug（108/145 条）+ 表格 `overflow-wrap:anywhere` + `.table-wrap` 兜底 | verify 全绿；6 个新用例（含对真实 requirements/ 全量护栏） | ✅ |

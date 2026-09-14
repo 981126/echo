@@ -1,5 +1,36 @@
 # 变更记录
 
+## [M140 / R-151] 2026-09-14 — 素材同步失败修复：TikHub 同路由限速 + 瞬时故障重试
+> 作者报障：素材同步失败 ——「关于经济独立我的思考…」：`TikHub 请求失败: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol`。
+> 该次 daily 同步（09:22–09:34，5 个博主账号）注册的 `card_sync` 队列里 **169 条失败**，通知只显示到其中两条。
+
+- **根因（实测三条，非推测）**：
+  1. **本地代理掐断 TLS 隧道**。进程环境变量里没有任何 `*_PROXY`，但 `httpx._utils.get_environment_proxies()`
+     返回 `{'http://': 'http://127.0.0.1:7890', 'https://': 'http://127.0.0.1:7890'}`——
+     httpx 默认 `trust_env=True`，会读 **macOS 系统代理**；堆栈落在 `httpcore/_sync/http_proxy.py:316 → start_tls`，
+     即 CONNECT 隧道建好后在 TLS 握手阶段被掐断。同窗口 DeepSeek 也报 `ConnectTimeout`/`RemoteProtocolError`，
+     属本地代理到外网的**瞬时抖动**（手工探测与随后请求均 200，API key / 额度正常）。
+  2. **TikHub 单路由限速 1 请求/秒**。并发 40 次探测 **35 次 429**，响应原文：
+     `"Request too fast, the request rate limit for the current route is 1 times/second"`；
+     而 daily 同步是 `ThreadPoolExecutor(3)` 多账号并行、每条素材再打评论接口，必然超限 ——
+     被限流时服务端有时回 429，**有时直接掐 TLS 连接**（就是上面的 SSL EOF）。
+  3. **代码放大故障**：`TikHubClient._get()` 只有一次 `httpx.get`，无重试、无限速、失败不写日志，
+     于是「一次瞬时抖动 = 一条素材同步失败 + 一条失败通知」，一次网络波动就产出 169 条通知。
+- **修复**（`backend/app/services/platform/tikhub.py`，前端/接口/表结构零改动）：
+  - 新增 `_throttle_route(path)`：进程内按 **API path** 排队，最小间隔 `_ROUTE_MIN_INTERVAL=1.2s`
+    （按 1 req/s 留 0.2s 余量；`threading.Lock` 先占时间片再在锁外 sleep），**不同路由互不阻塞**；
+  - `_get()` 有界重试：最多 3 次尝试、退避 `1.5s → 4.0s`，只对 `httpx.TransportError`
+    （SSL EOF / 连接重置 / 读写超时）与 HTTP `429/500/502/503/504` 重试；**4xx 永久错误立即抛**（不浪费额度）；
+  - 重试 `warning`、最终失败 `error` 写日志（R-133 logger）；错误消息保留 `TikHub 请求失败:` 前缀并追加「（已重试 2 次）」，
+    通知里可直接看懂，不再是一句裸 SSL 错误。
+- **验证**：`scripts/verify.sh` 全绿（ruff + mypy + pytest **320 例**（新增 6 例：SSL EOF 重试成功 / 429 重试成功 /
+  400 不重试 / 重试耗尽消息与次数 / 无 key 不发请求 / 同路由排队且不同路由不阻塞）+ 前端构建 + 文档一致性 29 表/123 路由）。
+  真实链路冒烟（重启后的后端进程，新代码）：报障那条素材 1570 `POST /api/platform/posts/1570/sync` → 200「单条同步完成」；
+  `GET …/comments/refresh` 两次均 200 并在库里落评论；直连 2 条真实抖音作品各取回 20 条评论无 429/SSL 报错；
+  限速器实测同路由背靠背第二次等待 **1.202s**。
+- **未做（需作者决策）**：不擅自改代理设置（是否走代理由网络环境决定）；不回补本次失败的 169 条素材
+  （会消耗 TikHub 额度，17:00 那轮 daily 只覆盖各账号最新 15 条，更早的需手动或批量补跑）。
+
 ## [M139 / R-150] 2026-09-12 — 口播脚本编辑区换 Tiptap v3 块编辑器（保持 Markdown 存储）
 > 作者：「有那种类似于 notion 开源组件吗，嵌入进我这个系统，我现在这个富文本使用不方便」。
 > 反问后作者确认：**Tiptap v3** + 官方 `@tiptap/markdown` 往返、**只换 DraftsView 口播脚本这一处**、

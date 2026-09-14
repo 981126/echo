@@ -14,18 +14,48 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+import threading
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
 
 from ...config import get_settings
+from ...core.log import get_logger
 from ...core.timeutil import now as _app_now
 from .base import CommentData, PostData, ProfileData  # noqa: E402,F401
 from .link_utils import parse_link, parse_post_id  # noqa: F401  re-export：保持旧导入路径
 
+log = get_logger("tikhub")
+
 PLATFORMS = ["douyin", "xiaohongshu", "bilibili"]
 PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
+
+# R-151：TikHub 接口限速「单路由 1 请求/秒」（实测 429 原文），而 daily 同步是多账号并行 +
+# 每条素材再打评论接口，必然超限；被限流时服务端有时回 429、有时直接掐断 TLS 连接
+# （本机 httpx 默认走 macOS 系统代理 127.0.0.1:7890，隧道被掐 → [SSL: UNEXPECTED_EOF_WHILE_READING]）。
+# 对策：同路由排队 + 瞬时故障有界重试，避免一次网络抖动就判一条素材同步失败。
+_ROUTE_MIN_INTERVAL = 1.2  # 秒；限速 1 req/s，留 0.2s 余量
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 3  # 首次 + 2 次重试
+_RETRY_DELAYS = (1.5, 4.0)
+_ROUTE_LAST: dict[str, float] = {}
+_ROUTE_LOCK = threading.Lock()
+
+
+def _throttle_route(path: str) -> None:
+    """同路由请求间隔 ≥ `_ROUTE_MIN_INTERVAL`（进程内排队，线程安全）。
+
+    只按 path 排队：不同路由互不阻塞；先占时间片再 sleep（锁外等待），避免并发线程挤在同一时刻发车。
+    """
+    with _ROUTE_LOCK:
+        now = time.monotonic()
+        at = max(now, _ROUTE_LAST.get(path, 0.0) + _ROUTE_MIN_INTERVAL)
+        _ROUTE_LAST[path] = at
+    delay = at - now
+    if delay > 0:
+        time.sleep(delay)
 
 # 主页链接解析规则：platform -> (正则组名/顺序)
 def _is_benchmark_account(account) -> bool:
@@ -214,20 +244,41 @@ class TikHubClient:
 
     # ---------- 内部 ----------
     def _get(self, path: str, params: dict | None = None) -> dict:
+        """GET 一个 TikHub 接口，带同路由限速与瞬时故障重试（R-151）。
+
+        重试条件：`httpx.TransportError`（SSL EOF/连接重置/超时等瞬时故障）或 HTTP 429/5xx；
+        其余 4xx 属永久错误（参数/权限/额度），立即抛出不浪费额度。
+        """
         if not self.api_key:
             raise TikHubError("未配置 ECHO_TIKHUB_API_KEY（real 模式需要）")
-        self._requests += 1
-        try:
-            resp = httpx.get(
-                f"{self.base_url}{path}",
-                params=params,
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=12,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPError as exc:
-            raise TikHubError(f"TikHub 请求失败: {exc}") from exc
+        url = f"{self.base_url}{path}"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        last = "未知错误"
+        last_exc: httpx.TransportError | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            _throttle_route(path)
+            self._requests += 1
+            try:
+                resp = httpx.get(url, params=params, headers=headers, timeout=12)
+            except httpx.TransportError as exc:  # 代理掐断/连接重置/读写超时等瞬时故障
+                last = f"{type(exc).__name__}: {exc}"
+                last_exc = exc
+            else:
+                if resp.status_code < 400:
+                    return resp.json()
+                last = f"HTTP {resp.status_code} {resp.text[:200]}"
+                if resp.status_code not in _RETRYABLE_STATUS:
+                    log.warning("TikHub 请求失败（不重试）：%s %s", path, last[:300])
+                    raise TikHubError(f"TikHub 请求失败: {last}")
+            if attempt < _MAX_ATTEMPTS:
+                delay = _RETRY_DELAYS[min(attempt - 1, len(_RETRY_DELAYS) - 1)]
+                log.warning("TikHub 请求失败，%.1fs 后重试（第 %d/%d 次）：%s %s", delay, attempt, _MAX_ATTEMPTS - 1, path, last[:200])
+                time.sleep(delay)
+        log.error("TikHub 请求失败（已尝试 %d 次）：%s %s", _MAX_ATTEMPTS, path, last[:300])
+        message = f"TikHub 请求失败（已重试 {_MAX_ATTEMPTS - 1} 次）: {last}"
+        if last_exc is not None:
+            raise TikHubError(message) from last_exc
+        raise TikHubError(message)
 
     # ---------- 余额 ----------
     def get_balance(self) -> dict:
