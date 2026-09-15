@@ -55,7 +55,23 @@
             <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
             <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
             <div class="tile-actions" @click.stop>
+              <n-button size="small" type="primary" secondary @click="markDone(d)">完成</n-button>
+              <n-button size="small" secondary @click="moveToDraft(d)">退回草稿</n-button>
               <n-button size="small" secondary @click="markArchived(d)">移入废稿</n-button>
+              <n-button size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
+            </div>
+          </div>
+        </div>
+      </n-tab-pane>
+
+      <n-tab-pane name="done" :tab="`完成 (${list('done').length})`">
+        <div v-if="!list('done').length" class="panel empty">暂无完成（点待制作的「完成」会进这里）</div>
+        <div class="grid">
+          <div v-for="d in list('done')" :key="d.id" class="card-tile" @click="open(d)">
+            <h3 class="tile-title">{{ d.title || '（无标题）' }}</h3>
+            <p class="tile-meta">{{ srcLabel(d) }}<template v-if="srcTitle(d)"> · {{ srcTitle(d) }}</template> · {{ fmt(d.updated_at) }}</p>
+            <div class="tile-actions" @click.stop>
+              <n-button size="small" secondary @click="backToUsed(d)">退回待制作</n-button>
               <n-button size="small" quaternary type="error" @click="softDelete(d)">删除</n-button>
             </div>
           </div>
@@ -596,6 +612,22 @@ async function restore(d) {
   load()
 }
 
+// R-159：待制作 → 完成 / 退回草稿；完成 → 退回待制作（只改状态，不动反馈）
+async function moveStatus(d, status, msg) {
+  await setStatus(d.id, status)
+  message.success(msg)
+  load()
+}
+function markDone(d) {
+  moveStatus(d, 'done', '已完成')
+}
+function moveToDraft(d) {
+  moveStatus(d, 'draft', '已退回草稿')
+}
+function backToUsed(d) {
+  moveStatus(d, 'used', '已退回待制作')
+}
+
 // R-158：删除才做逻辑删除，且必须二次确认；删除后页面上不可见
 function softDelete(d) {
   dialog.warning({
@@ -761,8 +793,8 @@ onMounted(async () => {
     const d = drafts.value.find(x => x.id === Number(m[1]))
     if (d) {
       open(d)
-      // R-158：深链打开时切到对应 tab（已删除的不在任何 tab 里，留在草稿）
-      if (['draft', 'used', 'archived'].includes(d.status)) listTab.value = d.status
+      // R-158/R-159：深链打开时切到对应 tab（已删除的不在任何 tab 里，留在草稿）
+      if (['draft', 'used', 'done', 'archived'].includes(d.status)) listTab.value = d.status
     }
   }
   pollTimer = setInterval(poll, 3000)

@@ -26,7 +26,7 @@ class Draft(Base):
     original_script: Mapped[str] = mapped_column(Text, default="")  # AI 原稿（改稿差异分析用）
     source_ref: Mapped[str] = mapped_column(Text, default="{}")  # 来源素材信息 JSON（对标 key/title/benchmark_name 等，R-117）
     tags: Mapped[str] = mapped_column(Text, default="[]")  # 素材标签（来自对标素材，R-120）
-    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|used|archived
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|used|done|archived|deleted
     prompt_version: Mapped[int] = mapped_column(Integer, default=0)  # 生成时启用的提示词版本（R-129 M116；0=历史/未知）
     persona_version: Mapped[int] = mapped_column(Integer, default=0)  # 生成时的人设档案版本（R-130；0=历史/未知）
     quality: Mapped[str] = mapped_column(Text, default="{}")  # 生成后自检结果 JSON（R-131）

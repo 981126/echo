@@ -79,7 +79,7 @@ SCHEMA_NOTES: dict[str, dict] = {
     "v_drafts": {
         "desc": "脚本草稿",
         "columns": {
-            "status": "draft=草稿 / used=待制作 / archived=不采用 / deleted=已删除",
+            "status": "draft=草稿 / used=待制作 / done=完成 / archived=不采用 / deleted=已删除",
             "source": "ai=AI 生成 / manual=手写",
             "script_len": "脚本字数（脚本全文不在此视图，需要看内容用 get_video_detail 或直接查草稿接口）",
             "script_preview": "脚本前 120 字",

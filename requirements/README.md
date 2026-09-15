@@ -115,6 +115,7 @@
 | R-107 | 2026-09-06 | 素材库不显示禁用账号数据（含绑定其作品的本地素材） | ✅ 已完成 | M90（已完成） | api/videos.list_videos、R-101 |
 | R-108 | 2026-09-07 | ASR 接入硅基流动（默认免费模型 Qwen/Qwen3-ASR-1.7B，可换 SenseVoiceSmall）：.env 切换 阿里云/硅基流动/模拟；超限明确报错走失败通知不切其它服务商 | ✅ 已完成（免费模型真实出稿验证通过） | M91（已完成） | config.py、services/transcription.py、siliconflow_asr.py、R-068/R-094 |
 | R-117 | 2026-09-07 | 洗稿来源记录(source_ref)+原文/洗稿左右 diff 对照 | ✅ 已完成 | M100（已完成） | drafts、DraftOut、BenchmarkView、diff.js |
+| R-159 | 2026-09-14 | 脚本工作台新增「完成」tab 与 `done` 状态：待制作卡加【完成】【退回草稿】，完成卡提供【退回待制作】+【删除】（只改状态、不动反馈） | ✅ 已完成 | M148（已完成） | schemas/draft、models/draft、analytics_views、DraftsView |
 | R-158 | 2026-09-14 | 脚本工作台：恢复「废稿」tab（只列未采用的 archived）；「不采用/移入废稿」进废稿并可「恢复为草稿」；「删除」二次确认后逻辑删除、页面上不可见 | ✅ 已完成 | M147（已完成） | DraftsView、R-152 |
 | R-157 | 2026-09-14 | 草稿版本：自动定稿补齐（洗稿留「洗稿前 ASR」+「洗稿后」两版、讨论无版本先留当前正文再留讨论后、AI 生成/每日生成各留一版）；【版本】每条加【回滚到此版本】【查看】且去掉两版对比；【原文对照】改名【正文对比】并改成左右各一个版本下拉框选任意两版对比 | ✅ 已完成 | M146（已完成） | draft_versions/diff_analysis/draft_flow/generation/debate、api/drafts、DraftsView |
 | R-156 | 2026-09-14 | 脚本工作台：【洗稿后】改【修改后】；编辑/新增加【定稿】按钮 + 【版本】tab（每次定稿存一条 正文+标题+封面字+标签，新表 `draft_versions`）；AI 讨论跑完自动定稿留痕；版本 tab 可选任意两版做差异比较；版本链反哺改稿差异分析与生成 few-shot | ✅ 已完成 | M145（已完成） | draft_version 模型、draft_versions/diff_analysis/generation/debate、api/drafts、DraftsView |

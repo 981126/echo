@@ -185,7 +185,7 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-158：三 tab（草稿/待制作/废稿），废稿可恢复；「删除」二次确认后逻辑删除且任何 tab 不可见（部分回退 R-152 的隐藏）**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`；R-156：【定稿】按钮 + 【版本】tab（版本列表），版本链反哺改稿差异分析与生成 few-shot；R-157：【版本】每条可【回滚到此版本】【查看】（回滚=覆盖保存），原【原文对照】改为【正文对比】（左右各一个版本下拉框选任意两版对比））、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-158：三 tab（草稿/待制作/废稿），废稿可恢复；「删除」二次确认后逻辑删除且任何 tab 不可见（部分回退 R-152 的隐藏）；R-159：加 `done` 状态与「完成」tab，待制作可【完成】/【退回草稿】，完成可【退回待制作】**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`；R-156：【定稿】按钮 + 【版本】tab（版本列表），版本链反哺改稿差异分析与生成 few-shot；R-157：【版本】每条可【回滚到此版本】【查看】（回滚=覆盖保存），原【原文对照】改为【正文对比】（左右各一个版本下拉框选任意两版对比））、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
   **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，
