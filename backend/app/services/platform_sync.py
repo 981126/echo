@@ -944,6 +944,101 @@ def sync_local_video_metrics(db: Session, video) -> dict:
     }
 
 
+def _running_sync_creator_ids(db: Session) -> set[int]:
+    """R-160：正在排队/执行的 platform_sync 任务涉及的 creator_id 集合（用于跳过硬在跑的对标）。"""
+    out: set[int] = set()
+    for row in (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "platform_sync", BackgroundTask.status.in_(["pending", "running"]))
+        .all()
+    ):
+        try:
+            pl = json.loads(row.payload or "{}")
+        except (TypeError, ValueError):
+            continue
+        cid = pl.get("creator_id")
+        if cid is not None:
+            try:
+                out.add(int(cid))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def run_benchmark_top15_sync(db: Session, owner: Creator, update=None) -> dict:
+    """R-160：一键同步当前主博主下全部对标博主账号最新 15 条（daily 同口径：评论+缺视频下载+缺转写）。
+
+    - 已在排队/执行的对标跳过，其余照常；
+    - 单个对标失败（含预算耗尽）不阻断其余，汇总说明；
+    - 完成后自动触发一次「重新对标」（refetch=False，不重捞）。
+    """
+    from .benchmark import benchmarks_of_owner, maybe_start_benchmark_rerun
+
+    bms = benchmarks_of_owner(db, owner)
+    if not bms:
+        raise ValueError("还没有对标博主，先去「博主管理」添加")
+    running = _running_sync_creator_ids(db)
+    total = len(bms)
+    synced = 0
+    skipped: list[str] = []
+    failed: list[str] = []
+    for i, bm in enumerate(bms, start=1):
+        name = bm.name or f"对标#{bm.id}"
+        if bm.id in running:
+            skipped.append(name)
+            continue
+        if update:
+            update(max(5, min(95, int((i - 1) / total * 100))), f"[{i}/{total}] {name}：同步前15条…")
+        try:
+            run_sync(db, scope="daily", creator_id=bm.id, with_media=True)
+            synced += 1
+        except BudgetExceeded as exc:  # 预算耗尽，继续只会重复失败
+            failed.append(f"{name}({str(exc)[:80]})")
+            break
+        except Exception as exc:  # noqa: BLE001 单个对标失败不阻断其余
+            db.rollback()
+            failed.append(f"{name}({str(exc)[:80]})")
+    rerun = "no_sync"
+    if synced:
+        rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
+    parts = [f"对标同步：共 {total} 个对标，已同步 {synced} 个"]
+    if skipped:
+        parts.append(f"跳过运行中 {len(skipped)} 个（{'、'.join(skipped)}）")
+    if failed:
+        parts.append("失败：" + "、".join(failed))
+    if synced:
+        if isinstance(rerun, str) and rerun.startswith("started:"):
+            parts.append("已自动触发「重新对标」")
+        elif rerun == "already_running":
+            parts.append("已有「重新对标」在跑，跳过自动触发")
+    if update:
+        update(100, "完成")
+    return {
+        "message": "；".join(parts),
+        "benchmarks": total,
+        "synced": synced,
+        "skipped": skipped,
+        "failed": failed,
+        "rerun": rerun,
+    }
+
+
+def benchmark_top15_worker(db: Session, payload: dict, update=None) -> dict:
+    """R-160 后台任务体：按 owner_id 同步其全部对标博主最新 15 条。"""
+    owner = None
+    cid = (payload or {}).get("creator_id")
+    if cid:
+        try:
+            owner = db.get(Creator, int(cid))
+        except (TypeError, ValueError):
+            owner = None
+    if owner is None:
+        owner = get_current_creator(db)
+    if owner is None:
+        raise ValueError("请先创建并切换到主博主")
+    return run_benchmark_top15_sync(db, owner, update=update)
+
+
 def run_daily_sync_all(db: Session) -> dict:
     """R-109：每日定时两轮（06:00/17:00）统一同步——主博主 + 全部对标博主。
 

@@ -25,7 +25,7 @@
         <span class="muted mini">{{ account.enabled === false ? '已禁用' : '启用' }}</span>
         <n-switch size="small" :value="account.enabled !== false" @update:value="v => $emit('enable', account, v)" />
       </div>
-      <n-button size="tiny" secondary :loading="syncingAcctId === account.id" @click="$emit('sync', account)">{{ syncLabel }}</n-button>
+      <n-button size="tiny" secondary :loading="syncing" @click="$emit('sync', account)">{{ syncLabel }}</n-button>
       <n-button size="tiny" secondary @click="$emit('posts', account)">作品</n-button>
       <n-button size="tiny" secondary @click="$emit('edit', account)">编辑</n-button>
       <n-button size="tiny" quaternary type="error" @click="$emit('remove', account)">删除</n-button>
@@ -40,7 +40,7 @@ import { fmt, fmtNum, platformName } from '../lib/format'
 const props = defineProps({
   account: { type: Object, required: true },
   benchmark: { type: Boolean, default: false },
-  syncingAcctId: { type: Number, default: -1 },
+  syncing: { type: Boolean, default: false },
   syncLabel: { type: String, default: '同步' }
 })
 defineEmits(['sync', 'posts', 'edit', 'remove', 'avatar', 'enable'])

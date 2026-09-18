@@ -20,11 +20,12 @@ from ..models.platform import (
 )
 from ..models.video import Video
 from ..schemas.platform import SyncRequest
-from ..services.creator_service import current_creator_id
+from ..services.creator_service import current_creator_id, get_current_creator
 from ..services.media_ensure import inspect_media, submit_media_task
 from ..services.platform.base import make_source
 from ..services.platform.budget import get_budget, set_budget
 from ..services.platform_sync import (
+    benchmark_top15_worker,
     run_sync,
     sync_local_video_metrics,
     sync_single_post,
@@ -391,6 +392,36 @@ def trigger_sync(payload: SyncRequest, db: Session = Depends(get_db)):
     return {"task_id": task_id, "scope": payload.scope}
 
 
+@router.post("/sync-benchmarks", response_model=dict)
+def trigger_benchmark_sync(db: Session = Depends(get_db)):
+    """R-160：一键同步当前主博主下全部对标博主账号最新15条（daily 同口径），完成后自动重新对标。"""
+    from ..models.task import BackgroundTask
+
+    owner = get_current_creator(db)
+    if owner is None:
+        raise HTTPException(status_code=400, detail="请先创建并切换到主博主")
+    bm_count = db.query(Creator).filter(Creator.kind == "benchmark", Creator.parent_id == owner.id).count()
+    if not bm_count:
+        raise HTTPException(status_code=400, detail="还没有对标博主，先去「博主管理」添加")
+    for row in (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.kind == "platform_sync", BackgroundTask.status.in_(["pending", "running"]))
+        .all()
+    ):
+        try:
+            pl = json.loads(row.payload or "{}")
+        except (TypeError, ValueError):
+            continue
+        if pl.get("scope") == "benchmark_top15" and pl.get("creator_id") == owner.id:
+            raise HTTPException(status_code=409, detail="对标同步任务正在进行中，请稍候")
+    task_id = start_task(
+        "platform_sync",
+        {"scope": "benchmark_top15", "creator_id": owner.id},
+        benchmark_top15_worker,
+    )
+    return {"task_id": task_id, "benchmark_count": int(bm_count)}
+
+
 @router.post("/videos/{video_id}/sync", response_model=dict)
 def sync_video_data(video_id: int, db: Session = Depends(get_db)):
     """素材库本地卡"同步数据"（R-067/R-077）：同步绑定平台指标+评论 Top50；缺转写则自动补齐。
@@ -414,8 +445,11 @@ def sync_video_data(video_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs", response_model=dict)
-def list_jobs(limit: int = 30, db: Session = Depends(get_db)):
-    rows = db.query(SyncJob).order_by(SyncJob.id.desc()).limit(limit).all()
+def list_jobs(limit: int = 30, status: str = "", db: Session = Depends(get_db)):
+    q = db.query(SyncJob)
+    if status:
+        q = q.filter(SyncJob.status == status)
+    rows = q.order_by(SyncJob.id.desc()).limit(limit).all()
     return {
         "items": [
             {

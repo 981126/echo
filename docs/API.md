@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 128 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 129 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 
 ## videos
@@ -1235,6 +1235,7 @@ List Jobs
 **参数**
 
 - `limit`（query）integer
+- `status`（query）string
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 
@@ -1329,6 +1330,17 @@ Trigger Sync
   - `creator_id` object
   - `top_n` object
 
+**返回 200**：application/json → object
+
+### POST /api/platform/sync-benchmarks
+
+Trigger Benchmark Sync
+
+R-160：一键同步当前主博主下全部对标博主账号最新15条（daily 同口径），完成后自动重新对标。
+
+**参数**
+
+- `x-access-token`（header）string
 **返回 200**：application/json → object
 
 ### GET /api/platform/topic-pool

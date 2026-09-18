@@ -33,9 +33,12 @@
         :is-current="c.is_current"
         :can-switch="!c.is_current"
         :show-add-benchmark="benchmarksOf(c).length > 0"
-        :syncing-owner-id="syncingOwner === c.id || runningCreators.has(c.id) ? c.id : 0"
+        :show-sync-benchmarks="c.is_current && benchmarksOf(c).length > 0"
+        :benchmark-syncing="isOwnerBenchmarkSyncing(c)"
+        :syncing="isHeaderSyncing(c.id)"
         @daily="c => syncCreator(c, 'daily')"
         @initial="c => syncCreator(c, 'initial')"
+        @syncBenchmarks="syncOwnerBenchmarks"
         @switch="askSwitch"
         @edit="openOwnerModal"
         @addAccount="openAccountModal"
@@ -52,7 +55,7 @@
         :key="a.id"
         :account="a"
         :benchmark="false"
-        :syncing-acct-id="syncingAcct === a.id || runningCreators.has(c.id) ? a.id : -1"
+        :syncing="syncingAccts.has(a.id) || runningCreators.has(c.id)"
         sync-label="同步"
         @sync="a => runSync('daily', a.id, c.id)"
         @posts="openPosts"
@@ -65,7 +68,7 @@
         <CreatorHeaderRow
         :creator="bm"
         :benchmark="true"
-        :syncing-owner-id="syncingOwner === bm.id || runningCreators.has(bm.id) ? bm.id : 0"
+        :syncing="isHeaderSyncing(bm.id)"
         @daily="bm => syncCreator(bm, 'daily')"
         @initial="bm => syncCreator(bm, 'initial')"
         @edit="openOwnerModal"
@@ -82,7 +85,7 @@
         :key="a.id"
         :account="a"
         :benchmark="true"
-        :syncing-acct-id="syncingAcct === a.id || runningCreators.has(bm.id) ? a.id : -1"
+        :syncing="syncingAccts.has(a.id) || runningCreators.has(bm.id)"
         sync-label="同步"
         @sync="a => runSync('daily', a.id, bm.id)"
         @posts="openPosts"
@@ -162,7 +165,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api, getToken } from '../api'
 import SyncProgressBar from '../components/SyncProgressBar.vue'
@@ -178,9 +181,10 @@ const current = ref({ id: null, name: '' })
 const budget = ref({ limit: 2000, used: 0 })
 const budgetLimit = ref(2000)
 const showBudget = ref(false)
-const syncing = ref(false)
-const syncingOwner = ref(0)
-const syncingAcct = ref(0)
+// R-161：按 id 独立记录在途请求，避免并发点击时先返回的请求把后点账号的动画清零
+const syncingHeaders = reactive(new Set())
+const syncingAccts = reactive(new Set())
+const syncingBenchmarks = reactive(new Set())
 const syncingPost = ref(0)
 const activeJobs = ref({}) // R-070：creatorId -> 正在运行的同步任务进度
 let progressTimer = null
@@ -243,7 +247,7 @@ async function load() {
 
 async function pollJobs() {
   try {
-    const d = await api('/api/platform/jobs?limit=12')
+    const d = await api('/api/platform/jobs?status=running&limit=50')
     const map = {}
     // jobs 已按最新在前返回
     for (const j of d.items || []) {
@@ -276,6 +280,12 @@ const runningCreators = computed(() => {
   for (const k of Object.keys(activeJobs.value)) s.add(Number(k))
   return s
 })
+function isHeaderSyncing(id) {
+  return syncingHeaders.has(id) || runningCreators.value.has(id)
+}
+function isOwnerBenchmarkSyncing(c) {
+  return syncingBenchmarks.has(c.id) || benchmarksOf(c).some(bm => runningCreators.value.has(bm.id))
+}
 
 function openOwnerModal(c) {
   creatorForm.value = c
@@ -462,7 +472,7 @@ async function syncCreator(c, scope) {
 }
 
 async function startCreatorSync(c, scope) {
-  syncingOwner.value = c.id
+  syncingHeaders.add(c.id)
   try {
     await api('/api/platform/sync', { method: 'POST', body: JSON.stringify({ scope, creator_id: c.id }) })
     message.success('已开始同步「' + c.name + '」，完成后右上角通知')
@@ -472,13 +482,37 @@ async function startCreatorSync(c, scope) {
   } catch (e) {
     message.error(e.message)
   } finally {
-    syncingOwner.value = 0
+    syncingHeaders.delete(c.id)
+  }
+}
+
+function syncOwnerBenchmarks(c) {
+  dialog.info({
+    title: '同步对标博主前15条',
+    content: `同步「${c.name}」下全部对标博主账号的最新 15 条（含评论采集、缺视频下载与转写，已下载/已转写自动跳过），完成后自动重新对标。确认开始？`,
+    positiveText: '开始',
+    negativeText: '取消',
+    onPositiveClick: () => startOwnerBenchmarkSync(c)
+  })
+}
+
+async function startOwnerBenchmarkSync(c) {
+  syncingBenchmarks.add(c.id)
+  try {
+    const r = await api('/api/platform/sync-benchmarks', { method: 'POST' })
+    message.success(`已开始同步 ${r.benchmark_count} 个对标博主，完成后右上角通知`)
+    startProgressPoll()
+    await pollJobs()
+    load()
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    syncingBenchmarks.delete(c.id)
   }
 }
 
 async function runSync(scope, accountId, creatorId) {
-  if (accountId) syncingAcct.value = accountId
-  else syncing.value = true
+  if (accountId) syncingAccts.add(accountId)
   try {
     const body = { scope, account_id: accountId || null }
     if (creatorId) body.creator_id = creatorId
@@ -490,8 +524,7 @@ async function runSync(scope, accountId, creatorId) {
   } catch (e) {
     message.error(e.message)
   } finally {
-    syncing.value = false
-    syncingAcct.value = 0
+    if (accountId) syncingAccts.delete(accountId)
   }
 }
 

@@ -163,10 +163,11 @@
 - 作品：`(platform, platform_post_id)` 唯一约束 + `_ensure_post` 先查后建/更新（含 title/cover/publish_time/raw/tags/cover_path）。
 - 指标：`(post_id, stat_date)` 唯一 upsert（当天多次同步覆盖成最新，历史保留）。
 - 评论：`_upsert_comments` 按 post_id+text 去重、点赞保留更高值、**按点赞降序取 Top50**（R-067）。
-- 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；`GET /api/platform/jobs` 输出进度供前端轮询。
+- 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；`GET /api/platform/jobs` 输出进度供前端轮询（R-161：可选 `status` 过滤，前端只拉 `status=running`，避免历史 job 挤占运行中进度）。
 
 ### 编排（run_sync）
-- 入口：手动（博主页 全量/前15条/对标单账号「同步」/单账号）、定时（06:00/17:00 两轮 `run_daily_sync_all`：主博主+全部对标统一 daily 带视频下载转写，R-109）、单条（posts/videos/works 同步）。
+- 入口：手动（博主页 全量/前15条/对标单账号「同步」/单账号/当前主博主「同步对标博主前15条」）、定时（06:00/17:00 两轮 `run_daily_sync_all`：主博主+全部对标统一 daily 带视频下载转写，R-109）、单条（posts/videos/works 同步）。
+- R-160：`run_benchmark_top15_sync(owner)` 遍历当前主博主全部对标，逐个 `run_sync(scope=daily, creator_id=bm.id, with_media=True)`（与主博主同口径）；已在排队/执行的对标（`platform_sync` 任务的 payload.creator_id 命中）跳过；单个对标失败不阻断其余（`BudgetExceeded` 停止）；完成后 `maybe_start_benchmark_rerun(refetch=False)`。接口 `POST /api/platform/sync-benchmarks`（同类任务在跑 409）。
 - `scope=daily`：每平台 top15（R-085/R-086 最终 15）；`weekly`：对标每账号 top3；`initial`：`count<=0 → _real_posts_all` 翻页全量。daily 且 with_media=True 时同步后对前 N 条跑媒体补齐（下载视频+自动转写）。
 - 并发：`ThreadPoolExecutor(max_workers=3)` 每账号独立 SQLAlchemy session（account 级隔离，单平台失败不拖垮其它）。
 - 结束：`auto_merge_creator` 合并同标题跨平台帖 → `works`；写 SyncJob stats/message + 账号 sync_status；通知中心收到完成。
@@ -185,7 +186,7 @@
 ## 6. 前端结构（frontend/src/）
 - `router.js`：/home /videos /drafts /chat /persona /prompts /benchmark /creators /login（hash）。
 - `api.js`：统一 fetch + `X-Access-Token`；401 自动跳登录。
-- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-158：三 tab（草稿/待制作/废稿），废稿可恢复；「删除」二次确认后逻辑删除且任何 tab 不可见（部分回退 R-152 的隐藏）；R-159：加 `done` 状态与「完成」tab，待制作可【完成】/【退回草稿】，完成可【退回待制作】**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`；R-156：【定稿】按钮 + 【版本】tab（版本列表），版本链反哺改稿差异分析与生成 few-shot；R-157：【版本】每条可【回滚到此版本】【查看】（回滚=覆盖保存），原【原文对照】改为【正文对比】（左右各一个版本下拉框选任意两版对比））、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条）、LoginView。
+- `views/`：HomeView（时间线+热点灵感）、VideosView（素材库：卡片/编辑弹窗/转本地/评论 tab/合并；R-152/R-153 非主博主素材**编辑页**「洗稿」，卡片列表不放入口）、DraftsView（**R-158：三 tab（草稿/待制作/废稿），废稿可恢复；「删除」二次确认后逻辑删除且任何 tab 不可见（部分回退 R-152 的隐藏）；R-159：加 `done` 状态与「完成」tab，待制作可【完成】/【退回草稿】，完成可【退回待制作】**+打分；R-154：新建草稿本地空白稿、内容全空不落库，弹窗叉掉/取消/保存后统一 `load()` 刷新；R-155：讨论 tab 无留痕显示【讨论】、有留痕底部【重新讨论】，跑 `draft_discuss` 后台任务，完成后把标题/封面字/正文/标签/原文案刷回弹窗并 `load()`；R-156：【定稿】按钮 + 【版本】tab（版本列表），版本链反哺改稿差异分析与生成 few-shot；R-157：【版本】每条可【回滚到此版本】【查看】（回滚=覆盖保存），原【原文对照】改为【正文对比】（左右各一个版本下拉框选任意两版对比））、ChatView（SSE 流式）、PersonaView、PromptsView、BenchmarkView、CreatorsView（博主/账号/作品/同步+进度条；R-160 当前主博主加「同步对标博主前15条」；R-161 syncing 状态按 id 用 reactive Set 记录，修多账号连点动画丢失）、LoginView。
 - `components/`：MaterialCard/CloudPostTile/PlatformStats/MediaComments/…/SyncProgressBar（R-070，1s 轮询 jobs）；
   **`RewriteDiffModal.vue`（R-152）**：博主对标页与素材库共用的「原文/洗稿」左右对照弹窗（`buildDiff`）；
   **`ScriptEditor.vue`（R-150，Tiptap v3 块编辑器）**：`v-model` 绑 **Markdown 字符串**（对外与旧 textarea 等价，

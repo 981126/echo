@@ -1,5 +1,27 @@
 # 变更记录
 
+## [M149/M150 / R-160+R-161] 2026-09-18 — 博主管理：一键同步对标前15条 + 多账号连点动画修复
+
+> 作者 2 条：①当前博主「全量同步」后加【同步对标博主前15条】，点击同步其下所有对标账号前15条；
+> ②逐个点每个账号「同步前15条」，点得多了后点的没有动画。
+> 确认：同步深度与主博主「同步前15条」完全一致；完成后自动重新对标；后端一个后台任务统一编排；运行中的对标跳过。
+
+- **R-160 后端**：`platform_sync.run_benchmark_top15_sync(owner)` + `benchmark_top15_worker`——
+  遍历当前主博主全部对标，逐个 `run_sync(scope=daily, creator_id=bm.id, with_media=True)`（评论采集 +
+  缺视频下载 + 缺转写 ASR，已下载/已转写跳过）；`platform_sync` 任务 payload.creator_id 命中的对标跳过；
+  单个对标失败不阻断其余，`BudgetExceeded` 停止；完成后 `maybe_start_benchmark_rerun(refetch=False)`。
+  接口 `POST /api/platform/sync-benchmarks`（无主博主/无对标 400，同类任务在跑 409）。**无表结构变更**。
+- **R-160 前端**：`CreatorHeaderRow` 在「全量同步」后加【同步对标博主前15条】（仅当前主博主且其下有对标时显示），
+  二次确认后调用；`CreatorAccountRow`/header 的进度条沿用既有 `jobFor`（每个对标一条 SyncJob）。
+- **R-161 修复**：`CreatorsView` 原用**单个共享变量** `syncingAcct`/`syncingOwner` 表示“哪个在转圈”，
+  并发连点多个账号时先返回的请求在 `finally` 把变量清零，覆盖后点账号的 loading（点击越多越明显）。
+  改为 `reactive(new Set())` 按 id 独立记录，每个请求只清自己；子组件 prop 由数字 id 改布尔 `syncing`。
+  并将 `pollJobs` 改为 `GET /api/platform/jobs?status=running&limit=50`（`list_jobs` 新增可选 `status` 参数），
+  避免历史 job 把运行中进度挤出。
+- **验证**：`scripts/verify.sh` 全绿（ruff + mypy + pytest + 前端 lint/build + 文档一致 30 表/129 路由）；
+  `tests/test_r160_benchmark_top15.py`（遍历全部对标 / 跳过运行中 / 无对标报错 / 全跳过不触发重新对标）；
+  接口冒烟 + 前端点检；服务保持运行。
+
 ## [M148 / R-159] 2026-09-14 — 脚本工作台：新增「完成」状态与 tab + 待制作两个流转按钮
 > 作者：脚本工作台加【完成】tab；待制作的素材加【完成】按钮（变完成状态）、加【退回草稿】按钮（变草稿状态）。
 

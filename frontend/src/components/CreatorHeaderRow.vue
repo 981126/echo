@@ -12,8 +12,16 @@
         <span class="muted fans" style="font-size: 12px">全网粉丝 {{ fmtNum(creator.followers_total) }}</span>
       </template>
       <span class="muted grow" style="font-size: 12px">{{ creator.note || (benchmark ? '' : '（无备注）') }}</span>
-      <n-button size="small" secondary :disabled="syncingOwnerId === creator.id" @click="$emit('initial', creator)">全量同步</n-button>
-      <n-button size="small" secondary :loading="syncingOwnerId === creator.id" @click="$emit('daily', creator)">同步前15条</n-button>
+      <n-button size="small" secondary :disabled="syncing" @click="$emit('initial', creator)">全量同步</n-button>
+      <n-button
+        v-if="!benchmark && showSyncBenchmarks"
+        size="small"
+        secondary
+        :loading="benchmarkSyncing"
+        :disabled="syncing || benchmarkSyncing"
+        @click="$emit('syncBenchmarks', creator)"
+      >同步对标博主前15条</n-button>
+      <n-button size="small" secondary :loading="syncing" @click="$emit('daily', creator)">同步前15条</n-button>
       <n-button v-if="!benchmark && canSwitch" size="tiny" secondary @click="$emit('switch', creator)">切换到此博主</n-button>
       <n-button size="tiny" secondary @click="$emit('edit', creator)">编辑</n-button>
       <n-button v-if="benchmark" size="tiny" secondary @click="$emit('addAccount', creator)">+ 账号</n-button>
@@ -35,9 +43,11 @@ defineProps({
   isCurrent: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },
   showAddBenchmark: { type: Boolean, default: false },
-  syncingOwnerId: { type: Number, default: -1 }
+  showSyncBenchmarks: { type: Boolean, default: false },
+  benchmarkSyncing: { type: Boolean, default: false },
+  syncing: { type: Boolean, default: false }
 })
-defineEmits(['daily', 'initial', 'switch', 'edit', 'addAccount', 'addBenchmark', 'remove'])
+defineEmits(['daily', 'initial', 'syncBenchmarks', 'switch', 'edit', 'addAccount', 'addBenchmark', 'remove'])
 </script>
 
 <style scoped>
