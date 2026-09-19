@@ -14,13 +14,13 @@
       <span class="muted grow" style="font-size: 12px">{{ creator.note || (benchmark ? '' : '（无备注）') }}</span>
       <n-button size="small" secondary :disabled="syncing" @click="$emit('initial', creator)">全量同步</n-button>
       <n-button
-        v-if="!benchmark && showSyncBenchmarks"
+        v-if="!benchmark && showSyncAll"
         size="small"
         secondary
-        :loading="benchmarkSyncing"
-        :disabled="syncing || benchmarkSyncing"
-        @click="$emit('syncBenchmarks', creator)"
-      >同步对标博主前15条</n-button>
+        :loading="syncAllLoading"
+        :disabled="syncing || syncAllLoading"
+        @click="$emit('syncAll', creator)"
+      >同步所有博主前15条</n-button>
       <n-button size="small" secondary :loading="syncing" @click="$emit('daily', creator)">同步前15条</n-button>
       <n-button v-if="!benchmark && canSwitch" size="tiny" secondary @click="$emit('switch', creator)">切换到此博主</n-button>
       <n-button size="tiny" secondary @click="$emit('edit', creator)">编辑</n-button>
@@ -43,11 +43,11 @@ defineProps({
   isCurrent: { type: Boolean, default: false },
   canSwitch: { type: Boolean, default: false },
   showAddBenchmark: { type: Boolean, default: false },
-  showSyncBenchmarks: { type: Boolean, default: false },
-  benchmarkSyncing: { type: Boolean, default: false },
+  showSyncAll: { type: Boolean, default: false },
+  syncAllLoading: { type: Boolean, default: false },
   syncing: { type: Boolean, default: false }
 })
-defineEmits(['daily', 'initial', 'syncBenchmarks', 'switch', 'edit', 'addAccount', 'addBenchmark', 'remove'])
+defineEmits(['daily', 'initial', 'syncAll', 'switch', 'edit', 'addAccount', 'addBenchmark', 'remove'])
 </script>
 
 <style scoped>

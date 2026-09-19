@@ -1332,11 +1332,11 @@ Trigger Sync
 
 **返回 200**：application/json → object
 
-### POST /api/platform/sync-benchmarks
+### POST /api/platform/sync-all
 
-Trigger Benchmark Sync
+Trigger Sync All
 
-R-160：一键同步当前主博主下全部对标博主账号最新15条（daily 同口径），完成后自动重新对标。
+R-162：一键同步当前主博主 + 其全部对标博主最新15条（daily 同口径）。为每个博主入队并预置同步记录（所有卡片立即可见动画），由一个后台消费者按队列逐个消费；运行中的博主跳过并汇总；完成后自动重新对标。
 
 **参数**
 

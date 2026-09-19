@@ -1,5 +1,23 @@
 # 变更记录
 
+## [M151 / R-162] 2026-09-19 — 博主管理：【同步对标博主前15条】改为【同步所有博主前15条】（队列化、所有博主同时显示动画）
+
+> 作者：同步对标博主前15条，改为同步所有博主账号前15条，点击后将所有博主的任务提交到队列中，
+> 然后后台一步消费，前端需要展示所有博主的同步动画。
+> 确认：范围=当前主博主 + 其全部对标博主；运行中的博主跳过并汇总；保持串行消费（不做博主间并行）。
+
+- **R-162 后端**：`platform_sync.run_sync` 新增 `job` 参数（队列复用预置 SyncJob，缺省行为不变）；
+  新增 `enqueue_all_top15_sync(owner)`（为每个博主写 `platform_sync` 队列任务 + 预置 running 的 SyncJob，
+  阶段「排队中…」，跳过运行中/无启用账号者）、`run_all_top15_sync(owner, entries)`（单消费者按队列顺序逐个
+  `run_sync(scope=daily, creator_id=…, with_media=True, job=…)`）、`all_top15_worker`；完成后若有同步成功则
+  `maybe_start_benchmark_rerun(refetch=False)`。接口 `POST /api/platform/sync-benchmarks` → `POST /api/platform/sync-all`
+  （无主博主/无可同步博主 400，同批任务在跑 409）。**无表结构变更**（复用 `background_tasks` + `sync_jobs`）。
+- **R-162 前端**：`CreatorHeaderRow` 按钮文案改【同步所有博主前15条】；`CreatorsView` 调 `/api/platform/sync-all`，
+  确认弹窗说明范围与成本；沿用 `/api/platform/jobs?status=running` 轮询——所有预置 job 使主博主与全部对标卡片
+  **同时出现同步动画**（排队中显示不确定进度，轮到后显示真实 done/total）；批量按钮在自身或任一博主运行中保持 loading。
+- **验证**：`tests/test_r162_sync_all_queue.py`（入队顺序=主博主+全部对标 / 预置 running job / 跳过运行中与无账号 /
+  消费者复用预置 job 且收尾自动重新对标）；`scripts/verify.sh` 全绿 + 接口冒烟 + 前端点检；服务保持运行。
+
 ## [M149/M150 / R-160+R-161] 2026-09-18 — 博主管理：一键同步对标前15条 + 多账号连点动画修复
 
 > 作者 2 条：①当前博主「全量同步」后加【同步对标博主前15条】，点击同步其下所有对标账号前15条；

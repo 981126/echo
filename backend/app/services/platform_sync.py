@@ -576,12 +576,16 @@ def run_sync(
     creator_id: int | None = None,
     top_n: int | None = None,
     with_media: bool = False,
+    job: SyncJob | None = None,
 ) -> dict:
     """手动/定时同步入口：
     - scope=daily：当前主博主全部启用账号 top15（R-085 定 10，R-086 调为 15）+ 评论选题采集；
       with_media=True 时同步后对前 N 条做视频下载+自动转写（R-085）
     - scope=initial：指定主博主（或当前）全部账号首次全量
     - scope=weekly：对标账号周同步
+
+    job（R-162）：队列编排时传入预置的 SyncJob 复用（前端在排队阶段就能看到该博主动画）；
+    缺省时行为不变（内部 `_log_job` 新建）。
     """
     owner = None
     if account_id:
@@ -590,7 +594,8 @@ def run_sync(
             raise ValueError("账号不存在")
         owner = db.get(Creator, acc.creator_id)
         accounts = [acc]
-        job = _log_job(db, "manual" if scope != "weekly" else "weekly", scope, creator_id=owner.id if owner else None, account_id=acc.id)
+        if job is None:
+            job = _log_job(db, "manual" if scope != "weekly" else "weekly", scope, creator_id=owner.id if owner else None, account_id=acc.id)
     else:
         if creator_id:
             owner = db.get(Creator, creator_id)
@@ -606,7 +611,8 @@ def run_sync(
         # 小红书优先（快），再抖音，最后 B站（量大/易受限）
         _order = {"xiaohongshu": 0, "douyin": 1, "bilibili": 2}
         accounts.sort(key=lambda a: _order.get(a.platform, 9))
-        job = _log_job(db, "initial" if scope == "initial" else "daily", scope, creator_id=owner.id)
+        if job is None:
+            job = _log_job(db, "initial" if scope == "initial" else "daily", scope, creator_id=owner.id)
 
     try:
         per_owner = int(top_n if top_n is not None else (0 if scope == "initial" else (3 if scope == "weekly" else 15)))
@@ -965,45 +971,117 @@ def _running_sync_creator_ids(db: Session) -> set[int]:
     return out
 
 
-def run_benchmark_top15_sync(db: Session, owner: Creator, update=None) -> dict:
-    """R-160：一键同步当前主博主下全部对标博主账号最新 15 条（daily 同口径：评论+缺视频下载+缺转写）。
+def _enabled_account_count(db: Session, creator_id: int) -> int:
+    from sqlalchemy import func
 
-    - 已在排队/执行的对标跳过，其余照常；
-    - 单个对标失败（含预算耗尽）不阻断其余，汇总说明；
-    - 完成后自动触发一次「重新对标」（refetch=False，不重捞）。
+    return int(
+        db.query(func.count(CreatorAccount.id))
+        .filter(CreatorAccount.creator_id == creator_id, CreatorAccount.enabled.is_(True))
+        .scalar()
+        or 0
+    )
+
+
+def enqueue_all_top15_sync(db: Session, owner: Creator) -> dict:
+    """R-162：把「当前主博主 + 其全部对标博主」的前15条同步任务写入队列（每个博主一条）。
+
+    - 已有 platform_sync pending/running 的博主（含无启用账号者）跳过，汇总在 skipped；
+    - 为每个入队博主**预置一条 running 的 SyncJob**（阶段「排队中…」），
+      这样前端轮询 `/api/platform/jobs?status=running` 时所有博主卡片立即出现动画；
+    - 返回 `{entries, skipped, total}`；entries 元素为 `{task_id, creator_id, job_id, name}`。
     """
-    from .benchmark import benchmarks_of_owner, maybe_start_benchmark_rerun
+    from .benchmark import benchmarks_of_owner
 
-    bms = benchmarks_of_owner(db, owner)
-    if not bms:
-        raise ValueError("还没有对标博主，先去「博主管理」添加")
+    creators = [owner] + benchmarks_of_owner(db, owner)
     running = _running_sync_creator_ids(db)
-    total = len(bms)
-    synced = 0
     skipped: list[str] = []
+    entries: list[dict] = []
+    for c in creators:
+        name = c.name or f"博主#{c.id}"
+        if c.id in running:
+            skipped.append(f"{name}(已在运行)")
+            continue
+        if _enabled_account_count(db, c.id) == 0:
+            skipped.append(f"{name}(无启用账号)")
+            continue
+        job = SyncJob(job_type="daily", scope="daily", creator_id=c.id, status="running", progress_note="排队中…")
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        _publish_job(db, job)
+        row = BackgroundTask(
+            kind="platform_sync",
+            status="pending",
+            payload=json.dumps({"scope": "daily", "creator_id": c.id, "queued": True}, ensure_ascii=False),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        entries.append({"task_id": row.id, "creator_id": c.id, "job_id": job.id, "name": name})
+    return {"entries": entries, "skipped": skipped, "total": len(creators)}
+
+
+def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=None) -> dict:
+    """R-162：后台消费者——按队列顺序逐个同步 entries 里的博主（daily 同口径：评论+缺视频下载+缺转写）。
+
+    - 每个博主复用 `enqueue_all_top15_sync` 预置的 SyncJob（前端排队/进行中动画连续）；
+    - 单个博主失败不阻断其余；`BudgetExceeded` 耗尽后停止后续；
+    - 完成后只要有博主实际同步成功，自动触发一次「重新对标」（refetch=False，不重捞）。
+    """
+    from .benchmark import maybe_start_benchmark_rerun
+
+    total = len(entries)
+    synced = 0
     failed: list[str] = []
-    for i, bm in enumerate(bms, start=1):
-        name = bm.name or f"对标#{bm.id}"
-        if bm.id in running:
-            skipped.append(name)
+    for i, entry in enumerate(entries, start=1):
+        try:
+            task_id = int(entry.get("task_id") or 0)
+            creator_id = int(entry.get("creator_id") or 0)
+            job_id = int(entry.get("job_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        name = entry.get("name") or f"博主#{creator_id}"
+        task_row = db.get(BackgroundTask, task_id)
+        job = db.get(SyncJob, job_id)
+        if task_row is not None and task_row.status == "failed":  # 重启等导致的中断
+            if job is not None and job.status == "running":
+                _finish_job(db, job, "任务中断", failed=True)
+            failed.append(f"{name}(任务中断)")
             continue
         if update:
-            update(max(5, min(95, int((i - 1) / total * 100))), f"[{i}/{total}] {name}：同步前15条…")
+            update(max(5, min(95, int((i - 1) / max(1, total) * 100))), f"[{i}/{total}] {name}：同步前15条…")
+        if task_row is not None:
+            task_row.status = "running"
+            task_row.note = "同步中…"
+            db.commit()
+            publish("task.update", {"id": task_id, "status": "running", "progress": task_row.progress or 5, "note": "同步中…", "payload": {"creator_id": creator_id}})
         try:
-            run_sync(db, scope="daily", creator_id=bm.id, with_media=True)
+            run_sync(db, scope="daily", creator_id=creator_id, with_media=True, job=job)
             synced += 1
+            if task_row is not None:
+                task_row.status = "done"
+                task_row.progress = 100
+                task_row.note = "完成"
+                db.commit()
+                publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": {"creator_id": creator_id}})
         except BudgetExceeded as exc:  # 预算耗尽，继续只会重复失败
+            if task_row is not None:
+                task_row.status = "failed"
+                task_row.error = str(exc)[:500]
+                db.commit()
             failed.append(f"{name}({str(exc)[:80]})")
             break
-        except Exception as exc:  # noqa: BLE001 单个对标失败不阻断其余
+        except Exception as exc:  # noqa: BLE001 单个博主失败不阻断其余
             db.rollback()
+            if task_row is not None:
+                task_row.status = "failed"
+                task_row.error = str(exc)[:500]
+                db.commit()
             failed.append(f"{name}({str(exc)[:80]})")
     rerun = "no_sync"
     if synced:
         rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
-    parts = [f"对标同步：共 {total} 个对标，已同步 {synced} 个"]
-    if skipped:
-        parts.append(f"跳过运行中 {len(skipped)} 个（{'、'.join(skipped)}）")
+    parts = [f"全量同步：共 {total} 个博主，已同步 {synced} 个"]
     if failed:
         parts.append("失败：" + "、".join(failed))
     if synced:
@@ -1015,28 +1093,30 @@ def run_benchmark_top15_sync(db: Session, owner: Creator, update=None) -> dict:
         update(100, "完成")
     return {
         "message": "；".join(parts),
-        "benchmarks": total,
+        "creators": total,
         "synced": synced,
-        "skipped": skipped,
         "failed": failed,
         "rerun": rerun,
     }
 
 
-def benchmark_top15_worker(db: Session, payload: dict, update=None) -> dict:
-    """R-160 后台任务体：按 owner_id 同步其全部对标博主最新 15 条。"""
+def all_top15_worker(db: Session, payload: dict, update=None) -> dict:
+    """R-162 后台任务体：消费 `enqueue_all_top15_sync` 写入的博主同步队列。"""
+    payload = payload or {}
+    entries = payload.get("entries") or []
     owner = None
-    cid = (payload or {}).get("creator_id")
-    if cid:
+    oid = payload.get("owner_id")
+    if oid:
         try:
-            owner = db.get(Creator, int(cid))
+            owner = db.get(Creator, int(oid))
         except (TypeError, ValueError):
             owner = None
     if owner is None:
         owner = get_current_creator(db)
     if owner is None:
         raise ValueError("请先创建并切换到主博主")
-    return run_benchmark_top15_sync(db, owner, update=update)
+    return run_all_top15_sync(db, owner, entries, update=update)
+
 
 
 def run_daily_sync_all(db: Session) -> dict:

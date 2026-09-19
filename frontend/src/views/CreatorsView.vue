@@ -33,12 +33,12 @@
         :is-current="c.is_current"
         :can-switch="!c.is_current"
         :show-add-benchmark="benchmarksOf(c).length > 0"
-        :show-sync-benchmarks="c.is_current && benchmarksOf(c).length > 0"
-        :benchmark-syncing="isOwnerBenchmarkSyncing(c)"
+        :show-sync-all="c.is_current && hasSyncable(c)"
+        :sync-all-loading="isOwnerSyncingAll(c)"
         :syncing="isHeaderSyncing(c.id)"
         @daily="c => syncCreator(c, 'daily')"
         @initial="c => syncCreator(c, 'initial')"
-        @syncBenchmarks="syncOwnerBenchmarks"
+        @syncAll="syncAllCreators"
         @switch="askSwitch"
         @edit="openOwnerModal"
         @addAccount="openAccountModal"
@@ -184,7 +184,7 @@ const showBudget = ref(false)
 // R-161：按 id 独立记录在途请求，避免并发点击时先返回的请求把后点账号的动画清零
 const syncingHeaders = reactive(new Set())
 const syncingAccts = reactive(new Set())
-const syncingBenchmarks = reactive(new Set())
+const syncingAll = reactive(new Set()) // R-162：当前主博主「同步所有博主」在途请求
 const syncingPost = ref(0)
 const activeJobs = ref({}) // R-070：creatorId -> 正在运行的同步任务进度
 let progressTimer = null
@@ -193,6 +193,7 @@ const owners = computed(() => creators.value.filter(c => c.kind === 'owner'))
 const ownerOptions = computed(() => owners.value.map(c => ({ label: c.name, value: c.id })))
 const benchmarksOf = (c) => creators.value.filter(x => x.kind === 'benchmark' && x.parent_id === c.id)
 const accountsOf = (c) => accountsBy.value[c.id] || []
+const hasSyncable = (c) => accountsOf(c).length > 0 || benchmarksOf(c).length > 0
 
 // creator modal
 const showCreatorModal = ref(false)
@@ -283,8 +284,11 @@ const runningCreators = computed(() => {
 function isHeaderSyncing(id) {
   return syncingHeaders.has(id) || runningCreators.value.has(id)
 }
-function isOwnerBenchmarkSyncing(c) {
-  return syncingBenchmarks.has(c.id) || benchmarksOf(c).some(bm => runningCreators.value.has(bm.id))
+function isOwnerSyncingAll(c) {
+  // R-162：主博主自身或其任一博主有运行中同步时，批量按钮保持 loading
+  return syncingAll.has(c.id)
+    || runningCreators.value.has(c.id)
+    || benchmarksOf(c).some(bm => runningCreators.value.has(bm.id))
 }
 
 function openOwnerModal(c) {
@@ -486,28 +490,32 @@ async function startCreatorSync(c, scope) {
   }
 }
 
-function syncOwnerBenchmarks(c) {
+function syncAllCreators(c) {
+  const bmCount = benchmarksOf(c).length
   dialog.info({
-    title: '同步对标博主前15条',
-    content: `同步「${c.name}」下全部对标博主账号的最新 15 条（含评论采集、缺视频下载与转写，已下载/已转写自动跳过），完成后自动重新对标。确认开始？`,
+    title: '同步所有博主前15条',
+    content: `将「${c.name}」主博主 + ${bmCount} 个对标博主的账号各同步最新 15 条（含评论采集、缺视频下载与转写，已下载/已转写自动跳过），逐个排队执行，完成后自动重新对标。确认开始？`,
     positiveText: '开始',
     negativeText: '取消',
-    onPositiveClick: () => startOwnerBenchmarkSync(c)
+    onPositiveClick: () => startAllSync(c)
   })
 }
 
-async function startOwnerBenchmarkSync(c) {
-  syncingBenchmarks.add(c.id)
+async function startAllSync(c) {
+  syncingAll.add(c.id)
   try {
-    const r = await api('/api/platform/sync-benchmarks', { method: 'POST' })
-    message.success(`已开始同步 ${r.benchmark_count} 个对标博主，完成后右上角通知`)
+    const r = await api('/api/platform/sync-all', { method: 'POST' })
+    const skipped = (r.skipped || []).length
+    let tip = `已入队 ${r.creator_count} 个博主，完成后右上角通知`
+    if (skipped) tip += `（跳过 ${skipped} 个运行中/无账号）`
+    message.success(tip)
     startProgressPoll()
     await pollJobs()
     load()
   } catch (e) {
     message.error(e.message)
   } finally {
-    syncingBenchmarks.delete(c.id)
+    syncingAll.delete(c.id)
   }
 }
 
