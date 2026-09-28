@@ -9,6 +9,7 @@ import {
   Fingerprint,
   Settings2,
   MessageSquare,
+  NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
   Waves
@@ -20,6 +21,7 @@ const NAV = [
   { to: '/home', label: '主页', icon: LayoutDashboard },
   { to: '/videos', label: '素材库', icon: Clapperboard },
   { to: '/drafts', label: '脚本工作台', icon: PenLine },
+  { to: '/inspiration', label: '灵感随手记', icon: NotebookPen },
   { to: '/benchmark', label: '博主对标', icon: Target },
   { to: '/creators', label: '博主管理', icon: Users },
   { to: '/persona', label: '人设档案', icon: Fingerprint },

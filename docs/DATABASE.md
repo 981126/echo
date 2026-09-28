@@ -4,7 +4,7 @@
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（30 张）
+## 表总览（31 张）
 
 | 表 | 说明 |
 |---|---|
@@ -23,6 +23,7 @@
 | `drafts` | 脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿；prompt_version 记录生成时启用的提示词版本（R-129 M116），用于按版本聚合反馈。 |
 | `feedback` | 作者反馈：草稿 1-5 星/采用与否，R-022 后含四维分节分（hook/pace/ending/style_score），信号回流人设学习。 |
 | `hot_topics` | 热点记录：平台+标题+日期去重；供选题匹配（R-025 扩充来源，R-065 后走 TikHub 热搜）。 |
+| `inspiration_notes` | 灵感随手记（R-186）：一句观察/截图/经历存原料库（text/image_url/source），可一键提炼成选题并生成草稿（status=new/used，draft_id）。 |
 | `metrics_snapshots` | 本地素材(videos)每日指标快照：手动录入/批量导入/抓取/平台同步聚合，驱动看板增长曲线与复盘。 |
 | `notifications` | 右上角通知（R-019）：异步任务完成/失败，含目标页 target 与已读。 |
 | `persona_checks` | 人设「增量 vs 全量」对齐校验记录（R-128）：覆盖率、AI 语义复核分、是否达标/是否回退全量、差异明细 JSON，供人设页展示 5% 对齐结果。 |
@@ -340,6 +341,27 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 
 **关系**：
 - hot_topics → topic_candidates（匹配选题）→ drafts（生成稿）
+
+---
+
+## `inspiration_notes`
+
+灵感随手记（R-186）：一句观察/截图/经历存原料库，可一键提炼成选题并生成草稿。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `creator_id` | INTEGER |  | 是 |  |
+| `text` | TEXT |  | 否 |  |
+| `image_url` | VARCHAR(500) |  | 否 |  |
+| `source` | VARCHAR(20) |  | 否 | text |
+| `status` | VARCHAR(20) |  | 否 | new |
+| `draft_id` | INTEGER |  | 是 |  |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**索引**：`ix_inspiration_notes_creator_id`（creator_id）；`ix_inspiration_notes_status`（status）
+
+**外键**：`creator_id` → `creators.id`；`draft_id` → `drafts.id`
 
 ---
 

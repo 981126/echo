@@ -13,6 +13,7 @@ const VideosPage = lazy(() => import('@/pages/videos'))
 const CreatorsPage = lazy(() => import('@/pages/creators'))
 const BenchmarkPage = lazy(() => import('@/pages/benchmark'))
 const DraftsPage = lazy(() => import('@/pages/drafts'))
+const InspirationPage = lazy(() => import('@/pages/inspiration'))
 const ChatPage = lazy(() => import('@/pages/chat'))
 const PersonaPage = lazy(() => import('@/pages/persona'))
 const PromptsPage = lazy(() => import('@/pages/prompts'))
@@ -55,6 +56,7 @@ const router = createHashRouter([
       { path: 'home', element: <Page><HomePage /></Page> },
       { path: 'videos', element: <Page><VideosPage /></Page> },
       { path: 'drafts', element: <Page><DraftsPage /></Page> },
+      { path: 'inspiration', element: <Page><InspirationPage /></Page> },
       { path: 'benchmark', element: <Page><BenchmarkPage /></Page> },
       { path: 'creators', element: <Page><CreatorsPage /></Page> },
       { path: 'persona', element: <Page><PersonaPage /></Page> },

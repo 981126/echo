@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 135 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 139 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -1633,6 +1633,56 @@ R-185：选题账本——已讲过的话题 + 池中被判为「可能已讲」
 **参数**
 
 - `limit`（query）integer，默认 50
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+## inspiration
+
+### GET /api/inspiration
+
+List Notes
+
+R-186：灵感随手记列表（status 可选 new/used）。
+
+**参数**
+
+- `status`（query）string
+- `limit`（query）integer，默认 100
+- `x-access-token`（header）string
+**返回 200**：application/json → array
+
+### POST /api/inspiration
+
+Create Note
+
+R-186：新建一条随手记（text/image_url）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### POST /api/inspiration/{note_id}/develop
+
+Develop Note
+
+R-186：把随手记提炼成选题标题并直接入队生成草稿；标记该条为已用。
+
+**参数**
+
+- `note_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### DELETE /api/inspiration/{note_id}
+
+Delete Note
+
+R-186：删除随手记。
+
+**参数**
+
+- `note_id`（path）integer，必填
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 

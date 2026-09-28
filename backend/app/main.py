@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import benchmark, chat, creators, drafts, events, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
+from .api import benchmark, chat, creators, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .core.log import get_logger, setup_logging
 from .db import init_db
@@ -85,6 +85,7 @@ app.include_router(platform.router, prefix="/api/platform", tags=["platform"], d
 app.include_router(works.router, prefix="/api/works", tags=["works"], dependencies=API_DEPENDENCIES)
 app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=API_DEPENDENCIES)
 app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opportunities"], dependencies=API_DEPENDENCIES)
+app.include_router(inspiration.router, prefix="/api/inspiration", tags=["inspiration"], dependencies=API_DEPENDENCIES)
 
 
 @app.get("/health")

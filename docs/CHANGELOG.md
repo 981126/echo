@@ -1,5 +1,14 @@
 # 变更记录
 
+## [M175 / R-186] 2026-09-28 — 灵感随手记（移动端）
+
+> 规划落地（内容经营闭环 R-180~R-186 收尾）：刷到灵感/亲身经历随手记，一键发展成选题草稿。
+
+- 新表 `inspiration_notes`；`services/inspiration.refine_topic` 把随手记提炼成选题标题（LLM 不可用则原样返回）。
+- API：`GET/POST /api/inspiration`、`POST /api/inspiration/{id}/develop`（提炼→入队生成）、`DELETE`。
+- 前端新增「灵感随手记」页（响应式）+ 侧栏/路由/标题；一键生成后跳脚本工作台。
+- 测试 `tests/test_r186_inspiration.py`；`scripts/verify.sh` 全绿（31 表 / 139 路由）。
+
 ## [M174 / R-185] 2026-09-28 — 内容机会引擎：评论聚类 + 每周灵感包 + 选题账本
 
 > 规划落地（内容经营闭环 R-180~R-186）——直接回应「越做越没灵感」的初心。

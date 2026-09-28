@@ -7,6 +7,7 @@ from .draft import Draft
 from .draft_version import DraftVersion
 from .feedback import Feedback
 from .hot_topic import HotTopic, TopicCandidate, TopicIdea
+from .inspiration import InspirationNote
 from .kv import Kv
 from .metrics import MetricsSnapshot
 from .notification import Notification
@@ -44,6 +45,7 @@ __all__ = [
     "AgentAction",
     "HotTopic",
     "TopicIdea",
+    "InspirationNote",
     "Kv",
     "TopicCandidate",
     "PipelineRun",
