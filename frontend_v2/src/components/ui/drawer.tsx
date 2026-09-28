@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -26,7 +27,9 @@ export function Drawer({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onOpenChange])
 
-  return (
+  // 必须 portal 到 body：页面容器有 framer-motion 的 transform/filter（pageVariants 的 y/blur），
+  // 它们会让 position:fixed 相对祖先而非视口定位 → 抽屉被限制在内容区、滚动不到底（R-164 实测 bug）。
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -62,7 +65,8 @@ export function Drawer({
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   )
 }
 

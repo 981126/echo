@@ -23,6 +23,7 @@
 | M137 | 需求管理页 UI 溢出修复（R-148） | ✅ |
 | M138 | 下线「需求管理」网页（R-149） | ✅ |
 | M139 | 口播脚本编辑区换 Tiptap v3 块编辑器（R-150） | ✅ |
+| M154 | frontend_v2 线上 bug 修复：素材库卡顿 / 同步·拆分无动画 / 抽屉滚不到底（R-165） | ✅ |
 | M153 | 全新前端 frontend_v2 全功能 9 页重设计（React+shadcn/ui+Framer Motion，挂 /v2）（R-164） | ✅ |
 | M152 | 同步提速：任务进队列 + 消费者并行（博主级+素材级）+ TikHub 全局限速 10 req/s + SQLite WAL（R-163） | ✅ |
 | M151 | 「同步所有博主前15条」队列化：所有博主同时显示动画（R-162） | ✅ |
@@ -48,6 +49,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
+| M154 / R-165 | frontend_v2 三个线上 bug 修复：①素材库卡顿——MaterialCard 改 React.memo（回调稳定化+hasTask ref）/ 去 layout 动画 / 仅前 40 卡入场 / content-visibility 跳过屏外渲染；②同步·拆分无动画——use-card-tasks 新增 begin 本地 ramp + claim（直接用同步响应 media.task_id）+ finish + onSettled 自动刷新，拆分/删除卡片 spinner；③抽屉滚不到底——transform/filter 祖先使 fixed 定位异常，Drawer/重命名弹层改 createPortal 到 body | headless 实测：抽屉 top=0 覆盖全视口、滚动到底、同步卡片即时进度 17%、618 卡滚动流畅、零 console 错误；verify.sh 全绿 | ✅ |
 | M153 / R-164 | 全新前端 `frontend_v2/`（React 19+TS+Tailwind v4+shadcn/ui+Framer Motion+TanStack Query+openapi-typescript 生成客户端+TipTap React）：底座（双主题令牌/收缩侧栏/通知中心/SSE）+ 全功能 9 页重设计（主页时间线+灵感池 / 素材库卡片墙+右侧抽屉编辑 / 脚本工作台四 tab+TipTap+讨论+正文对比+版本 / 博主管理 / 博主对标+洗稿对照 / 人设档案 / AI 设置模型+提示词 / AI 对话 SSE 流式）；挂 /v2 与老前端并存；登录态独立 | frontend_v2 自测 tsc/eslint/vitest 19 例全绿 + build（vendor 分包）；Playwright headless 9 页点检零 console 错误；verify.sh 全绿；服务运行（8000/5173/3000） | ✅ |
 | M152 / R-163 | 同步提速：①TikHub 限速改**全局令牌桶**（`ECHO_TIKHUB_RATE_LIMIT` 默认 10 req/s、`ECHO_TIKHUB_RATE_BURST`），保留按路由 429 退避兜底；②新增 `services/sync_pool.py`（`claim_task` 原子认领 pending 队列任务 + `gather` 线程池 + `session_factory`）；③博主级并行（`run_all_top15_sync` / `run_daily_sync_all`，并发 `ECHO_SYNC_CONCURRENCY` 默认 4，进度按完成数聚合，预算耗尽触发取消）；④素材级并行（`run_card_sync_queue`，独立小池 `ECHO_SYNC_MEDIA_CONCURRENCY` 默认 2，同合并作品主线程确定性去重）；⑤预算读写加进程内锁防超发 + SQLite 开 WAL/busy_timeout | verify 全绿（373 例，含 R-163 新用例；R-151/R-162/R-109 用例随行为更新）；接口冒烟 + 前端点检；服务保持运行 | ✅ |
 | M148 / R-159 | 草稿新增 `done`（完成）状态：四 tab「草稿/待制作/完成/废稿」；待制作卡【完成】【退回草稿】；完成卡【退回待制作】+【删除】；只改状态不动反馈；仅改 status 白名单与前端 | verify 全绿（366 例，含 2 新用例）；headless 点检四种流转（完成/退回待制作/退回草稿）计数正确 | ✅ |

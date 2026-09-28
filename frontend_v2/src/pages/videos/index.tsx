@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -56,6 +56,7 @@ export default function VideosPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [busy, setBusy] = useState<Record<string, boolean>>({})  // 单卡操作（拆分/删除/同步）即时反馈
 
   const [editId, setEditId] = useState<number | null>(null)
   const [cloudItem, setCloudItem] = useState<CardItem | null>(null)
@@ -95,12 +96,13 @@ export default function VideosPage() {
     return [...set].sort()
   }, [cards])
 
-  const { tasks, refreshActive } = useCardTasks(cards)
-
-  const reload = () => {
+  const reload = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['videos'] })
     qc.invalidateQueries({ queryKey: ['works'] })
-  }
+     
+  }, [qc])
+
+  const { tasks, begin, claim, finish, refreshActive, hasTask } = useCardTasks(cards, reload)
 
   // 筛选持久化
   useEffect(() => saveFilters(filters), [filters])
@@ -129,16 +131,16 @@ export default function VideosPage() {
     }
   }
 
-  function openItem(it: CardItem) {
+  const openItem = useCallback((it: CardItem) => {
     if (it.kind === 'cloud') {
       if (it.local_video_id) setEditId(it.local_video_id)
       else setCloudItem(it)
     } else {
       setEditId(it.id)
     }
-  }
+  }, [])
 
-  async function onPlay(it: CardItem) {
+  const onPlay = useCallback(async (it: CardItem) => {
     const vid = it.kind === 'local' ? it.id : it.local_video_id
     if (it.kind === 'cloud' && (!it.local_video_id || !it.hasVideo)) {
       openItem(it)
@@ -149,25 +151,40 @@ export default function VideosPage() {
       return
     }
     setPlayer({ id: vid, title: it.title })
-  }
+  }, [openItem])
 
-  async function onSync(it: CardItem) {
+  const onDeleteCb = useCallback((it: CardItem) => setDeleteItem(it), [])
+  const onSplitCb = useCallback((it: CardItem) => setSplitItem(it), [])
+
+  const onSyncCb = useCallback(async (it: CardItem) => {
+    if (hasTask(it.key)) return
+    begin(it.key) // 本地即时过渡动画，不等服务端任务注册
     try {
+      let r: { media?: { task_id?: number; status?: string }; message?: string } | null = null
       if (it.kind === 'local') {
-        await apiJson(`/api/platform/videos/${it.id}/sync`, { method: 'POST' })
+        r = await apiJson(`/api/platform/videos/${it.id}/sync`, { method: 'POST' })
       } else if (it.type === 'work') {
-        await apiJson(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
+        r = await apiJson(`/api/platform/works/${it.id}/sync`, { method: 'POST' })
       } else if (it.cloudPosts[0]) {
-        await apiJson(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
+        r = await apiJson(`/api/platform/posts/${it.cloudPosts[0].id}/sync`, { method: 'POST' })
       }
-      toast.success('已开始同步')
-      await refreshActive()
+      const taskId = r?.media?.task_id
+      if (taskId) {
+        claim(it.key, taskId) // 服务端媒体补齐任务接管进度
+      } else if (r?.media?.status === 'skip') {
+        finish(it.key, true, '已是最新，无需补齐')
+      } else {
+        await refreshActive() // 兜底：扫描认领
+        if (!hasTask(it.key)) finish(it.key, true, r?.message || '同步完成')
+      }
+      reload()
     } catch (e) {
+      finish(it.key, false)
       toast.error((e as Error).message)
     }
-  }
+  }, [begin, claim, finish, refreshActive, reload, hasTask])
 
-  async function onConfirmTags(it: CardItem) {
+  const onConfirmTags = useCallback(async (it: CardItem) => {
     try {
       await apiJson(`/api/videos/${it.id}/confirm-tags`, { method: 'POST', body: JSON.stringify({ tags_confirmed: true }) })
       toast.success('标签已确认')
@@ -175,11 +192,12 @@ export default function VideosPage() {
     } catch (e) {
       toast.error((e as Error).message)
     }
-  }
+  }, [reload])
 
   async function doDelete() {
     if (!deleteItem) return
     setDeleting(true)
+    setBusy((b) => ({ ...b, [deleteItem.key]: true }))
     try {
       if (deleteItem.kind === 'local') {
         await apiJson(`/api/videos/${deleteItem.id}`, { method: 'DELETE' })
@@ -193,11 +211,18 @@ export default function VideosPage() {
       toast.error((e as Error).message)
     } finally {
       setDeleting(false)
+      setBusy((b) => {
+        const n = { ...b }
+        delete n[deleteItem.key]
+        return n
+      })
     }
   }
 
   async function doSplit() {
     if (!splitItem) return
+    const key = splitItem.key
+    setBusy((b) => ({ ...b, [key]: true }))  // 拆分即时反馈（卡片 spinner）
     try {
       await apiJson(`/api/works/${splitItem.id}/split`, { method: 'POST', body: JSON.stringify({ platform_post_ids: [] }) })
       toast.success('已拆分')
@@ -205,6 +230,12 @@ export default function VideosPage() {
       reload()
     } catch (e) {
       toast.error((e as Error).message)
+    } finally {
+      setBusy((b) => {
+        const n = { ...b }
+        delete n[key]
+        return n
+      })
     }
   }
 
@@ -218,14 +249,14 @@ export default function VideosPage() {
     }
   }
 
-  function toggleSel(it: CardItem) {
+  const toggleSel = useCallback((it: CardItem) => {
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(it.key)) next.delete(it.key)
       else next.add(it.key)
       return next
     })
-  }
+  }, [])
 
   const selectedCards = cards.filter((c) => selected.has(c.key))
   const cloudCount = selectedCards.filter((c) => c.kind === 'cloud').length
@@ -240,7 +271,7 @@ export default function VideosPage() {
       } else if (action === 'sync') {
         for (const c of selectedCards) {
            
-          await onSync(c).catch(() => undefined)
+          await onSyncCb(c).catch(() => undefined)
         }
       } else {
         for (const c of selectedCards) {
@@ -439,7 +470,7 @@ export default function VideosPage() {
           没有匹配的素材（换个关键词/标签，或去「博主管理」同步）
         </div>
       ) : (
-        <motion.div layout className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           <AnimatePresence mode="popLayout">
             {filtered.map((it, i) => (
               <MaterialCard
@@ -449,17 +480,18 @@ export default function VideosPage() {
                 selectMode={selectMode}
                 selected={selected.has(it.key)}
                 task={tasks[it.key]}
+                busy={!!busy[it.key]}
                 onOpen={openItem}
                 onToggle={toggleSel}
                 onPlay={onPlay}
-                onSync={onSync}
+                onSync={onSyncCb}
                 onConfirmTags={onConfirmTags}
-                onDelete={setDeleteItem}
-                onSplit={setSplitItem}
+                onDelete={onDeleteCb}
+                onSplit={onSplitCb}
               />
             ))}
           </AnimatePresence>
-        </motion.div>
+        </div>
       )}
 
       {/* 抽屉与弹窗 */}

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import MarkdownIt from 'markdown-it'
@@ -396,7 +397,7 @@ export default function ChatPage() {
         destructive
         onConfirm={doDeleteConv}
       />
-      {renaming && (
+      {renaming && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45" onClick={() => setRenaming(null)}>
           <div className="w-72 rounded-lg border border-border bg-card p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <p className="mb-2 text-sm font-semibold">重命名对话</p>
@@ -412,7 +413,8 @@ export default function ChatPage() {
               <Button size="sm" onClick={doRename}>保存</Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

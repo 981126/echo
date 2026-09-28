@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { motion } from 'framer-motion'
 import { Play, RefreshCw, CheckCheck, Trash2, Split, Layers, BadgeCheck, LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -15,12 +16,13 @@ const PLATFORM_DOT: Record<string, string> = {
   bilibili: 'bg-[#00a1d6]'
 }
 
-export function MaterialCard({
+export const MaterialCard = memo(function MaterialCard({
   item,
   index,
   selectMode,
   selected,
   task,
+  busy,
   onOpen,
   onToggle,
   onPlay,
@@ -34,6 +36,7 @@ export function MaterialCard({
   selectMode: boolean
   selected: boolean
   task?: CardTaskState
+  busy?: boolean
   onOpen: (it: CardItem) => void
   onToggle: (it: CardItem) => void
   onPlay: (it: CardItem) => void
@@ -45,15 +48,18 @@ export function MaterialCard({
   const stats = item.cloudPosts.map((p) => p.latest_stat).filter(Boolean)
   const likes = stats.reduce((m, s) => Math.max(m, Number(s?.likes || 0)), 0)
   const syncing = !!task && task.progress < 100
+  // 大列表性能：前 40 张有入场动画，其余直接呈现（618+ 卡时避免集体动画卡顿）；
+  // 不再用 layout 动画（每次进度更新都会全量布局测量），改用 content-visibility 跳过屏外渲染
+  const animateEnter = index < 40
 
   return (
     <motion.div
-      layout
-      initial={{ opacity: 0, y: 18, scale: 0.97 }}
+      initial={animateEnter ? { opacity: 0, y: 18, scale: 0.97 } : false}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.94 }}
-      transition={{ duration: 0.35, delay: Math.min(index, 16) * 0.035, ease: [0.16, 1, 0.3, 1] }}
+      transition={animateEnter ? { duration: 0.35, delay: Math.min(index, 16) * 0.035, ease: [0.16, 1, 0.3, 1] } : { duration: 0.15 }}
       whileHover={{ y: -4 }}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 300px' } as React.CSSProperties}
       className={cn(
         'group relative overflow-hidden rounded-lg border bg-card shadow-[var(--shadow-card)] transition-colors',
         selected ? 'border-accent ring-2 ring-[var(--ring)]' : 'border-border'
@@ -109,6 +115,13 @@ export function MaterialCard({
         {selectMode && (
           <div className="absolute right-2 top-2 rounded-md bg-black/45 p-1 backdrop-blur-sm" onClick={(e) => e.stopPropagation()}>
             <Checkbox checked={selected} onCheckedChange={() => onToggle(item)} className="border-white/60 data-[state=checked]:border-accent" />
+          </div>
+        )}
+
+        {/* 操作即时反馈（拆分/删除等快操作） */}
+        {busy && !task && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
+            <LoaderCircle className="h-6 w-6 animate-spin text-white" />
           </div>
         )}
 
@@ -195,4 +208,4 @@ export function MaterialCard({
       )}
     </motion.div>
   )
-}
+})

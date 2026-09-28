@@ -1,5 +1,20 @@
 # 变更记录
 
+## [M154 / R-165] 2026-09-28 — frontend_v2 线上 bug：素材库卡顿 / 同步·拆分无动画 / 抽屉滚不到底
+
+> 作者：现在页面很多bug，比如点击素材库，页面很卡，点击同步、拆分没有动画，弹出的抽屉，抽屉向下滚动不到底。
+
+- **卡顿**：`MaterialCard` 改 `React.memo`（卡片回调全部 `useCallback` 稳定化；任务判断改 ref 读取的 `hasTask`，
+  避免任务进度更新整页重渲）；去掉卡片/网格 framer-motion `layout` 动画；仅前 40 张卡有入场动画；
+  卡片加 `content-visibility: auto` 跳过屏外渲染。
+- **同步/拆分无动画**：`use-card-tasks` 新增 `begin()`（点击即显示本地进度 ramp）→ `claim()`（直接用同步接口
+  返回的 `media.task_id` 接管进度，替代原先的盲扫竞争）→ `finish()`；任务终态经 `onSettled` 回调自动刷新列表；
+  拆分/删除加卡片级 spinner 覆盖层。
+- **抽屉滚不到底**：页面容器有 framer-motion transform/filter，`position:fixed` 相对祖先而非视口定位 →
+  Drawer 与聊天重命名弹层改 `createPortal` 挂 `document.body`。
+- **验证**：headless 实测（抽屉 top=0 覆盖全视口+滚动到底、同步卡片即时进度、618 卡滚动流畅、零 console 错误）；
+  `scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M153 / R-164] 2026-09-28 — 全新前端 frontend_v2（全功能 9 页重设计，挂 /v2）
 
 > 作者：前端太丑，新建独立项目（老前端名+v2），零复用老代码、全新布局、审美与动效优先。
