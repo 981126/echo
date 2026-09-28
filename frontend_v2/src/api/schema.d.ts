@@ -712,6 +712,10 @@ export interface paths {
         /**
          * Debate Status
          * @description 当前双模型讨论进行到哪一步（思考中提示）。
+         *
+         *     R-173：除原有的 `status`（人类可读文案，老前端只读它做展示，语义保持不变）外，
+         *     新增结构化字段 `state`（`running`/`failed`/`null`）+ `note/actor/phase/round/rounds/kind`，
+         *     新前端据此画「模型名 + 三点跳动 + 第 x/y 轮」并在 `state != running` 时收尾。
          */
         get: operations["debate_status_api_drafts__draft_id__debate_status_get"];
         put?: never;
@@ -2561,6 +2565,10 @@ export interface components {
              * @default 1
              */
             version: number;
+            /** Debate */
+            debate?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created At
              * Format: date-time

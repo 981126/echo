@@ -631,12 +631,29 @@ def analyze_worker(db: Session, payload: dict, update=None) -> dict:
 
 
 def rewrite_worker(db: Session, payload: dict, update=None) -> dict:
-    """后台任务：洗稿（R-116 后台留痕；R-117 记录来源素材；R-118 双模型多轮讨论）。"""
+    """后台任务：洗稿（R-116 后台留痕；R-117 记录来源素材；R-118 双模型多轮讨论）。
+
+    R-173：失败时给草稿留下「中断」标记（`run_rewrite_debate` 会把 draft_id 回写进 payload），
+    否则卡片会一直显示「讨论中」。
+    """
+    from . import draft_status
     from .debate import run_rewrite_debate
 
     if update:
         update(10, "启动双模型讨论…")
-    res = run_rewrite_debate(db, payload)
+    try:
+        res = run_rewrite_debate(db, payload)
+    except Exception as exc:  # noqa: BLE001 标记后原样抛出，交给任务运行器记 failed + 通知
+        try:
+            draft_status.set_failed(
+                db,
+                int(payload.get("draft_id") or 0),
+                f"洗稿中断：{str(exc)[:150]}",
+                kind="rewrite",
+            )
+        except Exception:  # noqa: BLE001 标记失败不能掩盖原始错误
+            db.rollback()
+        raise
     return {"key": payload.get("key") or "", **res}
 
 

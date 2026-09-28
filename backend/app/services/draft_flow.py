@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..models.draft import Draft
 from ..services.creator_service import current_creator_id
 from ..tasks import start_task
+from . import draft_status
 from .debate import PLACEHOLDER_SCRIPT, clear_debate_state, run_debate, run_debate_draft
 
 
@@ -21,12 +22,13 @@ def debate_task(db: Session, payload: dict) -> dict:
     """后台任务体：跑双模型讨论；失败时清进度与占位稿（R-134），再抛出。
 
     R-157：跑完自动定稿留一版（source=ai_generate）。
+    R-173：失败改为留「中断」标记（卡片显示「上次讨论中断（可重新讨论）」，但不转圈）。
     """
     try:
         res = run_debate_draft(db, payload)
-    except Exception:
+    except Exception as exc:
         try:
-            clear_debate_state(db, int(payload.get("draft_id") or 0))
+            clear_debate_state(db, int(payload.get("draft_id") or 0), reason=f"生成中断：{str(exc)[:150]}")
         except Exception:  # noqa: BLE001 清理失败不能掩盖原始错误
             db.rollback()
         raise
@@ -60,6 +62,7 @@ def create_placeholder_draft(db: Session, topic: str) -> Draft:
 def start_generation(db: Session, topic: str) -> tuple[int, int]:
     """建占位稿 + 入队双模型讨论；返回 (task_id, draft_id)。"""
     draft = create_placeholder_draft(db, topic)
+    draft_status.set_running(db, draft.id, f"正在生成《{topic[:20]}》…", kind="generate", phase="queued")
     task_id = start_task("generate_draft", {"draft_id": draft.id, "topic": topic}, debate_task)
     return task_id, draft.id
 
@@ -70,6 +73,7 @@ def start_rework(db: Session, draft_id: int) -> int:
     if draft is None:
         raise ValueError("草稿不存在")
     topic = (draft.title or "").strip() or "重新生成一条口播脚本"
+    draft_status.set_running(db, draft.id, "正在回炉重写…", kind="rework", phase="queued")
     return start_task("generate_draft", {"draft_id": draft.id, "topic": topic}, debate_task)
 
 
@@ -99,7 +103,8 @@ def discussion_task(db: Session, payload: dict) -> dict:
     """
     from .draft_versions import finalize_version, list_versions
 
-    draft = db.get(Draft, int(payload.get("draft_id") or 0))
+    draft_id = int(payload.get("draft_id") or 0)
+    draft = db.get(Draft, draft_id)
     if draft is None:
         raise ValueError("草稿不存在")
     if draft.creator_id is None:
@@ -109,7 +114,14 @@ def discussion_task(db: Session, payload: dict) -> dict:
     source_text = str(payload.get("source_text") or "")
     source_title = str(payload.get("source_title") or "")
     topic = (draft.title or "").strip() or source_title or "重新讨论"
-    res = run_debate(db, draft, topic, source_text=source_text, source_title=source_title)
+    try:
+        res = run_debate(db, draft, topic, source_text=source_text, source_title=source_title)
+    except Exception as exc:  # noqa: BLE001 R-173：失败留下「中断」标记，不永久转圈
+        try:
+            draft_status.set_failed(db, draft_id, f"讨论中断：{str(exc)[:150]}", kind="discuss")
+        except Exception:  # noqa: BLE001 标记失败不能掩盖原始错误
+            db.rollback()
+        raise
     finalize_version(db, draft, source="ai_discuss", note="讨论后")
     return res
 
@@ -122,6 +134,7 @@ def start_discussion(db: Session, draft_id: int) -> int:
     source_text, source_title = resolve_discussion_source(db, draft)
     if not source_text:
         raise ValueError("这篇草稿没有可讨论的原文或正文")
+    draft_status.set_running(db, draft.id, "正在准备讨论…", kind="discuss", phase="queued")
     return start_task(
         "draft_discuss",
         {"draft_id": draft.id, "source_text": source_text, "source_title": source_title},

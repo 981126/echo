@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..services import draft_status
 from ..services.creator_service import current_creator_id
 from ..models.draft import Draft
 from ..models.draft_version import DraftVersion
@@ -54,15 +55,26 @@ def _rework_task(db: Session, payload: dict) -> dict:
     """一键回炉（R-030⑦）：按原选题重新生成，并把内容替换回原草稿（保留 id/反馈/讨论记录）。
 
     R-157：中间 fresh 稿不留版，回炉结果记到**原稿**上。
+    R-173：回炉期间在**原稿**上写 AI 状态（卡片显示「正在回炉重写…」），失败留中断标记。
     """
     from .generation import generate_draft
     from ..services.draft_versions import finalize_version
 
-    draft = db.get(Draft, int(payload.get("draft_id") or 0))
+    draft_id = int(payload.get("draft_id") or 0)
+    draft = db.get(Draft, draft_id)
     if draft is None:
         return {"draft_id": 0}
     topic = (payload.get("topic") or draft.title or "").strip() or "重新生成一条口播脚本"
-    fresh = generate_draft(db, topic, snapshot=False)
+    draft_status.set_running(db, draft_id, "正在回炉重写…", kind="rework")
+    try:
+        fresh = generate_draft(db, topic, snapshot=False)
+    except Exception as exc:  # noqa: BLE001 R-173：留中断标记后原样抛出
+        try:
+            draft_status.set_failed(db, draft_id, f"回炉中断：{str(exc)[:150]}", kind="rework")
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        raise
+    draft = db.get(Draft, draft_id) or draft
     draft.title = fresh.title or draft.title
     draft.cover_text = fresh.cover_text or draft.cover_text
     draft.script = fresh.script or draft.script
@@ -72,6 +84,7 @@ def _rework_task(db: Session, payload: dict) -> dict:
     db.delete(fresh)
     db.commit()
     finalize_version(db, draft, source="ai_generate", note="一键回炉")
+    draft_status.clear(db, draft_id)
     return {"draft_id": draft.id, "title": draft.title}
 
 
@@ -197,11 +210,23 @@ def draft_discuss(draft_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{draft_id}/debate-status", response_model=dict)
 def debate_status(draft_id: int, db: Session = Depends(get_db)):
-    """当前双模型讨论进行到哪一步（思考中提示）。"""
-    from ..models.kv import Kv
+    """当前双模型讨论进行到哪一步（思考中提示）。
 
-    row = db.get(Kv, f"debate:{draft_id}")
-    return {"status": row.value if row else None}
+    R-173：除原有的 `status`（人类可读文案，老前端只读它做展示，语义保持不变）外，
+    新增结构化字段 `state`（`running`/`failed`/`null`）+ `note/actor/phase/round/rounds/kind`，
+    新前端据此画「模型名 + 三点跳动 + 第 x/y 轮」并在 `state != running` 时收尾。
+    """
+    state = draft_status.read(db, draft_id) or {}
+    return {
+        "status": state.get("note") or None,  # 兼容老前端：无任务时 null
+        "state": state.get("state"),
+        "kind": state.get("kind") or "",
+        "note": state.get("note") or "",
+        "actor": state.get("actor") or "",
+        "phase": state.get("phase") or "",
+        "round": state.get("round"),
+        "rounds": state.get("rounds"),
+    }
 
 
 @router.get("/{draft_id}/discussions", response_model=list[dict])
@@ -269,7 +294,15 @@ def list_drafts(
         q = q.filter(Draft.status == status)
     if video_id is not None:
         q = q.filter(Draft.video_id == video_id)
-    return q.order_by(Draft.updated_at.desc()).limit(limit).all()
+    rows = q.order_by(Draft.updated_at.desc()).limit(limit).all()
+    # R-173：一次批量查询带上「AI 长任务状态」，卡片据此显示讨论中动画（无 N+1）
+    states = draft_status.read_many(db, [r.id for r in rows])
+    out = []
+    for r in rows:
+        item = DraftOut.model_validate(r)
+        item.debate = states.get(r.id)
+        out.append(item)
+    return out
 
 
 @router.post("", response_model=DraftOut)
@@ -299,7 +332,9 @@ def get_draft(draft_id: int, db: Session = Depends(get_db)):
     draft = db.get(Draft, draft_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="草稿不存在")
-    return draft
+    item = DraftOut.model_validate(draft)
+    item.debate = draft_status.read(db, draft_id)  # R-173：抽屉刷新正文时也能拿到状态
+    return item
 
 
 @router.patch("/{draft_id}", response_model=DraftOut)

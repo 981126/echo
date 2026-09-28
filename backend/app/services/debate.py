@@ -17,7 +17,7 @@ from ..config import get_settings
 from ..models.discussion import DraftDiscussion
 from ..models.draft import Draft
 from ..models.kv import Kv
-from . import budget_settings, llm_router
+from . import budget_settings, draft_status, llm_router
 from .generation import _persona_context, _style_profile_lines, _style_samples, generation_user_message
 from .llm import LLMError
 from .prompt_service import get_prompt, get_prompt_version
@@ -61,22 +61,35 @@ def _note(db: Session, draft_id: int, round_no: int, text: str) -> None:
     _add(db, draft_id, round_no, "system", "note", text)
 
 
-def _status(db: Session, draft_id: int, text: str) -> None:
-    """把"当前正在做什么"写入 Kv，供前端讨论页显示思考中状态。"""
-    key = f"debate:{draft_id}"
-    row = db.get(Kv, key)
-    if row is None:
-        db.add(Kv(key=key, value=text))
-    else:
-        row.value = text
-    db.commit()
+def _status(
+    db: Session,
+    draft_id: int,
+    text: str,
+    *,
+    kind: str = "debate",
+    actor: str = "",
+    phase: str = "",
+    round_no: int | None = None,
+    rounds: int | None = None,
+) -> None:
+    """把"当前正在做什么（谁、哪一步、第几轮）"写进草稿 AI 状态（R-173）。
+
+    卡片与讨论 tab 都读它；`actor/phase/round/rounds` 让前端不必解析文案就能画状态条。
+    """
+    draft_status.set_running(
+        db,
+        draft_id,
+        text,
+        kind=kind,
+        actor=actor,
+        phase=phase,
+        round_no=round_no,
+        rounds=rounds,
+    )
 
 
 def _clear_status(db: Session, draft_id: int) -> None:
-    row = db.get(Kv, f"debate:{draft_id}")
-    if row is not None:
-        db.delete(row)
-        db.commit()
+    draft_status.clear(db, draft_id)
 
 
 # 各步推理预算（R-142 定标 / R-143 起可在「AI 设置 → 推理预算」里改）：
@@ -112,11 +125,16 @@ def merge_tags(raw: str, new_tags: list[str]) -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
-def clear_debate_state(db: Session, draft_id: int) -> None:
-    """讨论失败/中断后的清理（R-134）：清进度状态；占位稿改成可读的失败提示，避免永久「生成中…」。"""
+def clear_debate_state(db: Session, draft_id: int, reason: str = "") -> None:
+    """讨论失败/中断后的收尾（R-134；R-173 起保留「中断」标记）。
+
+    - R-134：占位稿改成可读的失败提示，避免永久「生成中…」；
+    - R-173：不再静默删状态，而是记成 `failed`——卡片显示「上次讨论中断（可重新讨论）」，
+      但不转圈（前端只对 `running` 画动画）。
+    """
     if not draft_id:
         return
-    _clear_status(db, draft_id)
+    draft_status.set_failed(db, draft_id, reason or "讨论中断", kind="debate")
     draft = db.get(Draft, draft_id)
     if draft is not None and (draft.script or "").strip() == PLACEHOLDER_SCRIPT:
         draft.script = FAILED_SCRIPT
@@ -192,7 +210,7 @@ def run_debate(
         initial_user = generation_user_message(db, topic)  # R-129：与金样本回放评分同一份输入
         initial_budget = budget_settings.budget_for(db, "debate_initial")
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
-        _status(db, draft.id, f"{name} 正在起草初稿…（生成方 {gen}）")
+        _status(db, draft.id, f"{name} 正在起草初稿…（生成方 {gen}）", actor=name, phase="draft", rounds=rounds_total)
         try:
             data = llm.chat_json(
                 [
@@ -245,8 +263,9 @@ def run_debate(
 
     latest = draft.script
     rounds_done = 0
+    break_reason = ""
     for r in range(1, rounds_total + 1):
-        _status(db, draft.id, f"{critic} 正在评审第 {r}/{rounds_total} 轮…")
+        _status(db, draft.id, f"{critic} 正在评审第 {r}/{rounds_total} 轮…", actor=critic, phase="critique", round_no=r, rounds=rounds_total)
         try:
             critique = _chat_once(
                 critic_llm,
@@ -256,10 +275,11 @@ def run_debate(
                 budget_settings.budget_for(db, "debate_critique"),
             )
         except Exception as exc:  # noqa: BLE001
+            break_reason = f"第 {r}/{rounds_total} 轮评审失败（{str(exc)[:120]}），已按当前稿定稿，可重新讨论"
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
             break
         _add(db, draft.id, r, critic, "critique", critique)
-        _status(db, draft.id, f"{gen} 正在按评审修订第 {r}/{rounds_total} 轮…")
+        _status(db, draft.id, f"{gen} 正在按评审修订第 {r}/{rounds_total} 轮…", actor=gen, phase="revise", round_no=r, rounds=rounds_total)
         try:
             revised = _chat_once(
                 gen_llm,
@@ -269,6 +289,7 @@ def run_debate(
                 budget_settings.budget_for(db, "debate_revise"),
             )
         except Exception as exc:  # noqa: BLE001
+            break_reason = f"第 {r}/{rounds_total} 轮修订失败（{str(exc)[:120]}），保留上一稿，可重新讨论"
             _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")
             break
         latest = revised
@@ -280,7 +301,7 @@ def run_debate(
     # 3) 生成后自检（R-131）：有问题就带着问题让生成方再改一次（只 1 次，避免成本失控）
     issues, coverage = _self_check(db, draft.script)
     if issues:
-        _status(db, draft.id, "正在按自检问题做最后一次收口修订…")
+        _status(db, draft.id, "正在按自检问题做最后一次收口修订…", actor=gen, phase="selfcheck", rounds=rounds_total)
         fix_user = (
             f"这是你自己刚写的脚本：\n{latest}\n\n"
             "以下几处不符合作者风格或踩了红线，请整篇重写并避免：\n"
@@ -316,7 +337,12 @@ def run_debate(
     )
     draft.script = latest
     db.commit()
-    _clear_status(db, draft.id)
+    # R-173：跑满才清状态；中途某轮失败（R-118 允许以当前稿定稿）留下「中断」标记，
+    # 让作者看到「讨论 x/y 轮后中断」而不是以为讨论正常结束。
+    if break_reason:
+        draft_status.set_failed(db, draft.id, break_reason, kind="debate")
+    else:
+        _clear_status(db, draft.id)
     return {
         "draft_id": draft.id,
         "title": draft.title,
@@ -394,6 +420,8 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     db.add(draft)
     db.commit()
     db.refresh(draft)
+    # R-173：把草稿 id 回写进 payload，供调用方（rewrite_worker）在**异常时**也能标记中断状态
+    payload["draft_id"] = draft.id
 
     # R-157：洗稿前先把素材 ASR 文案记为第一版（洗稿后正文是第二版）
     from .draft_versions import finalize_version
@@ -420,7 +448,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
 
     latest = None
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
-        _status(db, draft.id, f"{name.upper()} 正在初稿洗稿…")
+        _status(db, draft.id, f"{name.upper()} 正在初稿洗稿…", kind="rewrite", actor=name, phase="draft")
         try:
             data = llm.chat_json(
                 [{"role": "system", "content": rewrite_system}, {"role": "user", "content": rewrite_user}],
@@ -435,7 +463,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, 0, f"{name} 初稿失败：{str(exc)[:200]}；切换下一位")
     if not latest:
-        _clear_status(db, draft.id)
+        draft_status.set_failed(db, draft.id, "洗稿初稿生成失败（生成方与评审方都失败）", kind="rewrite")
         raise LLMError("生成方与评审方洗稿初稿均失败")
 
     # 标题不得与素材原标题一致（模型偶发偷懒时兜底）
@@ -456,9 +484,10 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     )
 
     rounds = debate_rounds(db, settings)
+    break_reason = ""
 
     for r in range(1, rounds + 1):
-        _status(db, draft.id, f"{critic.upper()} 正在评审第 {r}/{rounds} 轮…")
+        _status(db, draft.id, f"{critic.upper()} 正在评审第 {r}/{rounds} 轮…", kind="rewrite", actor=critic, phase="critique", round_no=r, rounds=rounds)
         try:
             critique = _chat_once(
                 critic_llm,
@@ -468,10 +497,11 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
                 budget_settings.budget_for(db, "debate_critique"),
             )
         except Exception as exc:  # noqa: BLE001
+            break_reason = f"第 {r}/{rounds} 轮评审失败（{str(exc)[:120]}），已按当前稿定稿，可重新讨论"
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
             break
         _add(db, draft.id, r, critic, "critique", critique)
-        _status(db, draft.id, f"{gen.upper()} 正在按评审修订第 {r}/{rounds} 轮…")
+        _status(db, draft.id, f"{gen.upper()} 正在按评审修订第 {r}/{rounds} 轮…", kind="rewrite", actor=gen, phase="revise", round_no=r, rounds=rounds)
         try:
             revised = _chat_once(
                 gen_llm,
@@ -481,6 +511,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
                 budget_settings.budget_for(db, "debate_revise"),
             )
         except Exception as exc:  # noqa: BLE001
+            break_reason = f"第 {r}/{rounds} 轮修订失败（{str(exc)[:120]}），保留上一稿，可重新讨论"
             _note(db, draft.id, r, f"修订方({gen})失败：{str(exc)[:200]}，保留上一稿")
             break
         latest = revised
@@ -488,7 +519,12 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         db.commit()
         _add(db, draft.id, r, gen, "revise", latest)
 
-    _clear_status(db, draft.id)
+    # R-173：真正跑满才清状态；中途失败（R-118 允许以当前稿定稿）留下「中断」标记，
+    # 免得作者以为「只讨论了一轮」是正常结果。
+    if break_reason:
+        draft_status.set_failed(db, draft.id, break_reason, kind="rewrite")
+    else:
+        _clear_status(db, draft.id)
     # R-157：洗稿完成后记第二版
     finalize_version(db, draft, source="ai_rewrite", note="洗稿后")
     return {

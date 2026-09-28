@@ -232,6 +232,7 @@ def mark_interrupted_tasks_on_startup() -> int:
                 log.exception("重启中断任务通知写入失败")
         _resume_persona_incremental_if_pending(db)
         _cleanup_stale_sync_state(db)
+        _cleanup_stale_draft_ai_state(db)
         return n
     finally:
         db.close()
@@ -259,6 +260,20 @@ def _cleanup_stale_sync_state(db) -> dict:
     if n_job or n_acc:
         log.warning("启动自愈：sync_jobs=%d、账号 sync_status=%d 已复位", n_job or 0, n_acc or 0)
     return {"sync_jobs": int(n_job or 0), "accounts": int(n_acc or 0)}
+
+
+def _cleanup_stale_draft_ai_state(db) -> int:
+    """R-173：清理草稿 AI 长任务残留状态 —— 讨论/洗稿/回炉中途重启后卡片会永久转圈。
+
+    残留 `running` 改判为「服务重启，任务中断」（卡片显示「上次讨论中断」但不转圈），
+    同时删掉 R-173 之前的旧键 `debate:{id}`。
+    """
+    from .services import draft_status
+
+    n = draft_status.reset_stale_on_startup(db)
+    if n:
+        log.warning("启动自愈：%d 条草稿 AI 状态由 running 改判中断", n)
+    return n
 
 
 def _resume_persona_incremental_if_pending(db) -> bool:

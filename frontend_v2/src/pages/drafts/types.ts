@@ -1,4 +1,17 @@
 // 脚本工作台类型
+/** R-173：草稿当前的 AI 长任务状态（讨论/洗稿/回炉/生成），来自 `/api/drafts` 的 `debate` 字段。 */
+export interface DebateState {
+  state: 'running' | 'failed' | string
+  kind: string
+  note: string
+  actor: string
+  phase: string
+  round: number | null
+  rounds: number | null
+  at?: string
+  running?: boolean
+}
+
 export interface Draft {
   id: number
   video_id?: number | null
@@ -29,6 +42,8 @@ export interface Draft {
     [k: string]: unknown
   }
   version: number
+  /** R-173：无任务时为 null/undefined */
+  debate?: DebateState | null
   created_at: string
   updated_at: string
 }
@@ -99,4 +114,17 @@ export const VERSION_SOURCE: Record<string, { label: string; variant: 'default' 
   rewrite_before: { label: '洗稿前 ASR', variant: 'secondary' },
   rewrite_after: { label: '修改后', variant: 'success' },
   rework: { label: '回炉', variant: 'warning' }
+}
+
+/** R-173：草稿 AI 长任务的类型名（卡片/讨论 tab 状态条） */
+export const AI_KIND_LABELS: Record<string, string> = {
+  debate: '双模型讨论',
+  discuss: '双模型讨论',
+  rewrite: '洗稿讨论',
+  rework: '回炉重写',
+  generate: 'AI 生成'
+}
+
+export function aiKindLabel(kind?: string): string {
+  return AI_KIND_LABELS[kind || ''] || 'AI 处理'
 }

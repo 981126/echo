@@ -374,6 +374,9 @@ Get Task
 
 List Drafts
 
+R-173：每条草稿附带 `debate` 字段（无任务为 `null`）——`{"state","kind","note","actor","phase","round","rounds"}`，
+卡片据此显示「讨论/洗稿/回炉/生成中」动画与「上次讨论中断」标记（单次批量查询，无 N+1）。
+
 **参数**
 
 - `status`（query）string
@@ -1607,11 +1610,18 @@ Debate Status
 
 当前双模型讨论进行到哪一步（思考中提示，R-134 补注册）。
 
+R-173：除原有的 `status`（人类可读文案，老前端只读它做展示，语义保持不变）外，新增结构化字段
+`state`（`running`/`failed`/`null`）+ `kind/note/actor/phase/round/rounds`；新前端据此画
+「模型名 + 三点跳动 + 第 x/y 轮」，并在 `state != running` 时收尾（null=正常结束并刷新正文，
+failed=「上次讨论中断」）。状态存 `app_kv['draft_ai:{id}']`（不新增表）。
+
 **参数**
 
 - `draft_id`（path）integer，必填
 - `x-access-token`（header）string
 **返回 200**：application/json → object
+
+示例：`{"status": "MODEL1 正在按评审修订第 3/3 轮…", "state": "running", "kind": "rewrite", "note": "…", "actor": "model1", "phase": "revise", "round": 3, "rounds": 3}`
 
 ### GET /api/settings/asr
 

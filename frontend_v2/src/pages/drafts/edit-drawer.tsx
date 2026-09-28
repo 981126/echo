@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Save,
@@ -29,10 +29,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from '@/components/ui/toaster'
 import { ScriptEditor } from './script-editor'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
+import { DraftAiStatus } from './draft-ai-status'
 import { buildDiff } from './diff'
 import {
   VERSION_SOURCE,
   modelInfo,
+  type DebateState,
   type Draft,
   type DraftVersion,
   type Discussion
@@ -62,6 +64,31 @@ interface VideoOpt {
   filename: string
 }
 
+/** R-173：`/api/drafts/{id}/debate-status` 返回（status 为老字段=人类可读文案） */
+interface DebateStatusRow {
+  status?: string | null
+  state?: 'running' | 'failed' | null
+  kind?: string
+  note?: string
+  actor?: string
+  phase?: string
+  round?: number | null
+  rounds?: number | null
+}
+
+function toDebateState(row: DebateStatusRow): DebateState | null {
+  if (!row.state) return null
+  return {
+    state: row.state,
+    kind: row.kind || '',
+    note: row.note || row.status || '',
+    actor: row.actor || '',
+    phase: row.phase || '',
+    round: row.round ?? null,
+    rounds: row.rounds ?? null
+  }
+}
+
 export function DraftEditDrawer({
   draft,
   state,
@@ -87,8 +114,10 @@ export function DraftEditDrawer({
   const [checkInfo, setCheckInfo] = useState<CheckInfo | null>(null)
   const [reworking, setReworking] = useState(false)
   const [discussions, setDiscussions] = useState<Discussion[]>([])
-  const [discussing, setDiscussing] = useState(false)
-  const [debateStatus, setDebateStatus] = useState('')
+  // R-173：讨论状态来自服务端（谁都能发起：抽屉里的【讨论】、素材库洗稿、回炉、AI 生成）
+  const [debate, setDebate] = useState<DebateState | null>(null)
+  const sawRunningRef = useRef(false) // 轮询里确认过 running（用于收尾判定，避免启动瞬间的空状态误判完成）
+  const startedAtRef = useRef(0) // 自己点【讨论】的时间（乐观 running 的兜底）
   const [versions, setVersions] = useState<DraftVersion[]>([])
   const [cmpLeft, setCmpLeft] = useState('')
   const [cmpRight, setCmpRight] = useState('')
@@ -97,6 +126,19 @@ export function DraftEditDrawer({
   const [videos, setVideos] = useState<VideoOpt[]>([])
 
   const id = state.id
+  const discussing = debate?.state === 'running'
+
+  /** R-173：取一次服务端 AI 状态（打开抽屉、回炉后都用它同步） */
+  async function refreshDebate(targetId = id) {
+    if (!targetId) return
+    try {
+      const row = await apiJson<DebateStatusRow>(`/api/drafts/${targetId}/debate-status`)
+      if (row.state === 'running') sawRunningRef.current = true
+      setDebate(toDebateState(row))
+    } catch {
+      /* 抖动忽略 */
+    }
+  }
 
   // 关联素材选项
   useEffect(() => {
@@ -108,10 +150,13 @@ export function DraftEditDrawer({
 
   // 讨论/版本随 id 加载
   useEffect(() => {
+    sawRunningRef.current = false
+    startedAtRef.current = 0
     if (!open || !id) {
       setDiscussions([])
       setVersions([])
       setCheckInfo(null)
+      setDebate(null)
       return
     }
     apiJson<Discussion[]>(`/api/drafts/${id}/discussions`).then(setDiscussions).catch(() => setDiscussions([]))
@@ -123,35 +168,41 @@ export function DraftEditDrawer({
       }
     }).catch(() => setVersions([]))
     apiJson<CheckInfo>(`/api/drafts/${id}/check`).then(setCheckInfo).catch(() => setCheckInfo(null))
+    // R-173：打开抽屉时先取一次 AI 状态——别人（素材库洗稿/回炉/生成）发起的任务也能看到进度
+    void refreshDebate(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, id])
 
-  // 讨论轮询
+  // 讨论轮询（R-173：以服务端 state 为准；不再等 done/idle/failed 三个永远不出现的值）
   useEffect(() => {
     if (!discussing || !id) return
     const timer = setInterval(async () => {
       try {
-        const st = await apiJson<{ status?: string; note?: string }>(`/api/drafts/${id}/debate-status`)
-        setDebateStatus(st.note || st.status || '')
+        const row = await apiJson<DebateStatusRow>(`/api/drafts/${id}/debate-status`)
         const rows = await apiJson<Discussion[]>(`/api/drafts/${id}/discussions`)
         setDiscussions(rows)
-        if (st.status === 'done' || st.status === 'idle' || st.status === 'failed') {
-          setDiscussing(false)
-          setDebateStatus('')
-          if (st.status === 'done') {
-            toast.success('讨论完成，正文已更新')
-            onSaved()
-            const d = await apiJson<Draft>(`/api/drafts/${id}`)
-            setState({
-              id: d.id,
-              title: d.title,
-              cover_text: d.cover_text,
-              script: d.script,
-              video_id: d.video_id ?? null,
-              tagsText: (d.tags || []).join(', ')
-            })
-          }
+        if (row.state === 'running') {
+          sawRunningRef.current = true
+          setDebate(toDebateState(row))
+          return
         }
+        // 状态已消失/失败：还没确认「跑起来过」时容忍刚入队的空窗，避免误判完成
+        const graceOver = startedAtRef.current > 0 && Date.now() - startedAtRef.current > 6000
+        if (!sawRunningRef.current && !graceOver) return
+        const next = toDebateState(row)
+        setDebate(next)
+        if (next && next.state === 'failed') toast.warning(next.note || '讨论中断')
+        else toast.success('讨论完成，正文已更新')
+        onSaved()
+        const d = await apiJson<Draft>(`/api/drafts/${id}`)
+        setState({
+          id: d.id,
+          title: d.title,
+          cover_text: d.cover_text,
+          script: d.script,
+          video_id: d.video_id ?? null,
+          tagsText: (d.tags || []).join(', ')
+        })
       } catch {
         /* 抖动继续 */
       }
@@ -249,6 +300,7 @@ export function DraftEditDrawer({
     try {
       await apiJson(`/api/drafts/${id}/rework`, { method: 'POST', body: '{}' })
       toast.success('已回炉重写')
+      void refreshDebate(id) // R-173：回炉期间也显示「正在回炉重写…」状态条
       const d = await apiJson<Draft>(`/api/drafts/${id}`)
       setState({ ...state, title: d.title, cover_text: d.cover_text, script: d.script })
       setCheckInfo(null)
@@ -264,8 +316,10 @@ export function DraftEditDrawer({
     if (!id) return
     try {
       await apiJson(`/api/drafts/${id}/discuss`, { method: 'POST', body: '{}' })
-      setDiscussing(true)
-      setDebateStatus('模型讨论中…')
+      // R-173：乐观进入 running（后端 worker 接手后会写入真实步骤）
+      sawRunningRef.current = false
+      startedAtRef.current = Date.now()
+      setDebate({ state: 'running', kind: 'discuss', note: '讨论已入队，正在准备…', actor: '', phase: 'queued', round: null, rounds: null })
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -429,6 +483,10 @@ export function DraftEditDrawer({
               <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">先保存草稿，再让双模型基于原文讨论</div>
             ) : (
               <div className="space-y-3">
+                {/* R-173：顶部状态条——正在思考的模型 + 三点跳动 + 第 x/y 轮；中断时给出标记 */}
+                <AnimatePresence initial={false}>
+                  {!!debate && <DraftAiStatus key={debate.state + debate.note} debate={debate} />}
+                </AnimatePresence>
                 {!discussions.length && !discussing && (
                   <div className="flex h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
                     <MessageSquare className="h-5 w-5" />
@@ -460,15 +518,9 @@ export function DraftEditDrawer({
                         </motion.div>
                       ))}
                     </AnimatePresence>
-                    {discussing && (
-                      <div className="flex items-center gap-2 py-3 text-xs text-warning">
-                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                        {debateStatus || '模型讨论中…'}
-                      </div>
-                    )}
                   </div>
                 </ScrollArea>
-                {!!discussions.length && !discussing && (
+                {!discussing && (!!discussions.length || debate?.state === 'failed') && (
                   <div className="pt-1 text-center">
                     <Button variant="secondary" size="sm" disabled={!canDiscuss} onClick={startDiscussion}>重新讨论</Button>
                   </div>

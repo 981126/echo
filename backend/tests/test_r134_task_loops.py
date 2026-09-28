@@ -130,7 +130,12 @@ def test_clear_debate_state_resets_placeholder(db):
     db.commit()
     _set_kv(db, f"debate:{draft.id}", "KIMI 正在起草…")
     clear_debate_state(db, draft.id)
+    # R-173：旧键删除、新键留「中断」标记（卡片显示「上次讨论中断」，但不转圈）
     assert db.get(Kv, f"debate:{draft.id}") is None
+    from app.services import draft_status
+
+    state = draft_status.read(db, draft.id)
+    assert state is not None and state["state"] == "failed" and state["running"] is False
     db.refresh(draft)
     assert draft.script == FAILED_SCRIPT
 

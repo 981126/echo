@@ -26,6 +26,9 @@ class DraftOut(BaseModel):
     persona_version: int = 0
     quality: dict = {}
     version: int = 1
+    # R-173：该草稿当前的 AI 长任务状态（讨论/洗稿/回炉/生成），无任务时为 None。
+    # 由 list/get 接口填充，ORM 上没有该属性（默认 None）。
+    debate: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
