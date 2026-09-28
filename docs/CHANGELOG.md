@@ -145,6 +145,18 @@
 - **验证**：修复后 33 张封面框唯一尺寸 344×258（4:3）；博主管理作品弹窗 263×197、素材库 265×199 回归正常；
   `scripts/verify.sh` 全绿；服务保持运行。
 
+## [M158 / R-169] 2026-09-28 — 脚本工作台草稿卡片不可见（Framer Motion 变体未传播）
+
+> 作者：脚本工作台，每次刷新页面重新打开，里面的明明有 2 篇草稿，却看不到。
+
+- **根因**：`/api/drafts` 与 tab 计数均正常（草稿 (2)），无头浏览器实测卡片已在 DOM 中，
+  但计算样式为 `opacity:0; translateY(14px)`（framer-motion `initial` 态）且从未进入 `animate`。
+  草稿卡片位于 `TabsContent`→无 variants 的 `motion.div layout`→`AnimatePresence` 多层之下，
+  父级 `listVariants` 的变体标签未传播到它；其它页列表项是 section 直接子节点故正常。
+- **修复**：`DraftTile` 的 `motion.article` 显式 `initial="initial" animate="animate"`，
+  不再依赖祖先变体传播。
+- **验证**：无头实测修复后 opacity=1（修复前 0）；`scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M157 / R-168] 2026-09-28 — 老前端 frontend/ 标记废弃，默认前端 = frontend_v2
 
 > 作者：在文档中将老的前端项目标成废弃，以后说启动项目、修改项目都不修改老前端项目，而是新前端项目。
