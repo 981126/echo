@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 129 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 130 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -1550,6 +1550,31 @@ Split Items
   - `platform_post_ids` array
 
 **返回 200**：application/json → object
+
+## library
+
+### GET /api/library
+
+Library Cards
+
+素材库统一列表（R-179）：本地素材 + 云端作品合并去重后按日期倒序，游标分页（默认每批 20）。
+筛选/搜索/计数一并下推服务端（前端不再全量拉取 + 内存过滤）。
+
+**参数**
+
+- `creator_id`（query）integer，0/不传=当前主博主
+- `cursor`（query）string，上一页返回的 `next_cursor`；不传=第一页
+- `limit`（query）integer，默认 20，上限 100
+- `platforms`（query）string，可重复，命中任一平台
+- `status`（query）string，planned / published
+- `video`（query）string，yes / no（有无视频文件）
+- `ad`（query）string，ad / no
+- `kw`（query）string，标题关键词
+- `tags`（query）string，可重复，需全部命中（AND）
+- `likes_min` / `likes_max`（query）integer，点赞区间（任一平台命中即可）
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+`{total, filtered_total, facets:{tags}, items:[卡片], next_cursor, has_more}`
 
 ## 其他
 

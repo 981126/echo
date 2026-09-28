@@ -12,7 +12,7 @@ import re
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from ..core.platform_links import build_platform_page_url
+from ..core.platform_links import build_platform_page_url_from_data, parse_raw
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.work import Work
 
@@ -53,17 +53,20 @@ def _latest_stat(db: Session, post_id: int):
     )
 
 
-def post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
+def post_item(db: Session, p: PlatformPost, account=None, stat=None, creator=None) -> dict:
     """平台作品统一序列化（works/platform 共用，R-061 收敛）。
 
     返回字段为两类消费方字段的并集；多返回的字段不影响既有前端。
+    R-179：可传入已预取的 `account` / `creator`（列表页批量序列化时避免 N+1 的 `db.get(Creator)`）；
+    `raw` 只解析一次（原来每条作品要 json.loads 两次）。
     """
     if account is None:
         account = db.get(CreatorAccount, p.account_id)
     if stat is None:
         stat = _latest_stat(db, p.id)
     acc = account
-    creator = db.get(Creator, acc.creator_id) if acc else None
+    if creator is None and acc is not None:
+        creator = db.get(Creator, acc.creator_id)
     tags = []
     try:
         tags = json.loads(p.tags or "[]") if isinstance(p.tags, str) else (p.tags or [])
@@ -80,7 +83,7 @@ def post_item(db: Session, p: PlatformPost, account=None, stat=None) -> dict:
         "is_ad": p.is_ad,
         "ad_price": p.ad_price,
         "platform_post_id": p.platform_post_id,
-        "page_url": build_platform_page_url(p.platform, p.platform_post_id, p.raw or ""),
+        "page_url": build_platform_page_url_from_data(p.platform, p.platform_post_id, parse_raw(p.raw or "")),
         "title": p.title,
         "desc": p.desc,
         "cover": p.cover_url_local,
@@ -191,6 +194,13 @@ def split_work(db: Session, work_id: int, keep_ids: list[int] | None = None) -> 
     return {"ok": True}
 
 
+def _work_member_item(db: Session, m: PlatformPost, account_map: dict, stat_map: dict, creator_map: dict) -> dict:
+    """列表内单条作品的序列化：账号/创作者都用预取好的 map（R-179 去掉 N+1）。"""
+    acc = account_map.get(m.account_id)
+    creator = creator_map.get(acc.creator_id) if acc is not None else None
+    return post_item(db, m, acc, stat_map.get(m.id), creator)
+
+
 def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
     """素材库云端作品列表：已合并作品在前（含各平台数据），未合并单条在后。"""
     q = db.query(PlatformPost)
@@ -207,8 +217,9 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
         else:
             singles.append(p)
 
-    # 批量预取：账号、作品、每条最新统计（避免 N+1 逐条查询）
+    # 批量预取：账号、作品、每条最新统计、创作者（避免 N+1 逐条查询）
     account_map = {a.id: a for a in db.query(CreatorAccount).all()}
+    creator_map = {c.id: c for c in db.query(Creator).all()}
     work_map_cache = {
         w.id: w for w in db.query(Work).filter(Work.id.in_(work_map.keys())).all()
     }
@@ -229,7 +240,7 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
                 "creator_id": work.creator_id,
                 "cover": next((m.cover_url_local for m in members if m.cover_url_local), None),
                 "platforms": [m.platform for m in members],
-                "posts": [post_item(db, m, account_map.get(m.account_id), stat_map.get(m.id)) for m in members],
+                "posts": [_work_member_item(db, m, account_map, stat_map, creator_map) for m in members],
             }
         )
     for p in singles:
@@ -242,7 +253,7 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
                 "creator_id": acc.creator_id if acc else None,
                 "cover": p.cover_url_local,
                 "platforms": [p.platform],
-                "posts": [post_item(db, p, acc, stat_map.get(p.id))],
+                "posts": [post_item(db, p, acc, stat_map.get(p.id), creator_map.get(acc.creator_id) if acc else None)],
             }
         )
     return out

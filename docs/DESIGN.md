@@ -7,7 +7,7 @@
 ### backend/app/main.py
 - `lifespan`：`init_db()` → `setup_scheduler()` → `start_inbox_watcher()`。
 - 路由均挂 `/api/*` 且默认带 `Depends(require_token)`（`X-Access-Token`）。
-- `GET /health` 免令牌；`/covers`、`/uploads` 静态目录挂载；存在 `frontend/dist` 时用 FastAPI 托管前端（hash 路由）。
+- `GET /health` 免令牌；`/covers`（R-179 起带 `?w=` 时按需生成缩略图并落盘缓存 `covers/thumbs/`，注册在静态挂载之前）、`/uploads` 静态目录挂载；存在 `frontend/dist` 时用 FastAPI 托管前端（hash 路由）。
 - CORS 全开（局域网单用户）。
 
 ### backend/app/config.py
@@ -103,6 +103,12 @@
 - `notify.py`（R-141）：`mail_config_problem(settings)` 是邮件配置的唯一体检入口（缺失 / 非 ASCII 占位符 / 非法邮箱 → 可读原因）；`_send` 把配置非法与 SMTP 异常都收敛成「log + 返回 False」，中文主题用 `Header(...,'utf-8').encode()` 做 RFC2047 编码，正文用 `msg.as_bytes()` 发送。因此邮件是**次要通道**：`run_daily_pipeline` 只在稿子生成失败时才置 failed。
 - `platform_sync.py` 的灵感池入池（R-140）：`pool_ideas_from_comments(db, post, comments, *, account=None, per_post=None)` 是「评论 → 选题池」的**唯一实现**——`_collect_comments()`（全量/每周，非队列）与 `sync_post_comments()`（daily 逐素材队列 / 单帖）都调用它。限量：单帖 `ECHO_POOL_IDEAS_PER_POST`（默认 8，按点赞降序）、单博主每天 `ECHO_POOL_IDEAS_PER_DAY`（默认 40，`0`=不限）；保留「标题 ≥4 字」、按 `(source,title,snapshot_date)` 去重、重复点赞取大。`_pool_quota()` 负责当天剩余配额。同步说明与 payload 汇报 `pool_ideas`（灵感池新增 N 条）。
 - `debate.py`：**所有脚本生成的唯一路径**（R-139）。`debate_rounds(db)` 取「AI 设置」轮次（Kv `debate_rounds` > `.env` > 5，夹 1–10）；`snapshot(db).generation_pair()` 解析生成方/评审方（可相同）；`_side_llm` 把某一方包成「该槽位主用 + 另一方兜底」；初稿用 `generation_user_message`（与金样本回放同一输入），自检不通过再做一次收口修订；结果写 `draft_discussions` 与 `Draft.quality`（models/used/fallback/rounds/rounds_done/issues/passed/style_coverage）。**R-178**：每条留痕还落库**实际出结果**的模型（`_llm_model_fields` → `used_slot/vendor/model_id`，取 `RoutedLLM.used_*`，降级后以事实为准）；每次讨论开头写一条 `kind='run'` 运行头（`_run_header`：当时配置的生成方/评审方 + 轮次，结束 `_finish_run_header` 回填 rounds_done/degraded）；状态条文案与接口展示统一走 `model_label()`（复用 `model_settings.VENDORS` 标签 → `DeepSeek · deepseek-flash`），不再出现槽位名 `model1/model2`。入口：`run_debate`（通用；R-155 增可选 `source_text/source_title`：传了就按原文改写出 标题/封面字/正文/标签，写回 `original_script` 供原文对照、`merge_tags` 合并去重，随后同样 N 轮+自检）、`run_debate_draft`（工作台后台任务）、`run_rewrite_debate`（对标洗稿，R-118）。原文讨论的入队/解析在 `draft_flow.resolve_discussion_source` / `start_discussion` / `discussion_task`（任务 kind=`draft_discuss`）。
+- `library_service.py`（R-179）：**素材库列表的唯一口径**——本地素材（`video_query.visible_videos_query`，含 R-107 禁用账号排除）
+  + 云端作品（与 `/api/works` 同分组：work_id 合并 + 未合并单条，成员按平台名排序）→ 剔除被云端作品绑定的本地素材 →
+  按日期倒序（同日 kind/id 兜底）→ 筛选（平台/状态/有无视频/广告/关键词/标签/点赞区间，与搬移前前端 `applyFiltersTo` 同语义）→
+  **游标分页**（`(date,kind,id)` 不透明串，滚动期间后台同步插入新条也不重复/漏条）。`GET /api/library` 返回
+  `{total, filtered_total, facets.tags, items, next_cursor, has_more}`；前端 `useInfiniteQuery` 每批 20、距底 1 屏预取。
+  卡片封面统一走 `?w=400` 缩略图（`core/thumbs.py`：按需生成 + `covers/thumbs/` 缓存 + 启动后台预热 + 上传/同步落地时顺手生成）。
 - `draft_status.py`（R-173）：**草稿 AI 长任务状态的唯一事实源**——讨论/洗稿/回炉/AI 生成共用一个键
   `app_kv['draft_ai:{id}']`（JSON：`state`(running|failed) / `kind` / `note` / `actor` / `phase` / `round` / `rounds` / `at`），
   不新增表、不新增字段。`set_running` 每个步骤覆盖写（`debate._status` 是它的薄封装），

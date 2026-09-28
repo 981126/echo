@@ -87,7 +87,7 @@ echo/
 |---|---|---|
 | `ECHO_DATA_DIR` | `/Users/yeah/document/echo_resource` | 数据根 |
 | `ECHO_DB_PATH` | `…/echo.db` | SQLite 库 |
-| videos / covers / uploads / inbox | `…/videos|covers|uploads|inbox` | 视频文件 / 封面 / 编辑器插图 / 待入库 |
+| videos / covers / uploads / inbox | `…/videos|covers|uploads|inbox` | 视频文件 / 封面（+ `covers/thumbs/` 缩略图缓存，R-179）/ 编辑器插图 / 待入库 |
 仓库 `data/` 为空壳，不是运行时目录。
 
 ## 6. 数据库（27 表）

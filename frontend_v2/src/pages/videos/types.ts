@@ -75,65 +75,6 @@ export function hasRealFile(filename?: string | null): boolean {
   return !!filename && !filename.startsWith('__cloud__')
 }
 
-function cloudWorkToCard(w: WorkItem, videoById: Map<number, VideoItem>): CardItem {
-  const posts = w.posts || []
-  const anyLocal = posts.find((x) => x.local_video_id)
-  const boundVideo = anyLocal?.local_video_id ? videoById.get(anyLocal.local_video_id) : undefined
-  const tags: string[] = []
-  posts.forEach((x) => (x.tags || []).forEach((t) => t && !tags.includes(t) && tags.push(t)))
-  const prices = posts.filter((x) => x.ad_price != null).map((x) => Number(x.ad_price))
-  if (boundVideo?.ad_price != null) prices.push(Number(boundVideo.ad_price))
-  const first = posts[0]
-  return {
-    key: (w.type === 'work' ? 'w' : 'p') + w.id,
-    kind: 'cloud',
-    id: w.id,
-    type: w.type,
-    title: w.title || '（无标题）',
-    cover_url: w.cover || '',
-    tags,
-    platforms: [...new Set(w.platforms || [])],
-    status: 'published',
-    is_ad: posts.some((x) => x.is_ad) || !!boundVideo?.is_ad,
-    ad_price: prices.length ? Math.max(...prices) : null,
-    merged: w.type === 'work' ? posts.length : 0,
-    cloudPosts: posts,
-    local_video_id: anyLocal?.local_video_id ?? null,
-    hasVideo: hasRealFile(boundVideo?.filename),
-    date: ((first?.publish_time || '') as string).slice(0, 10)
-  }
-}
-
-export function buildCards(videos: VideoItem[], works: WorkItem[]): CardItem[] {
-  const videoById = new Map(videos.map((v) => [v.id, v]))
-  const linkedLocal = new Set<number>()
-  ;(works || []).forEach((w) => (w.posts || []).forEach((p) => p.local_video_id && linkedLocal.add(p.local_video_id)))
-  const local: CardItem[] = videos
-    .filter((v) => !linkedLocal.has(v.id))
-    .map((v) => ({
-      key: 'v' + v.id,
-      kind: 'local' as const,
-      id: v.id,
-      creator_id: v.creator_id,
-      title: v.title || v.filename || '',
-      cover_url: v.cover_url || '',
-      platforms: [...new Set(v.platforms || [])],
-      tags: [...new Set([...(v.main_topics || []), ...(v.tags || [])])],
-      status: v.status,
-      is_ad: v.is_ad,
-      ad_price: v.ad_price == null ? null : Number(v.ad_price),
-      merged: 0,
-      cloudPosts: [],
-      local_video_id: null,
-      hasVideo: hasRealFile(v.filename),
-      filename: v.filename,
-      tags_confirmed: v.tags_confirmed,
-      date: (v.published_at || v.planned_publish_at || v.created_at || '').slice(0, 10)
-    }))
-  const cloud = (works || []).map((w) => cloudWorkToCard(w, videoById))
-  return [...local, ...cloud].sort((a, b) => (b.date < a.date ? -1 : 1))
-}
-
 export interface Filters {
   creatorId: number
   platforms: string[]
@@ -178,23 +119,41 @@ export function saveFilters(f: Filters) {
   }
 }
 
-export function applyFiltersTo(cards: CardItem[], a: Filters): CardItem[] {
-  return cards.filter((c) => {
-    if (a.kw && !(c.title || '').toLowerCase().includes(a.kw.toLowerCase())) return false
-    if (a.status && c.status !== a.status) return false
-    if (a.ad === 'ad' && !c.is_ad) return false
-    if (a.ad === 'no' && c.is_ad) return false
-    if (a.video === 'yes' && !c.hasVideo) return false
-    if (a.video === 'no' && c.hasVideo) return false
-    if (a.platforms.length && !a.platforms.some((x) => c.platforms.includes(x))) return false
-    if (a.tags.length && !a.tags.every((x) => c.tags.includes(x))) return false
-    if (a.likesMin != null || a.likesMax != null) {
-      const likes = (c.cloudPosts || [])
-        .map((x) => (x.latest_stat?.likes != null ? Number(x.latest_stat.likes) : null))
-        .filter((v): v is number => v != null)
-      const ok = likes.some((v) => (a.likesMin == null || v >= a.likesMin) && (a.likesMax == null || v <= a.likesMax))
-      if (!ok) return false
-    }
-    return true
-  })
+/** R-179：`GET /api/library` 一页卡片（服务端已合并去重 + 筛选 + 游标分页） */
+export interface LibraryPage {
+  total: number
+  filtered_total: number
+  facets: { tags: string[] }
+  items: CardItem[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
+export const PAGE_SIZE = 20
+
+/** 筛选条件 → `/api/library` 查询串（筛选/搜索/计数全部走服务端，前端不再内存过滤）。 */
+export function buildLibraryQuery(f: Filters, cursor: string): string {
+  const qs = new URLSearchParams()
+  qs.set('limit', String(PAGE_SIZE))
+  if (f.creatorId) qs.set('creator_id', String(f.creatorId))
+  if (cursor) qs.set('cursor', cursor)
+  for (const p of f.platforms) qs.append('platforms', p)
+  for (const t of f.tags) qs.append('tags', t)
+  if (f.status) qs.set('status', f.status)
+  if (f.video) qs.set('video', f.video)
+  if (f.ad) qs.set('ad', f.ad)
+  if (f.kw.trim()) qs.set('kw', f.kw.trim())
+  if (f.likesMin != null) qs.set('likes_min', String(f.likesMin))
+  if (f.likesMax != null) qs.set('likes_max', String(f.likesMax))
+  return qs.toString()
+}
+
+/**
+ * 封面缩略图 URL（R-179）：只对本地 `/covers/...` 生效（后端按需生成 ~25-40KB 的缩略图并落盘缓存），
+ * 远端 CDN 图（如果以后有）原样返回。原图直出时首屏 20 张要 ~9MB，缩图后 ~0.6MB。
+ */
+export function coverThumb(url: string | null | undefined, w = 400): string {
+  const u = url || ''
+  if (!u.startsWith('/covers/')) return u
+  return `${u}${u.includes('?') ? '&' : '?'}w=${w}`
 }

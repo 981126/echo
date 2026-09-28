@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import benchmark, chat, creators, drafts, events, works, notifications, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
+from .api import benchmark, chat, creators, drafts, events, library, works, notifications, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .core.log import get_logger, setup_logging
 from .db import init_db
@@ -41,6 +41,10 @@ async def lifespan(app: FastAPI):
     mark_stale_pipeline_runs_on_startup()  # R-133：流水线 running 卡死自愈
     setup_scheduler()
     start_inbox_watcher()
+    # R-179：历史封面补缩略图（后台线程，幂等；首次约几分钟，之后秒过）
+    from .core import thumbs
+
+    thumbs.prewarm_async(_settings.covers_dir, 400, logger=log)
     log.info("echo 后端启动完成")
     yield
 
@@ -79,6 +83,7 @@ app.include_router(settings.router, prefix="/api/settings", tags=["settings"], d
 app.include_router(creators.router, prefix="/api/creators", tags=["creators"], dependencies=API_DEPENDENCIES)
 app.include_router(platform.router, prefix="/api/platform", tags=["platform"], dependencies=API_DEPENDENCIES)
 app.include_router(works.router, prefix="/api/works", tags=["works"], dependencies=API_DEPENDENCIES)
+app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=API_DEPENDENCIES)
 
 
 @app.get("/health")
@@ -90,6 +95,36 @@ def health():
 _settings = get_settings()
 _settings.covers_dir.mkdir(parents=True, exist_ok=True)
 _settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+
+
+@app.get("/covers/{name:path}", include_in_schema=False)
+def cover_file(name: str, w: int | None = None):
+    """封面：带 `?w=` 时按需生成缩略图并落盘缓存（R-179），否则原图。
+
+    必须注册在 `/covers` 静态挂载**之前**（Starlette 按注册顺序匹配）；缩图失败一律回落原图。
+    """
+    from fastapi.responses import FileResponse
+
+    from .core import thumbs
+
+    root = _settings.covers_dir.resolve()
+    src = (root / name.replace("\\", "/").lstrip("/")).resolve()
+    if not str(src).startswith(str(root)) or not src.is_file():
+        raise HTTPException(status_code=404, detail="封面不存在")
+    width = thumbs.clamp_width(w)
+    if width and src.suffix.lower() in thumbs.IMAGE_EXTS:
+        thumb = thumbs.thumb_file(root, name, width)
+        if not thumb.is_file():
+            thumbs.make_thumb(src, thumb, width)  # 失败/坏图 → 下面回落原图
+        if thumb.is_file():
+            return FileResponse(
+                thumb,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=604800"},
+            )
+    return FileResponse(src, headers={"Cache-Control": "public, max-age=86400"})
+
+
 app.mount("/covers", StaticFiles(directory=str(_settings.covers_dir)), name="covers")
 _settings.videos_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/media/videos", StaticFiles(directory=str(_settings.videos_dir)), name="media_videos")

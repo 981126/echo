@@ -3,11 +3,13 @@ import { motion } from 'framer-motion'
 import { Play, RefreshCw, CheckCheck, Trash2, Split, Layers, BadgeCheck, LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { platformName, fmtNum, fmtDate } from '@/lib/format'
+import { softIn } from '@/lib/motion'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { CardItem } from './types'
+import { coverThumb } from './types'
 import type { CardTaskState } from './use-card-tasks'
 
 const PLATFORM_DOT: Record<string, string> = {
@@ -29,10 +31,13 @@ export const MaterialCard = memo(function MaterialCard({
   onSync,
   onConfirmTags,
   onDelete,
-  onSplit
+  onSplit,
+  append
 }: {
   item: CardItem
   index: number
+  /** R-179：来自后续批次的卡片（滚到底加载的）——用轻淡入，不做列表 stagger、不跳版 */
+  append?: boolean
   selectMode: boolean
   selected: boolean
   task?: CardTaskState
@@ -48,16 +53,23 @@ export const MaterialCard = memo(function MaterialCard({
   const stats = item.cloudPosts.map((p) => p.latest_stat).filter(Boolean)
   const likes = stats.reduce((m, s) => Math.max(m, Number(s?.likes || 0)), 0)
   const syncing = !!task && task.progress < 100
-  // 大列表性能：前 40 张有入场动画，其余直接呈现（618+ 卡时避免集体动画卡顿）；
-  // 不再用 layout 动画（每次进度更新都会全量布局测量），改用 content-visibility 跳过屏外渲染
-  const animateEnter = index < 40
+  // 大列表性能：前 40 张有入场动画，其余直接呈现（避免集体动画卡顿）；
+  // 不再用 layout 动画（每次进度更新都会全量布局测量），改用 content-visibility 跳过屏外渲染。
+  // R-179：分批加载后每批只有 20 张，入场动画只作用于「首批」；后续批次用 0.85→1 轻淡入（R-175：不能从 0 起步）
+  const animateEnter = !append && index < 40
 
   return (
     <motion.div
-      initial={animateEnter ? { opacity: 0, y: 18, scale: 0.97 } : false}
+      initial={append ? { opacity: 0.85, y: 8 } : animateEnter ? { opacity: 0, y: 18, scale: 0.97 } : false}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.94 }}
-      transition={animateEnter ? { duration: 0.35, delay: Math.min(index, 16) * 0.035, ease: [0.16, 1, 0.3, 1] } : { duration: 0.15 }}
+      transition={
+        append
+          ? softIn
+          : animateEnter
+            ? { duration: 0.35, delay: Math.min(index, 16) * 0.035, ease: [0.16, 1, 0.3, 1] }
+            : { duration: 0.15 }
+      }
       whileHover={{ y: -4 }}
       style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 300px' } as React.CSSProperties}
       className={cn(
@@ -69,7 +81,8 @@ export const MaterialCard = memo(function MaterialCard({
       <div className="relative aspect-[4/3] cursor-pointer overflow-hidden bg-muted" onClick={() => (selectMode ? onToggle(item) : onPlay(item))}>
         {item.cover_url ? (
           <img
-            src={item.cover_url}
+            // R-179：封面走缩略图（原图平均 191KB、首屏 20 张曾要 13MB → 缩图后 ~0.6MB）
+            src={coverThumb(item.cover_url, 400)}
             alt={item.title}
             loading="lazy"
             referrerPolicy="no-referrer"

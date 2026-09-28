@@ -92,6 +92,10 @@ def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: st
                 if img:
                     dest = unique_path(settings.covers_dir, stem, ".jpg")
                     dest.write_bytes(img)
+                    # R-179：新封面立刻生成列表缩略图
+                    from ..core import thumbs
+
+                    thumbs.make_thumb(dest, thumbs.thumb_file(settings.covers_dir, dest.name, 400), 400)
                     return dest.name
         except Exception:  # noqa: BLE001  下载失败回退占位
             pass

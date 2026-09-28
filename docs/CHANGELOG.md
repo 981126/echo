@@ -1,5 +1,28 @@
 # 变更记录
 
+## [M168 / R-179] 2026-09-28 — 素材库加载提速：服务端统一分页 + 无感无限滚动 + 封面缩略图
+
+> 作者：素材库页面还是加载太慢了，应该分页，每次加载20条，快划到底自动加载下一批数据，尽量让用户感觉没有加载的感觉。
+
+- **实测根因（改前）**：首屏 1208ms；`GET /api/works` 一次拉 618 条 **1.57MB**（227ms，其中 `post_item` ×1172 = 211ms，
+  `db.get(Creator)` **N+1 1172 次** + `json.loads(raw)` **×2344**）；首屏可见的 28 张封面就 **13.15MB**（原图直存：1766 张、
+  均 191KB、p90 503KB、共 330MB）；DOM **24 262** 节点、616ms 主线程长任务。
+- **服务端**：新增 `GET /api/library`——把「本地素材 + 云端作品合并去重后按日期倒序」这段口径从
+  `frontend_v2/pages/videos/types.ts` 整体搬到 `services/library_service.py`（`buildCards`/`applyFiltersTo` 同语义，
+  含 R-107 禁用账号排除），**游标分页**（`(date,kind,id)` 不透明串：滚动中后台同步插新条也不重复/漏条），
+  筛选/搜索/计数（`total`/`filtered_total`/`facets.tags`）一并下推；`works_service.post_item` 批量预取 creator、
+  `raw` 只解析一次（`core/platform_links` 拆出「已解析」入口），`/api/videos` 与 `/api/library` 共用可见性口径（`services/video_query.py`）。
+- **封面缩略图**：`GET /covers/{name}?w=`（注册在静态挂载之前）用 **Pillow** 按需生成 + 落盘 `covers/thumbs/` + 原子写 +
+  `Cache-Control`；上传封面/同步下载封面时顺手生成；启动后台线程预热历史封面（幂等，之后秒过）。1MB 原图 → 28KB（单张冷生成 34ms、命中 3ms）。
+- **前端**：`useInfiniteQuery`（每批 20）+ `IntersectionObserver` **距底 600px 预取** + 骨架卡（尺寸同真卡、不跳版）+
+  `keepPreviousData` 留住旧列表 + 底部细微加载条；返回态（滚动位置 + 已加载批次）保持；多选仍只作用已加载批次；
+  新批次卡片 `softIn`（0.85→1 + 8px）淡入，不改布局。
+- **实测（改后）**：首屏请求 **1.63MB → 42KB**（`/api/library` 27KB/20 条）、首屏封面 **13.15MB → 486KB**、
+  DOM **24 262 → 1 085**、长任务 **616ms → 0**；滚到底自动加载（20 → 80 张）、滚动位置离开再回来保持在 4995、
+  抽屉开关不跳位；**合并口径逐条对齐**：新接口分页走完 31 页 618 条与旧前端 `buildCards` 的顺序完全一致（无重复/漏条）。
+- **验证**：pytest 新增 9 条（合并/筛选/游标稳定/缩略图/目录穿越防护）+ vitest 5 条（查询串/缩略图 URL）；
+  `scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M167 / R-178] 2026-09-28 — 讨论留痕显示并记录「真实模型 + 版本」（不再只写 model1/model2）
 
 > 作者：讨论的模型不要展示成 model1、model2，展示成对应的模型和版本，并且要记录下来，不然我切模型了，都不知道之前用的什么模型。

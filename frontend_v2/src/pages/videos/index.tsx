@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Upload,
@@ -23,20 +23,23 @@ import { MultiSelect } from '@/components/ui/multi-select'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from '@/components/ui/toaster'
 import {
-  buildCards,
-  applyFiltersTo,
+  buildLibraryQuery,
   loadFilters,
   saveFilters,
+  PAGE_SIZE,
   type CardItem,
-  type VideoItem,
-  type WorkItem,
-  type Filters
+  type Filters,
+  type LibraryPage,
+  type VideoItem
 } from './types'
 import { useCardTasks } from './use-card-tasks'
 import { MaterialCard } from './material-card'
 import { EditDrawer } from './edit-drawer'
 import { CloudDrawer } from './cloud-drawer'
 import { PlayerDialog } from './player-dialog'
+
+/** R-179 返回态：离开素材库时记住滚动位置（模块级，跨路由挂载保留） */
+let savedScroll: { top: number | null; count: number } = { top: null, count: 0 }
 
 interface Creator {
   id: number
@@ -76,30 +79,29 @@ export default function VideosPage() {
   const currentCreatorId = currentQ.data?.id ?? 0
   const effectiveCreator = filters.creatorId || 0
 
-  const videosQ = useQuery({
-    queryKey: ['videos', 'list', effectiveCreator],
-    queryFn: () => apiJson<{ items: VideoItem[] }>(`/api/videos?limit=500${effectiveCreator ? `&creator_id=${effectiveCreator}` : ''}`)
-  })
-  const worksQ = useQuery({
-    queryKey: ['works', 'list', effectiveCreator],
-    queryFn: () => apiJson<{ items: WorkItem[] }>(`/api/works${effectiveCreator ? `?creator_id=${effectiveCreator}` : ''}`)
+  // R-179：素材库改成服务端统一分页（合并去重/筛选/计数都在后端），前端只发参数 + 无限滚动
+  const libQ = useInfiniteQuery({
+    queryKey: ['library', effectiveCreator, applied],
+    queryFn: ({ pageParam }) =>
+      apiJson<LibraryPage>(`/api/library?${buildLibraryQuery(applied, pageParam as string)}`),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.next_cursor || undefined,
+    placeholderData: keepPreviousData, // 切筛选先留住旧列表，避免整页空白
+    staleTime: 30_000
   })
 
-  const cards = useMemo(
-    () => buildCards(videosQ.data?.items ?? [], worksQ.data?.items ?? []),
-    [videosQ.data, worksQ.data]
-  )
-  const filtered = useMemo(() => applyFiltersTo(cards, applied), [cards, applied])
-  const allTags = useMemo(() => {
-    const set = new Set<string>()
-    cards.forEach((c) => c.tags.forEach((t) => set.add(t)))
-    return [...set].sort()
-  }, [cards])
+  const cards = useMemo(() => libQ.data?.pages.flatMap((p) => p.items) ?? [], [libQ.data])
+  // 第一批之后的卡片用「淡入」而不是列表 stagger（R-179：新批次不跳版、不从 0 起步）
+  const firstPageLen = libQ.data?.pages[0]?.items.length ?? 0
+  const total = libQ.data?.pages[0]?.total ?? 0
+  const filteredTotal = libQ.data?.pages[0]?.filtered_total ?? 0
+  const allTags = libQ.data?.pages[0]?.facets?.tags ?? []
+  const filtered = cards
 
   const reload = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['library'] })
     qc.invalidateQueries({ queryKey: ['videos'] })
     qc.invalidateQueries({ queryKey: ['works'] })
-     
   }, [qc])
 
   const { tasks, begin, claim, finish, refreshActive, hasTask } = useCardTasks(cards, reload)
@@ -110,11 +112,11 @@ export default function VideosPage() {
   // 深链 ?edit=
   useEffect(() => {
     const edit = params.get('edit')
-    if (edit && !videosQ.isLoading) {
+    if (edit && !libQ.isLoading) {
       setEditId(Number(edit))
       setParams({}, { replace: true })
     }
-  }, [params, setParams, videosQ.isLoading])
+  }, [params, setParams, libQ.isLoading])
 
   // ---------- 动作 ----------
   async function doUpload(file: File) {
@@ -249,6 +251,68 @@ export default function VideosPage() {
     }
   }
 
+  // ---------- 无限滚动（距底约 1 屏就预取下一批 → 滚到底前数据已到） ----------
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const fetchNextRef = useRef(libQ.fetchNextPage)
+  fetchNextRef.current = libQ.fetchNextPage
+  const hasNextRef = useRef(false)
+  hasNextRef.current = !!libQ.hasNextPage
+  const fetchingRef = useRef(false)
+  fetchingRef.current = libQ.isFetchingNextPage
+
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting) && hasNextRef.current && !fetchingRef.current) {
+          void fetchNextRef.current()
+        }
+      },
+      { rootMargin: '600px 0px' } // 约 1 屏提前量
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
+  // 返回态（R-179）：滚动时持续记住位置（被动 effect 的 cleanup 跑在 DOM 移除**之后**，
+  // 那时 scrollTop 已被夹到 0，所以不能只在卸载时保存），回来把这批数据原样滚回去，不重拉不闪。
+  const cardsRef = useRef<CardItem[]>([])
+  cardsRef.current = cards
+  useLayoutEffect(() => {
+    const el = document.querySelector('main')
+    if (!el) return
+    const onScroll = () => {
+      if (el.scrollTop > 0 || savedScroll.top === null) {
+        savedScroll = { top: Math.round(el.scrollTop), count: cardsRef.current.length }
+      }
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    let tries = 0
+    let timer = 0
+    const target = savedScroll.top ?? 0
+    const restore = () => {
+      if (target <= 0) return
+      el.scrollTop = target
+      tries += 1
+      if (tries < 15 && Math.abs(el.scrollTop - target) > 4) timer = window.setTimeout(restore, 120)
+    }
+    restore()
+    return () => {
+      window.clearTimeout(timer)
+      el.removeEventListener('scroll', onScroll)
+    }
+  }, [])
+
+  // 换筛选/查询 = 新的结果集 → 回到顶部（其它情况保持滚动位置）
+  const prevAppliedRef = useRef(applied)
+  useEffect(() => {
+    if (prevAppliedRef.current === applied) return
+    prevAppliedRef.current = applied
+    savedScroll = { top: null, count: 0 }
+    document.querySelector('main')?.scrollTo({ top: 0 })
+  }, [applied])
+
   const toggleSel = useCallback((it: CardItem) => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -331,7 +395,8 @@ export default function VideosPage() {
 
   // ---------- 渲染 ----------
   const creatorOptions = creatorsQ.data ?? []
-  const loading = videosQ.isLoading || worksQ.isLoading
+  const loading = libQ.isLoading // 首次加载才铺骨架；切筛选靠 keepPreviousData 留住旧列表
+  const refreshing = libQ.isFetching && !libQ.isFetchingNextPage && !loading
 
   return (
     <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-4">
@@ -455,14 +520,38 @@ export default function VideosPage() {
             </Button>
           </motion.div>
         )}
-        <span className="text-xs text-muted-foreground">共 {filtered.length} 个素材 · 点赞筛选任一平台命中即可</span>
+        <span className="text-xs text-muted-foreground">
+          共 {total} 个素材 · 筛选后 {filteredTotal} 个 · 点赞筛选任一平台命中即可
+        </span>
+        <AnimatePresence>
+          {refreshing && (
+            <motion.span
+              initial={{ opacity: 0.85 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground"
+            >
+              <LoaderCircle className="h-3 w-3 animate-spin" /> 正在刷新…
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* 卡片墙 */}
       {loading ? (
+        // 骨架尺寸与真卡一致（4:3 封面 + 信息区 + 操作行）→ 数据到了不跳版
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={i} className="aspect-[4/5] w-full" />
+          {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+            <div key={i} className="overflow-hidden rounded-lg border border-border bg-card">
+              <Skeleton className="aspect-[4/3] w-full" />
+              <div className="space-y-2 p-3">
+                <Skeleton className="h-3.5 w-4/5" />
+                <Skeleton className="h-3 w-2/5" />
+              </div>
+              <div className="border-t border-border px-2 py-1.5">
+                <Skeleton className="h-7 w-24" />
+              </div>
+            </div>
           ))}
         </div>
       ) : !filtered.length ? (
@@ -477,6 +566,7 @@ export default function VideosPage() {
                 key={it.key}
                 item={it}
                 index={i}
+                append={i >= firstPageLen}
                 selectMode={selectMode}
                 selected={selected.has(it.key)}
                 task={tasks[it.key]}
@@ -491,6 +581,20 @@ export default function VideosPage() {
               />
             ))}
           </AnimatePresence>
+        </div>
+      )}
+
+      {/* 触底哨兵 + 加载指示（只在真等的时候出现，一闪而过） */}
+      <div ref={sentinelRef} className="h-px w-full" aria-hidden />
+      {libQ.hasNextPage && (
+        <div className="flex h-10 items-center justify-center text-xs text-muted-foreground">
+          {libQ.isFetchingNextPage ? (
+            <span className="flex items-center gap-1.5">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> 加载中…
+            </span>
+          ) : (
+            <span className="opacity-60">继续下滑加载更多</span>
+          )}
         </div>
       )}
 

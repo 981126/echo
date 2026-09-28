@@ -14,7 +14,7 @@
 
 ## 2. 目录与数据
 - 代码：本仓库；**运行时数据不在仓库 `data/`**，由 `.env` 决定（本项目当前 `ECHO_DATA_DIR=/Users/yeah/document/echo_resource`，`ECHO_DB_PATH=…/echo.db`）
-- 子目录：`videos/`（素材文件）、`covers/`、`uploads/`、`inbox/`（拖入自动入库）
+- 子目录：`videos/`（素材文件）、`covers/`（封面原图 + `thumbs/` 缩略图缓存，R-179：`/covers/x.jpg?w=400` 按需生成）、`uploads/`、`inbox/`（拖入自动入库）
 - 备份：`scripts/backup.sh`（或每日 02:30 自动）；数据库建议用官方热备
 
 ## 3. 首次启动（笔记本）
