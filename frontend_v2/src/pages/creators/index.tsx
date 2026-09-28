@@ -34,6 +34,7 @@ import type { CreatorMeta, AccountMeta, SyncJob } from './types'
 import { AccountRow } from './account-row'
 import { SyncProgressBar } from './sync-progress-bar'
 import { PostsDialog } from './posts-dialog'
+import { TimelineCard } from '@/components/timeline-card'
 
 interface CreatorForm {
   id: number
@@ -407,6 +408,9 @@ export default function CreatorsPage() {
 
   return (
     <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-4">
+      {/* 时间线（R-193：从主页移到这里的最上面） */}
+      <TimelineCard />
+
       {/* 顶部条 */}
       <motion.div variants={itemVariants}>
         <Card>

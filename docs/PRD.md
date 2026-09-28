@@ -127,7 +127,7 @@ AGENTS.md 入口 + docs 全套 + requirements 归档 + scripts/verify.sh 质量�
 
 
 ## 4. 关键页面清单（12 页）
-主页(时间线/热点灵感/内容机会) · 素材库 · 脚本工作台 · 灵感随手记 · AI 对话 · 人设档案 · AI 设置 · 博主对标 · 博主管理 · 登录 · （含深链 edit/post 弹窗）
+主页(热点灵感/内容机会) · 素材库 · 脚本工作台 · 灵感随手记 · AI 对话 · 人设档案 · AI 设置 · 博主对标 · 博主管理(时间线) · 登录 · （含深链 edit/post 弹窗）
 
 ## 5. 技术要点（详见 ARCHITECTURE / DESIGN）
 - FastAPI + SQLite(SQLAlchemy 2.x) + Vue3/Vite/Naive UI；APScheduler + background_tasks 线程 + inbox watcher
