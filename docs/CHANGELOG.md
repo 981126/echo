@@ -1,5 +1,14 @@
 # 变更记录
 
+## [M155 / R-166] 2026-09-28 — NAS Docker 部署包含 frontend_v2 构建
+
+> 盘点「还有什么没做的」时发现：Dockerfile 只构建老前端，NAS 部署后 /v2 会 404（R-164 部署链路未闭环）。
+
+- `Dockerfile` 新增 `frontend-v2-build` 阶段（node:22-alpine，vite 7 需要 Node ^20.19/>=22.12）：
+  `npm install` + `npm run build`，产物 COPY 到 `/app/frontend_v2/dist`（与 `main.py` 的 /v2 挂载路径一致）。
+- `.dockerignore` 排除 `frontend_v2/dist/`（与老前端同规则）。
+- 验证：verify.sh 全绿；NAS 下次 `docker compose build && up -d` 后访问 `/v2/` 实测。
+
 ## [M154 / R-165] 2026-09-28 — frontend_v2 线上 bug：素材库卡顿 / 同步·拆分无动画 / 抽屉滚不到底
 
 > 作者：现在页面很多bug，比如点击素材库，页面很卡，点击同步、拆分没有动画，弹出的抽屉，抽屉向下滚动不到底。

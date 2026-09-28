@@ -7,6 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-166 | 2026-09-28 | NAS Docker 部署包含 frontend_v2 构建（Dockerfile 新增 frontend-v2-build 阶段，/v2 在 NAS 可用） | ✅ 已完成 | M155（已完成） | Dockerfile、R-164/R-145 |
 | R-165 | 2026-09-28 | frontend_v2 线上 bug 修复：素材库卡顿（去 layout 动画+memo+content-visibility）/ 同步·拆分无动画（本地 ramp+media.task_id 接管+卡片 spinner）/ 抽屉滚不到底（Drawer portal 到 body） | ✅ 已完成 | M154（已完成） | frontend_v2、R-164 |
 | R-164 | 2026-09-28 | 全新前端 `frontend_v2/`：React+shadcn/ui+Framer Motion，全功能 9 页从零重设计（Linear/Vercel 风、表现力动效、素材库卡片墙+抽屉），挂 /v2 与老前端并存 | ✅ 已完成 | M153（已完成） | PRD §3.5、R-015/R-162/R-163 |
 | R-163 | 2026-09-28 | 同步提速：任务进队列 + 消费者并行（博主级+素材级）+ TikHub 全局限速 10 req/s（取代按路由 1.2s）+ SQLite WAL | ✅ 已完成 | M152（已完成） | PRD §3.3/§3.6、R-070/R-085/R-086/R-093/R-094/R-109/R-151/R-162 |

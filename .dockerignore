@@ -24,6 +24,7 @@ venv/
 # Node / 前端
 node_modules/
 frontend/dist/
+frontend_v2/dist/
 .vite/
 
 # 版本控制与编辑器

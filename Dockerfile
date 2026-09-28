@@ -1,12 +1,20 @@
 # echo — 多阶段构建：前端产物 + 后端服务
 # 注意：M3 部署里程碑会完善；此处为 M0 骨架。
 
-# 阶段 1：构建前端
+# 阶段 1：构建老前端
 FROM node:20-alpine AS frontend-build
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 COPY frontend/ ./
+RUN npm run build
+
+# 阶段 1b：构建新前端 frontend_v2（R-164；vite 7 需要 Node ^20.19/>=22.12）
+FROM node:22-alpine AS frontend-v2-build
+WORKDIR /build/frontend_v2
+COPY frontend_v2/package.json frontend_v2/package-lock.json* ./
+RUN npm install
+COPY frontend_v2/ ./
 RUN npm run build
 
 # 阶段 2：后端运行时
@@ -23,6 +31,8 @@ COPY backend/ ./backend/
 COPY scripts/ ./scripts/
 RUN chmod +x scripts/*.sh
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist
+# R-166：新前端产物进镜像（后端 main.py 挂 /v2 → /app/frontend_v2/dist）
+COPY --from=frontend-v2-build /build/frontend_v2/dist ./frontend_v2/dist
 
 EXPOSE 8000
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
