@@ -37,3 +37,18 @@ export const fadeIn: Variants = {
 // **不从 opacity:0 起步**（切换/复用容器时会先闪一帧空白），统一从 0.85 起、收口到 1，
 // 配合 8–10px 位移表达「新内容进来了」。
 export const softIn: Transition = { duration: 0.24, ease: EASE_OUT_EXPO }
+
+// R-199：素材库「换一批结果」（切博主 / 改筛选后查询）的编排——旧卡先退场，新卡再入场。
+// 原因：AnimatePresence 用 `mode="popLayout"` 时退场卡被绝对定位在原地，若新卡同时淡入，
+// 两组卡叠在同一批网格位置上互相抵消，看起来就是「结果卡没有动画」。错开之后
+// 观感是「清掉 → 结果一张张飞进来」。
+export const listReplace = {
+  /** 旧卡退场时长（略快，给新卡让出舞台） */
+  exitDuration: 0.18,
+  /** 新卡入场的基础延迟：等旧卡基本退干净（> exitDuration）*/
+  baseDelay: 0.2,
+  /** 错峰比「首屏 stagger」更紧凑（0.56s 内铺满一屏 20 张，和首屏入场同量级）*/
+  stagger: 0.018,
+  /** 错峰封顶项数（= 每批 20 张，之后的批量一起进场）*/
+  maxItems: 20
+} as const

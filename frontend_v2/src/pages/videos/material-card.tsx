@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { Play, RefreshCw, CheckCheck, Trash2, Split, Layers, BadgeCheck, LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { platformName, fmtNum, fmtDate } from '@/lib/format'
-import { softIn } from '@/lib/motion'
+import { EASE_OUT_EXPO, listReplace, softIn } from '@/lib/motion'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
@@ -32,12 +32,15 @@ export const MaterialCard = memo(function MaterialCard({
   onConfirmTags,
   onDelete,
   onSplit,
-  append
+  append,
+  replace
 }: {
   item: CardItem
   index: number
   /** R-179：来自后续批次的卡片（滚到底加载的）——用轻淡入，不做列表 stagger、不跳版 */
   append?: boolean
+  /** R-199：属于「换一批结果」（切博主/改筛选查询）的新卡——等旧卡退场后再入场 */
+  replace?: boolean
   selectMode: boolean
   selected: boolean
   task?: CardTaskState
@@ -56,18 +59,22 @@ export const MaterialCard = memo(function MaterialCard({
   // 大列表性能：前 40 张有入场动画，其余直接呈现（避免集体动画卡顿）；
   // 不再用 layout 动画（每次进度更新都会全量布局测量），改用 content-visibility 跳过屏外渲染。
   // R-179：分批加载后每批只有 20 张，入场动画只作用于「首批」；后续批次用 0.85→1 轻淡入（R-175：不能从 0 起步）
+  // R-199：换一批结果时错峰延迟 = 基础延迟（等旧卡退场）+ 更紧凑的 stagger
   const animateEnter = !append && index < 40
+  const enterDelay = replace
+    ? listReplace.baseDelay + Math.min(index, listReplace.maxItems) * listReplace.stagger
+    : Math.min(index, 16) * 0.035
 
   return (
     <motion.div
       initial={append ? { opacity: 0.85, y: 8 } : animateEnter ? { opacity: 0, y: 18, scale: 0.97 } : false}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.94 }}
+      exit={{ opacity: 0, scale: 0.96, transition: { duration: listReplace.exitDuration, ease: EASE_OUT_EXPO } }}
       transition={
         append
           ? softIn
           : animateEnter
-            ? { duration: 0.35, delay: Math.min(index, 16) * 0.035, ease: [0.16, 1, 0.3, 1] }
+            ? { duration: 0.35, delay: enterDelay, ease: EASE_OUT_EXPO }
             : { duration: 0.15 }
       }
       whileHover={{ y: -4 }}

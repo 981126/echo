@@ -79,11 +79,12 @@ export default function VideosPage() {
     queryFn: () => apiJson<Creator>('/api/creators/current')
   })
   const currentCreatorId = currentQ.data?.id ?? 0
-  const effectiveCreator = filters.creatorId || 0
 
   // R-179：素材库改成服务端统一分页（合并去重/筛选/计数都在后端），前端只发参数 + 无限滚动
+  // R-199：key 只用 applied（= 请求参数），之前额外拼了 `filters.creatorId` → 只切博主下拉、没点查询
+  // 也会换 key 触发一次「参数没变」的空请求，并把旧博主数据写进新博主的缓存条目。
   const libQ = useInfiniteQuery({
-    queryKey: ['library', effectiveCreator, applied],
+    queryKey: ['library', applied],
     queryFn: ({ pageParam }) =>
       apiJson<LibraryPage>(`/api/library?${buildLibraryQuery(applied, pageParam as string)}`),
     initialPageParam: '',
@@ -99,6 +100,15 @@ export default function VideosPage() {
   const filteredTotal = libQ.data?.pages[0]?.filtered_total ?? 0
   const allTags = libQ.data?.pages[0]?.facets?.tags ?? []
   const filtered = cards
+
+  // R-199：首卡变了 = 换了一批结果（切博主 / 改筛选后查询）。此刻给新卡加基础延迟，
+  // 让旧卡的退场动画先走完——否则两组卡在同一批网格位置上交叉淡入，看起来「结果卡没有动画」。
+  const firstKey = cards[0]?.key ?? ''
+  const prevFirstKeyRef = useRef(firstKey)
+  const replaced = !!firstKey && prevFirstKeyRef.current !== firstKey
+  useEffect(() => {
+    prevFirstKeyRef.current = firstKey
+  }, [firstKey])
 
   const reload = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['library'] })
@@ -589,6 +599,7 @@ export default function VideosPage() {
                 item={it}
                 index={i}
                 append={i >= firstPageLen}
+                replace={replaced}
                 selectMode={selectMode}
                 selected={selected.has(it.key)}
                 task={tasks[it.key]}
