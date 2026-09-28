@@ -1,5 +1,19 @@
 # 变更记录
 
+## [M166 / R-177] 2026-09-28 — 脚本工作台「讨论」tab 滚动不了修复（ScrollArea 仅 max-h 约束时 Viewport 未定高）
+
+> 作者：脚本工作室 讨论tab页 滚动不了。
+
+- **根因（浏览器实测）**：讨论留痕列表是 `<ScrollArea className="max-h-[52vh]">`。Radix ScrollArea = `Root(overflow:hidden)`
+  + `Viewport(overflow:scroll, h-full)`，**只给 Root max-h、没有显式 height** 时 Root 的 `height` 仍是 `auto` →
+  Viewport 的 `h-full` 解析成 auto，高度=内容高度（草稿 #38 实测 **4215 / 4215**）→ 自己没有可滚余量；
+  真正的高只有 Root 的 `max-height: 468px`，而 Root `overflow:hidden` → 超出内容被直接裁掉（`scrollTop` 恒为 0，
+  滚轮无效）。显式高度的场景（`h-72`/`flex-1`）一直是好的。
+- **修复**：`components/ui/scroll-area.tsx` 的 Viewport 加 `max-h-[inherit]`（继承 Root 上限 → 只有 max-h 时也能定高成为滚动容器，
+  调用方仍只写 `max-h-*`，短列表不会被撑成固定高）。**同源场景一并修好**：标签多选（`max-h-64`）、通知列表（`max-h-[60vh]`）、提示词页（`max-h-72`/`max-h-56`）。
+- **验证**：草稿 #38 讨论 tab Viewport 由 `4215/4215` 变 `468/4215`，滚轮 `0 → 600 → 1200`，滚到底 3747（=max），最后一条留痕可见；
+  标签多选 `256/12960`、`scrollTop 0 → 300` 可滚且样式正常；新增 `scroll-area.test.tsx` 锁规则；`scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M165 / R-176] 2026-09-28 — AI 对话发送 422「Input should be a valid dictionary or object to extract fields from」修复
 
 > 作者：现在 ai 对话 进行对话就报错出错了：Input should be a valid dictionary or object to extract fields from
