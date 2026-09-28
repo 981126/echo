@@ -34,7 +34,10 @@ interface TileHandlers {
   submitDims: (d: Draft) => void
   setStatus: (d: Draft, status: Status, msg: string) => void
   remove: (d: Draft) => void
+  like: (d: Draft, liked: boolean) => void
 }
+
+const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
 
 const dimOf = (dims: Record<number, Record<string, number | null>>, id: number) => dims[id] || {}
 
@@ -100,6 +103,17 @@ function DraftTile({
         {srcLabel(d)}
         {srcTitle(d) ? ` · ${srcTitle(d)}` : ''} · {fmtDate(d.updated_at)}
       </p>
+      {!!d.publish_url && (
+        <a
+          href={d.publish_url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="mt-1 inline-block text-[11px] text-accent hover:underline"
+        >
+          已发布{d.publish_platform ? ` · ${PLATFORM_LABEL[d.publish_platform] || d.publish_platform}` : ''}
+        </a>
+      )}
 
       {/* R-173：AI 长任务进行中/中断的状态条 */}
       {!!d.debate?.state && (
@@ -117,6 +131,13 @@ function DraftTile({
       <div className="mt-3">
         <Actions d={d} busy={busy} h={h} />
       </div>
+      {(d.status === 'draft' || d.status === 'used' || d.status === 'done') && (
+        <div className="mt-2 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <span className="text-[11px] text-muted-foreground">快速反馈</span>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => h.like(d, true)}>好</Button>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => h.like(d, false)}>差</Button>
+        </div>
+      )}
       {d.status === 'draft' && (
         <div className="mt-3 space-y-1.5 border-t border-border pt-2.5" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-0.5">
@@ -201,7 +222,10 @@ export default function DraftsPage() {
       cover_text: d.cover_text,
       script: d.script,
       video_id: d.video_id ?? null,
-      tagsText: (d.tags || []).join(', ')
+      tagsText: (d.tags || []).join(', '),
+      publish_platform: d.publish_platform || '',
+      publish_url: d.publish_url || '',
+      published_at: d.published_at || ''
     })
   }
 
@@ -247,6 +271,15 @@ export default function DraftsPage() {
     }
   }
 
+  async function like(d: Draft, liked: boolean) {
+    try {
+      await apiJson(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ liked }) })
+      toast.success(liked ? '已标记：好' : '已标记：差')
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
   function setDim(id: number, key: string, v: number) {
     const cur = dims[id] || {}
     setDims({ ...dims, [id]: { ...cur, [key]: cur[key] === v ? null : v } })
@@ -274,7 +307,8 @@ export default function DraftsPage() {
     setDim,
     submitDims,
     setStatus,
-    remove: setDeleteDraft
+    remove: setDeleteDraft,
+    like
   }
 
   return (

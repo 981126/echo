@@ -315,6 +315,18 @@ def _migrate_draft_persona_version() -> None:
             conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN quality TEXT NOT NULL DEFAULT '{}'")
 
 
+def _migrate_draft_publish() -> None:
+    """R-184：drafts 增加发布回填字段 publish_url/publish_platform/published_at。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(drafts)").fetchall()}
+        if "publish_url" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN publish_url VARCHAR(500) NOT NULL DEFAULT ''")
+        if "publish_platform" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN publish_platform VARCHAR(20) NOT NULL DEFAULT ''")
+        if "published_at" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN published_at DATETIME")
+
+
 def _migrate_sunset_review() -> None:
     """R-136：复盘功能正式下线——删除 review_reports 表与 review 提示词行。
 
@@ -570,6 +582,7 @@ def init_db() -> None:
     _migrate_task_result()
     _migrate_draft_source_ref()
     _migrate_draft_tags()
+    _migrate_draft_publish()
     _migrate_transcript_asr_provider()
     _migrate_transcript_asr_model()
     _migrate_discussion_model_fields()

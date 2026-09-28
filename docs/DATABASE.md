@@ -262,7 +262,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 
 ## `drafts`
 
-脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 `draft`=草稿 / `used`=待制作 / `done`=完成 / `archived`=不采用(废稿) / `deleted`=逻辑删除（R-159）；素材双向关联 video_id；prompt_version / persona_version 记录生成时启用的提示词版本与人设档案版本（R-129/R-130，0=历史/未知）；quality 存生成后自检结果 JSON（attempts/issues/passed/style_coverage，R-131）。
+脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 `draft`=草稿 / `used`=待制作 / `done`=完成 / `archived`=不采用(废稿) / `deleted`=逻辑删除（R-159）；素材双向关联 video_id；prompt_version / persona_version 记录生成时启用的提示词版本与人设档案版本（R-129/R-130，0=历史/未知）；quality 存生成后自检结果 JSON（attempts/issues/passed/style_coverage，R-131）；publish_url/publish_platform/published_at 记录发布回填（R-184）。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -279,6 +279,9 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `prompt_version` | INTEGER |  | 否 | 0 |
 | `persona_version` | INTEGER |  | 否 | 0 |
 | `quality` | TEXT |  | 否 | {} |
+| `publish_url` | VARCHAR(500) |  | 否 |  |
+| `publish_platform` | VARCHAR(20) |  | 否 |  |
+| `published_at` | DATETIME |  | 是 |  |
 | `version` | INTEGER |  | 否 | 1 |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 | `updated_at` | DATETIME |  | 否 | 当前时间（北京） |

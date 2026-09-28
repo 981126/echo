@@ -521,7 +521,7 @@ export default function PersonaPage() {
                     {!!style.anchor_candidates?.length && (
                       <div>
                         <span className="mb-1.5 block text-xs text-muted-foreground">
-                          生成风格范本（勾选的素材必定注入生成上下文，不参与检索淘汰）
+                          生成风格范本（勾选的素材必定注入生成上下文，不参与检索淘汰）——建议选 5–10 条、覆盖不同内容模式
                         </span>
                         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
                           {style.anchor_candidates.map((c) => (

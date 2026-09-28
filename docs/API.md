@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 131 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 132 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -572,6 +572,18 @@ R-156：定稿——先保存当前编辑，再记一条版本（正文+标题+�
 Draft Rework
 
 一键回炉（R-030⑦）：按原选题重新异步生成一轮，完成后替换草稿。
+
+**参数**
+
+- `draft_id`（path）integer，必填
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/drafts/{draft_id}/performance
+
+Draft Performance
+
+R-184：已发布稿件的表现（绑定素材存在时返回各平台最新互动聚合）；未关联素材或未同步时 platforms=[]。
 
 **参数**
 

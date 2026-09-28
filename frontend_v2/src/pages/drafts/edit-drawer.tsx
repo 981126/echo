@@ -72,9 +72,22 @@ export interface DraftEditState {
   script: string
   video_id: number | null
   tagsText: string
+  publish_platform: string
+  publish_url: string
+  published_at: string
 }
 
-export const EMPTY_DRAFT: DraftEditState = { id: 0, title: '', cover_text: '', script: '', video_id: null, tagsText: '' }
+export const EMPTY_DRAFT: DraftEditState = {
+  id: 0,
+  title: '',
+  cover_text: '',
+  script: '',
+  video_id: null,
+  tagsText: '',
+  publish_platform: '',
+  publish_url: '',
+  published_at: ''
+}
 
 interface CheckInfo {
   ok: boolean
@@ -224,7 +237,10 @@ export function DraftEditDrawer({
           cover_text: d.cover_text,
           script: d.script,
           video_id: d.video_id ?? null,
-          tagsText: (d.tags || []).join(', ')
+          tagsText: (d.tags || []).join(', '),
+          publish_platform: d.publish_platform || '',
+          publish_url: d.publish_url || '',
+          published_at: d.published_at || ''
         })
       } catch {
         /* 抖动继续 */
@@ -253,7 +269,10 @@ export function DraftEditDrawer({
       cover_text: state.cover_text,
       script: state.script,
       video_id: state.video_id,
-      tags: state.tagsText.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
+      tags: state.tagsText.split(/[,，]/).map((x) => x.trim()).filter(Boolean),
+      publish_platform: state.publish_platform,
+      publish_url: state.publish_url,
+      published_at: state.published_at || null
     }
     if (id) {
       await apiJson(`/api/drafts/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
@@ -420,6 +439,29 @@ export function DraftEditDrawer({
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">素材标签（逗号分隔）</label>
               <Input value={state.tagsText} onChange={(e) => setState({ ...state, tagsText: e.target.value })} placeholder="如：求职, 面试, 赚钱" />
+            </div>
+          </div>
+          {/* R-184 发布回填：记录发布链接/平台/时间，关联素材后可看表现 */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">发布平台（可选）</label>
+              <Select value={state.publish_platform || 'none'} onValueChange={(v) => setState({ ...state, publish_platform: v === 'none' ? '' : v })}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="未发布" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">未发布</SelectItem>
+                  <SelectItem value="douyin">抖音</SelectItem>
+                  <SelectItem value="bilibili">B站</SelectItem>
+                  <SelectItem value="xiaohongshu">小红书</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">发布链接（可选）</label>
+              <Input value={state.publish_url} onChange={(e) => setState({ ...state, publish_url: e.target.value })} placeholder="粘贴作品链接" />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">发布时间（可选）</label>
+              <Input type="datetime-local" value={state.published_at ? state.published_at.slice(0, 16) : ''} onChange={(e) => setState({ ...state, published_at: e.target.value })} />
             </div>
           </div>
         </div>

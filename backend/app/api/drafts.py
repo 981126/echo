@@ -376,6 +376,39 @@ class FinalizeIn(BaseModel):
     video_id: int | None = None
 
 
+@router.get("/{draft_id}/performance", response_model=dict)
+def draft_performance(draft_id: int, db: Session = Depends(get_db)):
+    """R-184：已发布稿件的表现（绑定素材存在时，返回各平台最新互动聚合）。
+
+    未关联素材 / 无平台数据时返回 platforms=[]，前端提示「先关联素材并同步」。
+    """
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    if not draft.video_id:
+        return {"draft_id": draft_id, "video_id": None, "platforms": [], "totals": None}
+    from ..models.video import Video
+    from ..services.metrics import _platform_breakdown
+
+    video = db.get(Video, draft.video_id)
+    if video is None:
+        return {"draft_id": draft_id, "video_id": draft.video_id, "platforms": [], "totals": None}
+    rows = _platform_breakdown(db, video)
+    totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0}
+    for r in rows:
+        totals["plays"] += int(r.get("plays") or 0)
+        totals["likes"] += int(r.get("likes") or 0)
+        totals["favorites"] += int(r.get("favorites") or 0)
+        totals["comments"] += int(r.get("comments") or 0)
+    return {
+        "draft_id": draft_id,
+        "video_id": draft.video_id,
+        "video_title": video.title or "",
+        "platforms": rows,
+        "totals": totals,
+    }
+
+
 @router.get("/{draft_id}/versions", response_model=list[dict])
 def draft_versions(draft_id: int, db: Session = Depends(get_db)):
     """R-156：草稿的定稿版本留痕（时间正序，含正文供前端本地做两版 diff）。"""

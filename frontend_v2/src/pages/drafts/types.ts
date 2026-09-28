@@ -32,6 +32,9 @@ export interface Draft {
   status: 'draft' | 'used' | 'done' | 'archived'
   prompt_version: number
   persona_version: number
+  publish_url?: string
+  publish_platform?: string
+  published_at?: string | null
   quality: {
     fallback?: boolean
     rounds?: number

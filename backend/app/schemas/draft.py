@@ -25,6 +25,9 @@ class DraftOut(BaseModel):
     prompt_version: int = 0
     persona_version: int = 0
     quality: dict = {}
+    publish_url: str = ""
+    publish_platform: str = ""
+    published_at: Optional[datetime] = None
     version: int = 1
     # R-173：该草稿当前的 AI 长任务状态（讨论/洗稿/回炉/生成），无任务时为 None。
     # 由 list/get 接口填充，ORM 上没有该属性（默认 None）。
@@ -102,4 +105,7 @@ class DraftUpdate(BaseModel):
     script: Optional[str] = None
     platform_shells: Optional[dict] = None
     tags: Optional[list[str]] = None
+    publish_url: Optional[str] = None
+    publish_platform: Optional[str] = None
+    published_at: Optional[datetime] = None
     status: Optional[str] = Field(default=None, pattern="^(draft|used|done|archived|deleted)$")

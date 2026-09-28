@@ -1,8 +1,8 @@
 # R-184 反馈闭环：发布回填 + 一键反馈 + 风格范本引导
 
 - **日期**: 2026-09-28
-- **状态**: 🔲 已确认方向，待实施
-- **关联**: `drafts`（加发布字段）、`feedback`、`api/drafts.py`、前端脚本工作台；R-020/R-022/R-131/R-156
+- **状态**: ✅ 已完成（2026-09-28，M173；自动定时回填列为后续）
+- **关联**: `drafts`（发布字段）、`feedback`、`api/drafts.py`、前端脚本工作台；R-020/R-022/R-131/R-156
 
 ## 原文（作者原话，未改动）
 > （讨论「越做越久越没灵感」的闭环时确认）先建反馈闭环。
@@ -22,5 +22,14 @@
 - 草稿可记录发布链接/时间/平台；发布后能自动回填表现；
 - 一键反馈可用并回流；`scripts/verify.sh` 全绿。
 
+## 实施记录（2026-09-28）
+- `drafts` 加 `publish_url/publish_platform/published_at`（`_migrate_draft_publish`），`DraftOut/DraftUpdate` 同步；`PATCH /api/drafts/{id}` 可写。
+- 新增 `GET /api/drafts/{id}/performance`：草稿关联素材时聚合各平台最新互动（复用 `metrics._platform_breakdown`），未关联返回空。
+- 前端：编辑抽屉加「发布平台/链接/时间」；草稿卡片显示「已发布 · 平台」链接；卡片加**快速反馈「好/差」**（写 `feedback.liked`）。
+- 人设页风格范本区加引导「建议选 5–10 条、覆盖不同内容模式」。
+- **未做（后续）**：发布后 24h **定时自动**回填（当前为记录链接 + 按需查看表现）；「一键反馈回流提示词优化」沿用既有 `feedback_context`。
+- 测试：`tests/test_r184_publish_backfill.py`；`scripts/verify.sh` 全绿。
+
 ## 排期
-M173（待实施）
+M173
+
