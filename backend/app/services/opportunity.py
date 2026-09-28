@@ -230,6 +230,78 @@ def _weekly_pack(db: Session, limit: int) -> dict:
     return {"items": kept, "covered_count": len(covered), "generated_at": datetime.now().isoformat()}
 
 
+_GAP_SYSTEM = (
+    "你是选题策划。给你一位自媒体作者的人设、他最近讲过的话题、以及近期热点。"
+    "请给出**该讲但还没讲过**的选题——填补他的内容缺口，不要重复已讲过的话题，也不要是宽泛的大词。"
+    "每个选题：具体、有钩子、贴合作者人设与赛道（求职/面试/赚钱/知识），并说明为什么值得讲（哪来的缺口/需求）。"
+    "只输出 JSON，不要解释："
+    '{"topics":[{"title":"完整选题标题(可直接写稿)","reason":"一句话说明缺口/依据"}]}'
+)
+
+
+def gap_suggestions(db: Session, limit: int = 6) -> dict:
+    """缺口选题（带 120s 缓存）：AI 基于「已讲话题 + 人设」补位。"""
+    cid = _cid(db) or 0
+    return _cached(f"gap:{cid}:{limit}", lambda: _gap_suggestions(db, limit))
+
+
+def _gap_suggestions(db: Session, limit: int) -> dict:
+    from ..models.hot_topic import HotTopic
+    from ..models.persona import PersonaTag
+    from .persona import PersonaService
+
+    cid = _cid(db)
+    pq = db.query(PersonaTag).filter(PersonaTag.status == "confirmed")
+    if cid:
+        pq = pq.filter(PersonaTag.creator_id == cid)
+    persona = [
+        f"{t.label}: {t.description}".strip(": ")
+        for t in pq.order_by(PersonaTag.category, PersonaTag.id).all()
+        if t.category in ("style", "topic")
+    ]
+    covered = covered_titles(db)[:40]
+    hots = [h.title for h in db.query(HotTopic).order_by(HotTopic.id.desc()).limit(20).all() if h.title]
+
+    user = "\n".join(
+        [
+            "作者人设：",
+            *[f"- {p}" for p in persona or ["（暂无）"]],
+            "",
+            "最近讲过的话题（避免重复）：",
+            *[f"- {c}" for c in covered or ["（暂无）"]],
+            "",
+            "近期热点（可结合）：",
+            *[f"- {h}" for h in hots or ["（暂无）"]],
+            "",
+            f"请给出 {limit} 个该讲但没讲过的选题。",
+        ]
+    )
+    try:
+        data = PersonaService().call_json(
+            "ideas",
+            [{"role": "system", "content": _GAP_SYSTEM}, {"role": "user", "content": user}],
+            temperature=0.85,
+        )
+        items: list[dict] = []
+        covered_norm = [_norm(c) for c in covered]
+        for t in data.get("topics") or []:
+            if not isinstance(t, dict):
+                continue
+            title = str(t.get("title", "")).strip()
+            if not title or _is_covered(title, covered_norm):
+                continue
+            items.append(
+                {
+                    "title": title[:120],
+                    "reason": str(t.get("reason", "")).strip()[:200],
+                    "slot": "gap",
+                }
+            )
+        return {"items": items[:limit], "note": ""}
+    except Exception as exc:  # noqa: BLE001 AI 不可用不报错
+        return {"items": [], "note": f"AI 暂不可用：{str(exc)[:100]}"}
+
+
 def ledger(db: Session, limit: int = 50) -> dict:
     """选题账本（带 120s 缓存）：已讲过的话题 + 未使用灵感里被判为「可能已讲」的条目。"""
     cid = _cid(db) or 0

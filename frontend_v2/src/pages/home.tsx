@@ -77,6 +77,9 @@ export default function HomePage() {
   const [packLoading, setPackLoading] = useState(false)
   const [clusters, setClusters] = useState<Cluster[]>([])
   const [clustersLoading, setClustersLoading] = useState(false)
+  const [gap, setGap] = useState<PackItem[]>([])
+  const [gapLoading, setGapLoading] = useState(false)
+  const [gapNote, setGapNote] = useState('')
   const [pendingTopic, setPendingTopic] = useState('')
   const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
@@ -187,6 +190,19 @@ export default function HomePage() {
       toast.error((e as Error).message)
     } finally {
       setClustersLoading(false)
+    }
+  }
+
+  async function loadGap() {
+    setGapLoading(true)
+    try {
+      const r = await apiJson<{ items: PackItem[]; note?: string }>('/api/opportunities/gap?limit=6')
+      setGap(r.items || [])
+      setGapNote(r.note || '')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setGapLoading(false)
     }
   }
 
@@ -365,6 +381,10 @@ export default function HomePage() {
               {packLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               生成本周灵感包
             </Button>
+            <Button size="sm" variant="outline" onClick={loadGap} disabled={gapLoading}>
+              {gapLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              找缺口选题
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
             {!!clusters.length && (
@@ -402,8 +422,28 @@ export default function HomePage() {
                 </ul>
               </div>
             )}
-            {!clusters.length && !pack.length && (
-              <p className="py-3 text-center text-sm text-muted-foreground">点上方按钮：看观众反复问什么，或生成一份本周选题灵感包</p>
+            {!!gap.length && (
+              <div>
+                <span className="mb-1.5 block text-xs font-medium text-muted-foreground">缺口选题（该讲但还没讲过，AI 基于人设与已讲话题）</span>
+                <ul className="space-y-1.5">
+                  {gap.map((p, i) => (
+                    <li key={i} className="flex items-start gap-2 rounded-lg border border-accent/30 bg-accent-soft/40 px-3 py-2">
+                      <span className="tnum mt-0.5 shrink-0 text-xs text-muted-foreground">#{i + 1}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px]">{p.title}</span>
+                        {p.reason && <span className="mt-0.5 block text-[11px] text-muted-foreground">{p.reason}</span>}
+                      </span>
+                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title)} disabled={generating !== null}>生成</Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!!gapNote && !gap.length && (
+              <p className="text-xs text-muted-foreground">{gapNote}</p>
+            )}
+            {!clusters.length && !pack.length && !gap.length && (
+              <p className="py-3 text-center text-sm text-muted-foreground">点上方按钮：看观众反复问什么、生成本周灵感包，或让 AI 找缺口选题</p>
             )}
           </CardContent>
         </Card>

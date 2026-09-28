@@ -27,3 +27,9 @@ def weekly_pack(limit: int = 20, db: Session = Depends(get_db)):
 def topic_ledger(limit: int = 50, db: Session = Depends(get_db)):
     """选题账本：已讲过的话题与「可能已讲」的池中灵感。"""
     return opportunity.ledger(db, limit=max(1, min(limit, 200)))
+
+
+@router.get("/gap", response_model=dict)
+def gap_suggestions(limit: int = 6, db: Session = Depends(get_db)):
+    """缺口选题（R-187）：AI 基于「已讲话题 + 人设」给出该讲但没讲过的选题。"""
+    return opportunity.gap_suggestions(db, limit=max(1, min(limit, 12)))
