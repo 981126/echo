@@ -62,7 +62,7 @@ def test_rerun_ok_with_mock_sync(db, monkeypatch):
     assert result["benchmark_count"] == 1
     assert result["ok_count"] == 1
     assert result["summary"][0]["name"] == "对标A"
-    assert result["summary"][0]["top3_with_text"] == 0
+    assert result["summary"][0]["top_with_text"] == 0
     assert updates and updates[-1][0] == 99  # 留给 worker 收尾置 100
 
 
@@ -77,7 +77,7 @@ def test_rerun_single_benchmark_failure_does_not_block_others(db, monkeypatch):
             raise RuntimeError("mock 失败")
         return []
 
-    monkeypatch.setattr("app.services.benchmark.ensure_top3_with_text", _fake_ensure)
+    monkeypatch.setattr("app.services.benchmark.ensure_top_with_text", _fake_ensure)
     result = rerun_benchmarks(db, owner)
     assert result["benchmark_count"] == 2
     assert result["ok_count"] == 1

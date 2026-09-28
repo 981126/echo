@@ -1,4 +1,4 @@
-"""博主对标（R-097）：前2+最新展示（R-152） + 可讲分析 + 按人设洗稿存草稿。"""
+"""博主对标（R-097）：前3+最新展示（R-174，原 R-152 前2+最新） + 可讲分析 + 按人设洗稿存草稿。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from ..db import get_db
 from ..models.platform import Creator
 from ..services.benchmark import (
     benchmarks_of_owner,
-    ensure_top3_with_text,
+    ensure_top_with_text,
     resolve_rewrite_source,
     target_units,
     unit_payload,
@@ -33,7 +33,7 @@ def _owner(db: Session) -> Creator:
 
 @router.get("/top", response_model=dict)
 def benchmark_top(db: Session = Depends(get_db)):
-    """每个对标博主：最新15条里按互动分取前2 + 第三篇=该对标最新一篇（R-152）。
+    """每个对标博主：最新15条里按互动分取前3 + 第四篇=该对标最新一篇（R-174，原 R-152 前2+最新）。
 
     尚未转写的可先展示占位，需先 prepare；展示时仍「有文案优先」（R-106）。
     """
@@ -52,7 +52,7 @@ class PrepareIn(BaseModel):
 
 @router.post("/prepare", response_model=dict)
 def benchmark_prepare(payload: PrepareIn, db: Session = Depends(get_db)):
-    """对某个对标博主补齐文案（前2+最新缺转写自动下载+转写，无文案顺延），返回有文案的 3 条。
+    """对某个对标博主补齐文案（前3+最新缺转写自动下载+转写，无文案顺延），返回有文案的 4 条。
 
     同步执行，转写耗时可能几分钟；前端给 loading 提示。
     """
@@ -60,7 +60,7 @@ def benchmark_prepare(payload: PrepareIn, db: Session = Depends(get_db)):
     bm = db.get(Creator, payload.benchmark_id)
     if bm is None or bm.kind != "benchmark" or bm.parent_id != owner.id:
         raise HTTPException(status_code=404, detail="对标博主不存在")
-    picked = ensure_top3_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
+    picked = ensure_top_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
     items = []
     for u in picked:
         items.append(unit_payload(db, u, owner_id=owner.id))
@@ -137,7 +137,7 @@ def benchmark_rewrite_source(payload: RewriteSourceIn, db: Session = Depends(get
 
 @router.post("/rerun", response_model=dict)
 def benchmark_rerun(db: Session = Depends(get_db)):
-    """R-102/R-104/R-109/R-152：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新15条 + 自动补「前2+最新」文案。
+    """R-102/R-104/R-109/R-152：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新15条 + 自动补「前3+最新」文案。
 
     长任务（含同步与转写，可能较久）：落后台任务+进度+完成通知，返回 task_id 供前端轮询。
     """

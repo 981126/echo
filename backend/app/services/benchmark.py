@@ -1,4 +1,4 @@
-"""R-097：博主对标——对标最新15条取前2 + 最新一篇（R-152）+ “我能不能讲” + 按人设洗稿存草稿。
+"""R-097：博主对标——对标最新15条取前3 + 最新一篇（R-174，原 R-152 前2+最新）+ “我能不能讲” + 按人设洗稿存草稿。
 
 对标内容只做分析与改写来源，绝不进入主博主人设学习语料（D-028）；
 转写补齐产生的对标素材归属对标博主（R-082），天然被主博主语料过滤排除。
@@ -205,46 +205,52 @@ def _sorted_by_score(db: Session, units: list[dict]) -> list[dict]:
     return sorted(units, key=lambda u: score_unit(db, u, stats_map), reverse=True)
 
 
+# R-174 对标展示口径：前 N（互动分）+ 最新一篇 = 共 N+1 条（R-152 原为前 2 + 最新 = 3 条）
+BENCH_TOP_N = 3
+
+
 def target_units(db: Session, bm: Creator, limit_candidates: int = 15, with_text_first: bool = False) -> list[dict]:
-    """R-152 对标展示口径：旧规则取前 2 + 第三篇 = 该对标最新一篇。
+    """R-174 对标展示口径：前 3 + 第四篇 = 该对标最新一篇（共 4 条；R-152 原为前 2 + 最新 = 3 条）。
 
     - 候选仍为最新 N 条（广告/同款漏标已在 candidates() 过滤）。
-    - 前 2 = 按互动分降序前两条；with_text_first=True 时先把「有文案」的排前（R-106 展示口径）。
-    - 第三篇 = 最新一篇（publish_time 最大）；若它已在前 2 里，则按互动分顺延补一条（保底 3 条）。
-    - 候选不足 3 条时返回可用的全部。
+    - 前 3 = 按互动分降序前三条；with_text_first=True 时先把「有文案」的排前（R-106 展示口径）。
+    - 第四篇 = 最新一篇（publish_time 最大）；若它已在前 3 里，则按互动分顺延补位（保底 4 条）。
+    - 候选不足 4 条时返回可用的全部。
     """
     units = candidates(db, bm, limit=limit_candidates)
     if not units:
         return []
+    total = BENCH_TOP_N + 1
     ranked = _sorted_by_score(db, units)
     if with_text_first:
         ranked = [u for u in ranked if _unit_text(db, u)] + [u for u in ranked if not _unit_text(db, u)]
     latest = max(units, key=lambda u: (u["post"].publish_time or _EPOCH))
-    picked: list[dict] = list(ranked[:2])
+    picked: list[dict] = list(ranked[:BENCH_TOP_N])
     if latest not in picked:
         picked.append(latest)
-    for unit in ranked:  # 顺延补位（重叠或候选不足时保底 3 条）
-        if len(picked) >= 3:
+    for unit in ranked:  # 顺延补位（重叠或候选不足时保底 4 条）
+        if len(picked) >= total:
             break
         if unit not in picked:
             picked.append(unit)
-    return picked[:3]
+    return picked[:total]
 
 
-def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -> list[dict]:  # R-109：10 → 15
-    """R-152：取「前 2（互动分）+ 最新一篇」，逐条补齐转写；广告/无文案顺延，保底 3 条有文案。
+def ensure_top_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -> list[dict]:  # R-109：10 → 15
+    """R-174：取「前 3（互动分）+ 最新一篇」，逐条补齐转写；广告/无文案顺延，保底 4 条有文案。
 
     转写后仍无文案（识别为空/无声等）→ 顺延下一条顶上（R-097 Q3）。
     """
     units = candidates(db, bm, limit=limit_candidates)
     if not units:
         return []
+    total = BENCH_TOP_N + 1
     ranked = _sorted_by_score(db, units)
     latest = max(units, key=lambda u: (u["post"].publish_time or _EPOCH))
-    order: list[dict] = list(ranked[:2])
+    order: list[dict] = list(ranked[:BENCH_TOP_N])
     if latest not in order:
         order.append(latest)
-    for unit in ranked:  # 前 2 / 最新 之外的按分顺延，用于补位
+    for unit in ranked:  # 前 3 / 最新 之外的按分顺延，用于补位
         if unit not in order:
             order.append(unit)
 
@@ -269,7 +275,7 @@ def ensure_top3_with_text(db: Session, bm: Creator, limit_candidates: int = 15) 
         unit["text"] = text
         unit["score"] = score_unit(db, unit, _stats_map(db, [unit]))
         picked.append(unit)
-        if len(picked) >= 3:
+        if len(picked) >= total:
             break
     return picked
 
@@ -658,9 +664,9 @@ def rewrite_worker(db: Session, payload: dict, update=None) -> dict:
 
 
 def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = True) -> dict:
-    """R-102/R-109/R-152：重跑当前主博主所有对标——逐账号重捞最新15条 + 自动补「前2+最新」文案。
+    """R-102/R-109/R-152/R-174：重跑当前主博主所有对标——逐账号重捞最新15条 + 自动补「前3+最新」文案。
 
-    refetch=True（手动「重新对标」）：重捞最新 15 条后重算「前2+最新」；
+    refetch=True（手动「重新对标」）：重捞最新 15 条后重算「前3+最新」；
     refetch=False（R-109 每日同步完成后自动触发）：不重复拉取，仅基于已同步数据重算/补缺转写。
     update(pct, note) 可选：由后台任务运行器注入，实时回写进度（R-081 同款）。
     """
@@ -706,25 +712,25 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
                         raise
                     except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
                         db.rollback()
-            _up(55, "计算「前2+最新」并补齐文案…")
-            picked = ensure_top3_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
+            _up(55, "计算「前3+最新」并补齐文案…")
+            picked = ensure_top_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
             n = len(picked)
             ok_count += 1
             text_count += n
-            summary.append({"benchmark_id": bm.id, "name": name, "top3_with_text": n, "error": ""})
-            _up(100, f"完成（前2+最新有文案 {n} 条）")
+            summary.append({"benchmark_id": bm.id, "name": name, "top_with_text": n, "error": ""})
+            _up(100, f"完成（前3+最新有文案 {n} 条）")
         except BudgetExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 单个对标失败不阻断整体
             db.rollback()
-            summary.append({"benchmark_id": bm.id, "name": name, "top3_with_text": 0, "error": str(exc)[:200]})
+            summary.append({"benchmark_id": bm.id, "name": name, "top_with_text": 0, "error": str(exc)[:200]})
             _up(100, "失败")
     return {
-        "title": f"共 {ok_count}/{total} 个对标已更新（前2+最新有文案 {text_count} 条）",
+        "title": f"共 {ok_count}/{total} 个对标已更新（前3+最新有文案 {text_count} 条）",
         "summary": summary,
         "benchmark_count": total,
         "ok_count": ok_count,
-        "top3_with_text_total": text_count,
+        "top_with_text_total": text_count,
     }
 
 
@@ -732,7 +738,7 @@ def rerun_worker(db: Session, payload: dict, update=None) -> dict:
     """后台任务体（R-102/R-105/R-109）：按 owner_id 重跑当前主博主所有对标。
 
     refetch=True（默认，手动「重新对标」）重捞最新 15 条；
-    refetch=False（R-109：每日同步完成后自动触发）不重复拉取、只重算「前2+最新」。
+    refetch=False（R-109：每日同步完成后自动触发）不重复拉取、只重算「前3+最新」。
     """
     from ..models.platform import Creator
 

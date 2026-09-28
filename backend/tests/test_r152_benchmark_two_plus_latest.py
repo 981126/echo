@@ -1,4 +1,4 @@
-"""R-152 测试：对标「前2 + 最新一篇」口径 + 素材库非主博主洗稿来源解析（mock 离线）。"""
+"""R-152/R-174 测试：对标「前3 + 最新一篇」（4 条）口径 + 素材库非主博主洗稿来源解析（mock 离线）。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import Base
 from app.models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from app.models.video import Transcript, Video
-from app.services.benchmark import ensure_top3_with_text, resolve_rewrite_source, target_units
+from app.services.benchmark import ensure_top_with_text, resolve_rewrite_source, target_units
 
 BASE = datetime(2026, 9, 1, 12, 0, 0)
 
@@ -63,31 +63,44 @@ def _ids(units):
     return [u["post"].platform_post_id for u in units]
 
 
-def test_target_units_top2_plus_latest(db):
+def test_target_units_top3_plus_latest(db):
+    """R-174：前 3（互动分）+ 最新一篇 = 4 条。"""
     _, bm, acc = _seed(db)
     _post(db, acc, "best", hours_ago=1, likes=1000)
     _post(db, acc, "second", hours_ago=2, likes=500)
     _post(db, acc, "third", hours_ago=3, likes=300)
+    _post(db, acc, "fourth", hours_ago=4, likes=200)  # 前3 之外，不该入选
     _post(db, acc, "recent", hours_ago=0, likes=1)  # 最新一篇，互动分最低
 
-    assert _ids(target_units(db, bm)) == ["best", "second", "recent"]
+    assert _ids(target_units(db, bm)) == ["best", "second", "third", "recent"]
 
 
 def test_target_units_overlap_falls_back_to_next_score(db):
-    """最新一篇同时是分数第一 → 顺延补第 3 条（保底 3 条）。"""
+    """最新一篇同时是分数第一 → 顺延补第 4 条（保底 4 条，R-174）。"""
     _, bm, acc = _seed(db)
     _post(db, acc, "best", hours_ago=0, likes=1000)  # 既是最新也是最高分
     _post(db, acc, "second", hours_ago=1, likes=500)
     _post(db, acc, "third", hours_ago=2, likes=300)
+    _post(db, acc, "fourth", hours_ago=3, likes=200)
 
-    assert _ids(target_units(db, bm)) == ["best", "second", "third"]
+    assert _ids(target_units(db, bm)) == ["best", "second", "third", "fourth"]
+
+
+def test_target_units_candidates_short_returns_all(db):
+    """候选不足 4 条时返回可用的全部（与原口径同规则）。"""
+    _, bm, acc = _seed(db)
+    _post(db, acc, "best", hours_ago=1, likes=1000)
+    _post(db, acc, "recent", hours_ago=0, likes=1)
+
+    assert _ids(target_units(db, bm)) == ["best", "recent"]
 
 
 def test_target_units_with_text_first(db, monkeypatch):
-    """展示口径：有文案优先（R-106），前 2 里没文案的排到有文案之后。"""
+    """展示口径：有文案优先（R-106），没文案的排到有文案之后。"""
     _, bm, acc = _seed(db)
     _post(db, acc, "high_no_text", hours_ago=1, likes=1000)
     _post(db, acc, "low_with_text", hours_ago=2, likes=1)
+    _post(db, acc, "another", hours_ago=3, likes=0)
     _post(db, acc, "latest", hours_ago=0, likes=0)
     monkeypatch.setattr(
         "app.services.benchmark._unit_text",
@@ -95,10 +108,10 @@ def test_target_units_with_text_first(db, monkeypatch):
     )
     ids = _ids(target_units(db, bm, with_text_first=True))
     assert ids[0] == "low_with_text"
-    assert "latest" in ids and len(ids) == 3
+    assert "latest" in ids and len(ids) == 4
 
 
-def test_ensure_top3_transcribes_latest(db, monkeypatch):
+def test_ensure_top_transcribes_latest(db, monkeypatch):
     """R-152：第三篇（最新）没有文案时也会被补齐转写。"""
     _, bm, acc = _seed(db)
     best = _post(db, acc, "best", hours_ago=1, likes=1000)
@@ -119,7 +132,7 @@ def test_ensure_top3_transcribes_latest(db, monkeypatch):
     monkeypatch.setattr("app.services.benchmark._unit_is_ad", lambda db_, unit, text="": False)
     monkeypatch.setattr("app.services.media_ensure.platform_media_task", _fake_media)
 
-    picked = ensure_top3_with_text(db, bm, limit_candidates=15)
+    picked = ensure_top_with_text(db, bm, limit_candidates=15)
     assert _ids(picked) == ["best", "second", "latest"]
     assert calls == [latest.id]
 
@@ -195,7 +208,8 @@ def _client(db):
     return TestClient(app)
 
 
-def test_top_endpoint_returns_three_and_latest_last(db):
+def test_top_endpoint_returns_four_and_latest_last(db):
+    """R-174：/api/benchmark/top 每个对标返回 4 条（前3 + 最新），最新在最后一条。"""
     _, bm, acc = _seed(db)
     _post(db, acc, "best", hours_ago=1, likes=1000)
     _post(db, acc, "second", hours_ago=2, likes=500)
@@ -205,7 +219,7 @@ def test_top_endpoint_returns_three_and_latest_last(db):
     r = _client(db).get("/api/benchmark/top")
     assert r.status_code == 200, r.text
     items = r.json()["benchmarks"][0]["items"]
-    assert [it["title"] for it in items] == ["标题-best", "标题-second", "标题-recent"]
+    assert [it["title"] for it in items] == ["标题-best", "标题-second", "标题-third", "标题-recent"]
 
 
 def test_rewrite_source_endpoint_starts_task(db, monkeypatch):

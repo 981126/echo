@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import Base
 from app.models.platform import Creator, CreatorAccount, PlatformPost
 from app.models.video import Transcript, Video
-from app.services.benchmark import candidates, ensure_top3_with_text
+from app.services.benchmark import candidates, ensure_top_with_text
 
 
 @pytest.fixture()
@@ -70,7 +70,7 @@ def test_candidates_exclude_ad_and_same_title_twin(db):
     assert "n1" in titles and "n2" in titles
 
 
-def test_ensure_top3_skips_ad_and_flags(db, monkeypatch):
+def test_ensure_top_skips_ad_and_flags(db, monkeypatch):
     bm = _seed(
         db,
         [
@@ -79,6 +79,7 @@ def test_ensure_top3_skips_ad_and_flags(db, monkeypatch):
             ("adv2", "广告帖二", False),
             ("n2", "正常帖二", False),
             ("n3", "正常帖三", False),
+            ("n4", "正常帖四", False),
         ],
     )
     monkeypatch.setattr("app.services.benchmark._unit_text", lambda db, unit: "有转写文案内容")
@@ -86,9 +87,9 @@ def test_ensure_top3_skips_ad_and_flags(db, monkeypatch):
         "app.services.benchmark._unit_is_ad",
         lambda db, unit, text="": unit["post"].platform_post_id in ("adv1", "adv2"),
     )
-    picked = ensure_top3_with_text(db, bm, limit_candidates=10)
+    picked = ensure_top_with_text(db, bm, limit_candidates=10)
     picked_ids = [u["post"].platform_post_id for u in picked]
-    assert len(picked) == 3
+    assert len(picked) == 4  # R-174：前3+最新 = 4 条（广告顺延）
     assert "adv1" not in picked_ids and "adv2" not in picked_ids
     # 广告帖被落库标记，之后 candidates 直接排除
     flags = {r.platform_post_id: r.is_ad for r in db.query(PlatformPost).all()}

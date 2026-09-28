@@ -1,5 +1,25 @@
 # 变更记录
 
+## [M163 / R-174] 2026-09-28 — 对标封面尺寸对齐素材库 + 展示口径「前3+最新」+ 全站 TAB 切换动画
+
+> 作者：① 博主对标的封面图不需要那么大，和素材库的图一样大就行 ② 博主对标改为前3 + 最新一篇，其他逻辑不变
+> ③ AI设置、脚本工作台，切换TAB页没有动画。
+
+- **① 封面尺寸**：对标页网格 `lg:grid-cols-3` → `grid-cols-2 sm:grid-cols-3 lg:grid-cols-4`（与素材库一致），
+  封面从 **344×258 → 255×191**（素材库同视口 265×199，差的 4% 来自对标分区 Card 的内边距）。
+  卡片统计行加 `flex-wrap`，加载骨架 2 → 4 个。
+- **②「前3 + 最新」= 4 条**：`target_units` 改 `ranked[:3]` + 最新 + 按互动分顺延补位、`picked[:4]`；
+  `ensure_top3_with_text` → `ensure_top_with_text`（保底 4 条有文案）；`BENCH_TOP_N=3` 常量收敛口径。
+  **其余规则一律不动**：15 条候选、广告/同款过滤、展示「有文案优先」、缺文案自动下载转写、无文案顺延、
+  「最新」按 publish_time、`/top`、`/prepare`、重跑任务文案（`top3_with_text` → `top_with_text`）与 docstring 同步；
+  前端文案「前2 + 最新一篇」→「前3 + 最新一篇」、「转写补齐（前2+最新）」→「（前3+最新）」。
+- **③ TAB 切换动画（全站）**：`components/ui/tabs.tsx` 的 `TabsContent` 内层包 `motion.div`
+  （opacity 0→1 + y 8→0，0.25s，复用 `EASE_OUT_EXPO`）；调用方的 `className` 挂在内层，避免破坏 `space-y-*`。
+  Radix 未选中会卸载 Content → 每次切回都是重新挂载，动画必然重播。覆盖主页/AI 设置/脚本工作台及三个抽屉的 tab。
+- **验证**：无头探针（封面唯一尺寸 255×191、每个对标 4 张卡、AI 设置与脚本工作台切 tab opacity 0.52→1.000 /
+  0.31→1.000 且落定 transform none）；`/api/benchmark/top` 冒烟 11 个对标全部 4 条；
+  `pytest` 383 passed、`vitest` 新增 tabs 3 例、`scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M162 / R-173] 2026-09-28 — 草稿卡片 AI 任务状态动画 + 讨论 tab 思考状态条 + 结束判定修复
 
 > 作者：① 草稿点开抽屉后卡片为什么重新触发动画 ② 讨论中草稿卡片应该给动画

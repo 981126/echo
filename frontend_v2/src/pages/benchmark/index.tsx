@@ -202,7 +202,7 @@ export default function BenchmarkPage() {
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-2">
         <Target className="h-4 w-4 text-accent" />
         <span className="text-sm text-muted-foreground">
-          每个对标展示 <b className="text-foreground">前2 + 最新一篇</b>（按互动分，广告已过滤）
+          每个对标展示 <b className="text-foreground">前3 + 最新一篇</b>（按互动分，广告已过滤）
         </span>
         <span className="flex-1" />
         <Button size="sm" onClick={rerun} disabled={rerunning}>
@@ -213,7 +213,7 @@ export default function BenchmarkPage() {
 
       {topQ.isLoading ? (
         <div className="space-y-3">
-          {Array.from({ length: 2 }).map((_, i) => (
+          {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-56 w-full" />
           ))}
         </div>
@@ -234,7 +234,7 @@ export default function BenchmarkPage() {
                 <span className="flex-1" />
                 <Button variant="outline" size="sm" onClick={() => prepare(b)} disabled={preparingId === b.benchmark_id}>
                   {preparingId === b.benchmark_id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                  转写补齐（前2+最新）
+                  转写补齐（前3+最新）
                 </Button>
               </CardHeader>
               <CardContent>
@@ -243,7 +243,8 @@ export default function BenchmarkPage() {
                     暂无作品（先「重新对标」拉取）
                   </div>
                 ) : (
-                  <div className="grid gap-3 lg:grid-cols-3">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {/* R-174：网格与素材库一致（2/3/4 列），封面尺寸因此相同 */}
                     {b.items.map((it, idx) => {
                       const ana = analysisMap[it.key]
                       return (
@@ -281,7 +282,7 @@ export default function BenchmarkPage() {
                           </div>
                           <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
                             <p className="line-clamp-2 text-[13px] font-medium leading-snug">{it.title || '（无标题）'}</p>
-                            <div className="tnum flex items-center gap-2.5 text-[11px] text-muted-foreground">
+                            <div className="tnum flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
                               <span>👍 {fmtNum(it.likes)}</span>
                               <span>⭐ {fmtNum(it.favorites)}</span>
                               <span>💬 {fmtNum(it.comments)}</span>

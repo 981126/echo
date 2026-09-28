@@ -466,7 +466,7 @@ export interface paths {
         };
         /**
          * Benchmark Top
-         * @description 每个对标博主：最新15条里按互动分取前2 + 第三篇=该对标最新一篇（R-152）。
+         * @description 每个对标博主：最新15条里按互动分取前3 + 第四篇=该对标最新一篇（R-174，原 R-152 前2+最新）。
          *
          *     尚未转写的可先展示占位，需先 prepare；展示时仍「有文案优先」（R-106）。
          */
@@ -490,7 +490,7 @@ export interface paths {
         put?: never;
         /**
          * Benchmark Prepare
-         * @description 对某个对标博主补齐文案（前2+最新缺转写自动下载+转写，无文案顺延），返回有文案的 3 条。
+         * @description 对某个对标博主补齐文案（前3+最新缺转写自动下载+转写，无文案顺延），返回有文案的 4 条。
          *
          *     同步执行，转写耗时可能几分钟；前端给 loading 提示。
          */
@@ -568,7 +568,7 @@ export interface paths {
         put?: never;
         /**
          * Benchmark Rerun
-         * @description R-102/R-104/R-109/R-152：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新15条 + 自动补「前2+最新」文案。
+         * @description R-102/R-104/R-109/R-152：页面顶部「重新对标」——重跑当前主博主所有对标：重捞最新15条 + 自动补「前3+最新」文案。
          *
          *     长任务（含同步与转写，可能较久）：落后台任务+进度+完成通知，返回 task_id 供前端轮询。
          */

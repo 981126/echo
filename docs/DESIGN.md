@@ -27,7 +27,7 @@
 | works.py | /api/works | 云端作品列表、to-local、meta、merge/split、auto-merge、删除、cleanup-tags |
 | platform.py | /api/platform | 云端作品/评论/指标/同步触发与任务/预算/选题池/主页快照；bind-links |
 | creators.py | /api/creators | 博主 CRUD/切换/账号 CRUD/头像/链接解析 |
-| benchmark.py | /api/benchmark | 博主对标：前2+最新展示（R-152）/转写补齐/AI可讲/洗稿（R-152 增 `rewrite-source`：素材库非主博主素材一键洗稿）；「重新对标」一键重跑（R-102，后台任务） |
+| benchmark.py | /api/benchmark | 博主对标：前3+最新展示（R-174）/转写补齐/AI可讲/洗稿（R-152 增 `rewrite-source`：素材库非主博主素材一键洗稿）；「重新对标」一键重跑（R-102，后台任务） |
 | persona.py | /api/persona | 档案 CRUD/建议/一键确认/表达风格面板/金句候选/增量校验结果（R-128：`/check/latest`、`/recheck`）；R-131：`/style` 扩展风格范本与样本条数 |
 | drafts.py | /api/drafts | 草稿 CRUD/生成(同步)/generate-async/打分；`POST` 拒绝空白草稿（R-154）且支持 `tags`；`POST /{id}/discuss` 基于原文重新讨论（R-155）；`POST /{id}/finalize` 定稿 + `GET /{id}/versions` + `POST /{id}/versions/{vid}/rollback` 回滚（R-156/R-157） |
 | chat.py | /api/chat | 会话 CRUD + SSE 流式回复 |
@@ -125,7 +125,7 @@
 - `style_profile`（core）：口癖/句长/感叹反问占比等画像；R-057 表达风格面板 + 禁词注入。
 - `metrics.py`：`_platform_breakdown`（平台最新指标，供生成加权）/`summary`/`radar`（赛道雷达，R-136 自 review 迁入）/`apply_retention`（热点 30 天清理）；R-136 已删除无调用方的 upsert/import/fetch/series。
 - `chat_service.py`：只读工具集 + 流式问答；工具：search_videos/get_video_detail/get_persona/list_requirements/get_metrics_summary/get_today_topics/get_review_report/get_radar/search_drafts/generate_draft（写操作需明确同意）。SSE 由 api/chat 组装。
-- `benchmark.py`：对标聚合（**R-152：最新15条按互动分取前2 + 第三篇=该对标最新一篇**（重叠按互动分顺延保底3条），R-109：10→15；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `target_units`（R-152 统一的展示/补齐目标选取，`with_text_first` 保留 R-106 展示口径）+ `ensure_top3_with_text`（前2+最新缺文案自动下载转写、无文案顺延；有文案后严格 AI 审核软广/商单/引流并落库排除，R-103/R-106）+ `resolve_rewrite_source`（R-152：素材库按 video_id/post_id/work_id 解析 ASR 文案与来源，供 `/rewrite-source` 洗稿）+ `rerun_benchmarks(db, owner, update, refetch)`（R-102/R-109：refetch=True 手动重捞最新15条；refetch=False 每日同步后自动触发、不重复拉取，只重算前2+最新/补缺转写）；/top 有文案优先（空文案被下一条顶上，R-106）。
+- `benchmark.py`：对标聚合（**R-174：最新15条按互动分取前3 + 第四篇=该对标最新一篇**（共 4 条；重叠按互动分顺延保位，R-152 原为前2+最新=3 条），R-109：10→15；广告/同款漏标过滤；文案只用 ASR 转写稿）+ `target_units`（R-152 统一的展示/补齐目标选取，`with_text_first` 保留 R-106 展示口径）+ `ensure_top_with_text`（前3+最新缺文案自动下载转写、无文案顺延；有文案后严格 AI 审核软广/商单/引流并落库排除，R-103/R-106）+ `resolve_rewrite_source`（R-152：素材库按 video_id/post_id/work_id 解析 ASR 文案与来源，供 `/rewrite-source` 洗稿）+ `rerun_benchmarks(db, owner, update, refetch)`（R-102/R-109：refetch=True 手动重捞最新15条；refetch=False 每日同步后自动触发、不重复拉取，只重算前3+最新/补缺转写）；/top 有文案优先（空文案被下一条顶上，R-106）。
 - `platform_sync.py`：见 §4。
 - `works_service.py`：标题规范化（去话题/标点/空白/小写）+ 自动合并 + 手动合并/拆分 + `list_works`（合并作品含各平台）+ `post_item`（作品序列化）。
 - `creator_service.py`：当前博主/切换/账号元数据/全网粉丝汇总/删除保护。
