@@ -1,5 +1,16 @@
 # 变更记录
 
+## [M157 / R-168] 2026-09-28 — 老前端 frontend/ 标记废弃，默认前端 = frontend_v2
+
+> 作者：在文档中将老的前端项目标成废弃，以后说启动项目、修改项目都不修改老前端项目，而是新前端项目。
+
+- `frontend/`（Vue 3 + Naive UI）标记**废弃**：只读保留（生产挂根路径兜底），禁止改代码/加功能/修 bug；
+  `frontend_v2/`（React）成为**默认前端**，「启动项目 / 修改项目」一律指它（dev 3000 / 生产 /v2）。
+- 标注：`AGENTS.md`（技术栈 + 目录速览 + 服务运行端口改 3000）、`README.md`（运行命令）、
+  `docs/QUICKSTART.md`（启动命令改 frontend_v2）、`docs/PRD.md`、`docs/ARCHITECTURE.md`（前端行）。
+- 老前端暂不删除；verify.sh 保留其 lint/build 防腐，后续下线/删除另立需求。
+- 验证：`scripts/verify.sh` 全绿；服务保持运行（8000/3000）。
+
 ## [M156 / R-167] 2026-09-28 — frontend_v2 线上 bug②：AI 对话 [object Object] / 对标封面裂开 / 草稿抽屉空白防御
 
 > 作者：脚本工作台明明有草稿，打开却是空白，ai对话进行对话，ai回复我出错了：[object Object]，博主对标页面的封面图是裂开的。

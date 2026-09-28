@@ -25,13 +25,16 @@ cd backend
 .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 # 首次启动自动：建表/迁移/seed 默认提示词/注册定时任务/启动 inbox 监听
 
-# 前端
-cd frontend
+# 前端（frontend_v2，当前默认前端）
+cd frontend_v2
 npm install          # 首次
-npm run dev          # http://localhost:5173
+npm run dev          # http://localhost:3000
 ```
 登录：打开页面输入 `ECHO_ACCESS_TOKEN`。
-也可只跑后端（已 `npm run build` 时 FastAPI 直接托管 http://localhost:8000）。
+也可只跑后端（已 `npm run build` 时 FastAPI 托管：新前端 http://localhost:8000/v2/）。
+
+> ⚠️ 老前端 `frontend/`（Vue 3，dev 5173）**已废弃（R-168）**：只读保留、不再修改；
+> 其构建产物仍由后端挂根路径（http://localhost:8000）兜底，直到后续决定下线。
 
 ## 4. 首次使用流程
 1. **博主管理**：新建主博主 → 为它配置抖音/B站/小红书账号（填主页分享链接，系统自动解析平台 ID）

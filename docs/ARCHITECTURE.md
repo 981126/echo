@@ -8,8 +8,8 @@
 | 层 | 选型 | 说明 |
 |---|---|---|
 | 后端 | Python 3.12+ / FastAPI / Uvicorn | 单进程单体；路由薄、业务厚；同步阻塞业务跑在后台线程 |
-| 前端 | Vue 3 + Vite + Naive UI（+ Tiptap v3 块编辑器，R-150） | Hash 路由 SPA，桌面/移动响应式；dev(5173) 代理 8000，也可 build 后由 FastAPI 托管 |
-| 前端 v2（R-164） | React 19 + TS + Vite + Tailwind v4 + shadcn/ui + Framer Motion + TanStack Query | 全新设计并存项目：dev(3000) 代理 8000，build 后由 FastAPI 挂 **/v2**；登录态独立于老前端；API 类型由 `/openapi.json` 生成（`npm run gen:api`） |
+| 前端（当前，R-164） | React 19 + TS + Vite + Tailwind v4 + shadcn/ui + Framer Motion + TanStack Query | **默认前端**（R-168）：dev(3000) 代理 8000，build 后由 FastAPI 挂 **/v2**；登录态独立；API 类型由 `/openapi.json` 生成（`npm run gen:api`） |
+| ~~老前端（已废弃 R-168）~~ | Vue 3 + Vite + Naive UI | 只读保留，禁止修改；build 产物仍挂根路径兜底，后续下线另立需求 |
 | 数据库 | SQLite + SQLAlchemy 2.x（R-163 起 WAL + busy_timeout） | 单用户零运维；engine `check_same_thread=False, timeout=30` 支持多线程；WAL 支持并发读写 |
 | schema 演进 | 幂等轻量迁移（`db.py` 内函数） | 每次启动 `init_db()` 检查补列/建索引；**未用 Alembic**（tech-debt） |
 | 定时任务 | APScheduler BackgroundScheduler（进程内） | 每日流水线/平台同步两轮/指标留存/备份/清理/每周风格重建 |
@@ -70,7 +70,7 @@ echo/
 
 ## 4. 运行形态与定时任务（scheduler.py 为准）
 
-- Web：uvicorn :8000；dev 前端 vite :5173（/api 代理 8000）
+- Web：uvicorn :8000；dev 新前端 vite :3000（/api 代理 8000）；老前端 5173 已废弃
 - 启动时：`init_db()`（建表+迁移+索引）→ `setup_scheduler()` → `start_inbox_watcher()`（10s 轮询）
 
 | 定时 | 任务 | 行为 |

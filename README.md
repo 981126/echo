@@ -23,13 +23,16 @@
 cd backend
 .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# 3. 前端（端口 5173，dev 反向代理 8000）
-cd frontend
+# 3. 前端（frontend_v2，端口 3000，dev 反向代理 8000）
+cd frontend_v2
 npm install   # 首次
 npm run dev
 ```
-浏览器打开 http://localhost:5173 （访问令牌 = `.env` 的 `ECHO_ACCESS_TOKEN`）。
-也可以 `cd frontend && npm run build` 后由后端 FastAPI 直接托管构建产物（http://localhost:8000）。
+浏览器打开 http://localhost:3000 （访问令牌 = `.env` 的 `ECHO_ACCESS_TOKEN`）。
+也可以 `cd frontend_v2 && npm run build` 后由后端 FastAPI 托管到 http://localhost:8000/v2/。
+
+> ⚠️ 老前端 `frontend/`（Vue 3）**已废弃（R-168）**：只读保留、不再修改；
+> 其构建产物仍由后端挂根路径（http://localhost:8000）作历史兜底。
 
 ## 质量门禁
 ```bash

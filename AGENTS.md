@@ -22,7 +22,10 @@
 
 ## 技术栈速览（现状，均为真实接入）
 - 后端：Python FastAPI + APScheduler（单进程单体，轻量低内存）
-- 前端：Vue 3 + Vite + Naive UI SPA（响应式，桌面/手机浏览器均可用）
+- 前端（当前，R-164）：**React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion（`frontend_v2/`）**——
+  **默认前端**。「启动项目 / 修改项目」一律指它（dev 3000，生产挂 `/v2`）
+- ~~老前端：Vue 3 + Vite + Naive UI SPA~~ **已废弃（R-168）**：`frontend/` 只读保留（生产挂根路径兜底），
+  禁止改代码/加功能/修 bug；verify 保留其构建防腐直到后续决定下线（下线属新需求）
 - 数据库：SQLite + SQLAlchemy 2.x；运行时数据目录由 `.env` 的 `ECHO_DATA_DIR`/`ECHO_DB_PATH` 决定（当前 `echo_resource/`，**不是**仓库 `data/`）；schema 用幂等轻量迁移（Alembic 是 tech-debt，未落地）：**加表**靠 `create_all` 自动建、**加字段必须手写 `_migrate_*`**（`create_all` 不给已有表补列），启动时 `core/schema_guard` 会自检「模型声明 vs 实际库」并报警；迁移记在 `schema_migrations`，增量上线流程见 `docs/QUICKSTART.md` §8
 - 真实外部服务（2026-09-06 起全部 real，配置非法会启动报错，见 R-068）：
   - 平台数据：TikHub（抖音/B站/小红书，含主页/作品/统计/评论）
@@ -41,8 +44,8 @@ echo/
 ├── docs/               # 项目大脑：PRD/PRODUCT/ARCHITECTURE/DESIGN/WORKFLOW/DECISIONS/milestones/CHANGELOG/API/DATABASE/QUICKSTART/GLOSSARY/FAQ
 ├── requirements/       # 需求归档（事实源）：R-xxx.md + README 索引
 ├── backend/            # FastAPI：app/（api/services/models/core/schemas）tests/ scripts/
-├── frontend/           # Vue 3 老前端：src/（views/components/api/router）
-├── frontend_v2/        # R-164 全新前端（React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion），挂 /v2，与老前端并存
+├── frontend/           # ⚠️ 已废弃（R-168）：Vue 3 老前端，只读保留，禁止修改
+├── frontend_v2/        # 当前前端（R-164，React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion）：dev 3000 / 生产挂 /v2
 ├── scripts/            # 项目级脚本：verify.sh（质量门禁）/ backup.sh / update.sh / check_doc_consistency.py
 └── data/               # 仓库内遗留空目录（实际数据在 .env 指向的 echo_resource/）
 ```
@@ -89,6 +92,6 @@ echo/
   否则值会被整串解析 → 非法配置会**启动报错**（R-068 防静默回退 mock 写假数据）
 - **交付前 AI 自测（强制）**：任何功能开发/修复完成后必须自测通过才算完成——`scripts/verify.sh` 全绿
   + 相关后端接口冒烟（真实或 mock 均可，跑通关键链路）+ 前端关键交互点检，并说明自测结论
-- **改完必须保持服务运行（强制）**：每次改动/修复完成后，确保后端(8000)与前端(5173)处于运行状态且已加载最新代码；
+- **改完必须保持服务运行（强制）**：每次改动/修复完成后，确保后端(8000)与前端(frontend_v2，3000)处于运行状态且已加载最新代码；
   如被重启/中断需重新拉起并做 health 检查，再交付给作者验收
 - 文档与代码同步更新：改功能必须同步 PRD / ARCHITECTURE / DESIGN / CHANGELOG；改接口/表结构需同步更新 API.md / DATABASE.md（verify 会校验一致性）

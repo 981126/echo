@@ -99,8 +99,8 @@ AGENTS.md 入口 + docs 全套 + requirements 归档 + scripts/verify.sh 质量�
 
 ### 3.8 通知与体验（R-019/M6/M7 ✅）
 - 右上角通知中心：异步任务完成/失败 + 点击跳转；铃铛红点 + toast
-- 全站视觉（R-015 ✅）：Naive UI 纸感文艺设计系统；移动端底部导航；无原生控件残留
-- **全新前端 frontend_v2（R-164 ✅）**：React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion（Linear/Vercel 风、表现力动效、深/浅双主题），全功能 9 页从零重设计（素材库=卡片墙+右侧抽屉编辑），API 由 `/openapi.json` 生成类型化客户端；挂 `/v2` 与老前端并存（老前端根路径不动）
+- ~~全站视觉（R-015 ✅）：Naive UI 纸感文艺设计系统~~（**老前端已废弃 R-168**，只读保留不再修改）
+- **当前前端 frontend_v2（R-164 ✅，R-168 起为默认前端）**：React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion（Linear/Vercel 风、表现力动效、深/浅双主题），全功能 9 页从零重设计（素材库=卡片墙+右侧抽屉编辑），API 由 `/openapi.json` 生成类型化客户端；挂 `/v2` 与老前端并存（老前端根路径不动）
 
 ### 3.9 需求归档与工程
 - `requirements/` 事实源（R-xxx.md + README 索引）：需求登记由 AI 按流程写入文件（R-149 起网页入口已下线，状态写在文件头部的「状态」字段）
