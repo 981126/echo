@@ -1,7 +1,7 @@
 # 里程碑与进度
 
 > 状态图例：✅ 已完成 / 🔨 进行中 / 🔲 待排期
-> 最后更新：2026-09-19。需求原文与状态以 `requirements/R-xxx.md` + `requirements/README.md` 为准。
+> 最后更新：2026-09-28。需求原文与状态以 `requirements/R-xxx.md` + `requirements/README.md` 为准。
 
 ## 总览
 | 阶段 | 主题 | 状态 |
@@ -23,6 +23,8 @@
 | M137 | 需求管理页 UI 溢出修复（R-148） | ✅ |
 | M138 | 下线「需求管理」网页（R-149） | ✅ |
 | M139 | 口播脚本编辑区换 Tiptap v3 块编辑器（R-150） | ✅ |
+| M153 | 全新前端 frontend_v2 全功能 9 页重设计（React+shadcn/ui+Framer Motion，挂 /v2）（R-164） | ✅ |
+| M152 | 同步提速：任务进队列 + 消费者并行（博主级+素材级）+ TikHub 全局限速 10 req/s + SQLite WAL（R-163） | ✅ |
 | M151 | 「同步所有博主前15条」队列化：所有博主同时显示动画（R-162） | ✅ |
 | M150 | 博主管理多账号逐个同步动画丢失修复（R-161） | ✅ |
 | M149 | 当前主博主「同步对标博主前15条」一键同步（R-160） | ✅ |
@@ -46,6 +48,8 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
+| M153 / R-164 | 全新前端 `frontend_v2/`（React 19+TS+Tailwind v4+shadcn/ui+Framer Motion+TanStack Query+openapi-typescript 生成客户端+TipTap React）：底座（双主题令牌/收缩侧栏/通知中心/SSE）+ 全功能 9 页重设计（主页时间线+灵感池 / 素材库卡片墙+右侧抽屉编辑 / 脚本工作台四 tab+TipTap+讨论+正文对比+版本 / 博主管理 / 博主对标+洗稿对照 / 人设档案 / AI 设置模型+提示词 / AI 对话 SSE 流式）；挂 /v2 与老前端并存；登录态独立 | frontend_v2 自测 tsc/eslint/vitest 19 例全绿 + build（vendor 分包）；Playwright headless 9 页点检零 console 错误；verify.sh 全绿；服务运行（8000/5173/3000） | ✅ |
+| M152 / R-163 | 同步提速：①TikHub 限速改**全局令牌桶**（`ECHO_TIKHUB_RATE_LIMIT` 默认 10 req/s、`ECHO_TIKHUB_RATE_BURST`），保留按路由 429 退避兜底；②新增 `services/sync_pool.py`（`claim_task` 原子认领 pending 队列任务 + `gather` 线程池 + `session_factory`）；③博主级并行（`run_all_top15_sync` / `run_daily_sync_all`，并发 `ECHO_SYNC_CONCURRENCY` 默认 4，进度按完成数聚合，预算耗尽触发取消）；④素材级并行（`run_card_sync_queue`，独立小池 `ECHO_SYNC_MEDIA_CONCURRENCY` 默认 2，同合并作品主线程确定性去重）；⑤预算读写加进程内锁防超发 + SQLite 开 WAL/busy_timeout | verify 全绿（373 例，含 R-163 新用例；R-151/R-162/R-109 用例随行为更新）；接口冒烟 + 前端点检；服务保持运行 | ✅ |
 | M148 / R-159 | 草稿新增 `done`（完成）状态：四 tab「草稿/待制作/完成/废稿」；待制作卡【完成】【退回草稿】；完成卡【退回待制作】+【删除】；只改状态不动反馈；仅改 status 白名单与前端 | verify 全绿（366 例，含 2 新用例）；headless 点检四种流转（完成/退回待制作/退回草稿）计数正确 | ✅ |
 | M147 / R-158 | 草稿工作台：恢复「废稿」tab（只列 archived）；「不采用/移入废稿」进废稿并可「恢复为草稿」；「删除」二次确认后逻辑删除、任何 tab 不可见；深链切到对应 tab | verify 全绿（364 例）；headless 点检：三 tab、废稿卡「恢复为草稿\|删除」、删除弹确认且取消后稿子仍在（未真删真实草稿） | ✅ |
 | M146 / R-157 | 草稿版本完善：洗稿留「洗稿前 ASR」+「洗稿后」两版、讨论无版本先留当前正文、AI 生成/每日生成/回炉各留一版（金样本自测与回炉中间稿不留）；`POST /versions/{vid}/rollback`（纯覆盖保存，不留痕不改状态）；【版本】每条加【回滚/查看】并去掉两版对比；【原文对照】→【正文对比】（左右两个版本下拉框） | verify 全绿（364 例，含 5 新用例）；真实接口冒烟（两版→回滚→版本数不变、非法版本 404）；headless 点检（版本行按钮、查看弹窗、正文对比 2 下拉 + 2 栏 diff） | ✅ |

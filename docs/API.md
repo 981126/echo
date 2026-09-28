@@ -2,6 +2,7 @@
 
 > 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 129 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
+> 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
 ## videos
 

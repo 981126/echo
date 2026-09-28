@@ -96,6 +96,10 @@ app.mount("/media/videos", StaticFiles(directory=str(_settings.videos_dir)), nam
 app.mount("/uploads", StaticFiles(directory=str(_settings.uploads_dir)), name="uploads")
 
 # 托管前端构建产物（存在时挂载；/api 路由已先行注册，不受影响）
+# R-164：全新前端 frontend_v2（React）挂 /v2，与老前端并存互不影响
+_FRONTEND_V2_DIST = Path(__file__).resolve().parents[2] / "frontend_v2" / "dist"
+if _FRONTEND_V2_DIST.exists():
+    app.mount("/v2", StaticFiles(directory=str(_FRONTEND_V2_DIST), html=True), name="static_v2")
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if _FRONTEND_DIST.exists():
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="static")

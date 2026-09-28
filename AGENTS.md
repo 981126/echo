@@ -41,7 +41,8 @@ echo/
 ├── docs/               # 项目大脑：PRD/PRODUCT/ARCHITECTURE/DESIGN/WORKFLOW/DECISIONS/milestones/CHANGELOG/API/DATABASE/QUICKSTART/GLOSSARY/FAQ
 ├── requirements/       # 需求归档（事实源）：R-xxx.md + README 索引
 ├── backend/            # FastAPI：app/（api/services/models/core/schemas）tests/ scripts/
-├── frontend/           # Vue 3：src/（views/components/api/router）
+├── frontend/           # Vue 3 老前端：src/（views/components/api/router）
+├── frontend_v2/        # R-164 全新前端（React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion），挂 /v2，与老前端并存
 ├── scripts/            # 项目级脚本：verify.sh（质量门禁）/ backup.sh / update.sh / check_doc_consistency.py
 └── data/               # 仓库内遗留空目录（实际数据在 .env 指向的 echo_resource/）
 ```

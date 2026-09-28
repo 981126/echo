@@ -1,5 +1,61 @@
 # 变更记录
 
+## [M153 / R-164] 2026-09-28 — 全新前端 frontend_v2（全功能 9 页重设计，挂 /v2）
+
+> 作者：前端太丑，新建独立项目（老前端名+v2），零复用老代码、全新布局、审美与动效优先。
+> 确认：React + shadcn/ui + Framer Motion；Linear/Vercel 风；全功能新皮肤；挂 /v2 并存；
+> 先做视觉基准（登录+主页）确认风格再铺其余 7 页；vitest 组件测试。
+
+- **新目录 `frontend_v2/`**：React 19 + TS(strict) + Vite 7 · Tailwind v4（CSS 变量双主题令牌）·
+  shadcn/ui 风格基础组件（button/card/dialog/dropdown/tabs/tooltip/scroll-area/avatar/switch/progress/sonner 等）·
+  Framer Motion（页面转场/stagger/微交互）· TanStack Query · TipTap React 预留 · vitest + Testing Library。
+- **API 层**：`openapi-typescript` 从 `/openapi.json` 生成 `schema.d.ts`（`npm run gen:api`）+
+  `openapi-fetch` 客户端（X-Access-Token 中间件、401 清 token 跳登录、detail 错误归一）；
+  SSE 客户端（fetch 流 + 自动重连 + 事件总线）驱动 Query 失效刷新；登录态独立 key（`echo_v2_token`）。
+- **布局壳**：可收缩左侧导航（图标轨+active 指示动画）/ 顶栏（标题转场 + 搜索占位 + 通知中心 + 主题切换）/
+  移动端抽屉；通知中心（未读角标 + 面板 + 全部已读/清空）。
+- **全功能 9 页重设计**（功能对齐老前端，布局/交互全部重做）：
+  - **主页**：时间线横轴（封面 hover/今天刻度）+ 灵感池（来源 tab/换一批/抓取更新/生成文案→角度弹窗）。
+  - **素材库**：**卡片墙**（封面懒加载/hover 播放/角标/进度覆盖层动画/多选批量）+ **右侧抽屉编辑**
+    （标题/平台链接/封面/视频/关联脚本/元信息/标签/转写/文稿/评论 tab）；云端转本地抽屉；播放器弹窗；
+    全套筛选工具栏（持久化）+ 上传 + 自动合并/拆分 + SSE/轮询双通道卡片同步进度。
+  - **脚本工作台**：四 tab（草稿/待制作/完成/废稿）+ 打分/分节反馈 + **TipTap React** 块编辑器（Markdown
+    契约不变、粘贴/拖拽插图）+ 讨论（双模型留痕）/正文对比（两版 diff）/版本（回滚/查看）+ 体检/回炉/定稿。
+  - **博主管理**：博主/账号卡片（头像上传/启停/同步/作品弹窗/表单/解析链接）+ 运行中进度条（jobs 轮询+SSE）
+    + 预算调整 + 切换/对标确认流。
+  - **博主对标**：前2+最新卡片（互动分/文案/AI 分析/洗稿）+ 重新对标任务 + 洗稿原文对照弹窗。
+  - **人设档案**：初始化/增量校验面板 + 金句库 + 表达风格（禁用词/样本/范本）+ 建议确认流 + 档案多选删除。
+  - **AI 设置**：模型槽位（厂家/模型/Key）+ 生成方/评审方 + ASR + 每日篇数 + 推理预算网格 + 自检结果 +
+    各功能提示词（编辑/候选/评测/启用/历史/效果对比）。
+  - **AI 对话**：会话侧栏 + SSE 流式（步骤条+Markdown 渲染）+ 写操作确认/取消条。
+- **后端/门禁**：`main.py` 挂 `/v2` 静态目录；`verify.sh` 增 `frontend_v2`（eslint + vitest + tsc/vite build）。
+- **验证**：frontend_v2 自测 tsc/eslint/vitest 19 例全绿 + build 通过（vendor-react/motion/query/radix/tiptap 分包）；
+  Playwright headless 全页面点检（9 页渲染/登录/抽屉/编辑器/通知/主题切换，零 console 错误）；
+  `scripts/verify.sh` 全绿；服务保持运行（8000/5173/3000）。
+- **修复**：AppShell 页面级 `AnimatePresence mode=wait` 与 React 19 Outlet 组合导致页内 setState 时整页
+  误卸载重挂载（抽屉打不开）→ 改为仅入场动画的 key 化 motion.div；`asr.options`/`budgets` 按接口真实形态取值。
+
+## [M152 / R-163] 2026-09-28 — 同步提速：任务进队列 + 消费者并行 + TikHub 全局限速（10 req/s）
+
+> 作者：现在同步的速度太慢了，都是同步的操作，任务放到队列中，消费者应该并行，不过tikhup只支持10个请求/s。
+> 确认：限速=全局合计 10 req/s（保留按路由 429 退避兜底）；博主级+素材级都并行；并发可配默认 4；允许 SQLite WAL。
+
+- **R-163 限速器**：`platform/tikhub.py` 新增进程内**全局令牌桶** `_TokenBucket`（`_throttle_route` 先过桶），
+  速率/容量取 `ECHO_TIKHUB_RATE_LIMIT`（默认 10 req/s）/ `ECHO_TIKHUB_RATE_BURST`（默认 10）；
+  移除默认「按路由 1.2s 串行」，改为**按路由 429 退避兜底**（`_penalize_route`）；保留 R-151 有界重试与退避。
+- **R-163 消费者池**：新增 `services/sync_pool.py`——`claim_task`（`UPDATE … WHERE status='pending'` 原子认领）、
+  `gather`（线程池并发 + 单任务异常收集 + 完成回调）、`pool_size`、`session_factory`（按 bind 派生线程安全会话）。
+- **R-163 博主级并行**：`run_all_top15_sync`（sync-all）与 `run_daily_sync_all`（每日 06:00/17:00）由逐个串行改为
+  线程池并发（`ECHO_SYNC_CONCURRENCY` 默认 4）；每个博主独立 Session、复用预置 SyncJob；进度按完成数聚合；
+  `BudgetExceeded` 触发取消标记，未开始者置 failed。
+- **R-163 素材级并行**：`run_card_sync_queue` 改为并发消费（`ECHO_SYNC_MEDIA_CONCURRENCY` 默认 2，独立小池）；
+  同一合并作品去重改为主线程按平台优先级**确定性预标记**（防并发重复下载）；评论/灵感池计数即使媒体步骤失败也如实汇总。
+- **R-163 稳定性**：`platform/budget.py` `_charge`/`ensure_budget` 加进程内 `RLock`，并行下不超发；
+  `db.py` 连接时开 `journal_mode=WAL` + `busy_timeout=30000` + `synchronous=NORMAL`。
+- **验证**：新增 `tests/test_r163_sync_pool.py`（令牌桶速率/突发、claim 原子性、gather 并发与异常收集、预算并发不超发）；
+  更新 `tests/test_r151_tikhub_retry.py`（重置限速器 + 429 退避）、`tests/test_r162_sync_all_queue.py`、
+  `tests/test_r109_daily_sync.py`（并发后改为顺序无关断言）；`scripts/verify.sh` 全绿 + 接口冒烟 + 前端点检；服务保持运行。
+
 ## [M151 / R-162] 2026-09-19 — 博主管理：【同步对标博主前15条】改为【同步所有博主前15条】（队列化、所有博主同时显示动画）
 
 > 作者：同步对标博主前15条，改为同步所有博主账号前15条，点击后将所有博主的任务提交到队列中，

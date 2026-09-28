@@ -58,6 +58,21 @@ else
   echo "==> [frontend] 暂无代码"
 fi
 
+# 4b) 新前端（R-164，React）
+if [ -f frontend_v2/package.json ]; then
+  if [ -d frontend_v2/node_modules ]; then
+    echo "==> [frontend_v2] lint"
+    (cd frontend_v2 && npm run lint) || FAIL=1
+    echo "==> [frontend_v2] vitest"
+    (cd frontend_v2 && npx vitest run) || FAIL=1
+    echo "==> [frontend_v2] build (tsc + vite)"
+    (cd frontend_v2 && npm run build) || FAIL=1
+  else
+    echo "==> [frontend_v2] 依赖未安装，跳过（npm install 后启用）"
+    FAIL=1
+  fi
+fi
+
 # 5) 文档完整性 + 与代码一致性（自描述体系必须存在）
 if $PY -c "import sqlalchemy, fastapi" 2>/dev/null; then
   echo "==> [docs] 表数量/路由与代码一致性"
