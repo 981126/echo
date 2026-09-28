@@ -47,6 +47,15 @@ export const softIn: Transition = { duration: 0.24, ease: EASE_OUT_EXPO }
 export const listReplace = {
   /** 旧卡退场：= 换批前的原样（0.35s 淡出 + 缩到 0.94 + index×0.035 错峰扫过） */
   exit: { duration: 0.35, stagger: 0.035, maxItems: 16, scale: 0.94 },
-  /** 新卡入场：延迟 = 本格旧卡的退场延迟 + 退场时长 + 这个呼吸量 */
-  enter: { breathAfterExit: 0.06, duration: 0.35 }
+  /**
+   * 新卡入场 = 退场倒放（显影 + 长大），但要**放大到看得见**：
+   * `fromScale 0.78`（退场只收到 0.94，6% 的放大人眼几乎看不出来）+ 轻微回弹的 spring
+   * （冲过 1 再落回，给一个明确的「弹进来」信号）。
+   * 延迟 = 本格旧卡的退场延迟 + 退场时长 + `breathAfterExit`。
+   */
+  enter: {
+    breathAfterExit: 0.06,
+    fromScale: 0.78,
+    spring: { type: 'spring', stiffness: 320, damping: 18, mass: 0.9 }
+  }
 } as const

@@ -87,5 +87,44 @@ M188
 | t≈853ms | — | 前 4 格落定 `op 1.00 / scale 1.000` |
 | 全程 | 可见卡片数最低 9，无 console 错误 | — |
 
+## 真凶（作者第四轮反馈「入场动画一点都不明显」后定位，2026-09-28）
+
+### 原文（作者原话，未改动）
+> 入场动画一点都不明显
+
+### 根因（决定性）
+`AnimatePresence mode="popLayout"` 是靠**给每个子元素挂 ref、量出它的盒子**，再用
+`[data-motion-pop-id] { position: absolute !important; … }` 把「正在退场的子元素」弹出文档流的
+（`framer-motion/dist/es/components/AnimatePresence/PopChild.mjs`）。
+而 `MaterialCard` 是 `memo(function MaterialCard(props){…})` —— **没有 forwardRef**，framer 传进来的 ref 挂不到根节点 →
+`size.width/height` 量到 0 → 那条 `position: absolute` 规则根本不生成。
+
+后果（无头实测 `grid.children` 的 `position/top/opacity`）：
+| | 修前 | 修后 |
+|---|---|---|
+| 退场卡 | `flow@274`（**留在文档流里**，占着前 5 行） | `ABS@274`（被弹出流，不占位） |
+| 网格高度 | 20 张时 2367 → 过渡中 **4565**（翻倍、页面跳动） | 2367 → 2196（**稳定不跳**） |
+| 新卡位置 | `flow@297…` 其实在第 6–10 行（**屏幕外**，y≈2100+） | `flow@297`（第 1 行、**可视区内**） |
+| 新卡入场 | 在屏幕外播完 → 动画结束才「啪」地出现在可视区 | 在可视区内播（op 0.9 / scale 0.95 → 1.03 回弹） |
+
+⇒ 从 R-179 起，**所有「换批」的入场动画都在屏幕外播**，所以作者三次反馈「没有动画 / 不明显」——
+不是动画参数的问题，是动画根本不在视野里。
+
+### 修正
+- `MaterialCard` 改 `forwardRef<HTMLDivElement, MaterialCardProps>`，把 ref 透传到根 `motion.div`；
+  仍用 `memo(forwardRef(...))` 保留 R-179 的渲染性能优化。
+- 回归单测：给 `MaterialCard` 传 ref，断言 `ref.current` 是 HTMLElement（去掉 forwardRef 即失败）。
+- 同时保留第四轮的手感调整：`fromScale 0.78` + spring 回弹（冲过 1 到 ~1.03 再落回）—— 现在它在可视区里播，能看清了。
+
+### 修后实测（真实数据，console 错误 0）
+| 时刻 | 退场卡 | 新卡（可视区 y≈297 起） |
+|---|---|---|
+| t≈137ms | `ABS@270 op0.3 / ABS@265 op0.6`（弹出流 + 淡出缩小） | `flow@297 op0.0 / sc0.78`（就位等交接） |
+| t≈486ms | 全部 `ABS` 且 `op0.0`（清场完成，屏内可见 0 张 = 那一下「清掉」） | `op0.0 / sc0.78` |
+| t≈603ms | 同上（不占位、不推挤新卡） | `flow@271 op0.9 sc0.95 / flow@282 op0.6 sc0.88 / flow@293 op0.3 sc0.81`（**屏内长大**） |
+| t≈720ms | 同上 | `op1.0 sc1.03`（**回弹峰值，看得见**） |
+| t≈953ms | — | `op1.0 sc1.00` 落定；t≈1070ms 退场节点移除 |
+
+
 
 

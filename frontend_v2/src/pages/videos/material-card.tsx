@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { forwardRef, memo } from 'react'
 import { motion } from 'framer-motion'
 import { Play, RefreshCw, CheckCheck, Trash2, Split, Layers, BadgeCheck, LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -18,23 +18,7 @@ const PLATFORM_DOT: Record<string, string> = {
   bilibili: 'bg-[#00a1d6]'
 }
 
-export const MaterialCard = memo(function MaterialCard({
-  item,
-  index,
-  selectMode,
-  selected,
-  task,
-  busy,
-  onOpen,
-  onToggle,
-  onPlay,
-  onSync,
-  onConfirmTags,
-  onDelete,
-  onSplit,
-  append,
-  replace
-}: {
+interface MaterialCardProps {
   item: CardItem
   index: number
   /** R-179：来自后续批次的卡片（滚到底加载的）——用轻淡入，不做列表 stagger、不跳版 */
@@ -52,7 +36,37 @@ export const MaterialCard = memo(function MaterialCard({
   onConfirmTags: (it: CardItem) => void
   onDelete: (it: CardItem) => void
   onSplit: (it: CardItem) => void
-}) {
+}
+
+/**
+ * R-199 关键修复：**必须把 ref 透传到根 `motion.div`**。
+ *
+ * `AnimatePresence mode="popLayout"` 是靠给每个子元素挂 ref、量出它的盒子再把「正在退场的子元素」
+ * 用 `position: absolute !important` 弹出文档流的（见 framer-motion `PopChild`）。原来这里是
+ * `memo(function …)` 且没有 forwardRef → framer 量不到元素（宽度/高度为 0）→ **退场卡一直留在流里**，
+ * 结果换批时那 20 张正在退场的卡仍占着前 5 行，新卡被挤到第 6–10 行（**屏幕外**）去播入场动画，
+ * 等退场卡终于被移除，新卡「啪」地弹回可视区 —— 这就是「结果卡没有动画 / 入场一点都不明显」的真凶。
+ */
+const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function MaterialCard(
+  {
+    item,
+    index,
+    selectMode,
+    selected,
+    task,
+    busy,
+    onOpen,
+    onToggle,
+    onPlay,
+    onSync,
+    onConfirmTags,
+    onDelete,
+    onSplit,
+    append,
+    replace
+  },
+  ref
+) {
   const stats = item.cloudPosts.map((p) => p.latest_stat).filter(Boolean)
   const likes = stats.reduce((m, s) => Math.max(m, Number(s?.likes || 0)), 0)
   const syncing = !!task && task.progress < 100
@@ -62,7 +76,8 @@ export const MaterialCard = memo(function MaterialCard({
   // R-199：换一批结果时**逐格交接**——新卡的入场延迟 = 本格旧卡的退场延迟 + 退场时长 + 呼吸量；
   //        退场（老动画）严格保持原样：0.35s 淡出 + 缩到 0.94 + index×0.035 错峰扫过，
   //        append 卡沿用 softIn、40 张之后的卡沿用 0.15s。
-  //        **新卡进场 = 退场倒着播**：从 `opacity 0 / scale 0.94` 淡入 + 长大回 1，节奏与退场一致。
+  //        **新卡进场 = 退场倒着播（幅度拉大 + 回弹）**：从 `opacity 0 / fromScale 0.78` 显影长大回 1，
+  //        节奏沿用退场的错峰，但用 spring 冲过 1 再落回来，保证肉眼看得见。
   const animateEnter = !append && index < 40
   const replacing = !!replace && animateEnter
   const exitDelay = Math.min(index, listReplace.exit.maxItems) * listReplace.exit.stagger
@@ -73,18 +88,19 @@ export const MaterialCard = memo(function MaterialCard({
     : animateEnter
       ? { duration: listReplace.exit.duration, delay: exitDelay, ease: EASE_OUT_EXPO }
       : { duration: 0.15 }
-  // 入场：换批时按「退场倒放」的节奏来，其余情况与原来完全一致
+  // 入场：换批时按「退场倒放 + 回弹」来，其余情况与原来完全一致
   const enterTransition = replacing
-    ? { duration: listReplace.enter.duration, delay: enterDelay, ease: EASE_OUT_EXPO }
+    ? { ...listReplace.enter.spring, delay: enterDelay }
     : baseTransition
 
   return (
     <motion.div
+      ref={ref}
       initial={
         append
           ? { opacity: 0.85, y: 8 }
           : replacing
-            ? { opacity: 0, scale: listReplace.exit.scale } // 退场的镜像：小一点、透明 → 长大、显影
+            ? { opacity: 0, scale: listReplace.enter.fromScale } // 退场的反向：更小、透明 → 长大、显影
             : animateEnter
               ? { opacity: 0, y: 18, scale: 0.97 }
               : false
@@ -245,3 +261,6 @@ export const MaterialCard = memo(function MaterialCard({
     </motion.div>
   )
 })
+
+/** popLayout 需要子元素可被 ref 量测（见上方说明），这里用 memo 包住 forwardRef 的结果 */
+export const MaterialCard = memo(MaterialCardBase)
