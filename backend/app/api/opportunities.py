@@ -1,0 +1,29 @@
+"""内容机会引擎接口（R-185）：观众提问榜 / 每周灵感包 / 选题账本。"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from ..db import get_db
+from ..services import opportunity
+
+router = APIRouter()
+
+
+@router.get("/comments", response_model=dict)
+def comment_clusters(limit: int = 15, db: Session = Depends(get_db)):
+    """观众提问榜：未使用评论按近义聚类，按需求分排序。"""
+    return opportunity.comment_clusters(db, limit=max(1, min(limit, 50)))
+
+
+@router.get("/weekly", response_model=dict)
+def weekly_pack(limit: int = 20, db: Session = Depends(get_db)):
+    """每周灵感补给包：需求 × 人设 × 热度 × 缺口 综合打分，去重去已讲。"""
+    return opportunity.weekly_pack(db, limit=max(1, min(limit, 40)))
+
+
+@router.get("/ledger", response_model=dict)
+def topic_ledger(limit: int = 50, db: Session = Depends(get_db)):
+    """选题账本：已讲过的话题与「可能已讲」的池中灵感。"""
+    return opportunity.ledger(db, limit=max(1, min(limit, 200)))

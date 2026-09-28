@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 132 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 135 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -1598,10 +1598,47 @@ Library Cards
 **返回 200**：application/json → object
 `{total, filtered_total, facets:{tags}, items:[卡片], next_cursor, has_more}`
 
+## opportunities
+
+### GET /api/opportunities/comments
+
+Comment Clusters
+
+R-185：观众提问榜——未使用评论按近义聚类，按需求分排序。
+
+**参数**
+
+- `limit`（query）integer，默认 15
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/opportunities/weekly
+
+Weekly Pack
+
+R-185：每周灵感补给包——需求 × 人设 × 热度 × 缺口 综合打分，去重并剔除已讲过的话题。
+
+**参数**
+
+- `limit`（query）integer，默认 20
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/opportunities/ledger
+
+Topic Ledger
+
+R-185：选题账本——已讲过的话题 + 池中被判为「可能已讲」的灵感。
+
+**参数**
+
+- `limit`（query）integer，默认 50
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
 ## 其他
 
 ### GET /health
-
 Health
 
 **返回 200**：application/json → object

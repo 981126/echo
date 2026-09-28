@@ -38,6 +38,23 @@ interface Angle {
   hook?: string
   reason?: string
 }
+interface PackItem {
+  title: string
+  slot: string
+  score: number
+  reason: string
+  demand?: number
+  duplicate?: boolean
+  samples?: string[]
+}
+interface Cluster {
+  title: string
+  count: number
+  likes: number
+  matched: boolean
+  score: number
+  samples: string[]
+}
 
 // R-183 创作模式（空 = 自动，由人设+样本决定）
 const GEN_MODES = [
@@ -56,6 +73,10 @@ export default function HomePage() {
   const [angleOpen, setAngleOpen] = useState(false)
   const [angles, setAngles] = useState<Angle[]>([])
   const [mode, setMode] = useState('')
+  const [pack, setPack] = useState<PackItem[]>([])
+  const [packLoading, setPackLoading] = useState(false)
+  const [clusters, setClusters] = useState<Cluster[]>([])
+  const [clustersLoading, setClustersLoading] = useState(false)
   const [pendingTopic, setPendingTopic] = useState('')
   const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
@@ -142,6 +163,30 @@ export default function HomePage() {
       toast.error((e as Error).message)
     } finally {
       setAngleLoading(false)
+    }
+  }
+
+  async function loadPack() {
+    setPackLoading(true)
+    try {
+      const r = await apiJson<{ items: PackItem[] }>('/api/opportunities/weekly?limit=20')
+      setPack(r.items || [])
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setPackLoading(false)
+    }
+  }
+
+  async function loadClusters() {
+    setClustersLoading(true)
+    try {
+      const r = await apiJson<{ clusters: Cluster[] }>('/api/opportunities/comments?limit=15')
+      setClusters(r.clusters || [])
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setClustersLoading(false)
     }
   }
 
@@ -299,6 +344,66 @@ export default function HomePage() {
                   </motion.li>
                 ))}
               </motion.ul>
+            )}
+          </CardContent>
+        </Card>
+      </motion.section>
+
+      {/* 内容机会（R-185）：观众提问榜 + 每周灵感包 */}
+      <motion.section variants={itemVariants}>
+        <Card>
+          <CardHeader className="flex-row flex-wrap items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-accent" />
+            <CardTitle>内容机会</CardTitle>
+            <CardDescription>评论聚类「观众提问」+ 每周灵感包（自动去掉已讲过的话题）</CardDescription>
+            <span className="flex-1" />
+            <Button variant="outline" size="sm" onClick={loadClusters} disabled={clustersLoading}>
+              {clustersLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
+              观众提问榜
+            </Button>
+            <Button size="sm" onClick={loadPack} disabled={packLoading}>
+              {packLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              生成本周灵感包
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!!clusters.length && (
+              <div>
+                <span className="mb-1.5 block text-xs font-medium text-muted-foreground">观众提问榜（同一问题被问越多次越靠前）</span>
+                <ul className="space-y-1.5">
+                  {clusters.map((c, i) => (
+                    <li key={i} className="flex items-start gap-2 rounded-lg border border-border px-3 py-2">
+                      <span className="tnum mt-0.5 shrink-0 rounded bg-muted px-1.5 text-xs font-semibold">{c.count}人问</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px]">{c.title}</span>
+                        {!!c.samples?.length && <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">来自：{c.samples.join(' / ')}</span>}
+                      </span>
+                      {c.matched && <Badge variant="secondary" className="shrink-0">贴合人设</Badge>}
+                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(c.title)} disabled={generating !== null}>生成</Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!!pack.length && (
+              <div>
+                <span className="mb-1.5 block text-xs font-medium text-muted-foreground">本周灵感包（需求 × 人设 × 热度 × 缺口）</span>
+                <ul className="space-y-1.5">
+                  {pack.map((p, i) => (
+                    <li key={i} className="flex items-start gap-2 rounded-lg border border-border px-3 py-2">
+                      <span className="tnum mt-0.5 shrink-0 text-xs text-muted-foreground">#{i + 1}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px]">{p.title}</span>
+                        <span className="mt-0.5 block text-[11px] text-muted-foreground">{p.reason} · 分 {p.score}</span>
+                      </span>
+                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title)} disabled={generating !== null}>生成</Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!clusters.length && !pack.length && (
+              <p className="py-3 text-center text-sm text-muted-foreground">点上方按钮：看观众反复问什么，或生成一份本周选题灵感包</p>
             )}
           </CardContent>
         </Card>
