@@ -31,10 +31,14 @@ def client():
 
 @pytest.fixture()
 def no_sleep(monkeypatch):
-    """记录退避秒数（不真等），并关掉路由排队，保证用例毫秒级跑完。"""
+    """记录退避秒数（不真等），并关掉路由排队，保证用例毫秒级跑完。
+
+    R-163：全局令牌桶为进程级单例，用例间会累计消耗；每个用例开始重置，避免相互干扰。
+    """
     slept: list[float] = []
     monkeypatch.setattr(tikhub.time, "sleep", lambda s: slept.append(s))
     monkeypatch.setattr(tikhub, "_ROUTE_MIN_INTERVAL", 0.0)
+    tikhub._reset_limiter()
     monkeypatch.setattr(tikhub, "_ROUTE_LAST", {})
     return slept
 
@@ -79,7 +83,8 @@ def test_http_429_is_retried_then_succeeds(client, no_sleep, monkeypatch):
     )
     assert client._get("/douyin/app/v3/fetch_video_comments")["code"] == 200
     assert len(calls) == 2
-    assert no_sleep == [1.5]
+    # R-163：429 除退避重试外，还会抬高该路由下次允许时间（按路由兜底），故总 sleep 不止一次
+    assert no_sleep[0] == 1.5
 
 
 def test_permanent_4xx_is_not_retried(client, no_sleep, monkeypatch):

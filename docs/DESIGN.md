@@ -154,9 +154,9 @@
 - mode=mock：确定性种子假数据（离线验收）；mode=real：真实 REST（douyin app v3 / xhs app v2 / bilibili web）。
 - 预算：每次真实/模拟请求后 `_charge(db)` 计数（Kv `tikhub_budget_used:<date>`），超 `tikhub_daily_budget`（默认 2000，可页面调）抛 `BudgetExceeded` → 停止本轮并通知。
 - 列表自带 stats 则不额外请求；B站列表无赞藏评 → `_backfill_bili_stats` 每轮最多 150 条单条详情补全。
-- **限速与重试（R-151）**：TikHub 限「单路由 1 请求/秒」（429 原文实测），而 daily 同步是多账号并行 + 逐条素材再打评论接口，必然超限；被限流时服务端有时回 429、有时**直接掐断 TLS 隧道**（本机 httpx 默认读 macOS 系统代理 `127.0.0.1:7890`，故报 `[SSL: UNEXPECTED_EOF_WHILE_READING]`）。`TikHubClient._get()` 因此：
-  - `_throttle_route(path)`：进程内按 **API path** 排队（最小间隔 `_ROUTE_MIN_INTERVAL=1.2s`，`threading.Lock` 预留时间片、锁外 sleep），不同路由互不阻塞；
-  - 有界重试 4 次尝试、退避 `1.5s → 4.0s → 8.0s`，仅对 `httpx.TransportError`（SSL EOF/连接重置/超时）与 HTTP `429/500/502/503/504` 生效；**4xx 永久错误立即抛**；
+- **限速与重试（R-151 → R-163）**：R-151 曾按「单路由 1 请求/秒」串行排队；R-163 依 TikHub 套餐口径改为**全局合计 ≤ 10 请求/秒**——`_throttle_route(path)` 先过**进程内全局令牌桶**（`_TokenBucket`，速率 `ECHO_TIKHUB_RATE_LIMIT` 默认 10、容量 `ECHO_TIKHUB_RATE_BURST` 默认 10；锁内预留令牌、锁外 sleep），所有接口共享，是并行消费的前提；并保留：
+  - **按路由 429 退避兜底**：某 path 收到 429 时 `_penalize_route` 临时抬高该路由下次允许时间（`_ROUTE_BACKOFF_SECONDS=2s`），避免持续撞限流；`_ROUTE_MIN_INTERVAL` 默认 0（可配，用于需要时恢复按路由排队）。
+  - 有界重试 4 次尝试、退避 `1.5s → 4.0s → 8.0s`，仅对 `httpx.TransportError`（SSL EOF/连接重置/超时）与 HTTP `429/500/502/503/504` 生效；**4xx 永久错误立即抛**；被限流时服务端有时直接掐断 TLS 隧道（本机 httpx 读 macOS 系统代理 `127.0.0.1:7890`）。
   - 重试 `warning` / 最终失败 `error` 写日志（R-133 logger），错误消息保持 `TikHub 请求失败:` 前缀并追加「（已重试 N 次）」。
 
 ### 幂等与去重
@@ -167,9 +167,10 @@
 
 ### 编排（run_sync）
 - 入口：手动（博主页 全量/前15条/对标单账号「同步」/单账号/当前主博主「同步所有博主前15条」）、定时（06:00/17:00 两轮 `run_daily_sync_all`：主博主+全部对标统一 daily 带视频下载转写，R-109）、单条（posts/videos/works 同步）。
-- R-162（替换 R-160）：`enqueue_all_top15_sync(owner)` 为「当前主博主 + 全部对标」各写一条 `platform_sync` 队列任务（pending）并**预置一条 running 的 SyncJob**（progress_note=「排队中…」，前端所有卡片立即显示动画）；已在排队/执行的博主与无启用账号者跳过。`all_top15_worker` → `run_all_top15_sync(owner, entries)` **一个消费者逐个消费**，每个复用预置 job 调 `run_sync(scope=daily, creator_id=…, with_media=True, job=…)`（`run_sync` 新增 `job` 参数，缺省行为不变）；单个失败不阻断其余，`BudgetExceeded` 停止；完成后 `maybe_start_benchmark_rerun(refetch=False)`。接口 `POST /api/platform/sync-all`（无主博主/无可同步博主 400，同批任务在跑 409）。
+- R-162（替换 R-160）：`enqueue_all_top15_sync(owner)` 为「当前主博主 + 全部对标」各写一条 `platform_sync` 队列任务（pending）并**预置一条 running 的 SyncJob**（progress_note=「排队中…」，前端所有卡片立即显示动画）；已在排队/执行的博主与无启用账号者跳过。接口 `POST /api/platform/sync-all`（无主博主/无可同步博主 400，同批任务在跑 409）。
+- **R-163 并发消费**：`all_top15_worker` → `run_all_top15_sync(owner, entries)` 用 `sync_pool.gather` **线程池并行**消费博主（替代 R-162 的逐个串行）——每个博主一个新 Session、`sync_pool.claim_task` 原子认领其 pending 队列任务（`UPDATE … WHERE status='pending'`），复用预置 job 调 `run_sync(scope=daily, creator_id=…, with_media=True, job=…)`；单个失败不阻断其余，任一 `BudgetExceeded` 触发取消标记、未开始者置 failed；完成后 `maybe_start_benchmark_rerun(refetch=False)`。定时 `run_daily_sync_all` 同样并行（主博主沿用 `creator_id=None`，对标显式 id）。
 - `scope=daily`：每平台 top15（R-085/R-086 最终 15）；`weekly`：对标每账号 top3；`initial`：`count<=0 → _real_posts_all` 翻页全量。daily 且 with_media=True 时同步后对前 N 条跑媒体补齐（下载视频+自动转写）。
-- 并发：`ThreadPoolExecutor(max_workers=3)` 每账号独立 SQLAlchemy session（account 级隔离，单平台失败不拖垮其它）。
+- 并发：账号级 `ThreadPoolExecutor(max_workers=3)` 每账号独立 SQLAlchemy session；**R-163** 博主级 `ECHO_SYNC_CONCURRENCY`（默认 4）、素材级 `ECHO_SYNC_MEDIA_CONCURRENCY`（默认 2，独立小池），`services/sync_pool.py` 提供 `claim_task`/`gather`/`pool_size`/`session_factory`。素材队列 `run_card_sync_queue` 亦并行：每条独立 Session；同一合并作品去重改由主线程按平台优先级**确定性预标记**（避免并发重复下载）；单条失败/预算耗尽只影响自身与未开始条目；评论/灵感池计数即使媒体步骤失败也如实汇总。
 - 结束：`auto_merge_creator` 合并同标题跨平台帖 → `works`；写 SyncJob stats/message + 账号 sync_status；通知中心收到完成。
 - 本地素材卡片同步 `sync_local_video_metrics`：遍历 `_bound_platform_posts`（local_video_id + work_id + platform_post_id 三路去重）拉各平台指标 + 评论 Top50，并写 `metrics_snapshots`（当天多平台聚合）；单平台失败不中断，全部失败才报错。
 - 云端合并卡同步 `sync_work_posts`（R-067 新增）：遍历 work 下全部平台帖（原只同步 cloudPosts[0]）。

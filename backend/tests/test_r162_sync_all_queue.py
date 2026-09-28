@@ -92,7 +92,8 @@ def test_consumer_reuses_precreated_jobs_and_reruns(db, monkeypatch):
     calls: list[dict] = []
 
     def fake_run_sync(_db, **kw):
-        calls.append(kw)
+        # R-163：并发消费者用完即关会话，job 会 detached；在调用点取 id，避免事后访问
+        calls.append({"creator_id": kw["creator_id"], "scope": kw["scope"], "with_media": kw["with_media"], "job_id": kw["job"].id})
         return {"job_id": kw["job"].id, "message": "ok", "accounts": [], "posts": 1, "comments": 0}
 
     monkeypatch.setattr("app.services.platform_sync.run_sync", fake_run_sync)
@@ -104,9 +105,11 @@ def test_consumer_reuses_precreated_jobs_and_reruns(db, monkeypatch):
 
     res = run_all_top15_sync(db, owner, enq["entries"])
 
-    assert [c["creator_id"] for c in calls] == [owner.id, bm1.id, bm2.id]  # 逐个串行消费
+    # R-163：改为并发消费，完成顺序不保证；断言集合/次数
+    assert sorted(c["creator_id"] for c in calls) == sorted([owner.id, bm1.id, bm2.id])
+    assert len(calls) == 3
     assert all(c["scope"] == "daily" and c["with_media"] is True for c in calls)
-    assert [c["job"].id for c in calls] == job_ids  # 复用预置 SyncJob
+    assert sorted(c["job_id"] for c in calls) == sorted(job_ids)  # 复用预置 SyncJob
     assert started == [False]  # 完成后自动重新对标（不重捞）
     assert res["creators"] == 3 and res["synced"] == 3 and res["failed"] == []
     assert "已自动触发" in res["message"]

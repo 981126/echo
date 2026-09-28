@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     tikhub_mode: str = "mock"  # mock | real（real 需 .env 配 ECHO_TIKHUB_API_KEY）
     tikhub_daily_budget: int = 2000  # 每日请求预算上限（页面可覆盖，存 Kv）
     platform_sync_times: str = "06:00,17:00"  # R-109：每日两轮（主博主+对标统一），逗号分隔，北京时区
+    # R-163 同步并发：全局 TikHub 令牌桶（所有接口合计 ≤ rate req/s）+ 消费者池大小
+    tikhub_rate_limit: float = 10.0  # 全局请求速率上限（req/s），ECHO_TIKHUB_RATE_LIMIT
+    tikhub_rate_burst: int = 10  # 令牌桶容量（允许的瞬时突发），ECHO_TIKHUB_RATE_BURST
+    sync_concurrency: int = 4  # 博主级并发消费者数，ECHO_SYNC_CONCURRENCY
+    sync_media_concurrency: int = 2  # 素材级并发消费者数（下载/转写较重，独立小池），ECHO_SYNC_MEDIA_CONCURRENCY
 
     # 路径：未显式配置时由 data_dir 统一派生（env 可用 ECHO_DB_PATH / ECHO_*_DIR 覆盖）
     _UNSET = Path("@unset@")

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import get_settings
@@ -23,10 +23,23 @@ def _make_engine():
     settings = get_settings()
     path: Path = settings.db_path
     path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(
+    eng = create_engine(
         f"sqlite:///{path}",
         connect_args={"check_same_thread": False, "timeout": 30},  # 多线程同步时避免 database is locked
     )
+
+    @event.listens_for(eng, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
+        """R-163：并行消费者并发读写 —— 开 WAL（读写不互斥）+ busy_timeout + synchronous=NORMAL。"""
+        cur = dbapi_conn.cursor()
+        try:
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=30000")
+            cur.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cur.close()
+
+    return eng
 
 
 engine = _make_engine()

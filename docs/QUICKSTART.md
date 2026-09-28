@@ -62,6 +62,10 @@ PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh
 - 库结构版本：`schema_migrations` 表记录已应用的迁移（`baseline_pre_r144` 为 R-144 前的基线）；
   启动日志会打印「结构自检通过：N 张表；库结构版本=…」
 - 重大变更先 `scripts/backup.sh`
+- **并发同步（R-163）**：TikHub 全局限速 `ECHO_TIKHUB_RATE_LIMIT`（默认 10 req/s）；消费者数
+  `ECHO_SYNC_CONCURRENCY`（博主级，默认 4）/ `ECHO_SYNC_MEDIA_CONCURRENCY`（素材级，默认 2）。改后重启生效。
+- SQLite 已开 **WAL**（`echo.db` 旁会出现 `-wal`/`-shm`，属正常；备份用官方 backup API，自动含 WAL 内容；
+  请勿只 `cp echo.db` 热拷）
 - 定时任务在进程内（APScheduler）；改时间在 `.env`（如 `ECHO_PLATFORM_SYNC_TIMES=06:00,17:00`，主博主+对标统一每日两轮，R-109）
 - 接口/表结构文档为人工维护；`scripts/check_doc_consistency.py` 会校验表数量/路由与代码一致（verify.sh 已接入）
 

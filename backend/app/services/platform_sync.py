@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from ..core.timeutil import now as _app_now
 
 from sqlalchemy import text
@@ -1021,67 +1022,113 @@ def enqueue_all_top15_sync(db: Session, owner: Creator) -> dict:
     return {"entries": entries, "skipped": skipped, "total": len(creators)}
 
 
-def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=None) -> dict:
-    """R-162：后台消费者——按队列顺序逐个同步 entries 里的博主（daily 同口径：评论+缺视频下载+缺转写）。
+def _fail_creator_task(db: Session, task_id: int, error: str) -> None:
+    """把某个博主队列任务置 failed 并广播（R-163）。"""
+    try:
+        row = db.get(BackgroundTask, task_id)
+        if row is not None and row.status in ("pending", "running"):
+            row.status = "failed"
+            row.progress = row.progress or 0
+            row.error = error[:500]
+            row.note = error[:255]
+            db.commit()
+            publish(
+                "task.update",
+                {"id": task_id, "status": "failed", "progress": row.progress, "note": row.note, "error": row.error[:500]},
+            )
+    except Exception:  # noqa: BLE001 失败标记不影响其它博主
+        db.rollback()
 
-    - 每个博主复用 `enqueue_all_top15_sync` 预置的 SyncJob（前端排队/进行中动画连续）；
-    - 单个博主失败不阻断其余；`BudgetExceeded` 耗尽后停止后续；
+
+def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=None) -> dict:
+    """R-163：并发消费者——线程池并行同步 entries 里的博主（daily 同口径：评论+缺视频下载+缺转写）。
+
+    - 每个博主一个消费者（独立 Session），`claim_task` 原子认领其 pending 队列任务；
+    - 每个博主复用 `enqueue_all_top15_sync` 预置的 SyncJob（前端动画连续）；
+    - 单个博主失败不阻断其余；任一博主 `BudgetExceeded` 触发取消标记，未开始的博主标记失败；
     - 完成后只要有博主实际同步成功，自动触发一次「重新对标」（refetch=False，不重捞）。
     """
     from .benchmark import maybe_start_benchmark_rerun
+    from .sync_pool import claim_task, gather, new_cancel, pool_size, session_factory
 
-    total = len(entries)
-    synced = 0
-    failed: list[str] = []
-    for i, entry in enumerate(entries, start=1):
+    total = max(1, len(entries))
+    workers = pool_size("creator")
+    cancel = new_cancel()
+    counter = {"done": 0}
+    lock = threading.Lock()
+    new_session = session_factory(db)
+
+    def _one(entry: dict) -> dict:
         try:
             task_id = int(entry.get("task_id") or 0)
             creator_id = int(entry.get("creator_id") or 0)
             job_id = int(entry.get("job_id") or 0)
         except (TypeError, ValueError):
-            continue
+            return {"status": "skip", "name": entry.get("name") or "", "creator_id": 0}
         name = entry.get("name") or f"博主#{creator_id}"
-        task_row = db.get(BackgroundTask, task_id)
-        job = db.get(SyncJob, job_id)
-        if task_row is not None and task_row.status == "failed":  # 重启等导致的中断
-            if job is not None and job.status == "running":
-                _finish_job(db, job, "任务中断", failed=True)
-            failed.append(f"{name}(任务中断)")
-            continue
-        if update:
-            update(max(5, min(95, int((i - 1) / max(1, total) * 100))), f"[{i}/{total}] {name}：同步前15条…")
-        if task_row is not None:
-            task_row.status = "running"
-            task_row.note = "同步中…"
-            db.commit()
-            publish("task.update", {"id": task_id, "status": "running", "progress": task_row.progress or 5, "note": "同步中…", "payload": {"creator_id": creator_id}})
+        s = new_session()
         try:
-            run_sync(db, scope="daily", creator_id=creator_id, with_media=True, job=job)
-            synced += 1
+            if cancel.is_set():  # 预算已耗尽：不再开始新的博主
+                _fail_creator_task(s, task_id, "已取消：同步预算不足")
+                return {"status": "cancelled", "name": name, "creator_id": creator_id}
+            task_row = s.get(BackgroundTask, task_id)
+            job = s.get(SyncJob, job_id)
+            if task_row is not None and task_row.status == "failed":  # 重启等导致的中断
+                if job is not None and job.status == "running":
+                    _finish_job(s, job, "任务中断", failed=True)
+                return {"status": "failed", "name": name, "creator_id": creator_id, "reason": "任务中断"}
             if task_row is not None:
-                task_row.status = "done"
-                task_row.progress = 100
-                task_row.note = "完成"
-                db.commit()
-                publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": {"creator_id": creator_id}})
-        except BudgetExceeded as exc:  # 预算耗尽，继续只会重复失败
+                claim_task(s, task_id)  # 原子认领（pending→running）
+                task_row = s.get(BackgroundTask, task_id)
+                if task_row is not None:
+                    task_row.status = "running"
+                    task_row.note = "同步中…"
+                    s.commit()
+                    publish("task.update", {"id": task_id, "status": "running", "progress": task_row.progress or 5, "note": "同步中…", "payload": {"creator_id": creator_id}})
+            try:
+                run_sync(s, scope="daily", creator_id=creator_id, with_media=True, job=job)
+            except BudgetExceeded as exc:  # 预算耗尽：取消后续
+                s.rollback()
+                _fail_creator_task(s, task_id, str(exc))
+                cancel.set()
+                return {"status": "budget", "name": name, "creator_id": creator_id, "reason": str(exc)[:80]}
+            except Exception as exc:  # noqa: BLE001 单个博主失败不阻断其余
+                s.rollback()
+                _fail_creator_task(s, task_id, str(exc))
+                return {"status": "failed", "name": name, "creator_id": creator_id, "reason": str(exc)[:80]}
             if task_row is not None:
-                task_row.status = "failed"
-                task_row.error = str(exc)[:500]
-                db.commit()
-            failed.append(f"{name}({str(exc)[:80]})")
-            break
-        except Exception as exc:  # noqa: BLE001 单个博主失败不阻断其余
-            db.rollback()
-            if task_row is not None:
-                task_row.status = "failed"
-                task_row.error = str(exc)[:500]
-                db.commit()
-            failed.append(f"{name}({str(exc)[:80]})")
+                task_row = s.get(BackgroundTask, task_id)
+                if task_row is not None:
+                    task_row.status = "done"
+                    task_row.progress = 100
+                    task_row.note = "完成"
+                    s.commit()
+                    publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": {"creator_id": creator_id}})
+            return {"status": "done", "name": name, "creator_id": creator_id}
+        finally:
+            s.close()
+
+    def _on_result(_entry: object, res: object) -> None:
+        with lock:
+            counter["done"] += 1
+            n = counter["done"]
+        if update:
+            name = res.get("name") if isinstance(res, dict) else ""
+            update(max(5, min(95, int(n / total * 100))), f"[{n}/{total}] {name}：同步完成")
+
+    results = gather(_one, entries, workers=workers, on_result=_on_result)
+    synced = sum(1 for _, r in results if isinstance(r, dict) and r.get("status") == "done")
+    failed: list[str] = []
+    for _, r in results:
+        if not isinstance(r, dict):
+            continue
+        if r.get("status") in ("failed", "budget", "cancelled"):
+            reason = r.get("reason") or ("已取消：预算不足" if r.get("status") == "cancelled" else "失败")
+            failed.append(f"{r.get('name')}({reason})")
     rerun = "no_sync"
     if synced:
         rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
-    parts = [f"全量同步：共 {total} 个博主，已同步 {synced} 个"]
+    parts = [f"全量同步：共 {len(entries)} 个博主，已同步 {synced} 个（并发 {workers}）"]
     if failed:
         parts.append("失败：" + "、".join(failed))
     if synced:
@@ -1093,7 +1140,7 @@ def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=
         update(100, "完成")
     return {
         "message": "；".join(parts),
-        "creators": total,
+        "creators": len(entries),
         "synced": synced,
         "failed": failed,
         "rerun": rerun,
@@ -1128,14 +1175,26 @@ def run_daily_sync_all(db: Session) -> dict:
     前2+最新/补齐极个别缺转写）。
     """
     from .benchmark import benchmarks_of_owner, maybe_start_benchmark_rerun
+    from .sync_pool import gather, pool_size, session_factory
 
     owner = get_current_creator(db)
     if owner is None:
         raise ValueError("请先创建并切换到主博主")
-    results = [run_sync(db, scope="daily", with_media=True)]  # 主博主
     benchmarks = benchmarks_of_owner(db, owner)
-    for bm in benchmarks:  # 对标博主：与主博主同规格（15 条 + 下载/转写）
-        results.append(run_sync(db, scope="daily", creator_id=bm.id, with_media=True))
+    # 主博主保持 creator_id=None（走「当前主博主」语义，与既有行为一致），对标显式指定
+    creator_ids: list[int | None] = [None, *(bm.id for bm in benchmarks)]
+    new_session = session_factory(db)
+
+    def _sync_one(creator_id: int | None) -> dict:
+        s = new_session()
+        try:
+            # 主博主与对标同规格（daily：15 条 + 评论 + 缺视频下载/转写，已下载/已转写跳过）
+            return run_sync(s, scope="daily", creator_id=(None if creator_id is None else int(creator_id)), with_media=True)
+        finally:
+            s.close()
+
+    # R-163：主博主 + 全部对标博主并发同步（每个博主独立 Session），全局 TikHub 令牌桶控速
+    results = [r for _, r in gather(_sync_one, creator_ids, workers=pool_size("creator")) if isinstance(r, dict)]
     rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
     accounts = [a for res in results for a in (res.get("accounts") or [])]
     posts = sum(int(r.get("posts") or 0) for r in results)

@@ -32,30 +32,91 @@ log = get_logger("tikhub")
 PLATFORMS = ["douyin", "xiaohongshu", "bilibili"]
 PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
 
-# R-151：TikHub 接口限速「单路由 1 请求/秒」（实测 429 原文），而 daily 同步是多账号并行 +
-# 每条素材再打评论接口，必然超限；被限流时服务端有时回 429、有时直接掐断 TLS 连接
-# （本机 httpx 默认走 macOS 系统代理 127.0.0.1:7890，隧道被掐 → [SSL: UNEXPECTED_EOF_WHILE_READING]）。
-# 对策：同路由排队 + 瞬时故障有界重试，避免一次网络抖动就判一条素材同步失败。
-_ROUTE_MIN_INTERVAL = 1.2  # 秒；限速 1 req/s，留 0.2s 余量
+# R-163：TikHub 上限改为「全局合计 10 请求/秒」（TikHub 套餐口径），因此不再默认「按路由 1.2s 串行」
+# ——那会让同一平台所有账号/帖子互相排队，是同步慢的主因。现在：
+#   ① 全局令牌桶（所有接口共享，速率/容量可配）保证合计 ≤ 上限；
+#   ② 保留按路由的**基础间隔**（`_ROUTE_MIN_INTERVAL`，默认 0 关闭）与 **429 退避**兜底：
+#      某路由被服务端限流时临时抬高该路由的下次允许时间，避免持续撞 429。
+# 同时保留 R-151 的瞬时故障（TransportError/429/5xx）有界重试，避免一次抖动判失败。
+_ROUTE_MIN_INTERVAL = 0.0  # 秒；默认不做按路由强制排队（R-163），由全局令牌桶控速
+_ROUTE_BACKOFF_SECONDS = 2.0  # 某路由 429 后，临时抬高该路由下次允许时间的秒数（兜底）
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _MAX_ATTEMPTS = 4  # 首次 + 3 次重试（实测：只重试 2 次时，补跑 60 条仍有 3 条撞上代理抖动窗口而失败）
 _RETRY_DELAYS = (1.5, 4.0, 8.0)
 _ROUTE_LAST: dict[str, float] = {}
+_ROUTE_BACKOFF: dict[str, float] = {}
 _ROUTE_LOCK = threading.Lock()
 
 
-def _throttle_route(path: str) -> None:
-    """同路由请求间隔 ≥ `_ROUTE_MIN_INTERVAL`（进程内排队，线程安全）。
+class _TokenBucket:
+    """线程安全令牌桶：按 `rate` req/s 补充令牌，容量 `capacity`（限制瞬时突发）。
 
-    只按 path 排队：不同路由互不阻塞；先占时间片再 sleep（锁外等待），避免并发线程挤在同一时刻发车。
+    `acquire()` 先锁内**预留**令牌（可为负），再锁外 sleep，避免并发线程同时挤在同一时刻发车。
     """
+
+    def __init__(self, rate: float, capacity: int) -> None:
+        self.rate = max(0.01, float(rate))
+        self.capacity = max(1, int(capacity))
+        self.tokens = float(self.capacity)
+        self.updated = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            elapsed = max(0.0, now - self.updated)
+            self.updated = now
+            self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+            self.tokens -= 1.0
+            wait = -self.tokens / self.rate if self.tokens < 0 else 0.0
+        if wait > 0:
+            time.sleep(wait)
+
+
+_GLOBAL_BUCKET: _TokenBucket | None = None
+_GLOBAL_LOCK = threading.Lock()
+
+
+def _global_bucket() -> _TokenBucket:
+    """按当前配置惰性构建全局令牌桶（.env 改动需重启生效，与其它配置一致）。"""
+    global _GLOBAL_BUCKET
+    if _GLOBAL_BUCKET is None:
+        with _GLOBAL_LOCK:
+            if _GLOBAL_BUCKET is None:
+                settings = get_settings()
+                _GLOBAL_BUCKET = _TokenBucket(settings.tikhub_rate_limit, settings.tikhub_rate_burst)
+    return _GLOBAL_BUCKET
+
+
+def _penalize_route(path: str, seconds: float = _ROUTE_BACKOFF_SECONDS) -> None:
+    """某路由被限流（429）时临时抬高其下次允许时间（按路由退避兜底）。"""
+    with _ROUTE_LOCK:
+        _ROUTE_BACKOFF[path] = max(_ROUTE_BACKOFF.get(path, 0.0), time.monotonic() + seconds)
+
+
+def _throttle_route(path: str) -> None:
+    """发请求前控速：先过全局令牌桶，再按路由基础间隔 / 429 退避排队（线程安全）。"""
+    _global_bucket().acquire()
     with _ROUTE_LOCK:
         now = time.monotonic()
         at = max(now, _ROUTE_LAST.get(path, 0.0) + _ROUTE_MIN_INTERVAL)
+        backoff = _ROUTE_BACKOFF.get(path, 0.0)
+        if backoff > at:
+            at = backoff
         _ROUTE_LAST[path] = at
     delay = at - now
     if delay > 0:
         time.sleep(delay)
+
+
+def _reset_limiter() -> None:
+    """测试用：清空全局令牌桶与路由状态（生产不调用）。"""
+    global _GLOBAL_BUCKET
+    with _GLOBAL_LOCK:
+        _GLOBAL_BUCKET = None
+    with _ROUTE_LOCK:
+        _ROUTE_LAST.clear()
+        _ROUTE_BACKOFF.clear()
 
 # 主页链接解析规则：platform -> (正则组名/顺序)
 def _is_benchmark_account(account) -> bool:
@@ -267,6 +328,8 @@ class TikHubClient:
                 if resp.status_code < 400:
                     return resp.json()
                 last = f"HTTP {resp.status_code} {resp.text[:200]}"
+                if resp.status_code == 429:
+                    _penalize_route(path)  # R-163：按路由退避兜底，避免持续撞限流
                 if resp.status_code not in _RETRYABLE_STATUS:
                     log.warning("TikHub 请求失败（不重试）：%s %s", path, last[:300])
                     raise TikHubError(f"TikHub 请求失败: {last}")

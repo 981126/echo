@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -394,12 +395,15 @@ def _fail_remaining(db, remaining: list[tuple[int, int]], reason: str) -> int:
 
 
 def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: bool = True) -> dict:
-    """R-093/R-094：逐素材异步队列（顺序执行）。
+    """R-093/R-094/R-163：逐素材异步队列（**并行消费者**，独立 Session）。
 
     - 先按平台优先级（抖音→小红书→B站）排序，同一合并作品的多个平台帖只处理一次（避免重复下载/评论费用）；
     - 每条：采集评论/素材数据 →（daily 带媒体）缺视频下载/自动转写 → 完成/失败；
+    - 任一条 `BudgetExceeded` 触发取消标记，未开始的条目标记失败；
     - 任何非正常结束（失败/超时/无有效语音）都会 push 通知。
     """
+    from .sync_pool import gather, new_cancel, pool_size, session_factory
+
     stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0, "pool": 0}
     prio = {"douyin": 0, "xiaohongshu": 1, "bilibili": 2}
     ordered = []
@@ -408,97 +412,137 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
         ordered.append((prio.get(post.platform, 9) if post else 9, post_id, tid))
     ordered.sort(key=lambda x: x[0])
     items = [(a, b) for _, a, b in ordered]
-    done_work: set[int] = set()  # 同一合并作品只处理一次（R-094）
-    total = len(items)
+
+    # R-094：同一合并作品只处理一次 —— 主线程按排序确定性地标记「后续重复」跳过（避免并发竞态重复下载）
+    seen_work: set[int] = set()
+    prepared: list[dict] = []
     for idx, (post_id, task_id) in enumerate(items, start=1):
-        row = db.get(BackgroundTask, task_id)
         post = db.get(PlatformPost, post_id)
-        title = (post.title if post else "") or "素材"
-        ensure_budget(db)  # R-135：预算预检，不足直接抛 → 由 BudgetExceeded 分支取消剩余队列
+        work_id = post.work_id if post else None
+        skip = False
+        if work_id:
+            if work_id in seen_work:
+                skip = True
+            else:
+                seen_work.add(work_id)
+        prepared.append({"post_id": post_id, "task_id": task_id, "idx": idx, "skip": skip})
 
-        def _up(pct: int | None = None, note: str = "") -> None:
-            t = db.get(BackgroundTask, task_id)
-            if t is None:
-                return
-            if pct is not None:
-                t.progress = max(0, min(100, int(pct)))
-            if note:
-                t.note = note[:255]
-            t.status = "running"
-            db.commit()
-            publish(
-                "task.update",
-                {"id": task_id, "status": "running", "progress": t.progress, "note": t.note or "", "payload": {"post_id": post_id}},
-            )
+    total = len(prepared)
+    cancel = new_cancel()
+    stats_lock = threading.Lock()
+    new_session = session_factory(db)
 
-        def _fail(err: str) -> None:
-            t = db.get(BackgroundTask, task_id)
-            if t is not None:
-                t.status = "failed"
-                t.error = err[:500]
-                db.commit()
-                publish(
-                    "task.update",
-                    {"id": task_id, "status": "failed", "progress": t.progress or 0, "note": t.note or "", "error": err[:500], "payload": {"post_id": post_id}},
-                )
-            # R-094：非正常结果必通知
-            try:
-                push_notification(
-                    db, kind="card_sync", status="failed",
-                    title="素材同步失败",
-                    message=f"「{title[:60]}」：{err[:200]}",
-                    target="/videos",
-                )
-            except Exception:  # noqa: BLE001 通知失败不影响
-                db.rollback()
-
-        def _done(note: str = "完成") -> None:
-            t = db.get(BackgroundTask, task_id)
-            if t is not None:
-                t.status = "done"
-                t.progress = 100
-                t.note = note
-                db.commit()
-                publish(
-                    "task.update",
-                    {"id": task_id, "status": "done", "progress": 100, "note": note, "payload": {"post_id": post_id}},
-                )
-
+    def _one(pitem: dict) -> dict:
+        post_id = pitem["post_id"]
+        task_id = pitem["task_id"]
+        idx = pitem["idx"]
+        s = new_session()
         try:
-            if post is None:
-                raise MediaDownloadError("作品不存在")
-            if post.work_id and post.work_id in done_work:
-                # R-094：同一合并作品已由前一个平台帖下载，跳过重复下载/评论
-                _up(max(row.progress if row else 0, 8), "同合并作品已处理，跳过…")
-                _done("跳过（同合并作品的视频已下载）")
-                stats["skipped"] += 1
-                continue
-            _up(max(row.progress if row else 0, 12), f"正在同步素材数据/评论（{idx}/{total}）…")
-            from .platform_sync import sync_post_comments  # 延迟导入避免循环
+            row = s.get(BackgroundTask, task_id)
+            post = s.get(PlatformPost, post_id)
+            title = (post.title if post else "") or "素材"
 
-            cres = sync_post_comments(db, post, limit=50, charge=True)
-            stats["comments"] += int(cres.get("added") or 0) + int(cres.get("updated") or 0)
-            stats["pool"] += int(cres.get("pool_added") or 0)  # R-140：评论按限量进灵感池
-            if with_media:
-                res = platform_media_task(db, {"post_id": post_id}, _up)
-                if res.get("status") == "done":
-                    if res.get("downloaded"):
-                        stats["downloaded"] += 1
-                    if res.get("transcribed"):
-                        stats["transcribed"] += 1
-                else:
-                    stats["skipped"] += 1
-            if post.work_id:
-                done_work.add(post.work_id)
-            _done()
-        except BudgetExceeded:
-            _fail("预算不足，停止素材队列")
-            stats["errors"] += 1
-            db.rollback()
-            stats["errors"] += _fail_remaining(db, items[idx:], "已取消：同步预算不足")  # R-134
-            break
-        except Exception as exc:  # noqa: BLE001 单条失败不影响后续（已通知）
-            db.rollback()
-            _fail(str(exc))
-            stats["errors"] += 1
+            def _up(pct: int | None = None, note: str = "") -> None:
+                t = s.get(BackgroundTask, task_id)
+                if t is None:
+                    return
+                if pct is not None:
+                    t.progress = max(0, min(100, int(pct)))
+                if note:
+                    t.note = note[:255]
+                t.status = "running"
+                s.commit()
+                publish(
+                    "task.update",
+                    {"id": task_id, "status": "running", "progress": t.progress, "note": t.note or "", "payload": {"post_id": post_id}},
+                )
+
+            def _fail(err: str) -> None:
+                t = s.get(BackgroundTask, task_id)
+                if t is not None:
+                    t.status = "failed"
+                    t.error = err[:500]
+                    s.commit()
+                    publish(
+                        "task.update",
+                        {"id": task_id, "status": "failed", "progress": t.progress or 0, "note": t.note or "", "error": err[:500], "payload": {"post_id": post_id}},
+                    )
+                # R-094：非正常结果必通知
+                try:
+                    push_notification(
+                        s, kind="card_sync", status="failed",
+                        title="素材同步失败",
+                        message=f"「{title[:60]}」：{err[:200]}",
+                        target="/videos",
+                    )
+                except Exception:  # noqa: BLE001 通知失败不影响
+                    s.rollback()
+
+            def _done(note: str = "完成") -> None:
+                t = s.get(BackgroundTask, task_id)
+                if t is not None:
+                    t.status = "done"
+                    t.progress = 100
+                    t.note = note
+                    s.commit()
+                    publish(
+                        "task.update",
+                        {"id": task_id, "status": "done", "progress": 100, "note": note, "payload": {"post_id": post_id}},
+                    )
+
+            # 本地增量：即使后续媒体步骤失败，已完成的评论/灵感池计数也要如实汇总（R-140 回归保护）
+            local = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0, "pool": 0}
+            if cancel.is_set():  # 预算已耗尽：未开始的条目直接失败
+                _fail("已取消：同步预算不足")
+                local["errors"] += 1
+                return local
+            try:
+                if post is None:
+                    raise MediaDownloadError("作品不存在")
+                if pitem["skip"]:
+                    # R-094：同一合并作品已由前一个平台帖下载，跳过重复下载/评论
+                    _up(max(row.progress if row else 0, 8), "同合并作品已处理，跳过…")
+                    _done("跳过（同合并作品的视频已下载）")
+                    local["skipped"] += 1
+                    return local
+                _up(max(row.progress if row else 0, 12), f"正在同步素材数据/评论（{idx}/{total}）…")
+                ensure_budget(s)  # R-135：预算预检，不足直接抛 → 取消剩余队列
+                from .platform_sync import sync_post_comments  # 延迟导入避免循环
+
+                cres = sync_post_comments(s, post, limit=50, charge=True)
+                local["comments"] += int(cres.get("added") or 0) + int(cres.get("updated") or 0)
+                local["pool"] += int(cres.get("pool_added") or 0)  # R-140：评论按限量进灵感池
+                if with_media:
+                    res = platform_media_task(s, {"post_id": post_id}, _up)
+                    if res.get("status") == "done":
+                        if res.get("downloaded"):
+                            local["downloaded"] += 1
+                        if res.get("transcribed"):
+                            local["transcribed"] += 1
+                    else:
+                        local["skipped"] += 1
+                _done()
+                return local
+            except BudgetExceeded:
+                s.rollback()
+                _fail("预算不足，停止素材队列")
+                cancel.set()
+                local["errors"] += 1
+                return local
+            except Exception as exc:  # noqa: BLE001 单条失败不影响其它（已通知）
+                s.rollback()
+                _fail(str(exc))
+                local["errors"] += 1
+                return local
+        finally:
+            s.close()
+
+    def _merge(_item: object, res: object) -> None:
+        if not isinstance(res, dict):
+            return
+        with stats_lock:
+            for key in ("downloaded", "transcribed", "skipped", "errors", "comments", "pool"):
+                stats[key] += int(res.get(key) or 0)
+
+    gather(_one, prepared, workers=pool_size("media"), on_result=_merge)
     return stats

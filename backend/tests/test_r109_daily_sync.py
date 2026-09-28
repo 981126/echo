@@ -67,8 +67,10 @@ def test_daily_sync_all_covers_owner_and_benchmarks(db, monkeypatch):
     res = run_daily_sync_all(db)
 
     assert len(calls) == 2  # 主博主 + 1 个对标
-    assert calls[0]["scope"] == "daily" and calls[0].get("creator_id") is None
-    assert calls[1]["scope"] == "daily" and calls[1]["creator_id"] == bm.id
+    # R-163：改为并发同步，完成顺序不保证；主博主仍为 creator_id=None（当前主博主语义）
+    by_creator = {c.get("creator_id"): c for c in calls}
+    assert set(by_creator) == {None, bm.id}
+    assert all(c["scope"] == "daily" for c in calls)
     assert all(c["with_media"] is True for c in calls)  # 对标同样下载视频+转写
     assert started == [False]  # 同步完成后自动触发重新对标（不重捞）
     assert "对标" in res["message"]
