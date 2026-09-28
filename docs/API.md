@@ -513,6 +513,10 @@ List Discussions
 
 脚本讨论留痕（R-023）：按轮次返回聊天式消息。
 
+R-178：每条附**实际出结果**的模型——`used_slot` / `vendor` / `model_id` 与展示用 `model_label`（如 `DeepSeek · deepseek-flash`）；
+历史行（R-178 之前）这三项为空，前端显示「未记录模型（历史）」。`kind='run'` 是某次讨论的运行头（`content` 为 JSON：
+`{gen:{slot,vendor,model,label}, critic:{...}, rounds, rounds_done, degraded}`）。
+
 **参数**
 
 - `draft_id`（path）integer，必填

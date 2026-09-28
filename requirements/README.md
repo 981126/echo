@@ -7,7 +7,8 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
-| R-178 | 2026-09-28 | 讨论留痕要显示并记录「真实模型 + 版本」而不是 `model1/model2`（切模型后要能知道当时用的什么模型）；现状：留痕 `actor` 存槽位名、`Draft.quality.models` 只留最后一次且会被覆盖、编辑 tab「本篇生成模型」是死代码（key 不匹配） | 🔲 已登记（等作者回答反问） | 待确认（预计 M167） | frontend_v2、debate.py、draft_discussions、DATABASE.md、R-023/R-139/R-142/R-173 |
+| R-179 | 2026-09-28 | 素材库加载太慢：服务端统一列表分页（本地素材+云端作品合并去重后分页，筛选/搜索/计数下推）+ 前端每批 20 条距底 1 屏预取/骨架/留住旧列表/保持滚动位置 + 封面缩略图（Pillow 按需生成 `?w=400`）+ works 列表 N+1 瘦身；实测首屏 1208ms、`/api/works` 1.57MB、首屏封面 13MB、DOM 24k、长任务 616ms | ✅ 已确认（2026-09-28）→ 待开工 | M168（待开工） | frontend_v2、videos/works API、works_service、/covers、R-165/R-163 |
+| R-178 | 2026-09-28 | 讨论留痕要显示并记录「真实模型 + 版本」而不是 `model1/model2`（切模型后要能知道当时用的什么模型）；现状：留痕 `actor` 存槽位名、`Draft.quality.models` 只留最后一次且会被覆盖、编辑 tab「本篇生成模型」是死代码（key 不匹配） | ✅ 已完成 | M167（已完成） | frontend_v2、debate.py、draft_discussions、DATABASE.md、R-023/R-139/R-142/R-173 |
 | R-177 | 2026-09-28 | 脚本工作台「讨论」tab 滚动不了修复：`ScrollArea` 只给 Root `max-h-*` 时 Viewport 的 `h-full` 解析成 auto（高度=内容高度，4215/4215）→ 没得滚、Root `overflow:hidden` 直接裁掉；Viewport 加 `max-h-[inherit]` 定高，同源场景（标签多选/通知/提示词）一并修好 | ✅ 已完成 | M166（已完成） | frontend_v2、scroll-area、R-173/R-165 |
 | R-176 | 2026-09-28 | AI 对话一发消息就报 422「Input should be a valid dictionary or object to extract fields from」修复：新前端 SSE 请求漏带 `Content-Type: application/json`（fetch 对字符串 body 默认 text/plain → FastAPI 解析不出 JSON body）；调用点显式声明 + `apiFetch` 字符串 body 兜底补 JSON 头 + 3 条单测锁规则 | ✅ 已完成 | M165（已完成） | frontend_v2、R-164/R-167 |
 | R-175 | 2026-09-28 | 动效规范立项（该有的动画不能省、必须美观流畅）+ AI 设置切 TAB 白闪修复：入场动效不得从 `opacity:0` 起步（旧 Content 已卸载 → 闪一帧空白），改 0.85+8px/0.22s；规范写入 AGENTS/DESIGN §8/WORKFLOW DoD/PRD | ✅ 已完成 | M164（已完成） | frontend_v2、AGENTS、DESIGN、WORKFLOW、R-164/R-174 |

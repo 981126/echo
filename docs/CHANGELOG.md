@@ -1,5 +1,23 @@
 # 变更记录
 
+## [M167 / R-178] 2026-09-28 — 讨论留痕显示并记录「真实模型 + 版本」（不再只写 model1/model2）
+
+> 作者：讨论的模型不要展示成 model1、model2，展示成对应的模型和版本，并且要记录下来，不然我切模型了，都不知道之前用的什么模型。
+
+- **现状（改前）**：留痕 `actor` 存的就是槽位名 `model1/model2`（表头直接显示它）；状态条文案里也拼槽位名；
+  `Draft.quality.models` 其实有 `model1(deepseek/deepseek-flash)`，但**只在最后一次讨论写一次且会被别的流程覆盖**（草稿 37/38 已是 `{}`）；
+  编辑 tab「本篇生成模型」读 `quality.gen_model/referee_model` —— 后端从没写过这两个 key，**一直是死代码**。
+- **记录**：`draft_discussions` 加 `used_slot/vendor/model_id`（实际出结果的模型，取 `RoutedLLM.used_*`，与 R-142 同口径），
+  按 AGENTS 手写幂等 `_migrate_discussion_model_fields`（加字段不靠 `create_all`）；每次讨论开头写一条 `kind='run'` 运行头
+  （当时配置的生成方/评审方 + 轮次，结束时回填 `rounds_done/degraded`）→ 切模型后仍能回溯「那一次用的是谁」。
+- **显示（四处全改）**：① 留痕表头 `生成方 [DeepSeek · deepseek-flash] 初稿 · 第0轮` ② 讨论 tab 顶部「本次讨论：生成方 X × 评审方 Y · 讨论 n/N 轮」
+  ③ 草稿卡片/讨论 tab 状态条文案 `DeepSeek · deepseek-flash 正在评审第 1/3 轮…` ④ 编辑 tab「本篇生成模型」死代码修活（优先运行头、quality 兜底）。
+  厂商名复用 `model_settings.VENDORS` 标签（单一事实源）；历史留痕显示「未记录模型（历史）」，**不按当前配置反推**。
+- **动效**：模型标签/运行头摘要 0.85→1 淡入（新增 `softIn` 令牌，R-175 禁 0 起步）；顺手修掉自己引入的 hooks 顺序错误（`useMemo` 落到了 `if (!open) return null` 之后）。
+- **验证**：真机冒烟（临时草稿跑 1 轮真实双模型讨论）状态条文案为 `Kimi（月之暗面） · kimi-k2.6 正在评审第 1/1 轮…`、6 条留痕全部带真实模型、运行头回填 1/1 轮；
+  浏览器点检新留痕显示 `DeepSeek · deepseek-flash × Kimi（月之暗面） · kimi-k2.6`、老留痕显示「未记录模型（历史）」、控制台 0 报错；
+  pytest 新增 5 条 + vitest 新增 6 条；`scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M166 / R-177] 2026-09-28 — 脚本工作台「讨论」tab 滚动不了修复（ScrollArea 仅 max-h 约束时 Viewport 未定高）
 
 > 作者：脚本工作室 讨论tab页 滚动不了。

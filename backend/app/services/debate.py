@@ -52,13 +52,110 @@ def _context(db: Session, topic: str) -> dict:
     }
 
 
-def _add(db: Session, draft_id: int, round_no: int, actor: str, kind: str, content: str) -> None:
-    db.add(DraftDiscussion(draft_id=draft_id, round=round_no, actor=actor, kind=kind, content=content))
+def model_label(vendor: str, model_id: str) -> str:
+    """「厂家标签 · 模型 ID」——全站展示实际模型的唯一口径（R-178）。
+
+    厂家标签复用 `model_settings.VENDORS`（设置页「模型设置」的同一事实源），
+    例如 `DeepSeek · deepseek-flash`；厂家未知时退化成只显示模型 ID。
+    """
+    from .model_settings import VENDORS
+
+    label = (VENDORS.get(vendor or "") or {}).get("label") or ""
+    mid = model_id or ""
+    if label and mid:
+        return f"{label} · {mid}"
+    return label or mid or ""
+
+
+def _llm_model_fields(llm) -> dict:
+    """取某个模型客户端**实际出结果**的三元组（R-142/R-178）。"""
+    if llm is None:
+        return {"used_slot": "", "vendor": "", "model_id": ""}
+    return {
+        "used_slot": str(getattr(llm, "used_slot", "") or ""),
+        "vendor": str(getattr(llm, "used_vendor", "") or ""),
+        "model_id": str(getattr(llm, "used_model", "") or ""),
+    }
+
+
+def _add(
+    db: Session,
+    draft_id: int,
+    round_no: int,
+    actor: str,
+    kind: str,
+    content: str,
+    *,
+    llm=None,
+) -> None:
+    """写一条留痕。传 `llm` 时同时落库**实际出结果**的模型（R-178）。"""
+    db.add(
+        DraftDiscussion(
+            draft_id=draft_id,
+            round=round_no,
+            actor=actor,
+            kind=kind,
+            content=content,
+            **_llm_model_fields(llm),
+        )
+    )
     db.commit()
 
 
 def _note(db: Session, draft_id: int, round_no: int, text: str) -> None:
     _add(db, draft_id, round_no, "system", "note", text)
+
+
+def _run_header(db: Session, draft_id: int, gen_slot: dict, critic_slot: dict, rounds: int) -> int:
+    """一次讨论的运行头（R-178）：记录**当时配置**的生成方/评审方，返回该行 id 供结束时回填。
+
+    作者切模型后仍能从历史里看出「那一次用的是谁」；结束时会补 `rounds_done/degraded`。
+    """
+    payload = {
+        "gen": _slot_meta(gen_slot),
+        "critic": _slot_meta(critic_slot),
+        "rounds": rounds,
+        "rounds_done": None,
+        "degraded": None,
+    }
+    row = DraftDiscussion(
+        draft_id=draft_id,
+        round=0,
+        actor="system",
+        kind="run",
+        content=json.dumps(payload, ensure_ascii=False),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row.id
+
+
+def _finish_run_header(db: Session, header_id: int, *, rounds_done: int, degraded: bool) -> None:
+    """讨论结束回填运行头（跑满/中断都留事实）。"""
+    row = db.get(DraftDiscussion, header_id)
+    if row is None:
+        return
+    try:
+        payload = json.loads(row.content or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    payload["rounds_done"] = rounds_done
+    payload["degraded"] = bool(degraded)
+    row.content = json.dumps(payload, ensure_ascii=False)
+    db.commit()
+
+
+def _slot_meta(slot: dict) -> dict:
+    """槽位配置（含可展示文案）——运行头用。"""
+    vendor = str(slot.get("vendor") or "")
+    model_id = str(slot.get("model") or "")
+    return {
+        "slot": str(slot.get("slot") or ""),
+        "vendor": vendor,
+        "model": model_id,
+        "label": model_label(vendor, model_id),
+    }
 
 
 def _status(
@@ -186,6 +283,10 @@ def run_debate(
     gen_llm = _side_llm(route, gen)
     critic_llm = _side_llm(route, critic)
     rounds_total = debate_rounds(db, settings)
+    # R-178：先落「本次讨论的运行头」——记录当时配置的生成方/评审方（切模型后仍可回溯），结束时回填结果
+    run_header_id = _run_header(db, draft.id, gen_slot, critic_slot, rounds_total)
+    gen_label = _slot_meta(gen_slot)["label"]
+    critic_label = _slot_meta(critic_slot)["label"]
 
     ctx = _context(db, topic)
     persona_text = "\n".join(f"- {t}" for t in ctx["tags"] or ["（暂无）"]) or "（暂无）"
@@ -210,7 +311,14 @@ def run_debate(
         initial_user = generation_user_message(db, topic)  # R-129：与金样本回放评分同一份输入
         initial_budget = budget_settings.budget_for(db, "debate_initial")
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
-        _status(db, draft.id, f"{name} 正在起草初稿…（生成方 {gen}）", actor=name, phase="draft", rounds=rounds_total)
+        _status(
+            db,
+            draft.id,
+            f"{gen_label or name} 正在起草初稿…（生成方）",
+            actor=name,
+            phase="draft",
+            rounds=rounds_total,
+        )
         try:
             data = llm.chat_json(
                 [
@@ -224,6 +332,7 @@ def run_debate(
             initial = {
                 # R-142：留痕要记**实际出结果**的槽位（内部降级后 name 会与事实不符）
                 "model": getattr(llm, "used_slot", None) or name,
+                "llm": llm,
                 "title": str(data.get("title", "")).strip() or topic,
                 "cover_text": str(data.get("cover_text", "")).strip(),
                 "script": str(data.get("script", "")).strip(),
@@ -245,7 +354,7 @@ def run_debate(
         draft.original_script = source_text  # R-155：原文对照展示「原文 vs 讨论后」
         draft.tags = merge_tags(draft.tags, initial["tags"])  # R-155：标签合并去重
     db.commit()
-    _add(db, draft.id, 0, initial["model"], "draft", draft.script)
+    _add(db, draft.id, 0, initial["model"], "draft", draft.script, llm=initial.get("llm"))
 
     # 2) N 轮讨论：评审方挑刺 → 生成方修订
     critic_system = (
@@ -265,7 +374,15 @@ def run_debate(
     rounds_done = 0
     break_reason = ""
     for r in range(1, rounds_total + 1):
-        _status(db, draft.id, f"{critic} 正在评审第 {r}/{rounds_total} 轮…", actor=critic, phase="critique", round_no=r, rounds=rounds_total)
+        _status(
+            db,
+            draft.id,
+            f"{critic_label or critic} 正在评审第 {r}/{rounds_total} 轮…",
+            actor=critic,
+            phase="critique",
+            round_no=r,
+            rounds=rounds_total,
+        )
         try:
             critique = _chat_once(
                 critic_llm,
@@ -278,8 +395,16 @@ def run_debate(
             break_reason = f"第 {r}/{rounds_total} 轮评审失败（{str(exc)[:120]}），已按当前稿定稿，可重新讨论"
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
             break
-        _add(db, draft.id, r, critic, "critique", critique)
-        _status(db, draft.id, f"{gen} 正在按评审修订第 {r}/{rounds_total} 轮…", actor=gen, phase="revise", round_no=r, rounds=rounds_total)
+        _add(db, draft.id, r, critic, "critique", critique, llm=critic_llm)
+        _status(
+            db,
+            draft.id,
+            f"{gen_label or gen} 正在按评审修订第 {r}/{rounds_total} 轮…",
+            actor=gen,
+            phase="revise",
+            round_no=r,
+            rounds=rounds_total,
+        )
         try:
             revised = _chat_once(
                 gen_llm,
@@ -295,13 +420,20 @@ def run_debate(
         latest = revised
         draft.script = latest
         db.commit()
-        _add(db, draft.id, r, gen, "revise", latest)
+        _add(db, draft.id, r, gen, "revise", latest, llm=gen_llm)
         rounds_done = r
 
     # 3) 生成后自检（R-131）：有问题就带着问题让生成方再改一次（只 1 次，避免成本失控）
     issues, coverage = _self_check(db, draft.script)
     if issues:
-        _status(db, draft.id, "正在按自检问题做最后一次收口修订…", actor=gen, phase="selfcheck", rounds=rounds_total)
+        _status(
+            db,
+            draft.id,
+            f"{gen_label or gen} 正在做最后一次收口修订…",
+            actor=gen,
+            phase="selfcheck",
+            rounds=rounds_total,
+        )
         fix_user = (
             f"这是你自己刚写的脚本：\n{latest}\n\n"
             "以下几处不符合作者风格或踩了红线，请整篇重写并避免：\n"
@@ -315,7 +447,7 @@ def run_debate(
             latest = fixed
             draft.script = latest
             db.commit()
-            _add(db, draft.id, rounds_total + 1, gen, "revise", latest)
+            _add(db, draft.id, rounds_total + 1, gen, "revise", latest, llm=gen_llm)
             issues, coverage = _self_check(db, draft.script)
         except Exception as exc:  # noqa: BLE001 收口失败保留原稿
             _note(db, draft.id, rounds_total + 1, f"自检收口修订失败：{str(exc)[:200]}，保留当前稿")
@@ -343,6 +475,8 @@ def run_debate(
         draft_status.set_failed(db, draft.id, break_reason, kind="debate")
     else:
         _clear_status(db, draft.id)
+    # R-178：回填运行头（实际跑完几轮 / 是否降级）
+    _finish_run_header(db, run_header_id, rounds_done=rounds_done, degraded=degraded)
     return {
         "draft_id": draft.id,
         "title": draft.title,
@@ -422,6 +556,11 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     db.refresh(draft)
     # R-173：把草稿 id 回写进 payload，供调用方（rewrite_worker）在**异常时**也能标记中断状态
     payload["draft_id"] = draft.id
+    # R-178：洗稿同样留运行头 + 每次调用记实际模型
+    rewrite_rounds = debate_rounds(db, settings)
+    run_header_id = _run_header(db, draft.id, gen_slot, critic_slot, rewrite_rounds)
+    gen_label = _slot_meta(gen_slot)["label"]
+    critic_label = _slot_meta(critic_slot)["label"]
 
     # R-157：洗稿前先把素材 ASR 文案记为第一版（洗稿后正文是第二版）
     from .draft_versions import finalize_version
@@ -447,8 +586,16 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     rewrite_user = f"作者人设：\n{persona}\n\n参考素材标题：{source_title}\n参考素材原文：\n{source_text[:4000]}"
 
     latest = None
+    draft_llm = None
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
-        _status(db, draft.id, f"{name.upper()} 正在初稿洗稿…", kind="rewrite", actor=name, phase="draft")
+        _status(
+            db,
+            draft.id,
+            f"{gen_label or name.upper()} 正在初稿洗稿…",
+            kind="rewrite",
+            actor=name,
+            phase="draft",
+        )
         try:
             data = llm.chat_json(
                 [{"role": "system", "content": rewrite_system}, {"role": "user", "content": rewrite_user}],
@@ -457,6 +604,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
                 require=("script",),
             )
             latest = str(data.get("script", "")).strip()
+            draft_llm = llm
             draft.title = str(data.get("title", "")).strip() or ""
             draft.cover_text = str(data.get("cover_text", "")).strip()
             break
@@ -471,7 +619,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         draft.title = (source_title[:30] + "·口播稿") if source_title else "对标洗稿"
     draft.script = latest
     db.commit()
-    _add(db, draft.id, 0, gen, "draft", latest)
+    _add(db, draft.id, 0, gen, "draft", latest, llm=draft_llm)
 
     critic_system = (
         "你是脚本评审专家。对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、哪些有 AI 感、"
@@ -483,11 +631,20 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "不要解释、不要加标题，保持 1-2 分钟口播长度。"
     )
 
-    rounds = debate_rounds(db, settings)
+    rounds = rewrite_rounds
     break_reason = ""
 
     for r in range(1, rounds + 1):
-        _status(db, draft.id, f"{critic.upper()} 正在评审第 {r}/{rounds} 轮…", kind="rewrite", actor=critic, phase="critique", round_no=r, rounds=rounds)
+        _status(
+            db,
+            draft.id,
+            f"{critic_label or critic.upper()} 正在评审第 {r}/{rounds} 轮…",
+            kind="rewrite",
+            actor=critic,
+            phase="critique",
+            round_no=r,
+            rounds=rounds,
+        )
         try:
             critique = _chat_once(
                 critic_llm,
@@ -500,8 +657,17 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             break_reason = f"第 {r}/{rounds} 轮评审失败（{str(exc)[:120]}），已按当前稿定稿，可重新讨论"
             _note(db, draft.id, r, f"评审方({critic})失败：{str(exc)[:200]}，以当前稿定稿")
             break
-        _add(db, draft.id, r, critic, "critique", critique)
-        _status(db, draft.id, f"{gen.upper()} 正在按评审修订第 {r}/{rounds} 轮…", kind="rewrite", actor=gen, phase="revise", round_no=r, rounds=rounds)
+        _add(db, draft.id, r, critic, "critique", critique, llm=critic_llm)
+        _status(
+            db,
+            draft.id,
+            f"{gen_label or gen.upper()} 正在按评审修订第 {r}/{rounds} 轮…",
+            kind="rewrite",
+            actor=gen,
+            phase="revise",
+            round_no=r,
+            rounds=rounds,
+        )
         try:
             revised = _chat_once(
                 gen_llm,
@@ -517,7 +683,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         latest = revised
         draft.script = latest
         db.commit()
-        _add(db, draft.id, r, gen, "revise", latest)
+        _add(db, draft.id, r, gen, "revise", latest, llm=gen_llm)
 
     # R-173：真正跑满才清状态；中途失败（R-118 允许以当前稿定稿）留下「中断」标记，
     # 免得作者以为「只讨论了一轮」是正常结果。
@@ -525,6 +691,13 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         draft_status.set_failed(db, draft.id, break_reason, kind="rewrite")
     else:
         _clear_status(db, draft.id)
+    # R-178：回填运行头（实际跑完几轮）
+    _finish_run_header(
+        db,
+        run_header_id,
+        rounds_done=rounds if not break_reason else 0,
+        degraded=bool(gen_llm.degraded or critic_llm.degraded),
+    )
     # R-157：洗稿完成后记第二版
     finalize_version(db, draft, source="ai_rewrite", note="洗稿后")
     return {

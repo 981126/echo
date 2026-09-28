@@ -11,7 +11,7 @@ import {
   Pencil,
   MessageSquare,
   RotateCcw,
-
+  Cpu,
 } from 'lucide-react'
 import MarkdownIt from 'markdown-it'
 import { apiJson } from '@/api/client'
@@ -31,9 +31,14 @@ import { ScriptEditor } from './script-editor'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { DraftAiStatus } from './draft-ai-status'
 import { buildDiff } from './diff'
+import { softIn } from '@/lib/motion'
 import {
   VERSION_SOURCE,
-  modelInfo,
+  discussionModelInfo,
+  discussModelLabel,
+  discussRoleLabel,
+  isRunRow,
+  latestRun,
   type DebateState,
   type Draft,
   type DraftVersion,
@@ -41,6 +46,24 @@ import {
 } from './types'
 
 const md = new MarkdownIt({ html: false, linkify: true })
+
+/** R-178：只有「模型真的说过话」的留痕才挂模型标签（note/run 是系统行） */
+const TALK_KINDS = new Set(['draft', 'critique', 'revise'])
+
+/** R-178：模型标签（`DeepSeek · deepseek-flash`），生成方/评审方用不同底色区分 */
+export function ModelChip({ label, tone }: { label: string; tone: 'gen' | 'critic' }) {
+  return (
+    <span
+      data-testid={`model-chip-${tone}`}
+      className={cn(
+        'rounded px-1 py-0.5 text-[10px] font-medium',
+        tone === 'gen' ? 'bg-accent-soft text-accent' : 'bg-muted text-foreground'
+      )}
+    >
+      {label}
+    </span>
+  )
+}
 
 export interface DraftEditState {
   id: number
@@ -210,6 +233,8 @@ export function DraftEditDrawer({
     return () => clearInterval(timer)
   }, [discussing, id, onSaved, setState])
 
+  // R-178：最近一次讨论的运行头（配置的生成方/评审方）——必须在 early return 之前，遵守 hooks 规则
+  const currentRun = useMemo(() => latestRun(discussions), [discussions])
   const versionsDesc = useMemo(() => [...versions].sort((a, b) => b.id - a.id), [versions])
   const bodyDiff = useMemo(() => {
     const l = versions.find((v) => String(v.id) === cmpLeft)
@@ -339,7 +364,8 @@ export function DraftEditDrawer({
     }
   }
 
-  const info = draft ? modelInfo(draft) : ''
+  // R-178：本篇生成模型优先用「最近一次讨论的运行头」（切模型后仍显示当时那次），quality 兜底
+  const info = draft ? discussionModelInfo(discussions, draft) : ''
   const q = draft?.quality || {}
 
   return (
@@ -495,24 +521,64 @@ export function DraftEditDrawer({
                     {!canDiscuss && <span className="text-xs">这篇草稿没有可讨论的原文或正文</span>}
                   </div>
                 )}
+                {/* R-178：本次讨论用的是哪两个模型（最近一次运行头，切模型后仍显示历史那次） */}
+                {!!currentRun && (
+                  <motion.div
+                    initial={{ opacity: 0.85, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={softIn}
+                    className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-2 text-[11px]"
+                  >
+                    <Cpu className="h-3.5 w-3.5 shrink-0 text-accent" />
+                    <span className="text-muted-foreground">本次讨论：</span>
+                    <ModelChip label={currentRun.gen} tone="gen" />
+                    <span className="text-muted-foreground">×</span>
+                    <ModelChip label={currentRun.critic} tone="critic" />
+                    {!!currentRun.rounds && (
+                      <span className="text-muted-foreground">
+                        · 讨论 {currentRun.rounds_done ?? currentRun.rounds}/{currentRun.rounds} 轮
+                      </span>
+                    )}
+                    {currentRun.degraded === true && <Badge variant="warning">存在降级</Badge>}
+                  </motion.div>
+                )}
                 <ScrollArea className="max-h-[52vh]">
                   <div className="space-y-2.5 pr-2">
                     <AnimatePresence initial={false}>
-                      {discussions.map((m) => (
+                      {discussions.filter((m) => !isRunRow(m)).map((m) => (
                         <motion.div
                           key={m.id}
-                          initial={{ opacity: 0, y: 10 }}
+                          initial={{ opacity: 0.85, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
+                          transition={softIn}
                           className={cn(
                             'rounded-lg border px-3 py-2.5',
-                            m.actor === 'referee' ? 'border-accent/30 bg-accent-soft/40' : 'border-border bg-muted/40'
+                            m.kind === 'critique' ? 'border-accent/30 bg-accent-soft/40' : 'border-border bg-muted/40'
                           )}
                         >
-                          <div className="mb-1 flex items-center gap-2 text-xs">
-                            <b>{m.actor === 'referee' ? '评审方' : m.actor === 'generator' ? '生成方' : m.actor}</b>
+                          <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                            <b>{discussRoleLabel(m)}</b>
+                            {/* R-178：显示真实模型 + 版本，不再显示 model1/model2（系统说明行没有模型，不挂标签） */}
+                            {TALK_KINDS.has(m.kind) && (
+                              <motion.span
+                                initial={{ opacity: 0.85 }}
+                                animate={{ opacity: 1 }}
+                                transition={softIn}
+                                className={cn(
+                                  'rounded px-1 py-0.5 text-[10px]',
+                                  m.model_label ? 'bg-accent-soft text-accent' : 'bg-muted text-muted-foreground'
+                                )}
+                                title={m.model_id ? `${m.vendor}/${m.model_id}` : '这条留痕产生时还没有记录模型版本'}
+                              >
+                                {discussModelLabel(m)}
+                              </motion.span>
+                            )}
                             <span className="text-muted-foreground">
                               {{ draft: '初稿', critique: '评审', revise: '修订', note: '说明' }[m.kind as string] || m.kind} · 第{m.round}轮
                             </span>
+                            {!!m.created_at && (
+                              <span className="text-muted-foreground/70">{fmtDate(m.created_at)}</span>
+                            )}
                           </div>
                           <p className="whitespace-pre-wrap text-xs leading-relaxed">{m.content}</p>
                         </motion.div>

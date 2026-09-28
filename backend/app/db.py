@@ -510,6 +510,22 @@ def _fix_app_utc_columns() -> None:
         session.close()
 
 
+def _migrate_discussion_model_fields() -> None:
+    """R-178：draft_discussions 记录**实际出结果**的模型（used_slot/vendor/model_id）。
+
+    之前只存槽位名（`actor=model1/model2`），作者切了模型后历史留痕就无从考证；
+    新列对历史行留空（前端显示「未记录模型（历史）」），不伪造。
+    """
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(draft_discussions)").fetchall()}
+        if "used_slot" not in cols:
+            conn.exec_driver_sql("ALTER TABLE draft_discussions ADD COLUMN used_slot VARCHAR(20) NOT NULL DEFAULT ''")
+        if "vendor" not in cols:
+            conn.exec_driver_sql("ALTER TABLE draft_discussions ADD COLUMN vendor VARCHAR(40) NOT NULL DEFAULT ''")
+        if "model_id" not in cols:
+            conn.exec_driver_sql("ALTER TABLE draft_discussions ADD COLUMN model_id VARCHAR(80) NOT NULL DEFAULT ''")
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  确保模型已注册
 
@@ -539,6 +555,7 @@ def init_db() -> None:
     _migrate_draft_tags()
     _migrate_transcript_asr_provider()
     _migrate_transcript_asr_model()
+    _migrate_discussion_model_fields()
     _fix_video_creator_binding()
     _auto_confirm_tags()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间

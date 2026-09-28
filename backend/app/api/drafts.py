@@ -231,8 +231,14 @@ def debate_status(draft_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{draft_id}/discussions", response_model=list[dict])
 def list_discussions(draft_id: int, db: Session = Depends(get_db)):
-    """脚本讨论留痕（R-023）：按轮次返回聊天式消息。"""
+    """脚本讨论留痕（R-023）：按轮次返回聊天式消息。
+
+    R-178：每条附**实际出结果**的模型（`used_slot/vendor/model_id` + 服务端算好的 `model_label`，
+    如 `DeepSeek · deepseek-flash`）；历史行没记过模型 → `model_label` 为空，前端显示「未记录模型（历史）」。
+    `kind='run'` 是某一次讨论的运行头（content 为 JSON：当时配置的生成方/评审方 + 轮次 + 是否降级）。
+    """
     from ..models.discussion import DraftDiscussion
+    from ..services.debate import model_label
 
     rows = (
         db.query(DraftDiscussion)
@@ -247,6 +253,10 @@ def list_discussions(draft_id: int, db: Session = Depends(get_db)):
             "actor": r.actor,
             "kind": r.kind,
             "content": r.content,
+            "used_slot": r.used_slot or "",
+            "vendor": r.vendor or "",
+            "model_id": r.model_id or "",
+            "model_label": model_label(r.vendor or "", r.model_id or ""),
             "created_at": r.created_at.isoformat(),
         }
         for r in rows

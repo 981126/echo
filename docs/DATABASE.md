@@ -216,6 +216,8 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 ## `draft_discussions`
 
 双模型讨论留痕（R-023）：围绕草稿的每轮讨论消息（模型/轮次/内容）。
+R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_id`，降级/兜底后以事实为准），
+`kind='run'` 的行是**一次讨论的运行头**（`content` 为 JSON：当时配置的生成方/评审方 + 轮次 + 是否降级）。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -225,6 +227,9 @@ AI 对话消息：角色（user/assistant/system）、内容、会话归属 conv
 | `actor` | VARCHAR(20) |  | 否 |  |
 | `kind` | VARCHAR(20) |  | 否 |  |
 | `content` | TEXT |  | 否 |  |
+| `used_slot` | VARCHAR(20) |  | 否 | '' |
+| `vendor` | VARCHAR(40) |  | 否 | '' |
+| `model_id` | VARCHAR(80) |  | 否 | '' |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
 **索引**：`ix_draft_discussions_draft_id`（draft_id）

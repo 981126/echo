@@ -102,7 +102,7 @@
     用它模拟老库跑 `init_db()` 并断言「模型每一列都存在」—— 治「本地测试全用全新库，漏写迁移 100% 绿」。
 - `notify.py`（R-141）：`mail_config_problem(settings)` 是邮件配置的唯一体检入口（缺失 / 非 ASCII 占位符 / 非法邮箱 → 可读原因）；`_send` 把配置非法与 SMTP 异常都收敛成「log + 返回 False」，中文主题用 `Header(...,'utf-8').encode()` 做 RFC2047 编码，正文用 `msg.as_bytes()` 发送。因此邮件是**次要通道**：`run_daily_pipeline` 只在稿子生成失败时才置 failed。
 - `platform_sync.py` 的灵感池入池（R-140）：`pool_ideas_from_comments(db, post, comments, *, account=None, per_post=None)` 是「评论 → 选题池」的**唯一实现**——`_collect_comments()`（全量/每周，非队列）与 `sync_post_comments()`（daily 逐素材队列 / 单帖）都调用它。限量：单帖 `ECHO_POOL_IDEAS_PER_POST`（默认 8，按点赞降序）、单博主每天 `ECHO_POOL_IDEAS_PER_DAY`（默认 40，`0`=不限）；保留「标题 ≥4 字」、按 `(source,title,snapshot_date)` 去重、重复点赞取大。`_pool_quota()` 负责当天剩余配额。同步说明与 payload 汇报 `pool_ideas`（灵感池新增 N 条）。
-- `debate.py`：**所有脚本生成的唯一路径**（R-139）。`debate_rounds(db)` 取「AI 设置」轮次（Kv `debate_rounds` > `.env` > 5，夹 1–10）；`snapshot(db).generation_pair()` 解析生成方/评审方（可相同）；`_side_llm` 把某一方包成「该槽位主用 + 另一方兜底」；初稿用 `generation_user_message`（与金样本回放同一输入），自检不通过再做一次收口修订；结果写 `draft_discussions` 与 `Draft.quality`（models/used/fallback/rounds/rounds_done/issues/passed/style_coverage）。入口：`run_debate`（通用；R-155 增可选 `source_text/source_title`：传了就按原文改写出 标题/封面字/正文/标签，写回 `original_script` 供原文对照、`merge_tags` 合并去重，随后同样 N 轮+自检）、`run_debate_draft`（工作台后台任务）、`run_rewrite_debate`（对标洗稿，R-118）。原文讨论的入队/解析在 `draft_flow.resolve_discussion_source` / `start_discussion` / `discussion_task`（任务 kind=`draft_discuss`）。
+- `debate.py`：**所有脚本生成的唯一路径**（R-139）。`debate_rounds(db)` 取「AI 设置」轮次（Kv `debate_rounds` > `.env` > 5，夹 1–10）；`snapshot(db).generation_pair()` 解析生成方/评审方（可相同）；`_side_llm` 把某一方包成「该槽位主用 + 另一方兜底」；初稿用 `generation_user_message`（与金样本回放同一输入），自检不通过再做一次收口修订；结果写 `draft_discussions` 与 `Draft.quality`（models/used/fallback/rounds/rounds_done/issues/passed/style_coverage）。**R-178**：每条留痕还落库**实际出结果**的模型（`_llm_model_fields` → `used_slot/vendor/model_id`，取 `RoutedLLM.used_*`，降级后以事实为准）；每次讨论开头写一条 `kind='run'` 运行头（`_run_header`：当时配置的生成方/评审方 + 轮次，结束 `_finish_run_header` 回填 rounds_done/degraded）；状态条文案与接口展示统一走 `model_label()`（复用 `model_settings.VENDORS` 标签 → `DeepSeek · deepseek-flash`），不再出现槽位名 `model1/model2`。入口：`run_debate`（通用；R-155 增可选 `source_text/source_title`：传了就按原文改写出 标题/封面字/正文/标签，写回 `original_script` 供原文对照、`merge_tags` 合并去重，随后同样 N 轮+自检）、`run_debate_draft`（工作台后台任务）、`run_rewrite_debate`（对标洗稿，R-118）。原文讨论的入队/解析在 `draft_flow.resolve_discussion_source` / `start_discussion` / `discussion_task`（任务 kind=`draft_discuss`）。
 - `draft_status.py`（R-173）：**草稿 AI 长任务状态的唯一事实源**——讨论/洗稿/回炉/AI 生成共用一个键
   `app_kv['draft_ai:{id}']`（JSON：`state`(running|failed) / `kind` / `note` / `actor` / `phase` / `round` / `rounds` / `at`），
   不新增表、不新增字段。`set_running` 每个步骤覆盖写（`debate._status` 是它的薄封装），
@@ -225,6 +225,7 @@
 | `pageVariants` | opacity 0→1 + y 12→0 + blur 4→0，0.32s | 路由级页面切换（`AppShell` 的 `<Outlet>`） |
 | `listVariants` + `itemVariants` | stagger 0.045s + y 14→0，0.34s | 列表/卡片墙入场 |
 | `cardHover` / `fadeIn` | y -3 / opacity 0→1 | 卡片悬停、轻量出现 |
+| `softIn`（R-178） | 0.24s，`EASE_OUT_EXPO` | **新元素/新标签入场**（模型标签、运行头摘要、新批次卡片）：配 `opacity 0.85→1` + y 8–10→0，**禁止从 0 起步** |
 | `ThinkingDots`（`components/ui/thinking-dots.tsx`） | 三点循环跳动 | AI 长任务"正在思考" |
 
 ### 8.2 必须有的动效（缺一不可）

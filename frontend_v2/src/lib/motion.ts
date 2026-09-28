@@ -32,3 +32,8 @@ export const fadeIn: Variants = {
   animate: { opacity: 1, transition: { duration: 0.25 } },
   exit: { opacity: 0, transition: { duration: 0.15 } }
 }
+
+// R-178 / R-175：新元素（模型标签、运行头摘要、新批次卡片）入场用的轻过渡——
+// **不从 opacity:0 起步**（切换/复用容器时会先闪一帧空白），统一从 0.85 起、收口到 1，
+// 配合 8–10px 位移表达「新内容进来了」。
+export const softIn: Transition = { duration: 0.24, ease: EASE_OUT_EXPO }
