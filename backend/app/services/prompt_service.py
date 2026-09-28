@@ -113,6 +113,17 @@ def ensure_persona_layer_prompts(db: Session) -> None:
             save_new_version(db, key, default_content(key), note="R-182 人设四层重构")
 
 
+def ensure_generation_steering_prompt(db: Session) -> None:
+    """R-183：把 generation 提示词从「写死画像/句式」退回「方向盘」版。
+
+    老库启用版含写死的「先破后立/全程断言」等，R-183 起改由人设 + 创作模式 + 样本决定；
+    检测到旧版特征就另存并用代码默认（方向盘）启用，旧版归档可回溯。
+    """
+    content = get_prompt("generation", db)
+    if "先破后立" in content or "本次创作模式" not in content:
+        save_new_version(db, "generation", default_content("generation"), note="R-183 生成提示词退回方向盘")
+
+
 def save_new_version(db: Session, key: str, content: str, note: str = "") -> AiPrompt:
     """手动编辑保存 = 另存为新版本并启用（旧 enabled 转 archived）。"""
     content = (content or "").strip()

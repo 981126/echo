@@ -267,6 +267,7 @@ def run_debate(
     settings=None,
     source_text: str = "",
     source_title: str = "",
+    mode: str = "",
 ) -> dict:
     """在已有草稿上跑一次完整双模型讨论（所有脚本生成的唯一路径，R-139）。
 
@@ -313,7 +314,7 @@ def run_debate(
         initial_budget = budget_settings.budget_for(db, "rewrite")
     else:
         initial_system = get_prompt("generation", db)
-        initial_user = generation_user_message(db, topic)  # R-129：与金样本回放评分同一份输入
+        initial_user = generation_user_message(db, topic, mode)  # R-129：与金样本回放评分同一份输入；R-183 创作模式
         initial_budget = budget_settings.budget_for(db, "debate_initial")
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
         _status(
@@ -502,7 +503,8 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
     if not draft.prompt_version:
         draft.prompt_version = get_prompt_version("generation", db)  # R-129：按提示词版本归因
     topic = str(payload.get("topic", "")).strip() or draft.title or "今日话题"
-    return run_debate(db, draft, topic)
+    mode = str(payload.get("mode") or "").strip()
+    return run_debate(db, draft, topic, mode=mode)
 
 
 def run_rewrite_debate(db: Session, payload: dict) -> dict:

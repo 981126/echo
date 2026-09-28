@@ -87,6 +87,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [mode, setMode] = useState('ops')
   const [actions, setActions] = useState<AgentAction[]>([])
   const [deleteConv, setDeleteConv] = useState<Conversation | null>(null)
   const [renaming, setRenaming] = useState<Conversation | null>(null)
@@ -177,7 +178,7 @@ export default function ChatPage() {
         method: 'POST',
         // R-176：必须显式声明 JSON，否则 fetch 默认 text/plain，FastAPI 解析不出 body → 422
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversation_id: currentId, message: q })
+        body: JSON.stringify({ conversation_id: currentId, message: q, mode })
       })
       if (!resp.body) throw new Error('连接失败')
       const reader = resp.body.getReader()
@@ -391,6 +392,24 @@ export default function ChatPage() {
         </div>
 
         <div className="border-t border-border p-3">
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">对话模式</span>
+            {[
+              { key: 'ops', label: '运营分析' },
+              { key: 'create', label: '创作共创' }
+            ].map((m) => (
+              <button
+                key={m.key}
+                onClick={() => setMode(m.key)}
+                className={
+                  'cursor-pointer rounded-md border px-2 py-0.5 text-xs transition-colors ' +
+                  (mode === m.key ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted-foreground hover:text-foreground')
+                }
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           <div className="flex items-end gap-2">
             <textarea
               value={input}

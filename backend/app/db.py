@@ -577,12 +577,13 @@ def init_db() -> None:
     _auto_confirm_tags()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
-    from .services.prompt_service import ensure_defaults, ensure_persona_layer_prompts
+    from .services.prompt_service import ensure_defaults, ensure_generation_steering_prompt, ensure_persona_layer_prompts
 
     session = SessionLocal()
     try:
         ensure_defaults(session)
         ensure_persona_layer_prompts(session)  # R-182：人设四层提示词升级
+        ensure_generation_steering_prompt(session)  # R-183：生成提示词退回方向盘
     finally:
         session.close()
     _fix_platform_timezone()

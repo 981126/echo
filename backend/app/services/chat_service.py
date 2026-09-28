@@ -430,6 +430,13 @@ def _step_summary(name: str, result: dict) -> str:
 log = get_logger("chat")
 
 
+CREATE_MODE_PROMPT = (
+    "\n\n【创作共创模式】当前作者在和你做**开放式创作共创**：允许发散、追问、一次给多个方向甚至反方向，"
+    "不要急着把话套进固定结构；先和作者把选题/角度聊开，需要时再落成脚本。"
+    "数据使用规则与写操作确认规则依然有效。"
+)
+
+
 class ChatService:
     """AI 对话（R-139：默认模型1，失败自动降级模型2）。`llm=` 仍可注入（测试/显式指定）。"""
 
@@ -444,6 +451,7 @@ class ChatService:
         *,
         conversation_id: int | None = None,
         on_step: Callable[[dict], None] | None = None,
+        mode: str = "ops",
     ) -> str:
         """多步 agent 问答（R-147 P0）。
 
@@ -458,7 +466,7 @@ class ChatService:
         budget = budget_settings.budget_for(db, "chat")
 
         messages: list[dict] = [
-            {"role": "system", "content": get_prompt("chat") + TOOL_DATA_RULES + "\n\n" + _schema_section(db)}
+            {"role": "system", "content": get_prompt("chat") + (CREATE_MODE_PROMPT if mode == "create" else "") + TOOL_DATA_RULES + "\n\n" + _schema_section(db)}
         ]
         messages.extend(history[-20:])
         messages.append({"role": "user", "content": user_message})

@@ -34,6 +34,7 @@ def _persona_version(db: Session) -> int:
 
 class GenerateIn(BaseModel):
     topic: str
+    mode: str = ""  # R-183 创作模式：sharp/monologue/commentary/experiment，空=不指定
 
 
 class AnglesIn(BaseModel):
@@ -91,7 +92,7 @@ def _rework_task(db: Session, payload: dict) -> dict:
 @router.post("/generate", response_model=DraftOut)
 def generate(payload: GenerateIn, db: Session = Depends(get_db)):
     """根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。"""
-    return generate_draft(db, payload.topic)
+    return generate_draft(db, payload.topic, mode=payload.mode)
 
 
 # R-147：讨论任务体与占位稿创建抽到 services/draft_flow，供「AI 生成」按钮与 AI 对话的
@@ -105,7 +106,7 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
     topic = (payload.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="选题不能为空")
-    task_id, draft_id = draft_flow.start_generation(db, topic)
+    task_id, draft_id = draft_flow.start_generation(db, topic, mode=(payload.mode or "").strip())
     return {"task_id": task_id, "draft_id": draft_id}
 
 

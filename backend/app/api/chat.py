@@ -176,7 +176,7 @@ def chat_stream(payload: ChatStreamIn):
                     out.put(("step", step))
 
                 reply = ChatService(db=db).reply(
-                    db, user_msg, history, conversation_id=conversation_id, on_step=on_step
+                    db, user_msg, history, conversation_id=conversation_id, on_step=on_step, mode=payload.mode
                 )
                 msg = ChatMessage(conversation_id=conversation_id, role="assistant", content=reply)
                 db.add(msg)

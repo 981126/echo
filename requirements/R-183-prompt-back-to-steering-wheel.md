@@ -1,8 +1,8 @@
 # R-183 生成提示词退回「方向盘」+ 创作模式参数
 
 - **日期**: 2026-09-28
-- **状态**: 🔲 已确认方向，待实施
-- **关联**: `ai_prompts.generation`、`services/debate.py`、`services/generation.py`；R-130/R-131/R-182
+- **状态**: ✅ 已完成（2026-09-28，M172）
+- **关联**: `ai_prompts.generation`、`services/debate.py`、`services/generation.py`、`services/chat_service.py`；R-130/R-131/R-182
 
 ## 原文（作者原话，未改动）
 > （讨论「提示词会阻碍 AI 发挥吗」时确认）把提示词里写死的画像退回方向盘。
@@ -24,5 +24,13 @@
 - generation 提示词不再含写死画像；切换创作模式产出明显不同风格；
 - `scripts/verify.sh` 全绿。
 
+## 实施记录（2026-09-28）
+- `GENERATION_SYSTEM` 退回方向盘：只要求「真实/具体/口语/不要 AI 腔 + 输出契约」，删掉「先破后立/第一句必须钩子/全程断言」等写死句式；老库启用版检测到旧特征自动另存新版本（`ensure_generation_steering_prompt`），旧版归档可回溯。
+- 新增创作模式 `CREATION_MODES`（犀利干货/个人独白/热点评论/实验复盘）：`mode` 从 `/api/drafts/generate(-async)` → `draft_flow.start_generation` → `debate.run_debate` → `generation_user_message` 注入「本次创作模式：…」；无模式时走人设+样本。
+- 前端：主页角度弹窗加创作模式选择（自动/犀利干货/个人独白/热点评论/实验复盘）。
+- AI 对话拆双模式：`ChatStreamIn.mode`（ops 运营分析 / create 创作共创），create 时系统提示追加「允许发散、多方向、不急着套结构」；前端对话底部加模式切换。
+- 测试：`tests/test_r183_generation_mode.py`（提示词无写死句式、模式注入）；`scripts/verify.sh` 全绿。
+
 ## 排期
-M172（待实施）
+M172
+

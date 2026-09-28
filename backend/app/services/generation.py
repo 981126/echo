@@ -25,13 +25,40 @@ from ..models.video import Video
 from .llm import LLMError
 
 GENERATION_SYSTEM = (
-    "你是短视频口播脚本创作专家。严格模仿作者的语气与用词习惯，"
-    "结合人设档案与风格样本，围绕给定选题创作。"
-    "只输出 JSON："
-    '{"title":"视频标题（抓眼球但不过度）","cover_text":"封面字（与标题不同，3-8字，适合压在图上的大字）",'
-    '"script":"完整口播脚本（1-2分钟，约200-400字，口语化，有钩子有结尾互动）",'
+    "你是这位作者的代笔，写出来要像他本人对着镜头说话：真实、具体、口语，"
+    "不要 AI 腔、不要书面套话、不要正确但没用的空话。\n"
+    "怎么写由「作者人设 + 本次创作模式 + 风格样本」决定，不要套固定模板；"
+    "观点必须用作者自己的，例子优先用作者真实经历；给方向也可以，但别喂到嘴里。\n"
+    "严格按末尾的输出契约返回，不输出额外文字。\n"
+    "输出契约（系统固定，不得改动字段名与结构）：\n"
+    '只输出 JSON：{"title":"视频标题","cover_text":"封面字","script":"完整口播脚本（1-2 分钟，约200-400字，口语化，有钩子有收尾）",'
     '"shells":{"douyin":"抖音发布文案+话题标签","bilibili":"B站简介","xiaohongshu":"小红书笔记正文（含emoji与话题）"}}'
 )
+
+# R-183：创作模式——把「是否犀利/独白/追热点/做实验」从提示词里拿出来，改成显式参数。
+CREATION_MODES: dict[str, dict[str, str]] = {
+    "sharp": {
+        "label": "犀利干货",
+        "guide": "以犀利干货为主：直接给判断和可执行动作，先破后立、观点鲜明，少铺垫。",
+    },
+    "monologue": {
+        "label": "个人独白",
+        "guide": "以个人独白为主：第一人称讲自己的经历、状态与感受，真诚、具体，不强行升华。",
+    },
+    "commentary": {
+        "label": "热点评论",
+        "guide": "以热点评论为主：借热点事件表达作者的鲜明立场，联系自己的经验，观点用作者自己的。",
+    },
+    "experiment": {
+        "label": "实验复盘",
+        "guide": "以实验复盘为主：把一件事当实验，讲清做法、过程与结果，结论留有余地。",
+    },
+}
+
+
+def mode_label(mode: str) -> str:
+    return CREATION_MODES.get((mode or "").strip(), {}).get("label", "")
+
 
 
 def _creator_filter(db: Session):
@@ -423,11 +450,11 @@ def _dim_examples(db: Session, per_dim: int = 1) -> str:
     return "作者分节打分最高的范例（按维度学：开头怎么钩、节奏怎么走、结尾怎么收）：\n" + "\n".join(lines[: per_dim * 4])
 
 
-def author_style_context(db: Session, topic: str = "") -> str:
+def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
     """作者人设 + 语言习惯 + 样本/范本/结构/分节范例/对标参考的共享上下文。
 
     R-181：生成与「参考改写（洗稿）」共用同一份上下文，避免洗稿只拿到简化人设、
-    不像作者本人。`topic` 非空时按选题检索风格样本。
+    不像作者本人。`topic` 非空时按选题检索风格样本；`mode`（R-183）为创作模式。
     """
     ctx = _persona_context(db)
     samples = _style_samples(db, topic) if topic else _style_samples(db, "")
@@ -438,10 +465,12 @@ def author_style_context(db: Session, topic: str = "") -> str:
     rewrites = _rewrite_examples(db)
     dims = _dim_examples(db)
     avoid = _avoid_words(db)
+    mode_info = CREATION_MODES.get((mode or "").strip())
     return "\n".join(
         [
             "作者人设：",
             *[f"- {t}" for t in ctx["tags"] or ["（暂无）"]],
+            *([] if not mode_info else ["", f"本次创作模式：{mode_info['label']}——{mode_info['guide']}"]),
             "",
             "红线（不要违反）：",
             *[f"- {r}" for r in ctx["redlines"] or ["（无）"]],
@@ -462,9 +491,9 @@ def author_style_context(db: Session, topic: str = "") -> str:
     )
 
 
-def generation_user_message(db: Session, topic: str) -> str:
+def generation_user_message(db: Session, topic: str, mode: str = "") -> str:
     """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
-    return "\n".join([f"选题：{topic}", "", author_style_context(db, topic)])
+    return "\n".join([f"选题：{topic}", "", author_style_context(db, topic, mode)])
 
 
 
@@ -505,13 +534,14 @@ def _mock_payload(topic: str) -> tuple[str, str, str, dict]:
     return title, cover, script, shells
 
 
-def generate_draft(db: Session, topic: str, settings=None, snapshot: bool = True) -> Draft:
+def generate_draft(db: Session, topic: str, settings=None, snapshot: bool = True, mode: str = "") -> Draft:
     """生成一篇脚本草稿（R-139：与工作台/每日自动生成完全相同的双模型讨论路径）。
 
     流程：建占位稿 → `run_debate`（生成方初稿 + 评审方 N 轮挑刺 + 生成方修订 + 自检收口）
     → 草稿上带 `quality`（含模型组合 / 是否降级 / 轮次 / 自检结果）。
     无密钥或两个模型都不可用时回落到确定性 mock 稿（开发/离线可跑，`quality.mock=True`）。
     R-157：默认生成完自动定稿留一版；`snapshot=False` 用于金样本自测 / 回炉中间稿（不留版）。
+    R-183：`mode` 为创作模式（sharp/monologue/commentary/experiment），空=不指定。
     """
     from .debate import PLACEHOLDER_SCRIPT, debate_rounds, run_debate
 
@@ -533,7 +563,7 @@ def generate_draft(db: Session, topic: str, settings=None, snapshot: bool = True
     db.refresh(draft)
 
     try:
-        run_debate(db, draft, topic, settings)
+        run_debate(db, draft, topic, settings, mode=mode)
     except LLMError as exc:
         # 无密钥 / 两个模型全挂 → 确定性 mock 稿（保留草稿，绝不静默丢稿）
         db.rollback()

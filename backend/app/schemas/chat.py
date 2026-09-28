@@ -16,6 +16,7 @@ class ChatIn(BaseModel):
 class ChatStreamIn(BaseModel):
     conversation_id: Optional[int] = None
     message: str
+    mode: str = "ops"  # R-183：ops 运营分析 / create 创作共创
 
 
 class ChatMessageOut(BaseModel):

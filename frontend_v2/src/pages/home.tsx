@@ -39,6 +39,15 @@ interface Angle {
   reason?: string
 }
 
+// R-183 创作模式（空 = 自动，由人设+样本决定）
+const GEN_MODES = [
+  { key: '', label: '自动' },
+  { key: 'sharp', label: '犀利干货' },
+  { key: 'monologue', label: '个人独白' },
+  { key: 'commentary', label: '热点评论' },
+  { key: 'experiment', label: '实验复盘' }
+]
+
 export default function HomePage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -46,6 +55,7 @@ export default function HomePage() {
   const [batch, setBatch] = useState(0)
   const [angleOpen, setAngleOpen] = useState(false)
   const [angles, setAngles] = useState<Angle[]>([])
+  const [mode, setMode] = useState('')
   const [pendingTopic, setPendingTopic] = useState('')
   const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
@@ -138,7 +148,7 @@ export default function HomePage() {
   async function generate(topic: string) {
     setGenerating(topic)
     try {
-      await apiJson('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic }) })
+      await apiJson('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic, mode }) })
       toast.success('已开始生成，去脚本工作台查看')
       setAngleOpen(false)
       navigate('/drafts')
@@ -300,6 +310,21 @@ export default function HomePage() {
           <DialogHeader>
             <DialogTitle>选一个切入角度</DialogTitle>
           </DialogHeader>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">创作模式</span>
+            {GEN_MODES.map((m) => (
+              <button
+                key={m.key}
+                onClick={() => setMode(m.key)}
+                className={
+                  'cursor-pointer rounded-md border px-2 py-0.5 text-xs transition-colors ' +
+                  (mode === m.key ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted-foreground hover:text-foreground')
+                }
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           {angleLoading ? (
             <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
               <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> 正在想 3 个角度…
