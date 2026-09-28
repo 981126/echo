@@ -62,7 +62,9 @@ export const MaterialCard = memo(function MaterialCard({
   // R-199：换一批结果时**逐格交接**——新卡的入场延迟 = 本格旧卡的退场延迟 + 退场时长 + 呼吸量；
   //        退场（老动画）严格保持原样：0.35s 淡出 + 缩到 0.94 + index×0.035 错峰扫过，
   //        append 卡沿用 softIn、40 张之后的卡沿用 0.15s。
+  //        **新卡进场 = 退场倒着播**：从 `opacity 0 / scale 0.94` 淡入 + 长大回 1，节奏与退场一致。
   const animateEnter = !append && index < 40
+  const replacing = !!replace && animateEnter
   const exitDelay = Math.min(index, listReplace.exit.maxItems) * listReplace.exit.stagger
   const enterDelay = exitDelay + listReplace.exit.duration + listReplace.enter.breathAfterExit
   // 老动画：退场沿用「这张卡原本的过渡规则」
@@ -71,12 +73,22 @@ export const MaterialCard = memo(function MaterialCard({
     : animateEnter
       ? { duration: listReplace.exit.duration, delay: exitDelay, ease: EASE_OUT_EXPO }
       : { duration: 0.15 }
-  // 入场：换批时等本格旧卡退完再飞入，其余情况与原来完全一致
-  const enterTransition = replace && animateEnter ? { duration: listReplace.enter.duration, delay: enterDelay, ease: EASE_OUT_EXPO } : baseTransition
+  // 入场：换批时按「退场倒放」的节奏来，其余情况与原来完全一致
+  const enterTransition = replacing
+    ? { duration: listReplace.enter.duration, delay: enterDelay, ease: EASE_OUT_EXPO }
+    : baseTransition
 
   return (
     <motion.div
-      initial={append ? { opacity: 0.85, y: 8 } : animateEnter ? { opacity: 0, y: 18, scale: 0.97 } : false}
+      initial={
+        append
+          ? { opacity: 0.85, y: 8 }
+          : replacing
+            ? { opacity: 0, scale: listReplace.exit.scale } // 退场的镜像：小一点、透明 → 长大、显影
+            : animateEnter
+              ? { opacity: 0, y: 18, scale: 0.97 }
+              : false
+      }
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: listReplace.exit.scale, transition: baseTransition }}
       transition={enterTransition}

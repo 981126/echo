@@ -10,6 +10,12 @@ describe('listReplace 换批编排（R-199）', () => {
     expect(listReplace.exit).toEqual({ duration: 0.35, stagger: 0.035, maxItems: 16, scale: 0.94 })
   })
 
+  it('新卡进场 = 退场倒放：时长与错峰节奏和退场一致（只有方向相反）', () => {
+    expect(listReplace.enter.duration).toBe(listReplace.exit.duration)
+    // 进场起步的 scale 直接复用退场收尾的 scale（镜像），不另立一套数值
+    expect(listReplace.exit.scale).toBeLessThan(1)
+  })
+
   it('同一格：新卡必须等旧卡退完（含呼吸量）再入场 → 两段动画不互相抵消', () => {
     expect(listReplace.enter.breathAfterExit).toBeGreaterThanOrEqual(0)
     const enterDelayFor = (i: number) =>
