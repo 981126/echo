@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from datetime import datetime
 from difflib import SequenceMatcher
 
@@ -19,6 +20,21 @@ from ..models.hot_topic import TopicIdea
 
 _SIM_THRESHOLD = 0.5
 _COVERED_THRESHOLD = 0.62
+_SCAN_LIMIT = 500  # 只对互动最高的一批评论聚类，避免 O(n²) 卡死
+_CACHE_TTL = 120.0
+_CACHE: dict[str, tuple[float, object]] = {}
+
+
+def _cached(key: str, fn):
+    now = time.monotonic()
+    hit = _CACHE.get(key)
+    if hit and now - hit[0] < _CACHE_TTL:
+        return hit[1]
+    value = fn()
+    _CACHE[key] = (now, value)
+    if len(_CACHE) > 32:
+        _CACHE.clear()
+    return value
 _EMOJI_TAG = re.compile(r"\[[^\]]{1,8}\]")
 _AT_RE = re.compile(r"@\S+")
 _QUESTION_HINTS = ("怎么", "如何", "能不能", "是不是", "为什么", "吗", "？", "?", "求", "想问", "请教")
@@ -79,20 +95,33 @@ def _is_covered(title: str, covered_norm: list[str]) -> bool:
     return any(_sim(n, c) >= _COVERED_THRESHOLD for c in covered_norm)
 
 
-def _unused_ideas(db: Session, source: str) -> list[TopicIdea]:
-    return (
+def _unused_ideas(db: Session, source: str, limit: int | None = None) -> list[TopicIdea]:
+    q = (
         db.query(TopicIdea)
         .filter(TopicIdea.source == source, TopicIdea.used.is_(False))
         .order_by(TopicIdea.likes.desc(), TopicIdea.id.desc())
-        .all()
     )
+    if limit:
+        q = q.limit(limit)
+    return q.all()
+
+
+def _cid(db: Session) -> int | None:
+    from .creator_service import current_creator_id
+
+    return current_creator_id(db)
 
 
 def comment_clusters(db: Session, limit: int = 15) -> dict:
-    """观众提问榜：把未使用评论按近义聚簇，返回按需求分排序的簇列表。"""
+    """观众提问榜（带 120s 缓存）：把未使用评论按近义聚簇，返回按需求分排序的簇列表。"""
+    cid = _cid(db) or 0
+    return _cached(f"cc:{cid}:{limit}", lambda: _comment_clusters(db, limit))
+
+
+def _comment_clusters(db: Session, limit: int) -> dict:
     from . import ideas_service
 
-    rows = _unused_ideas(db, "comment")
+    rows = _unused_ideas(db, "comment", _SCAN_LIMIT)
     if not rows:
         return {"clusters": [], "total_comments": 0}
     ann = {a["id"]: a for a in ideas_service.annotate_items(db, [{"id": r.id, "title": r.title} for r in rows])}
@@ -138,7 +167,12 @@ def comment_clusters(db: Session, limit: int = 15) -> dict:
 
 
 def weekly_pack(db: Session, limit: int = 20) -> dict:
-    """每周灵感补给包：评论簇 + 热榜，去重/去已讲，综合打分，产出带理由的选题。"""
+    """每周灵感补给包（带 120s 缓存）：评论簇 + 热榜，去重/去已讲，综合打分。"""
+    cid = _cid(db) or 0
+    return _cached(f"wp:{cid}:{limit}", lambda: _weekly_pack(db, limit))
+
+
+def _weekly_pack(db: Session, limit: int) -> dict:
     from . import ideas_service
 
     covered = [_norm(t) for t in covered_titles(db)]
@@ -197,7 +231,12 @@ def weekly_pack(db: Session, limit: int = 20) -> dict:
 
 
 def ledger(db: Session, limit: int = 50) -> dict:
-    """选题账本：已讲过的话题 + 未使用灵感里被判为「可能已讲」的条目。"""
+    """选题账本（带 120s 缓存）：已讲过的话题 + 未使用灵感里被判为「可能已讲」的条目。"""
+    cid = _cid(db) or 0
+    return _cached(f"led:{cid}:{limit}", lambda: _ledger(db, limit))
+
+
+def _ledger(db: Session, limit: int) -> dict:
     covered = covered_titles(db)
     cc = comment_clusters(db, limit=limit)
     covered_norm = [_norm(t) for t in covered]
