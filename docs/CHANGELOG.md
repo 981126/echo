@@ -13,8 +13,11 @@
   实测：网格高度 2367 → **4565**（翻倍，页面跳）；修后 → 2196（稳定），新卡回到 `y≈297` 的可视区里播动画。
   ⇒ 从 R-179 起「换批入场」一直是屏幕外演出，前三轮反馈都不是参数问题。
 - 修：`MaterialCard` 改 `forwardRef` 并透传到根 `motion.div`，外层保留 `memo`；加回归单测（断言 `ref.current` 是 HTMLElement）。
-- 手感：进场 = 退场倒放（显影 + 长大）但振幅放大到 `fromScale 0.78` + spring 回弹（峰值 ~1.03），错峰沿用退场的 35ms/张、逐格交接；
+- 手感：进场 = 退场倒放（显影 + 长大）但**放慢 + 加过冲**：`fromScale 0.8`、`duration 0.5`、`ease 'backOut'`
+  （中段冲过 1 再落回，整段都看得见）；错峰沿用退场的 35ms/张、逐格交接。
   退场保持换批前的原值（0.35s + 0.94 + index×0.035，单测锁死）。
+  > 用 CDP screencast（真合成帧）回放定位到：spring 版入场 150ms 就落定、前面还有 ~200ms 空网格 → 人眼像「没有动画」。
+  > 另确认代码里没有 `MotionConfig`/`reducedMotion`（framer 默认 `never`），排除系统「减弱动效」吃掉 transform。
 - 顺带修真 bug：查询 key 原用未生效的 `filters.creatorId`，只切博主下拉会发一次无 `creator_id` 的空请求并把旧数据写进新 key 的缓存；现 key 只用 `applied`（= 请求参数）。
 - 实测（真实数据，零 console 错误）：清场（退场卡 `ABS` + 淡出缩小）→ 屏内 0 张的一拍 → 新卡在可视区 `op 0.9/sc 0.95 → op 1.0/sc 1.03（回弹）→ sc 1.00` 落定。
 - 单测 `lib/motion.test.ts` 5 例 + `material-card.test.tsx` 4 例（含 ref 回归）；`scripts/verify.sh` 全绿。

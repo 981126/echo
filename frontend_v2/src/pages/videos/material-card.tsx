@@ -77,7 +77,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
   //        退场（老动画）严格保持原样：0.35s 淡出 + 缩到 0.94 + index×0.035 错峰扫过，
   //        append 卡沿用 softIn、40 张之后的卡沿用 0.15s。
   //        **新卡进场 = 退场倒着播（幅度拉大 + 回弹）**：从 `opacity 0 / fromScale 0.78` 显影长大回 1，
-  //        节奏沿用退场的错峰，但用 spring 冲过 1 再落回来，保证肉眼看得见。
+  //        节奏沿用退场的错峰，但放慢并用 backOut 过冲（0.8 → 冲过 1 → 落回），保证肉眼看得见。
   const animateEnter = !append && index < 40
   const replacing = !!replace && animateEnter
   const exitDelay = Math.min(index, listReplace.exit.maxItems) * listReplace.exit.stagger
@@ -88,9 +88,9 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
     : animateEnter
       ? { duration: listReplace.exit.duration, delay: exitDelay, ease: EASE_OUT_EXPO }
       : { duration: 0.15 }
-  // 入场：换批时按「退场倒放 + 回弹」来，其余情况与原来完全一致
+  // 入场：换批时按「退场倒放 + 慢一点 + 过冲」来，其余情况与原来完全一致
   const enterTransition = replacing
-    ? { ...listReplace.enter.spring, delay: enterDelay }
+    ? { duration: listReplace.enter.duration, delay: enterDelay, ease: listReplace.enter.ease }
     : baseTransition
 
   return (
