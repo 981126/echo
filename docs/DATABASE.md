@@ -26,7 +26,7 @@
 | `metrics_snapshots` | 本地素材(videos)每日指标快照：手动录入/批量导入/抓取/平台同步聚合，驱动看板增长曲线与复盘。 |
 | `notifications` | 右上角通知（R-019）：异步任务完成/失败，含目标页 target 与已读。 |
 | `persona_checks` | 人设「增量 vs 全量」对齐校验记录（R-128）：覆盖率、AI 语义复核分、是否达标/是否回退全量、差异明细 JSON，供人设页展示 5% 对齐结果。 |
-| `persona_tags` | 人设档案版本：标签 + 描述 + AI 自定维度(dimension) + 红线/边界 + 状态(suggested/confirmed/rejected)；版本化，AI 建议需作者确认。 |
+| `persona_tags` | 人设档案版本：标签 + 描述 + AI 自定维度(dimension) + 四层分层(layer: core_dna/stance/mode/forbidden，R-182) + 证据/频次 + 状态(suggested/confirmed/rejected)；版本化，AI 建议需作者确认。 |
 | `pipeline_runs` | 每日流水线运行记录：当日幂等（同 run_date 不重跑）、成功/失败状态与摘要。 |
 | `platform_post_comments` | 平台作品评论（入库本地查询，R-067 后带点赞数 likes，按点赞 Top50 入库展示）：post_id+text 去重。 |
 | `platform_post_stats` | 平台作品互动指标按天快照：播放/点赞/收藏/评论/转发 + extra 平台特有字段。(post_id, stat_date) 唯一。 |
@@ -410,7 +410,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 
 ## `persona_tags`
 
-人设档案版本：标签 + 描述 + AI 自定维度 + 红线/边界 + 状态(suggested/confirmed/rejected)；版本化，AI 建议需作者确认。
+人设档案版本：标签 + 描述 + AI 自定维度 + **四层分层(R-182: core_dna/stance/mode/forbidden)** + 证据/频次/最近出现/确认强度 + 红线/边界 + 状态(suggested/confirmed/rejected)；版本化，AI 建议需作者确认。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -420,6 +420,11 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `description` | TEXT |  | 否 |  |
 | `dimension` | VARCHAR(30) |  | 否 |  |
 | `category` | VARCHAR(20) |  | 否 | style |
+| `layer` | VARCHAR(20) |  | 否 | stance |
+| `evidence` | TEXT |  | 否 |  |
+| `frequency` | INTEGER |  | 否 | 0 |
+| `last_seen_at` | DATETIME |  | 是 |  |
+| `confirm_strength` | INTEGER |  | 否 | 1 |
 | `source` | VARCHAR(20) |  | 否 | ai |
 | `status` | VARCHAR(20) |  | 否 | suggested |
 | `version` | INTEGER |  | 否 | 1 |

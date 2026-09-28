@@ -20,6 +20,11 @@ class PersonaTag(Base):
     description: Mapped[str] = mapped_column(Text, default="")  # 描述
     dimension: Mapped[str] = mapped_column(String(30), default="")  # AI 自定维度（语气/价值观/口头禅/选题/受众/结构/专业/其他，R-128）
     category: Mapped[str] = mapped_column(String(20), default="style")  # style | topic | redline | phrase
+    layer: Mapped[str] = mapped_column(String(20), default="stance")  # R-182 四层：core_dna|stance|mode|forbidden
+    evidence: Mapped[str] = mapped_column(Text, default="")  # R-182 证据原文短句
+    frequency: Mapped[int] = mapped_column(Integer, default=0)  # R-182 出现频次（命中素材篇数）
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # R-182 最后出现时间
+    confirm_strength: Mapped[int] = mapped_column(Integer, default=1)  # R-182 作者确认强度（手动=3/AI建议确认=2）
     source: Mapped[str] = mapped_column(String(20), default="ai")  # ai | manual
     status: Mapped[str] = mapped_column(String(20), default="suggested")  # suggested|confirmed|rejected
     version: Mapped[int] = mapped_column(Integer, default=1)  # 档案版本

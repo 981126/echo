@@ -99,6 +99,35 @@ def merge_profile(parts: list[dict], service_factory=PersonaService) -> dict:
     return service_factory().merge_full(parts)
 
 
+def annotate_profile_stats(profile: dict, parts: list[dict], materials: list[tuple]) -> dict:
+    """R-182：给合并后的 tag 补 frequency（命中素材篇数）与 last_seen_at（最后出现时间）。
+
+    `parts` 与 `materials` 一一对应（都被 `extract_pieces`/`_owner_materials` 按同一顺序过滤）。
+    """
+    from .persona import label_match
+
+    vids = [m[0] for m in materials]
+    for tag in (profile or {}).get("tags") or []:
+        label = str(tag.get("label", "")).strip()
+        if not label:
+            continue
+        hits: list[int] = []
+        for i, part in enumerate(parts):
+            labels = [str(t.get("label", "")).strip() for t in (part or {}).get("tags") or [] if isinstance(t, dict)]
+            if any(lbl and label_match(label, lbl) for lbl in labels):
+                hits.append(i)
+        tag["frequency"] = len(hits)
+        dates = []
+        for i in hits:
+            if i < len(vids):
+                v = vids[i]
+                d = getattr(v, "published_at", None) or getattr(v, "created_at", None)
+                if d:
+                    dates.append(d)
+        tag["last_seen_at"] = max(dates) if dates else None
+    return profile
+
+
 def full_profile(
     db,
     transcripts: list[str],
@@ -173,7 +202,7 @@ def _tag_category(dimension: str) -> str:
 
 
 def current_profile(db, cid: int | None) -> dict:
-    """当前已确认人设档案（结构化）；金句锚点不属于人设维度，不并入。"""
+    """当前已确认人设档案（结构化，R-182 含 layer）；金句锚点不属于人设维度，不并入。"""
     q = db.query(PersonaTag).filter(PersonaTag.status == "confirmed")
     if cid:
         q = q.filter(PersonaTag.creator_id == cid)
@@ -185,13 +214,13 @@ def current_profile(db, cid: int | None) -> dict:
         elif t.category == "phrase":
             continue
         else:
-            dimension = getattr(t, "dimension", "") or ""
             tags.append(
                 {
                     "label": t.label,
                     "description": t.description or "",
-                    "dimension": dimension,
-                    "evidence": "",
+                    "dimension": getattr(t, "dimension", "") or "",
+                    "evidence": getattr(t, "evidence", "") or "",
+                    "layer": getattr(t, "layer", "") or "stance",
                 }
             )
     return {"tags": tags, "redlines": redlines}
@@ -225,70 +254,75 @@ def _next_version(db, cid: int | None) -> int:
 def persist_suggestions(
     db, cid: int | None, profile: dict, skip_existing: bool = True, max_items: int = 150
 ) -> dict:
-    """把档案落库为「待确认建议」；已确认/待确认的同名条目跳过（被拒的可再次建议）。
+    """把档案落库为「待确认建议」（R-182：四层 layer + evidence + 频次/最近出现）。
 
-    max_items 是防御性上限：AI 归纳失败退化成机械合并时可能产出几百条原始标签，
-    此时截断并置 truncated，避免待确认列表被噪声淹没。
+    已确认/待确认的同名条目跳过（被拒的可再次建议）；
+    max_items 是防御性上限：AI 归纳失败退化成机械合并时可能产出几百条原始标签。
     """
+    from .persona import FORBIDDEN, LAYERS, _default_layer
+
     existing = _existing_keys(db, cid) if skip_existing else set()
     version = _next_version(db, cid)
     added = 0
     truncated = False
-    for item in (profile or {}).get("tags") or []:
+
+    def _add(label: str, description: str, dimension: str, layer: str, evidence: str, item: dict) -> None:
+        nonlocal added, truncated
         if added >= max_items:
             truncated = True
-            break
-        label = str(item.get("label", "")).strip() if isinstance(item, dict) else ""
-        if not label:
-            continue
-        description = str(item.get("description", "")).strip() if isinstance(item, dict) else ""
-        dimension = str(item.get("dimension", "")).strip() if isinstance(item, dict) else ""
-        evidence = str(item.get("evidence", "")).strip() if isinstance(item, dict) else ""
-        category = _tag_category(dimension)
+            return
+        if layer not in LAYERS:
+            layer = _default_layer(dimension)
+        category = "redline" if layer == FORBIDDEN else _tag_category(dimension)
         key = (category, _norm_label(label))
         if skip_existing and key in existing:
-            continue
+            return
         existing.add(key)
-        full_desc = description
-        if evidence and evidence not in description and len(description) < 200:
-            full_desc = f"{description}（依据：{evidence}）" if description else f"依据：{evidence}"
+        try:
+            frequency = int(item.get("frequency") or 0)
+        except (TypeError, ValueError):
+            frequency = 0
+        last_seen = item.get("last_seen_at")
         db.add(
             PersonaTag(
                 creator_id=cid,
                 label=label[:100],
-                description=full_desc,
-                dimension=dimension[:30],
+                description=description,
+                dimension=(dimension or ("红线" if layer == FORBIDDEN else ""))[:30],
                 category=category,
+                layer=layer,
+                evidence=evidence[:200],
+                frequency=max(0, frequency),
+                last_seen_at=last_seen,
+                confirm_strength=2,
                 source="ai",
                 status="suggested",
                 version=version,
             )
         )
         added += 1
-    for redline in (profile or {}).get("redlines") or []:
-        if added >= max_items:
-            truncated = True
-            break
-        label = str(redline).strip()
+
+    for item in (profile or {}).get("tags") or []:
+        if not isinstance(item, dict):
+            label = str(item).strip()
+            if label:
+                _add(label, "", "", "stance", "", {})
+            continue
+        label = str(item.get("label", "")).strip()
         if not label:
             continue
-        key = ("redline", _norm_label(label))
-        if skip_existing and key in existing:
-            continue
-        existing.add(key)
-        db.add(
-            PersonaTag(
-                creator_id=cid,
-                label=label[:100],
-                description="",
-                dimension="红线",
-                category="redline",
-                source="ai",
-                status="suggested",
-                version=version,
-            )
+        _add(
+            label,
+            str(item.get("description", "")).strip(),
+            str(item.get("dimension", "")).strip(),
+            str(item.get("layer", "")).strip(),
+            str(item.get("evidence", "")).strip(),
+            item,
         )
-        added += 1
+    for redline in (profile or {}).get("redlines") or []:
+        label = str(redline).strip()
+        if label:
+            _add(label, "", "红线", FORBIDDEN, "", {})
     db.commit()
     return {"version": version, "added": added, "truncated": truncated}
 
@@ -299,6 +333,7 @@ __all__ = [
     "extract_pieces",
     "full_profile",
     "merge_profile",
+    "annotate_profile_stats",
     "incremental_profile",
     "profile_coverage",
     "compare_profiles",

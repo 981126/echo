@@ -18,7 +18,7 @@ from ..models.discussion import DraftDiscussion
 from ..models.draft import Draft
 from ..models.kv import Kv
 from . import budget_settings, draft_status, llm_router
-from .generation import _persona_context, _style_profile_lines, _style_samples, generation_user_message
+from .generation import _persona_context, _style_profile_lines, _style_samples, author_style_context, generation_user_message
 from .llm import LLMError
 from .prompt_service import get_prompt, get_prompt_version
 from .creator_service import current_creator_id
@@ -199,9 +199,13 @@ PLACEHOLDER_SCRIPT = "（双模型讨论生成中…）"
 FAILED_SCRIPT = "（生成失败，请重试或删除本稿）"
 
 # R-155：基于原文重新讨论时的初稿提示词（比对标洗稿多产出 tags）
+# R-181：改为「参考改写」契约——只借选题与信息线索，不借结构/比喻/句群，必须补作者自己的经历与判断。
 SOURCE_REWRITE_SYSTEM = (
-    "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；"
-    "不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"
+    "你是口播脚本代笔。只把给定素材当作**选题与信息线索**，"
+    "用作者的人设口吻与表达习惯，写成作者能直接录的原创口播稿。"
+    "硬性要求：1) 不逐字抄袭，不复用原文的结构、核心比喻和句群；"
+    "2) 必须补入作者自己的经历、判断或案例，观点必须用作者自己的；"
+    "3) 语言自然口语，像作者本人对着镜头说话。"
     '只输出 JSON：{"title": string, "cover_text": string, "script": string, "tags": string[]}；'
     "title 必须与素材原标题不同；cover_text 是 3-8 字封面字（与 title 不同）；"
     "script 是脚本正文；tags 是 3-6 个内容标签（如 求职/面试/赚钱/知识，可含具体主题词）。"
@@ -302,8 +306,9 @@ def run_debate(
             _note(db, draft.id, 0, "—— 重新讨论（基于原文）——")
         initial_system = SOURCE_REWRITE_SYSTEM
         initial_user = (
-            f"作者人设：\n{persona_text}\n\n参考素材标题：{source_title or topic}\n"
-            f"参考素材原文：\n{source_text[:4000]}"
+            f"{author_style_context(db)}\n\n"
+            f"【参考素材·只借选题与信息线索，不借结构与措辞】\n"
+            f"素材标题：{source_title or topic}\n素材原文：\n{source_text[:4000]}"
         )
         initial_budget = budget_settings.budget_for(db, "rewrite")
     else:

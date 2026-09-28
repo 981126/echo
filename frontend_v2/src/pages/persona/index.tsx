@@ -35,6 +35,10 @@ interface PersonaTag {
   description: string
   dimension: string
   category: string
+  layer: string
+  evidence?: string
+  frequency?: number
+  last_seen_at?: string | null
   status: string
 }
 
@@ -70,14 +74,26 @@ const CATEGORY: Record<string, { label: string; variant: 'default' | 'secondary'
   phrase: { label: '金句锚点', variant: 'warning' }
 }
 
+// R-182 四层：核心DNA / 内容立场 / 创作模式 / 禁区
+const LAYERS: { key: string; label: string; hint: string }[] = [
+  { key: 'core_dna', label: '核心 DNA', hint: '最稳定的写作口吻特征（6–10 条）' },
+  { key: 'stance', label: '内容立场', hint: '观点立场与可信经历，可随创作演化' },
+  { key: 'mode', label: '创作模式', hint: '常用内容形态（犀利干货/个人独白/热点评论/实验复盘）' },
+  { key: 'forbidden', label: '禁区', hint: '真正的行为禁区（平台风险/商业边界/绝不做）' }
+]
+const LAYER_LABEL: Record<string, string> = Object.fromEntries(LAYERS.map((l) => [l.key, l.label]))
+const layerOf = (t: PersonaTag) => t.layer || 'stance'
+
 export default function PersonaPage() {
   const qc = useQueryClient()
   const [running, setRunning] = useState(false)
+  const [rebuilding, setRebuilding] = useState(false)
+  const [rebuildOpen, setRebuildOpen] = useState(false)
   const [checking, setChecking] = useState(false)
   const [confirmingAll, setConfirmingAll] = useState(false)
   const [multiMode, setMultiMode] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [editForm, setEditForm] = useState<{ id: number | null; label: string; description: string; dimension: string; category: string } | null>(null)
+  const [editForm, setEditForm] = useState<{ id: number | null; label: string; description: string; dimension: string; category: string; layer: string; evidence: string } | null>(null)
   const [deleteTag, setDeleteTag] = useState<PersonaTag | null>(null)
   const [rejectAllOpen, setRejectAllOpen] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
@@ -147,6 +163,20 @@ export default function PersonaPage() {
     }
   }
 
+  async function rebuildPersona() {
+    setRebuilding(true)
+    try {
+      await apiJson('/api/persona/rebuild', { method: 'POST', body: '{}' })
+      toast.success('已入队：推倒重建人设（清空旧档案 → 四层重建为待确认，完成后通知）')
+      setRebuildOpen(false)
+      setTimeout(reload, 5000)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setRebuilding(false)
+    }
+  }
+
   async function recheck() {
     setChecking(true)
     try {
@@ -196,7 +226,7 @@ export default function PersonaPage() {
   async function saveTag() {
     if (!editForm) return
     try {
-      const body = { label: editForm.label, description: editForm.description, dimension: editForm.dimension, category: editForm.category }
+      const body = { label: editForm.label, description: editForm.description, dimension: editForm.dimension, category: editForm.category, layer: editForm.layer, evidence: editForm.evidence }
       if (editForm.id) {
         await apiJson(`/api/persona/tags/${editForm.id}`, { method: 'PATCH', body: JSON.stringify(body) })
       } else {
@@ -307,13 +337,16 @@ export default function PersonaPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             <b className="text-[13px]">{t.label}</b>
             <Badge variant={cat.variant}>{cat.label}</Badge>
+            <Badge variant="secondary">{LAYER_LABEL[layerOf(t)] || layerOf(t)}</Badge>
             {t.dimension && t.category !== 'redline' && <Badge variant="secondary">{t.dimension}</Badge>}
+            {!!t.frequency && <span className="text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
           </div>
           {t.description && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.description}</p>}
+          {!!t.evidence && <p className="mt-0.5 text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
         </div>
         {!picking && (
           <div className="flex shrink-0 gap-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditForm({ id: t.id, label: t.label, description: t.description, dimension: t.dimension, category: t.category })}>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditForm({ id: t.id, label: t.label, description: t.description, dimension: t.dimension, category: t.category, layer: layerOf(t), evidence: t.evidence || '' })}>
               <Pencil className="h-3.5 w-3.5" />
             </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteTag(t)}>
@@ -335,6 +368,10 @@ export default function PersonaPage() {
         <Button variant="secondary" size="sm" onClick={initPersona} disabled={running}>
           {running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
           用历史转写稿初始化人设
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setRebuildOpen(true)} disabled={rebuilding}>
+          {rebuilding ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <TriangleAlert className="h-3.5 w-3.5" />}
+          推倒重建（四层）
         </Button>
       </motion.div>
 
@@ -546,9 +583,12 @@ export default function PersonaPage() {
                         <Badge variant={(CATEGORY[t.category] || CATEGORY.style).variant}>
                           {(CATEGORY[t.category] || CATEGORY.style).label}
                         </Badge>
+                        <Badge variant="secondary">{LAYER_LABEL[layerOf(t)] || layerOf(t)}</Badge>
                         {t.dimension && <Badge variant="secondary">{t.dimension}</Badge>}
+                        {!!t.frequency && <span className="text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
                       </div>
                       {t.description && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.description}</p>}
+                      {!!t.evidence && <p className="mt-0.5 text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
                     </div>
                     <Button size="sm" className="h-7 text-xs" onClick={() => decide(t, 'confirmed')}>
                       <Check className="h-3 w-3" /> 确认
@@ -574,7 +614,7 @@ export default function PersonaPage() {
             {!multiMode ? (
               <>
                 <Button variant="outline" size="sm" onClick={() => setMultiMode(true)} disabled={!confirmed.length}>多选</Button>
-                <Button size="sm" onClick={() => setEditForm({ id: null, label: '', description: '', dimension: '', category: 'style' })}>
+                <Button size="sm" onClick={() => setEditForm({ id: null, label: '', description: '', dimension: '', category: 'style', layer: 'stance', evidence: '' })}>
                   <Plus className="h-3.5 w-3.5" /> 新增
                 </Button>
               </>
@@ -594,13 +634,28 @@ export default function PersonaPage() {
             ) : !confirmed.length ? (
               <p className="py-4 text-center text-sm text-muted-foreground">暂无已确认人设</p>
             ) : (
-              <motion.div layout className="space-y-2">
-                <AnimatePresence initial={false}>
-                  {confirmed.map((t) => (
-                    <TagRow key={t.id} t={t} picking={multiMode} />
-                  ))}
-                </AnimatePresence>
-              </motion.div>
+              <div className="space-y-4">
+                {LAYERS.map((l) => {
+                  const items = confirmed.filter((t) => layerOf(t) === l.key)
+                  if (!items.length) return null
+                  return (
+                    <div key={l.key} className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium">{l.label}</span>
+                        <Badge variant="secondary">{items.length}</Badge>
+                        <span className="text-[11px] text-muted-foreground">{l.hint}</span>
+                      </div>
+                      <motion.div layout className="space-y-2">
+                        <AnimatePresence initial={false}>
+                          {items.map((t) => (
+                            <TagRow key={t.id} t={t} picking={multiMode} />
+                          ))}
+                        </AnimatePresence>
+                      </motion.div>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -637,6 +692,21 @@ export default function PersonaPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">分层（R-182 四层）</label>
+                <Select value={editForm.layer} onValueChange={(v) => setEditForm({ ...editForm, layer: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {LAYERS.map((l) => (
+                      <SelectItem key={l.key} value={l.key}>{l.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">证据（原文短句，可留空）</label>
+                <Input value={editForm.evidence} onChange={(e) => setEditForm({ ...editForm, evidence: e.target.value })} placeholder="摘一句原文" />
+              </div>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setEditForm(null)}>取消</Button>
                 <Button size="sm" onClick={saveTag} disabled={!editForm.label.trim()}>{editForm.id ? '保存' : '新增'}</Button>
@@ -647,6 +717,16 @@ export default function PersonaPage() {
       </Dialog>
 
       <ConfirmDialog open={deleteTag !== null} onOpenChange={(v) => !v && setDeleteTag(null)} title={`删除人设标签「${deleteTag?.label}」？`} confirmText="删除" destructive onConfirm={doDeleteTag} />
+      <ConfirmDialog
+        open={rebuildOpen}
+        onOpenChange={setRebuildOpen}
+        title="推倒重建人设档案？"
+        description="将清空当前全部人设标签，重新逐篇分析并归纳成「核心DNA/内容立场/创作模式/禁区」四层，产出为新一批待确认建议（需你审核确认）。旧档案请确保已备份。"
+        confirmText="推倒重建"
+        destructive
+        loading={rebuilding}
+        onConfirm={rebuildPersona}
+      />
       <ConfirmDialog open={rejectAllOpen} onOpenChange={setRejectAllOpen} title="一键拒绝全部建议？" description={`共 ${suggested.length} 条待确认建议将被拒绝`} confirmText="全部拒绝" destructive onConfirm={rejectAll} />
       <ConfirmDialog open={batchOpen} onOpenChange={setBatchOpen} title={`删除所选 ${selected.size} 项人设？`} confirmText="删除" destructive onConfirm={batchDelete} />
 

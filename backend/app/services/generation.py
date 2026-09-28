@@ -73,6 +73,8 @@ def _avoid_words(db: Session) -> list[str]:
 
 
 def _persona_context(db: Session) -> dict:
+    from .persona import LAYER_LABELS, LAYERS
+
     q = db.query(PersonaTag).filter(PersonaTag.status == "confirmed")
     cid = _creator_filter(db)
     if cid:
@@ -81,11 +83,15 @@ def _persona_context(db: Session) -> dict:
 
     def _fmt(t: PersonaTag) -> str:
         dim = (getattr(t, "dimension", "") or "").strip()
-        prefix = f"[{dim}] " if dim else ""
+        layer = (getattr(t, "layer", "") or "").strip()
+        prefix = f"[{LAYER_LABELS[layer]}] " if layer in LAYER_LABELS else (f"[{dim}] " if dim else "")
         return f"{prefix}{t.label}: {t.description}"
 
+    style_tags = [t for t in tags if t.category not in ("redline", "phrase")]
+    layer_order = {name: i for i, name in enumerate(LAYERS)}
+    style_tags.sort(key=lambda t: layer_order.get(getattr(t, "layer", "") or "", 9))
     return {
-        "tags": [_fmt(t) for t in tags if t.category not in ("redline", "phrase")],
+        "tags": [_fmt(t) for t in style_tags],
         "anchors": [t.label for t in tags if t.category == "phrase"],
         "redlines": [t.label for t in tags if t.category == "redline"],
     }
@@ -417,30 +423,33 @@ def _dim_examples(db: Session, per_dim: int = 1) -> str:
     return "作者分节打分最高的范例（按维度学：开头怎么钩、节奏怎么走、结尾怎么收）：\n" + "\n".join(lines[: per_dim * 4])
 
 
-def generation_user_message(db: Session, topic: str) -> str:
-    """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
+def author_style_context(db: Session, topic: str = "") -> str:
+    """作者人设 + 语言习惯 + 样本/范本/结构/分节范例/对标参考的共享上下文。
+
+    R-181：生成与「参考改写（洗稿）」共用同一份上下文，避免洗稿只拿到简化人设、
+    不像作者本人。`topic` 非空时按选题检索风格样本。
+    """
     ctx = _persona_context(db)
-    samples = _style_samples(db, topic)
+    samples = _style_samples(db, topic) if topic else _style_samples(db, "")
     anchors = _style_anchor_samples(db)
     profile = _style_profile_lines(db)
     refs = benchmark_context_lines(db)
     structure = _structure_templates(db)
     rewrites = _rewrite_examples(db)
     dims = _dim_examples(db)
+    avoid = _avoid_words(db)
     return "\n".join(
         [
-            f"选题：{topic}",
-            "",
             "作者人设：",
             *[f"- {t}" for t in ctx["tags"] or ["（暂无）"]],
             "",
             "红线（不要违反）：",
             *[f"- {r}" for r in ctx["redlines"] or ["（无）"]],
             "",
-            *([] if not ctx.get("anchors") else ["", "作者金句锚点（用它的短句语气，不要整句照搬）：", *[f"- {a}" for a in ctx["anchors"]]]),
+            *([] if not ctx.get("anchors") else ["作者金句锚点（用它的短句语气，不要整句照搬）：", *[f"- {a}" for a in ctx["anchors"]], ""]),
             "作者语言习惯（从全部素材统计，必须模仿）：",
             profile,
-            *([] if not _avoid_words(db) else ["", "这些表达尽量别用（AI 腔/套话，用了会不像真人）：", "、".join(_avoid_words(db)[:20])]),
+            *([] if not avoid else ["", "这些表达尽量别用（AI 腔/套话，用了会不像真人）：", "、".join(avoid[:20])]),
             *([] if not anchors else ["", "作者指定为风格范本的素材（必须重点模仿其语气与节奏）：", *[f"--- 范本{i+1} ---\n{s[:400]}" for i, s in enumerate(anchors)]]),
             "",
             "风格样本（按选题检索的真实原文节选）：",
@@ -451,6 +460,12 @@ def generation_user_message(db: Session, topic: str) -> str:
             *([] if not refs else ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs]),
         ]
     )
+
+
+def generation_user_message(db: Session, topic: str) -> str:
+    """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
+    return "\n".join([f"选题：{topic}", "", author_style_context(db, topic)])
+
 
 
 def _self_check(db: Session, script: str) -> tuple[list[str], float]:

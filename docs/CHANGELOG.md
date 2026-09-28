@@ -1,5 +1,36 @@
 # 变更记录
 
+## [M171 / R-182] 2026-09-28 — 人设档案四层重构（方案B 推倒重建）
+
+> 作者：直接推倒重建。
+
+- **模型**：`persona_tags` 加 `layer`（core_dna/stance/mode/forbidden）、`evidence`、`frequency`、`last_seen_at`、`confirm_strength`（`_migrate_persona_layer`）。
+- **提示词**：`persona_merge`/`persona_updates` 升级为四层输出（老库自动另存新版本并归档旧版）；禁区只收「发布风险/法律合规/商业边界」。
+- **管线**：`parse_layered_result` 四层解析 + 维度兜底；`annotate_profile_stats` 补频次/最近出现；`persist_suggestions` 写 layer/evidence；生成上下文按四层分组注入并优先核心 DNA。
+- **重建**：`POST /api/persona/rebuild` + `persona_rebuild_task`（清空 → 全量重建为待确认 + `persona_check` 差异单）。
+- **前端**：人设页已确认档案按四层分区（含层标签/证据/频次）、编辑加分层与证据、新增「推倒重建（四层）」按钮。
+- **执行**：清空旧 163 条 → 收紧禁区后产出 29 条待确认（核心DNA 9／立场 10／模式 6／禁区 4），作者审核中；备份 `echo_pre_R182_rebuild_20260928_205102.db`。
+- **验证**：`tests/test_r182_persona_rebuild.py` + `scripts/verify.sh` 全绿（30 表 / 131 路由）。
+
+## [M170 / R-181] 2026-09-28 — 参考改写（洗稿）学习链路补齐
+
+> 规划落地（内容经营闭环 R-180~R-186）：洗稿此前只有简化人设，补成与生成同源。
+
+- `generation.py` 抽出共享 `author_style_context(db, topic="")`，`generation_user_message` 复用它（行为不变）。
+- `benchmark.py`：`rewrite_script/rewrite_text` 改用完整人设+风格上下文；新增「参考改写」契约
+  （只借选题与信息线索，不复用原文结构/核心比喻/句群，必须补作者自己的经历与判断）。
+- `debate.py`：R-155 原文改写同步为「参考改写」契约 + 注入完整风格上下文。
+- 验证：定向 pytest 全绿；`scripts/verify.sh` 全绿。
+
+## [M169 / R-180] 2026-09-28 — 人设分析止血：只学当前主博主
+
+> 规划落地（内容经营闭环 R-180~R-186）：对标博主素材也在跑人设，白烧 LLM 且堆积脏建议。
+
+- `ingest.py`：`enqueue_persona_incremental` 只在 `cid == 当前主博主` 时入队；
+  `persona_init_task/persona_incremental_task` 入口强制 `cid` 纠正回主博主。
+- 清理：删除 1,807 条对标博主/无归属的 `suggested` 脏建议（清理前已备份）。
+- 新增回归测试 `tests/test_r180_persona_owner_only.py`；`scripts/verify.sh` 全绿。
+
 ## [M168 / R-179] 2026-09-28 — 素材库加载提速：服务端统一分页 + 无感无限滚动 + 封面缩略图
 
 > 作者：素材库页面还是加载太慢了，应该分页，每次加载20条，快划到底自动加载下一批数据，尽量让用户感觉没有加载的感觉。

@@ -33,11 +33,17 @@ def enqueue_persona_incremental(db, video=None, creator_id=None) -> int | None:
 
     已有同类任务在跑时不重复入队，只置 pending 标记，由当前任务收尾时补跑一次
     （避免任务执行期间新导入的素材被漏掉）。
+
+    R-180：人设只学**当前主博主**——对标博主/其它博主的素材不进人设（D-028），
+    避免为对标博主白白烧 LLM 并堆积永远用不到的待确认建议。
     """
     from ..models.task import BackgroundTask
     from ..tasks import start_task
 
-    cid = creator_id or (video.creator_id if video is not None else None) or current_creator_id(db)
+    owner_id = current_creator_id(db)
+    cid = creator_id or (video.creator_id if video is not None else None) or owner_id
+    if not owner_id or cid != owner_id:
+        return None
     vid = video.id if video is not None else 0
     dup = (
         db.query(BackgroundTask)
@@ -186,7 +192,11 @@ def persona_init_task(db, payload: dict, update=None) -> dict:
     """
     from . import persona_profile
 
-    cid = payload.get("creator_id") or current_creator_id(db)
+    # R-180：人设只分析当前主博主，纠正历史遗留/异常入队的其它博主 cid。
+    owner_id = current_creator_id(db)
+    cid = payload.get("creator_id") or owner_id
+    if owner_id and cid != owner_id:
+        cid = owner_id
     materials = _owner_materials(db, cid)
     if not materials:
         return {"message": "没有可用转写稿，未产出人设建议"}
@@ -203,6 +213,7 @@ def persona_init_task(db, payload: dict, update=None) -> dict:
     if update:
         update(88, f"AI 归纳合并去重（{total} 篇）…")
     profile = persona_profile.merge_profile(parts, service_factory=lambda: PersonaService())
+    persona_profile.annotate_profile_stats(profile, parts, materials)
     res = persona_profile.persist_suggestions(db, cid, profile, skip_existing=True)
     tail = "（已达上限被截断，建议先确认后再跑一次）" if res.get("truncated") else ""
     if update:
@@ -218,7 +229,11 @@ def persona_incremental_task(db, payload: dict, update=None) -> dict:
     """
     from . import persona_profile
 
-    cid = payload.get("creator_id") or current_creator_id(db)
+    # R-180：人设只分析当前主博主，纠正历史遗留/异常入队的其它博主 cid。
+    owner_id = current_creator_id(db)
+    cid = payload.get("creator_id") or owner_id
+    if owner_id and cid != owner_id:
+        cid = owner_id
     materials = _owner_materials(db, cid)
     if not materials:
         return {"message": "没有可用转写稿，跳过人设增量校验"}
@@ -249,6 +264,7 @@ def persona_incremental_task(db, payload: dict, update=None) -> dict:
     if update:
         update(86, "增量 vs 全量对齐校验…")
     verdict = persona_profile.compare_profiles(incremental, full, service_factory=lambda: PersonaService())
+    persona_profile.annotate_profile_stats(verdict["chosen"], parts, materials)
     res = persona_profile.persist_suggestions(db, cid, verdict["chosen"], skip_existing=True)
     db.add(
         PersonaCheck(
@@ -297,6 +313,94 @@ def persona_incremental_task(db, payload: dict, update=None) -> dict:
             f"覆盖率 {pct:.1f}%{sem_txt}，"
             + ("已回退为全量结果" if verdict["fallback"] else "增量结果通过")
             + f"，新增建议 {res['added']} 条{tail}"
+        )
+    }
+
+
+def _diff_labels(old: list[str], new: list[str]) -> tuple[list[str], list[str]]:
+    """R-182 差异单：按近义匹配算「新增」（新有旧无）与「过期」（旧有新无）。"""
+    from .persona import label_match
+
+    added = [n for n in new if not any(label_match(n, o) for o in old)]
+    expired = [o for o in old if not any(label_match(o, n) for n in new)]
+    return added, expired
+
+
+def persona_rebuild_task(db, payload: dict, update=None) -> dict:
+    """R-182 方案B：推倒重建人设档案。
+
+    清空当前主博主全部人设标签 → 全量逐篇提取 → 四层归纳合并 → 重建为**待确认建议**，
+    并写一条 PersonaCheck 差异单（新增/过期/分层计数）。清空前的档案由启动备份兜底。
+    """
+    from ..models.persona import PersonaTag
+    from . import persona_profile
+
+    owner_id = current_creator_id(db)
+    cid = owner_id or payload.get("creator_id")
+    materials = _owner_materials(db, cid)
+    if not materials:
+        return {"message": "没有可用转写稿，无法重建人设"}
+    total = len(materials)
+    texts = [t for _v, t in materials]
+
+    old_q = db.query(PersonaTag)
+    if cid:
+        old_q = old_q.filter(PersonaTag.creator_id == cid)
+    old_labels = [t.label for t in old_q.all()]
+    for t in old_q.all():
+        db.delete(t)
+    db.commit()
+
+    if update:
+        update(5, f"推倒重建：逐篇分析人设（0/{total}）…")
+
+    def _progress(done: int, todo: int) -> None:
+        if update:
+            update(min(70, 5 + int(65 * done / max(todo, 1))), f"逐篇分析人设（{done}/{todo}）…")
+
+    parts = persona_profile.extract_pieces(db, texts, service_factory=lambda: PersonaService(), progress=_progress)
+    if update:
+        update(80, f"四层归纳合并（{total} 篇）…")
+    profile = persona_profile.merge_profile(parts, service_factory=lambda: PersonaService())
+    persona_profile.annotate_profile_stats(profile, parts, materials)
+    res = persona_profile.persist_suggestions(db, cid, profile, skip_existing=False)
+
+    new_labels = [str(t.get("label", "")) for t in profile.get("tags") or [] if isinstance(t, dict)]
+    added, expired = _diff_labels(old_labels, new_labels)
+    layer_counts: dict[str, int] = {"core_dna": 0, "stance": 0, "mode": 0, "forbidden": 0}
+    for t in profile.get("tags") or []:
+        layer = str(t.get("layer", "stance"))
+        layer_counts[layer] = layer_counts.get(layer, 0) + 1
+    layer_counts["forbidden"] += len(profile.get("redlines") or [])
+    db.add(
+        PersonaCheck(
+            creator_id=cid,
+            mode="rebuild",
+            source_count=total,
+            coverage=1.0,
+            semantic=None,
+            passed=True,
+            fallback=False,
+            detail=json.dumps(
+                {
+                    "added": added,
+                    "expired": expired,
+                    "layers": layer_counts,
+                    "version": res["version"],
+                    "previous_count": len(old_labels),
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db.commit()
+    if update:
+        update(100, f"重建完成：新增 {len(new_labels)} 条待确认（核心 {layer_counts['core_dna']}）")
+    return {
+        "message": (
+            f"人设已推倒重建：清空旧档案 {len(old_labels)} 条，产出待确认 {res['added']} 条"
+            f"（核心DNA {layer_counts['core_dna']}／立场 {layer_counts['stance']}／模式 {layer_counts['mode']}／禁区 {layer_counts['forbidden']}），"
+            f"过期 {len(expired)} 条"
         )
     }
 

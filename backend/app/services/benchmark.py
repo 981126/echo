@@ -369,6 +369,27 @@ def persona_lines(db: Session, owner: Creator) -> list[str]:
     return lines
 
 
+REWRITE_SYSTEM = (
+    "你是口播脚本代笔。只把给定素材当作**选题与信息线索**，"
+    "用作者的人设口吻与表达习惯，写成作者能直接录的原创口播稿。"
+    "硬性要求："
+    "1) 不逐字抄袭，不复用原文的结构、核心比喻和句群；"
+    "2) 必须补入作者自己的经历、判断或案例，观点必须用作者自己的；"
+    "3) 语言自然口语，像作者本人对着镜头说话（不是书面稿、不是念素材）。"
+)
+
+
+def _rewrite_user(db: Session, title: str, text: str) -> str:
+    """参考改写（洗稿）的 user 上下文：作者完整人设+风格上下文 + 素材（R-181）。"""
+    from .generation import author_style_context
+
+    return (
+        f"{author_style_context(db)}\n\n"
+        f"【参考素材·只借选题与信息线索，不借结构与措辞】\n"
+        f"素材标题：{title}\n素材原文：\n{text[:4000]}"
+    )
+
+
 def _llm(db: Session | None = None):
     """对标分析用模型（R-139）：模型1 主用，失败自动降级模型2。"""
     from . import llm_router
@@ -400,12 +421,11 @@ def rewrite_script(db: Session, owner: Creator, unit: dict, title: str = "") -> 
     text = unit.get("text") or _unit_text(db, unit)
     if not text:
         raise ValueError("该素材还没有可用文案（先转写补齐）")
-    persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
     llm = _llm(db)
     script = llm.chat(
         [
-            {"role": "system", "content": "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"},
-            {"role": "user", "content": f"我的人设：\n{persona}\n\n参考素材标题：{title or unit['post'].title}\n参考素材文案：\n{text[:4000]}"},
+            {"role": "system", "content": REWRITE_SYSTEM},
+            {"role": "user", "content": _rewrite_user(db, title or unit["post"].title, text)},
         ],
         temperature=0.7,
         max_tokens=budget_settings.budget_for(db, "rewrite"),
@@ -456,12 +476,11 @@ def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref:
     """按人设把文案改写成原创口播稿并存脚本草稿；记录来源素材（source_ref）。"""
     if not (text or "").strip():
         raise ValueError("该素材还没有可用文案（先转写补齐）")
-    persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
     llm = _llm(db)
     script = llm.chat(
         [
-            {"role": "system", "content": "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"},
-            {"role": "user", "content": f"我的人设：\n{persona}\n\n参考素材标题：{title}\n参考素材文案：\n{text[:4000]}"},
+            {"role": "system", "content": REWRITE_SYSTEM},
+            {"role": "user", "content": _rewrite_user(db, title, text)},
         ],
         temperature=0.7,
         max_tokens=budget_settings.budget_for(db, "rewrite"),

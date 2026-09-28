@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 130 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 131 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -218,6 +218,17 @@ Init Persona
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 
+### POST /api/persona/rebuild
+
+Rebuild Persona
+
+R-182 方案B：推倒重建人设档案（清空旧档案 → 四层全量重建为待确认建议）。进行中拒绝重复入队。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
 ### GET /api/persona/phrases/suggest
 
 Suggest Phrases
@@ -233,7 +244,6 @@ Suggest Phrases
 ### POST /api/persona/recheck
 
 Recheck Persona
-
 手动重跑一次增量人设校验（增量 + 全量重算对照），进行中拒绝重复入队（R-128）。
 
 **参数**

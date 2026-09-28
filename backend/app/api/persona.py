@@ -16,7 +16,7 @@ from ..schemas.persona import (
     PersonaTagOut,
     PersonaTagUpdate,
 )
-from ..services.ingest import persona_init_task, persona_incremental_task
+from ..services.ingest import persona_init_task, persona_incremental_task, persona_rebuild_task
 from ..tasks import start_task
 
 router = APIRouter()
@@ -60,7 +60,7 @@ def reject_all_suggested(db: Session = Depends(get_db)):
 @router.post("/tags", response_model=PersonaTagOut)
 def add_manual_tag(payload: PersonaTagCreate, db: Session = Depends(get_db)):
     data = {k: v for k, v in payload.model_dump().items() if k != "source"}
-    tag = PersonaTag(**data, source="manual", status="confirmed", creator_id=current_creator_id(db))
+    tag = PersonaTag(**data, source="manual", status="confirmed", confirm_strength=3, creator_id=current_creator_id(db))
     db.add(tag)
     db.commit()
     db.refresh(tag)
@@ -73,6 +73,8 @@ def decide_tag(tag_id: int, payload: PersonaDecision, db: Session = Depends(get_
     if tag is None:
         raise HTTPException(status_code=404, detail="标签不存在")
     tag.status = payload.status
+    if payload.status == "confirmed":
+        tag.confirm_strength = 3  # R-182：作者确认 = 强度最高
     db.commit()
     db.refresh(tag)
     return tag
@@ -80,7 +82,7 @@ def decide_tag(tag_id: int, payload: PersonaDecision, db: Session = Depends(get_
 
 @router.patch("/tags/{tag_id}", response_model=PersonaTagOut)
 def update_tag(tag_id: int, payload: PersonaTagUpdate, db: Session = Depends(get_db)):
-    """编辑人设标签（标签/描述/类别）。"""
+    """编辑人设标签（标签/描述/类别/分层/证据）。"""
     tag = db.get(PersonaTag, tag_id)
     if tag is None:
         raise HTTPException(status_code=404, detail="标签不存在")
@@ -89,6 +91,8 @@ def update_tag(tag_id: int, payload: PersonaTagUpdate, db: Session = Depends(get
     tag.description = payload.description
     tag.dimension = (payload.dimension or "").strip()[:30]
     tag.category = payload.category
+    tag.layer = payload.layer
+    tag.evidence = payload.evidence
     db.commit()
     db.refresh(tag)
     return tag
@@ -153,6 +157,30 @@ def init_persona(db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="已有「用历史转写稿初始化人设」任务进行中，请稍候再试")
     cid = current_creator_id(db)
     task_id = start_task("persona_init", {"creator_id": cid}, persona_init_task)
+    return {"task_id": task_id}
+
+
+@router.post("/rebuild")
+def rebuild_persona(db: Session = Depends(get_db)):
+    """R-182 方案B：推倒重建人设档案（清空旧档案 → 四层全量重建为待确认建议）。
+
+    已有重建/初始化任务进行中时拒绝重复入队，防连点。清空前请确已备份（启动/手动备份均可）。
+    """
+    from ..models.task import BackgroundTask
+
+    dup = (
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.kind.in_(["persona_rebuild", "persona_init"]),
+            BackgroundTask.status.in_(["pending", "running"]),
+        )
+        .order_by(BackgroundTask.id.desc())
+        .first()
+    )
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="已有人设重建/初始化任务进行中，请稍候再试")
+    cid = current_creator_id(db)
+    task_id = start_task("persona_rebuild", {"creator_id": cid}, persona_rebuild_task)
     return {"task_id": task_id}
 
 

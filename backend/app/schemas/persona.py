@@ -15,6 +15,11 @@ class PersonaTagOut(BaseModel):
     description: str = ""
     dimension: str = ""
     category: str = "style"
+    layer: str = "stance"
+    evidence: str = ""
+    frequency: int = 0
+    last_seen_at: datetime | None = None
+    confirm_strength: int = 1
     source: str = "ai"
     status: str = "suggested"
     version: int = 1
@@ -26,6 +31,8 @@ class PersonaTagCreate(BaseModel):
     description: str = ""
     dimension: str = ""
     category: str = "style"  # style | topic | redline | phrase
+    layer: str = "stance"
+    evidence: str = ""
     source: str = "manual"
 
 
@@ -38,6 +45,8 @@ class PersonaTagUpdate(BaseModel):
     description: str = ""
     dimension: str = ""
     category: str = Field(default="style", pattern="^(style|topic|redline|phrase)$")
+    layer: str = Field(default="stance", pattern="^(core_dna|stance|mode|forbidden)$")
+    evidence: str = ""
 
 
 class PersonaCheckOut(BaseModel):

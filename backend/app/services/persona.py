@@ -43,29 +43,63 @@ PERSONA_INIT_SYSTEM = (
 
 PERSONA_MERGE_SYSTEM = (
     "你是人设画像的总编。下面给你同一位作者多篇文案各自提炼出的人设信号（JSON 数组）。"
-    "请你像人类主编一样做一次「总结去重」：把重复、近义、可以合并的信号归并成一份**精炼**的人设档案。\n"
+    "请像人类主编一样做一次「总结去重」，并把结果按**四层**归类输出。\n"
+    "四层定义（务必分清，不要混淆）：\n"
+    "- core_dna 核心人格与语言 DNA：最稳定、最能把这个作者和别人区分开的**写作口吻**特征"
+    "（语气、句式习惯、标志性表达、底层态度）。只保留 6-10 条。\n"
+    "- stance 内容立场与可信经历：作者在选题上的观点/立场/亲身经历（如学历、收入、行业判断、价值取舍），可随创作演化。\n"
+    "- mode 创作模式：作者常用的内容形态（如 犀利干货 / 个人独白 / 热点评论 / 实验复盘）。\n"
+    "- forbidden 真正禁区：**只收「发布风险 / 法律合规 / 商业边界」三类**——"
+    "(a) 平台会限流或封号的表达/操作；(b) 与自身商业利益冲突的边界（接广告范围、收费·卖课·带人边界）；"
+    "(c) 法律或明显道德风险。个人生活习惯、工作态度、投资/饮食选择、一次性做法都不算禁区；"
+    "观点与策略属于 stance。没有就给空数组，**宁少勿滥（0-8 条）**。\n"
     "要求：\n"
-    "1. 合并近义与重复（例如「说话直接」「不绕弯子」「犀利」应归并为一条），保留最准确的措辞与最具体的描述。\n"
-    "2. 只保留在原文里有依据的信号；不要为了凑数合并出空泛的大词。\n"
-    "3. 维度由你决定，可参考：语气/价值观/口头禅/选题/受众/结构/专业/其他。\n"
-    "4. 输出必须精炼：tags 控制在 20-35 条、redlines 控制在 15 条以内；"
-    "description 用一句话（≤40 字），evidence 只留 1 条最典型短句（≤30 字），不要罗列。\n"
-    "5. 只输出 JSON，不要解释、不要复述输入：\n"
-    '{"tags":[{"label":"...","description":"...","dimension":"...","evidence":"..."}],"redlines":["..."]}'
+    "1. 合并近义与重复，只保留原文有依据的信号，不凑空泛大词。\n"
+    "2. description 一句话（≤40 字）；evidence 只留 1 条最典型原文短句（≤30 字）。\n"
+    "3. 只输出 JSON，不要解释、不要复述输入：\n"
+    '{"core_dna":[{"label":"...","description":"...","evidence":"..."}],'
+    '"stance":[{"label":"...","description":"...","evidence":"..."}],'
+    '"mode":[{"label":"...","description":"...","evidence":"..."}],"forbidden":["作者绝不做/不说的行为"]}'
 )
 
 PERSONA_UPDATES_SYSTEM = (
-    "你是人设画像的迭代专家。给你作者「当前人设档案」和「一篇新文案的提炼结果」，"
-    "请把新信号增量并入档案，产出更新后的完整档案。\n"
-    "要求：\n"
-    "1. 新增：档案里没有的新特质，补进去。\n"
-    "2. 强化：已有特质的更具体描述或证据，用它替换原来更模糊的描述。\n"
-    "3. 修正：与档案冲突的信号，以新文案的真实内容为准调整（不要凭空删档案）。\n"
-    "4. 只依据两份输入的真实内容判断，不要脑补；输出保持精炼：tags 控制在 20-35 条、"
-    "redlines 控制在 15 条以内，description ≤40 字、evidence ≤30 字。\n"
-    "5. 只输出 JSON，不要解释、不要复述输入：\n"
-    '{"tags":[{"label":"...","description":"...","dimension":"...","evidence":"..."}],"redlines":["..."]}'
+    "你是人设画像的迭代专家。输入：作者的「当前四层档案」(JSON) 和「一篇新文案的提炼结果」(JSON)。"
+    "请把新信号增量并入档案，输出更新后的完整四层档案。\n"
+    "四层：core_dna 核心人格与语言 DNA（6-10 条，写作口吻层面）/ stance 内容立场与可信经历 / "
+    "mode 创作模式 / forbidden 真正的禁区（**只收发布风险·法律合规·商业边界三类**；"
+    "个人习惯、工作态度、投资/饮食选择都不算，观点策略归 stance）。\n"
+    "要求：1) 新增新特质；2) 用更具体的描述/证据强化已有特质；3) 与新文案冲突时以新文案为准修正（不凭空删档案）；"
+    "4) 只依据两份输入判断，不脑补；description ≤40 字、evidence ≤30 字。\n"
+    "只输出 JSON，不要解释、不要复述输入：\n"
+    '{"core_dna":[{"label":"...","description":"...","evidence":"..."}],'
+    '"stance":[...],"mode":[...],"forbidden":["..."]}'
 )
+
+# R-182：人设四层。语句/态度→core_dna，观点立场/经历→stance，内容形态→mode，行为禁区→forbidden。
+CORE_DNA = "core_dna"
+STANCE = "stance"
+MODE = "mode"
+FORBIDDEN = "forbidden"
+LAYERS = (CORE_DNA, STANCE, MODE, FORBIDDEN)
+LAYER_LABELS: dict[str, str] = {
+    CORE_DNA: "核心DNA",
+    STANCE: "内容立场",
+    MODE: "创作模式",
+    FORBIDDEN: "禁区",
+}
+_CORE_DIMENSIONS = {"语气", "口头禅", "结构"}
+_STANCE_DIMENSIONS = {"价值观", "专业", "受众", "选题", "领域"}
+
+
+def _default_layer(dimension: str) -> str:
+    """模型没给 layer 时按维度粗分层（保守默认 stance）。"""
+    d = (dimension or "").strip()
+    if d in _CORE_DIMENSIONS:
+        return CORE_DNA
+    if d in _STANCE_DIMENSIONS:
+        return STANCE
+    return STANCE
+
 
 PERSONA_COMPARE_SYSTEM = (
     "你是人设档案质检员。给你两份同一位作者的人设档案：A=增量更新得到的档案，B=从全部素材从头重算得到的档案。"
@@ -181,6 +215,57 @@ def parse_persona_result(data: dict) -> dict:
     return result
 
 
+def _tag_item(item: object, layer: str) -> dict | None:
+    """把四层输出里的一个条目规范成内部 tag（兼容字符串与对象）。"""
+    if isinstance(item, dict):
+        label = str(item.get("label", "")).strip()
+        if not label:
+            return None
+        return {
+            "label": label[:100],
+            "description": str(item.get("description", "")).strip(),
+            "dimension": str(item.get("dimension", "")).strip()[:30],
+            "evidence": str(item.get("evidence", "")).strip()[:_MAX_EVIDENCE],
+            "layer": layer,
+        }
+    label = str(item).strip()
+    if not label:
+        return None
+    return {"label": label[:100], "description": "", "dimension": "", "evidence": "", "layer": layer}
+
+
+def parse_layered_result(data: dict) -> dict:
+    """解析四层输出（R-182）；模型若仍按扁平 tags/redlines 返回，则按维度粗分层兜底。
+
+    返回 {"tags":[{label,description,dimension,evidence,layer}], "redlines":[...]}。
+    """
+    result: dict = {"tags": [], "redlines": []}
+    for layer in (CORE_DNA, STANCE, MODE):
+        for item in data.get(layer) or []:
+            tag = _tag_item(item, layer)
+            if tag:
+                result["tags"].append(tag)
+    # 兼容模型忽略分层、仍用扁平 tags 的情况
+    if not result["tags"]:
+        for item in data.get("tags") or []:
+            if isinstance(item, dict):
+                dim = str(item.get("dimension", "")).strip()[:30]
+                tag = _tag_item(item, _default_layer(dim))
+                if tag:
+                    tag["dimension"] = dim
+                    result["tags"].append(tag)
+            else:
+                tag = _tag_item(item, STANCE)
+                if tag:
+                    result["tags"].append(tag)
+    for redline in data.get("forbidden") or data.get("redlines") or []:
+        text = str(redline).strip()
+        if text:
+            result["redlines"].append(text[:200])
+    return result
+
+
+
 def label_match(a: str, b: str) -> bool:
     """同义/近义判定：规范化后相等、互相包含，或字符相似度 ≥0.6。"""
     na, nb = _norm_label(a), _norm_label(b)
@@ -192,13 +277,15 @@ def label_match(a: str, b: str) -> bool:
 
 
 def _better(cur: dict, incoming: dict) -> None:
-    """把 incoming 的信息并入 cur：保留更完整的描述/证据，补齐空维度。"""
+    """把 incoming 的信息并入 cur：保留更完整的描述/证据，补齐空维度/分层。"""
     if len(incoming.get("description", "")) > len(cur.get("description", "")):
         cur["description"] = incoming["description"]
     if len(incoming.get("evidence", "")) > len(cur.get("evidence", "")):
         cur["evidence"] = incoming["evidence"]
     if not cur.get("dimension") and incoming.get("dimension"):
         cur["dimension"] = incoming["dimension"]
+    if not cur.get("layer") and incoming.get("layer"):
+        cur["layer"] = incoming["layer"]
 
 
 def dedupe_profile(profile: dict) -> dict:
@@ -208,11 +295,13 @@ def dedupe_profile(profile: dict) -> dict:
         label = str(item.get("label", "")).strip() if isinstance(item, dict) else str(item).strip()
         if not label:
             continue
+        dimension = str(item.get("dimension", "")).strip()[:30] if isinstance(item, dict) else ""
         incoming = {
             "label": label[:100],
             "description": str(item.get("description", "")).strip() if isinstance(item, dict) else "",
-            "dimension": str(item.get("dimension", "")).strip()[:30] if isinstance(item, dict) else "",
+            "dimension": dimension,
             "evidence": str(item.get("evidence", "")).strip()[:_MAX_EVIDENCE] if isinstance(item, dict) else "",
+            "layer": (str(item.get("layer", "")).strip() if isinstance(item, dict) else "") or _default_layer(dimension),
         }
         for cur in tags:
             if label_match(label, cur["label"]):
@@ -236,7 +325,10 @@ def collect_profile(parts: list[dict]) -> dict:
     redlines: list[str] = []
     for part in parts or []:
         for item in (part or {}).get("tags") or []:
-            tags.append(item if isinstance(item, dict) else {"label": str(item)})
+            if isinstance(item, dict):
+                tags.append({**item, "layer": item.get("layer") or _default_layer(str(item.get("dimension", "")))})
+            else:
+                tags.append({"label": str(item), "layer": STANCE})
         redlines.extend((part or {}).get("redlines") or [])
     return dedupe_profile({"tags": tags, "redlines": redlines})
 
@@ -320,8 +412,11 @@ class PersonaService:
         data = self.call_json("persona_init", messages)
         return parse_persona_result(data)
 
-    def _llm_merge(self, key: str, parts: list[dict]) -> dict[str, Any] | None:
-        """调 LLM 做归纳合并；失败/空结果返回 None（由调用方决定降级策略）。"""
+    def _llm_merge(self, key: str, parts: list[dict], parser=parse_persona_result) -> dict[str, Any] | None:
+        """调 LLM 做归纳合并；失败/空结果返回 None（由调用方决定降级策略）。
+
+        R-182：`parser` 决定解析口径——人设归纳用 `parse_layered_result`（四层）。
+        """
         user = "待归纳的人设信号（JSON 数组）：\n" + json.dumps(parts, ensure_ascii=False)
         try:
             data = self.call_json(
@@ -335,7 +430,7 @@ class PersonaService:
             )
         except Exception:  # noqa: BLE001 外部服务任何异常都降级，不拖垮整条管线
             return None
-        result = parse_persona_result(data)
+        result = parser(data)
         if not result["tags"] and not result["redlines"]:
             return None
         return result
@@ -353,7 +448,7 @@ class PersonaService:
         if not clean:
             return empty_profile()
         if len(clean) <= GLOBAL_MERGE_MAX_PARTS:
-            merged = self._llm_merge("persona_merge", clean)
+            merged = self._llm_merge("persona_merge", clean, parser=parse_layered_result)
             if merged is not None:
                 return dedupe_profile(merged)
         profile = collect_profile(clean)
@@ -367,18 +462,18 @@ class PersonaService:
                 break
             merged_parts: list[dict] = []
             for chunk in chunks:
-                merged_parts.append(self._llm_merge("persona_merge", [chunk]) or chunk)
+                merged_parts.append(self._llm_merge("persona_merge", [chunk], parser=parse_layered_result) or chunk)
             reduced = collect_profile(merged_parts)
             if _profile_size(reduced) >= _profile_size(profile):
                 break
             profile = reduced
-        final = self._llm_merge("persona_merge", [profile])
+        final = self._llm_merge("persona_merge", [profile], parser=parse_layered_result)
         return dedupe_profile(final) if final is not None else profile
 
     def merge_incremental(self, current: dict, new_part: dict) -> dict:
-        """增量合并：把新文案信号并入当前档案，产出更新后的完整档案（R-128 第2条）。"""
+        """增量合并：把新文案信号并入当前档案，产出更新后的完整档案（R-128/R-182 四层）。"""
         parts = [current or empty_profile(), new_part or empty_profile()]
-        merged = self._llm_merge("persona_updates", parts)
+        merged = self._llm_merge("persona_updates", parts, parser=parse_layered_result)
         if merged is None:
             return collect_profile(parts)
         return dedupe_profile(merged)

@@ -101,6 +101,18 @@ def _next_version(db: Session, key: str) -> int:
     return (row.version + 1) if row else 1
 
 
+def ensure_persona_layer_prompts(db: Session) -> None:
+    """R-182：把「人设归纳/增量」提示词升级为四层版（老库启用版仍是扁平输出）。
+
+    只在当前启用版还不含四层标记（core_dna）时，另存一版并用代码默认（四层）启用；
+    旧版自动归档，可回溯。
+    """
+    for key in ("persona_merge", "persona_updates"):
+        content = get_prompt(key, db)
+        if "core_dna" not in content or "发布风险" not in content:
+            save_new_version(db, key, default_content(key), note="R-182 人设四层重构")
+
+
 def save_new_version(db: Session, key: str, content: str, note: str = "") -> AiPrompt:
     """手动编辑保存 = 另存为新版本并启用（旧 enabled 转 archived）。"""
     content = (content or "").strip()

@@ -164,6 +164,7 @@ def test_learning_material_includes_dimensioned_persona(db):
             description="说话不绕弯子",
             dimension="语气",
             category="style",
+            layer="core_dna",
             status="confirmed",
             version=1,
         )
@@ -171,8 +172,8 @@ def test_learning_material_includes_dimensioned_persona(db):
     _add_video(db, owner, "v1", "这是一篇用于语料的作者真实文案")
     db.commit()
     text = learning_material(db)
-    # 候选提示词语料里带上了「归纳合并后的人设档案」（含维度）
-    assert "[语气] 直白犀利" in text
+    # R-182：候选提示词语料里的档案按四层展示（此处为核心 DNA）
+    assert "[核心DNA] 直白犀利" in text
 
 
 def test_persist_suggestions_caps_and_flags(db):

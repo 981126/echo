@@ -281,6 +281,22 @@ def _migrate_persona_dimension() -> None:
             conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN dimension VARCHAR(30) NOT NULL DEFAULT ''")
 
 
+def _migrate_persona_layer() -> None:
+    """R-182：persona_tags 四层重构——layer/evidence/frequency/last_seen_at/confirm_strength。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(persona_tags)").fetchall()}
+        if "layer" not in cols:
+            conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN layer VARCHAR(20) NOT NULL DEFAULT 'stance'")
+        if "evidence" not in cols:
+            conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN evidence TEXT NOT NULL DEFAULT ''")
+        if "frequency" not in cols:
+            conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN frequency INTEGER NOT NULL DEFAULT 0")
+        if "last_seen_at" not in cols:
+            conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN last_seen_at DATETIME")
+        if "confirm_strength" not in cols:
+            conn.exec_driver_sql("ALTER TABLE persona_tags ADD COLUMN confirm_strength INTEGER NOT NULL DEFAULT 1")
+
+
 def _migrate_draft_prompt_version() -> None:
     """R-129 M116：drafts 增加 prompt_version（生成时启用的提示词版本，便于按版本归因反馈）。"""
     with engine.begin() as conn:
@@ -547,6 +563,7 @@ def init_db() -> None:
     _migrate_topic_candidate_slot()
     _migrate_task_note()
     _migrate_persona_dimension()
+    _migrate_persona_layer()
     _migrate_draft_prompt_version()
     _migrate_draft_persona_version()
     _migrate_sunset_review()
@@ -560,11 +577,12 @@ def init_db() -> None:
     _auto_confirm_tags()
     _fix_app_utc_columns()  # 历史 UTC 时间列一次性 +8h → 北京时间
     # R-021：首次启动把各功能默认提示词 seed 入库（版本 v1）
-    from .services.prompt_service import ensure_defaults
+    from .services.prompt_service import ensure_defaults, ensure_persona_layer_prompts
 
     session = SessionLocal()
     try:
         ensure_defaults(session)
+        ensure_persona_layer_prompts(session)  # R-182：人设四层提示词升级
     finally:
         session.close()
     _fix_platform_timezone()
