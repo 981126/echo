@@ -59,24 +59,27 @@ export const MaterialCard = memo(function MaterialCard({
   // 大列表性能：前 40 张有入场动画，其余直接呈现（避免集体动画卡顿）；
   // 不再用 layout 动画（每次进度更新都会全量布局测量），改用 content-visibility 跳过屏外渲染。
   // R-179：分批加载后每批只有 20 张，入场动画只作用于「首批」；后续批次用 0.85→1 轻淡入（R-175：不能从 0 起步）
-  // R-199：换一批结果时错峰延迟 = 基础延迟（等旧卡退场）+ 更紧凑的 stagger
+  // R-199：换一批结果时**逐格交接**——新卡的入场延迟 = 本格旧卡的退场延迟 + 退场时长 + 呼吸量；
+  //        退场（老动画）严格保持原样：0.35s 淡出 + 缩到 0.94 + index×0.035 错峰扫过，
+  //        append 卡沿用 softIn、40 张之后的卡沿用 0.15s。
   const animateEnter = !append && index < 40
-  const enterDelay = replace
-    ? listReplace.baseDelay + Math.min(index, listReplace.maxItems) * listReplace.stagger
-    : Math.min(index, 16) * 0.035
+  const exitDelay = Math.min(index, listReplace.exit.maxItems) * listReplace.exit.stagger
+  const enterDelay = exitDelay + listReplace.exit.duration + listReplace.enter.breathAfterExit
+  // 老动画：退场沿用「这张卡原本的过渡规则」
+  const baseTransition = append
+    ? softIn
+    : animateEnter
+      ? { duration: listReplace.exit.duration, delay: exitDelay, ease: EASE_OUT_EXPO }
+      : { duration: 0.15 }
+  // 入场：换批时等本格旧卡退完再飞入，其余情况与原来完全一致
+  const enterTransition = replace && animateEnter ? { duration: listReplace.enter.duration, delay: enterDelay, ease: EASE_OUT_EXPO } : baseTransition
 
   return (
     <motion.div
       initial={append ? { opacity: 0.85, y: 8 } : animateEnter ? { opacity: 0, y: 18, scale: 0.97 } : false}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.96, transition: { duration: listReplace.exitDuration, ease: EASE_OUT_EXPO } }}
-      transition={
-        append
-          ? softIn
-          : animateEnter
-            ? { duration: 0.35, delay: enterDelay, ease: EASE_OUT_EXPO }
-            : { duration: 0.15 }
-      }
+      exit={{ opacity: 0, scale: listReplace.exit.scale, transition: baseTransition }}
+      transition={enterTransition}
       whileHover={{ y: -4 }}
       style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 300px' } as React.CSSProperties}
       className={cn(
