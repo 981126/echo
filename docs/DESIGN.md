@@ -256,6 +256,10 @@
 - 组件定义在另一个组件函数体内 → 每次 re-render 都是新类型 → 整棵子树重建、入场动画重播（R-169/R-171/R-173）。
 - `AnimatePresence mode="wait"` 包 React 19 的 `Outlet` → 页内 setState 误触发整页卸载重挂（R-164 实测）。
 - 动画状态与后端状态各写一套 → 判据永不成立（R-173：等 `done/idle/failed` 三个永不出现的值）。
+- 筛选下拉的「全部」选项文案写成字段名（`<SelectItem value="all">广告</SelectItem>`）→ Radix `SelectValue` 只要
+  `value` 非空就按正常前景色渲染选中项文字，默认（不筛选）态看起来跟真的筛了「仅广告」一样（R-198）。
+  约定：**下拉默认态一律用 `components/ui/filter-value.tsx` 的 `FilterValue`**（默认灰字字段名、选中具体值才高亮并显示值），
+  下拉内保留「全部」项用于取消筛选；现用于素材库工具栏（博主/发布状态/有无视频/是否广告）。
 
 ### 8.5 点检方法（自测用）
 - **数值探针**：无头浏览器里用 `requestAnimationFrame` 采样目标元素的 `opacity/transform`，检查

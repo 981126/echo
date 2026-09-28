@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectValue, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select'
 import { MultiSelect } from '@/components/ui/multi-select'
+import { FilterValue } from '@/components/ui/filter-value' // R-198：筛选下拉默认态灰字
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from '@/components/ui/toaster'
 import {
@@ -47,6 +48,7 @@ interface Creator {
   kind: string
   is_current?: boolean
 }
+
 
 export default function VideosPage() {
   const navigate = useNavigate()
@@ -418,7 +420,15 @@ export default function VideosPage() {
           value={String(filters.creatorId)}
           onValueChange={(v) => setFilters({ ...filters, creatorId: Number(v) })}
         >
-          <SelectTrigger className="h-9 w-44"><SelectValue placeholder="博主（默认当前主博主）" /></SelectTrigger>
+          <SelectTrigger className="h-9 w-44">
+            <SelectValue placeholder="博主（默认当前主博主）">
+              <FilterValue
+                active={!!filters.creatorId}
+                name="当前主博主"
+                label={creatorOptions.find((c) => c.id === filters.creatorId)?.name ?? '指定博主'}
+              />
+            </SelectValue>
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="0">当前主博主</SelectItem>
             {creatorOptions.map((c) => (
@@ -437,25 +447,37 @@ export default function VideosPage() {
           className="w-32"
         />
         <Select value={filters.status || 'all'} onValueChange={(v) => setFilters({ ...filters, status: v === 'all' ? '' : v })}>
-          <SelectTrigger className="h-9 w-28"><SelectValue placeholder="状态" /></SelectTrigger>
+          <SelectTrigger className="h-9 w-28">
+            <SelectValue placeholder="发布状态">
+              <FilterValue active={!!filters.status} name="发布状态" label={filters.status === 'published' ? '已发布' : '待发布'} />
+            </SelectValue>
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="all">全部</SelectItem>
             <SelectItem value="planned">待发布</SelectItem>
             <SelectItem value="published">已发布</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filters.video || 'all'} onValueChange={(v) => setFilters({ ...filters, video: v === 'all' ? '' : v })}>
-          <SelectTrigger className="h-9 w-28"><SelectValue placeholder="视频" /></SelectTrigger>
+          <SelectTrigger className="h-9 w-28">
+            <SelectValue placeholder="有无视频">
+              <FilterValue active={!!filters.video} name="有无视频" label={filters.video === 'yes' ? '有视频' : '无视频'} />
+            </SelectValue>
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">有无视频</SelectItem>
+            <SelectItem value="all">全部</SelectItem>
             <SelectItem value="yes">有视频</SelectItem>
             <SelectItem value="no">无视频</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filters.ad || 'all'} onValueChange={(v) => setFilters({ ...filters, ad: v === 'all' ? '' : v })}>
-          <SelectTrigger className="h-9 w-24"><SelectValue placeholder="广告" /></SelectTrigger>
+          <SelectTrigger className="h-9 w-28">
+            <SelectValue placeholder="是否广告">
+              <FilterValue active={!!filters.ad} name="是否广告" label={filters.ad === 'ad' ? '仅广告' : '非广告'} />
+            </SelectValue>
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">广告</SelectItem>
+            <SelectItem value="all">全部</SelectItem>
             <SelectItem value="ad">仅广告</SelectItem>
             <SelectItem value="no">非广告</SelectItem>
           </SelectContent>

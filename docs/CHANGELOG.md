@@ -1,5 +1,14 @@
 # 变更记录
 
+## [M187 / R-198] 2026-09-28 — 素材库筛选下拉默认态修正
+
+> 作者：「素材库广告搜索条件里面为什么是默认『广告』二字，很容易误解啊……改成是否广告、发布状态」。
+
+- 根因：筛选项的「全部」项文案被写成了字段名（`<SelectItem value="all">广告</SelectItem>`），而 Radix `SelectValue` 只要 `value` 非空就按正常前景色渲染选中项文字 → 默认（不筛选）态看起来跟真的筛了「仅广告」一样。
+- 新增 `frontend_v2/src/components/ui/filter-value.tsx`：默认态＝字段名 + `text-muted-foreground`，选中具体值才恢复正常前景色与该值文案。
+- 素材库工具栏 4 个下拉接入（博主/发布状态/有无视频/是否广告），文案统一为字段名，下拉内保留「全部」项取消筛选；动效不变。
+- 单测 `components/ui/filter-value.test.tsx` 3 例；`frontend_v2` tsc/eslint/vitest（43 例）全绿；`scripts/verify.sh` 全绿。
+
 ## [M183~M186 / R-194~R-197] 2026-09-28 — 洗稿主链路/来源分层/立场提词/历史回填
 
 > 采纳外部评审的三处修正 + 历史回填。
