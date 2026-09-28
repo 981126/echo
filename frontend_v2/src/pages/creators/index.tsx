@@ -56,6 +56,129 @@ interface AccountForm {
 const EMPTY_CREATOR: CreatorForm = { id: 0, kind: 'owner', name: '', parent_id: null, note: '' }
 const EMPTY_ACCOUNT: AccountForm = { id: 0, creator_id: 0, platform: 'douyin', nickname: '', home_link: '', platform_user_id: '', cookie: '' }
 
+// R-171：CreatorBlock 必须定义在组件外部——定义在 CreatorsPage 内部会因每次渲染都是新组件类型，
+// 导致 jobs 轮询更新时整块卡片被 remount，进度条反复播放进入动画（视觉上「消失又出现」）。
+interface CreatorBlockHandlers {
+  onSyncAll: () => void
+  onSync: (body: Record<string, unknown>, msg?: string) => void
+  onSwitch: (c: CreatorMeta) => void
+  onBenchmarkToggle: (c: CreatorMeta, on: boolean) => void
+  onDeleteCreator: (c: CreatorMeta) => void
+  onEditCreator: (c: CreatorMeta) => void
+  onAddAccount: (c: CreatorMeta) => void
+  onAddBenchmark: (c: CreatorMeta) => void
+  onEditAccount: (c: CreatorMeta, a: AccountMeta) => void
+  onRemoveAccount: (a: AccountMeta) => void
+  onPosts: (a: AccountMeta) => void
+  onToggleEnabled: (a: AccountMeta, on: boolean) => void
+}
+
+function CreatorBlock({
+  c,
+  benchmark = false,
+  job,
+  running,
+  syncingAll,
+  hasBenchmarks,
+  h
+}: {
+  c: CreatorMeta
+  benchmark?: boolean
+  job: SyncJob | null
+  running: boolean
+  syncingAll: boolean
+  hasBenchmarks: boolean
+  h: CreatorBlockHandlers
+}) {
+  return (
+    <motion.div variants={itemVariants} className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Avatar className="h-10 w-10">
+          {c.avatar ? <AvatarImage src={c.avatar} alt={c.name} /> : null}
+          <AvatarFallback>{c.name.slice(0, 1) || '博'}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[15px] font-semibold">{c.name}</span>
+            {benchmark ? (
+              <Badge variant="secondary"><Target className="h-3 w-3" /> 对标</Badge>
+            ) : c.is_current ? (
+              <Badge><Crown className="h-3 w-3" /> 当前主博主</Badge>
+            ) : (
+              <Badge variant="secondary">主博主</Badge>
+            )}
+          </div>
+          <div className="tnum text-[11px] text-muted-foreground">
+            全网粉丝 {fmtNum(c.followers_total)} · {c.account_count} 个账号
+            {c.note ? ` · ${c.note}` : ''}
+          </div>
+        </div>
+        <span className="flex-1" />
+        <div className="flex flex-wrap items-center gap-1.5">
+          {!benchmark && c.is_current && (
+            <Button size="sm" variant="secondary" onClick={h.onSyncAll} disabled={syncingAll}>
+              {syncingAll ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              同步所有博主前15条
+            </Button>
+          )}
+          <Button size="sm" variant="outline" disabled={running} onClick={() => h.onSync({ scope: 'daily', creator_id: c.id })}>
+            {running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            同步
+          </Button>
+          <Button size="sm" variant="outline" disabled={running} onClick={() => h.onSync({ scope: 'initial', creator_id: c.id }, '已入队全量同步')}>
+            全量同步
+          </Button>
+          {!benchmark && !c.is_current && (
+            <Button size="sm" variant="secondary" onClick={() => h.onSwitch(c)}>切换</Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => h.onEditCreator(c)}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => h.onAddAccount(c)}>
+            <Plus className="h-3.5 w-3.5" /> 账号
+          </Button>
+          {!benchmark && hasBenchmarks && (
+            <Button size="sm" variant="ghost" onClick={() => h.onAddBenchmark(c)}>
+              <UserPlus className="h-3.5 w-3.5" /> 对标
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" className="text-destructive" onClick={() => h.onDeleteCreator(c)}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* 对标开关 */}
+      <div className="flex items-center justify-end gap-2">
+        <span className="text-xs text-muted-foreground">{benchmark ? '恢复为独立主博主' : '对标博主'}</span>
+        <Switch checked={benchmark} onCheckedChange={(v) => h.onBenchmarkToggle(c, v)} />
+      </div>
+
+      <AnimatePresence>{job && <SyncProgressBar job={job} />}</AnimatePresence>
+
+      <div className="space-y-2">
+        {c.accounts.map((a) => (
+          <AccountRow
+            key={a.id}
+            account={a}
+            syncing={running || a.sync_status === 'running'}
+            onSync={(acc) => h.onSync({ scope: 'daily', account_id: acc.id, creator_id: c.id })}
+            onPosts={h.onPosts}
+            onEdit={(acc) => h.onEditAccount(c, acc)}
+            onRemove={h.onRemoveAccount}
+            onToggleEnabled={h.onToggleEnabled}
+          />
+        ))}
+        {!c.accounts.length && (
+          <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+            还没有账号，点「+ 账号」配置抖音/小红书/B站主页链接
+          </div>
+        )}
+      </div>
+    </motion.div>
+  )
+}
+
 export default function CreatorsPage() {
   const qc = useQueryClient()
   const [creatorForm, setCreatorForm] = useState<CreatorForm | null>(null)
@@ -258,105 +381,28 @@ export default function CreatorsPage() {
   }
 
   // ---------- 渲染 ----------
-  function CreatorBlock({ c, benchmark = false }: { c: CreatorMeta; benchmark?: boolean }) {
-    const job = jobFor(c)
-    return (
-      <motion.div variants={itemVariants} className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Avatar className="h-10 w-10">
-            {c.avatar ? <AvatarImage src={c.avatar} alt={c.name} /> : null}
-            <AvatarFallback>{c.name.slice(0, 1) || '博'}</AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[15px] font-semibold">{c.name}</span>
-              {benchmark ? (
-                <Badge variant="secondary"><Target className="h-3 w-3" /> 对标</Badge>
-              ) : c.is_current ? (
-                <Badge><Crown className="h-3 w-3" /> 当前主博主</Badge>
-              ) : (
-                <Badge variant="secondary">主博主</Badge>
-              )}
-            </div>
-            <div className="tnum text-[11px] text-muted-foreground">
-              全网粉丝 {fmtNum(c.followers_total)} · {c.account_count} 个账号
-              {c.note ? ` · ${c.note}` : ''}
-            </div>
-          </div>
-          <span className="flex-1" />
-          <div className="flex flex-wrap items-center gap-1.5">
-            {!benchmark && c.is_current && (
-              <Button size="sm" variant="secondary" onClick={syncAll} disabled={syncingAll}>
-                {syncingAll ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                同步所有博主前15条
-              </Button>
-            )}
-            <Button size="sm" variant="outline" disabled={runningCreators.has(c.id)} onClick={() => runSync({ scope: 'daily', creator_id: c.id })}>
-              {runningCreators.has(c.id) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              同步
-            </Button>
-            <Button size="sm" variant="outline" disabled={runningCreators.has(c.id)} onClick={() => runSync({ scope: 'initial', creator_id: c.id }, '已入队全量同步')}>
-              全量同步
-            </Button>
-            {!benchmark && !c.is_current && (
-              <Button size="sm" variant="secondary" onClick={() => setSwitchTo(c)}>切换</Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => setCreatorForm({ id: c.id, kind: c.kind, name: c.name, parent_id: c.parent_id ?? null, note: c.note || '' })}>
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setAccountForm({ ...EMPTY_ACCOUNT, creator_id: c.id })}>
-              <Plus className="h-3.5 w-3.5" /> 账号
-            </Button>
-            {!benchmark && benchmarksOf(c).length > 0 && (
-              <Button size="sm" variant="ghost" onClick={() => setCreatorForm({ ...EMPTY_CREATOR, kind: 'benchmark', parent_id: c.id })}>
-                <UserPlus className="h-3.5 w-3.5" /> 对标
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setDeleteCreator(c)}>
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-
-        {/* 对标开关 */}
-        <div className="flex items-center justify-end gap-2">
-          <span className="text-xs text-muted-foreground">{benchmark ? '恢复为独立主博主' : '对标博主'}</span>
-          <Switch checked={benchmark} onCheckedChange={(v) => setBenchmarkToggle({ c, on: v })} />
-        </div>
-
-        <AnimatePresence>{job && <SyncProgressBar job={job} />}</AnimatePresence>
-
-        <div className="space-y-2">
-          {c.accounts.map((a) => (
-            <AccountRow
-              key={a.id}
-              account={a}
-              syncing={runningCreators.has(c.id) || a.sync_status === 'running'}
-              onSync={(acc) => runSync({ scope: 'daily', account_id: acc.id, creator_id: c.id })}
-              onPosts={setPostsAccount}
-              onEdit={(acc) =>
-                setAccountForm({
-                  id: acc.id,
-                  creator_id: c.id,
-                  platform: acc.platform,
-                  nickname: acc.nickname,
-                  home_link: acc.home_link,
-                  platform_user_id: acc.platform_user_id,
-                  cookie: (acc.extra_config?.cookie as string) || ''
-                })
-              }
-              onRemove={setDeleteAccount}
-              onToggleEnabled={toggleEnabled}
-            />
-          ))}
-          {!c.accounts.length && (
-            <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-              还没有账号，点「+ 账号」配置抖音/小红书/B站主页链接
-            </div>
-          )}
-        </div>
-      </motion.div>
-    )
+  const handlers: CreatorBlockHandlers = {
+    onSyncAll: syncAll,
+    onSync: runSync,
+    onSwitch: setSwitchTo,
+    onBenchmarkToggle: (c, on) => setBenchmarkToggle({ c, on }),
+    onDeleteCreator: setDeleteCreator,
+    onEditCreator: (c) => setCreatorForm({ id: c.id, kind: c.kind, name: c.name, parent_id: c.parent_id ?? null, note: c.note || '' }),
+    onAddAccount: (c) => setAccountForm({ ...EMPTY_ACCOUNT, creator_id: c.id }),
+    onAddBenchmark: (c) => setCreatorForm({ ...EMPTY_CREATOR, kind: 'benchmark', parent_id: c.id }),
+    onEditAccount: (c, acc) =>
+      setAccountForm({
+        id: acc.id,
+        creator_id: c.id,
+        platform: acc.platform,
+        nickname: acc.nickname,
+        home_link: acc.home_link,
+        platform_user_id: acc.platform_user_id,
+        cookie: (acc.extra_config?.cookie as string) || ''
+      }),
+    onRemoveAccount: setDeleteAccount,
+    onPosts: setPostsAccount,
+    onToggleEnabled: toggleEnabled
   }
 
   return (
@@ -416,10 +462,10 @@ export default function CreatorsPage() {
           <motion.div key={c.id} variants={itemVariants}>
             <Card className={c.is_current ? 'border-accent/50' : ''}>
               <CardContent className="space-y-4 py-4">
-                <CreatorBlock c={c} />
+                <CreatorBlock c={c} job={jobFor(c)} running={runningCreators.has(c.id)} syncingAll={syncingAll} hasBenchmarks={benchmarksOf(c).length > 0} h={handlers} />
                 {benchmarksOf(c).map((bm) => (
                   <div key={bm.id} className="ml-4 border-l-2 border-border pl-4">
-                    <CreatorBlock c={bm} benchmark />
+                    <CreatorBlock c={bm} benchmark job={jobFor(bm)} running={runningCreators.has(bm.id)} syncingAll={syncingAll} hasBenchmarks={false} h={handlers} />
                   </div>
                 ))}
               </CardContent>

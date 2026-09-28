@@ -145,6 +145,17 @@
 - **验证**：修复后 33 张封面框唯一尺寸 344×258（4:3）；博主管理作品弹窗 263×197、素材库 265×199 回归正常；
   `scripts/verify.sh` 全绿；服务保持运行。
 
+## [M160 / R-171] 2026-09-28 — 博主管理同步进度条「消失又出现」
+
+> 作者：博主管理点击同步后，进度条会消失又出现，很奇怪。
+
+- **根因**：`CreatorBlock` 定义在 `CreatorsPage` 函数体内部，每次渲染都是新的组件类型 → React 每次重渲染
+  卸载重建整块卡片；jobs 轮询/SSE 频繁触发重渲染，`SyncProgressBar` 的进入动画（`initial` opacity/height 0）
+  被反复重放。无头探针实测：进度一变，进度条与账号行 DOM 节点即被替换。
+- **修复**：`frontend_v2/src/pages/creators/index.tsx` 把 `CreatorBlock` 提升到模块作用域，改为纯 props
+  （`job/running/syncingAll/hasBenchmarks/h`）。
+- **验证**：递增进度 mock 下探针 `barSame/rowSame` 由 `false` 变持续 `true`；`scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M159 / R-170] 2026-09-28 — 脚本工作台删除草稿报 Method Not Allowed
 
 > 作者：我点击删除脚本工作台的脚本报错 Method Not Allowed。
