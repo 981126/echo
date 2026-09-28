@@ -7,6 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-172 | 2026-09-28 | 博主对标封面长宽高统一为 4:3：封面框是 flex item，`min-height:auto` 被竖版封面固有高度顶开（344×459/678），改 absolute 图片 + overflow-hidden 固定比例；作品弹窗加载骨架 3:4→4:3 | ✅ 已完成 | M161（已完成） | frontend_v2、R-164/R-167 |
 | R-168 | 2026-09-28 | 老前端 `frontend/` 标记废弃：以后启动/修改项目一律指新前端 `frontend_v2/`（老前端不删、构建防腐保留） | ✅ 已完成 | M157（已完成） | AGENTS/README/QUICKSTART/PRD/ARCH、R-164 |
 | R-167 | 2026-09-28 | frontend_v2 线上 bug 修复②：AI 对话 [object Object]（错误帧显式处理+健壮提取）/ 对标封面裂开（后端改本地封面+no-referrer）/ 草稿抽屉空白防御（ErrorBoundary 降级） | ✅ 已完成 | M156（已完成） | frontend_v2、benchmark.py、R-164/R-165 |
 | R-166 | 2026-09-28 | NAS Docker 部署包含 frontend_v2 构建（Dockerfile 新增 frontend-v2-build 阶段，/v2 在 NAS 可用） | ✅ 已完成 | M155（已完成） | Dockerfile、R-164/R-145 |

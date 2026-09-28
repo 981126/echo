@@ -1,5 +1,19 @@
 # 变更记录
 
+## [M161 / R-172] 2026-09-28 — 博主对标封面长宽高统一（4:3）
+
+> 作者：博主对标，封面需要统一长宽高，不然有些封面很高。
+
+- **根因**：封面框虽写了 `aspect-video`，但它是 `article`（flex column）的 flex item，`min-height: auto`
+  的自动最小尺寸取内容高度——框内 `<img class="h-full">` 百分比高度在不定高祖先下回退为固有高度
+  （344 宽 × 3:4 竖图 = 459 高），把 `aspect-ratio` 顶开；同排卡片被 grid stretch 拉齐，整页参差。
+  无头实测：同一排 344×194（B站 16:9）与 344×459、344×678（抖音/小红书）并存。
+- **修复**：`frontend_v2/src/pages/benchmark/index.tsx` 封面框改
+  `relative aspect-[4/3] w-full shrink-0 overflow-hidden` + 图片 `absolute inset-0 h-full w-full object-cover`
+  （绝对定位不参与内容尺寸计算）；`creators/posts-dialog.tsx` 加载骨架 `aspect-[3/4]` → `aspect-[4/3]`。
+- **验证**：修复后 33 张封面框唯一尺寸 344×258（4:3）；博主管理作品弹窗 263×197、素材库 265×199 回归正常；
+  `scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M157 / R-168] 2026-09-28 — 老前端 frontend/ 标记废弃，默认前端 = frontend_v2
 
 > 作者：在文档中将老的前端项目标成废弃，以后说启动项目、修改项目都不修改老前端项目，而是新前端项目。
