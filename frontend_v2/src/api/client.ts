@@ -11,6 +11,28 @@ export class ApiError extends Error {
   }
 }
 
+// R-167：后端 detail 可能是字符串/对象/数组（如 422 校验错误），统一转可读文本
+export function detailText(v: unknown, fallback: string): string {
+  if (v == null) return fallback
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) {
+    const parts = v.map((x) => detailText(x, '')).filter(Boolean)
+    return parts.join('；') || fallback
+  }
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    if (typeof o.message === 'string') return o.message
+    if (typeof o.msg === 'string') return o.msg
+    if (typeof o.detail === 'string') return o.detail
+    try {
+      return JSON.stringify(o)
+    } catch {
+      return fallback
+    }
+  }
+  return String(v)
+}
+
 const authMiddleware: Middleware = {
   async onRequest({ request }) {
     const token = getToken()
@@ -27,7 +49,7 @@ const authMiddleware: Middleware = {
       let detail = response.statusText
       try {
         const j = await response.clone().json()
-        detail = (j as { detail?: string }).detail || detail
+        detail = detailText((j as { detail?: unknown }).detail, detail)
       } catch {
         /* ignore */
       }
@@ -55,7 +77,7 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     let detail = resp.statusText
     try {
       const j = await resp.clone().json()
-      detail = (j as { detail?: string }).detail || detail
+      detail = detailText((j as { detail?: unknown }).detail, detail)
     } catch {
       /* ignore */
     }

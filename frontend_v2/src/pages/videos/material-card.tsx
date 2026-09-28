@@ -72,6 +72,7 @@ export const MaterialCard = memo(function MaterialCard({
             src={item.cover_url}
             alt={item.title}
             loading="lazy"
+            referrerPolicy="no-referrer"
             className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
           />
         ) : (

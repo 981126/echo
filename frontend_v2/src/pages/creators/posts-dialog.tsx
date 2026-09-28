@@ -77,7 +77,7 @@ export function PostsDialog({
                 <motion.li key={p.id} variants={itemVariants} className="overflow-hidden rounded-lg border border-border bg-card">
                   <div className="relative aspect-[4/3] bg-muted">
                     {p.cover ? (
-                      <img src={p.cover} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      <img src={p.cover} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full items-center justify-center text-[10px] font-semibold text-muted-foreground/60">ECHO</div>
                     )}

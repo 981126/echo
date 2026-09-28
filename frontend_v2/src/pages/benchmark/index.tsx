@@ -256,7 +256,7 @@ export default function BenchmarkPage() {
                         >
                           <div className="relative aspect-video bg-muted">
                             {it.cover ? (
-                              <img src={it.cover} alt="" loading="lazy" className="h-full w-full object-cover" />
+                              <img src={it.cover} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                             ) : (
                               <div className="flex h-full items-center justify-center text-xs font-semibold text-muted-foreground/60">ECHO</div>
                             )}

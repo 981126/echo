@@ -1,5 +1,18 @@
 # 变更记录
 
+## [M156 / R-167] 2026-09-28 — frontend_v2 线上 bug②：AI 对话 [object Object] / 对标封面裂开 / 草稿抽屉空白防御
+
+> 作者：脚本工作台明明有草稿，打开却是空白，ai对话进行对话，ai回复我出错了：[object Object]，博主对标页面的封面图是裂开的。
+
+- **AI 对话错误显示**：`chat/index.tsx` 显式处理 `event: error` 帧（原先只查 `data.error` 字段，错误帧被漏过或
+  把对象塞给 `new Error`）；新增 `errText()` 健壮提取；`api/client.ts` 新增 `detailText()`（FastAPI 422 的
+  detail 数组/嵌套对象统一转可读文本）。
+- **对标封面裂开**：后端 `unit_payload` 由远端 `cover_url`（CDN 防盗链 403）改 `cover_url_local`（本地 /covers/ 优先）；
+  前端 benchmark/素材卡/作品弹窗/主页时间线封面加 `referrerPolicy="no-referrer"`。
+- **草稿抽屉空白（防御）**：本地 34 篇草稿+新建保存链路+预览+深色+生产构建全量复测均正常、无法复现；
+  新增 `ErrorBoundary` 组件包住 TipTap 编辑器，渲染崩溃时降级纯文本编辑（内容不丢），杜绝白屏。
+- **验证**：对标封面 headless 实测全部加载（0 张 4xx）；错误提取单测 3 例；vitest 22 例全绿；verify.sh 全绿；服务保持运行。
+
 ## [M155 / R-166] 2026-09-28 — NAS Docker 部署包含 frontend_v2 构建
 
 > 盘点「还有什么没做的」时发现：Dockerfile 只构建老前端，NAS 部署后 /v2 会 404（R-164 部署链路未闭环）。

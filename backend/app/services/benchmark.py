@@ -333,7 +333,7 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
         "post_id": post.id,
         "title": post.title or "",
         "desc": post.desc or "",
-        "cover": post.cover_url or "",
+        "cover": post.cover_url_local or "",  # R-167：用本地封面（远端 URL 防盗链 403 裂开）
         "platforms": platforms,
         "likes": likes,
         "favorites": fav,

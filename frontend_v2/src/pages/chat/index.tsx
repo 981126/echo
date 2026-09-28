@@ -62,6 +62,25 @@ function stepText(d: StepData): string {
   return d.summary || `${d.tool || d.name || '工具'}：${d.detail || ''}`
 }
 
+// R-167：错误消息健壮提取——后端错误帧可能是字符串/对象/数组，统一转成可读文本（修「出错了：[object Object]」）
+export function errText(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) return v.map(errText).filter(Boolean).join('；')
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    if (typeof o.message === 'string') return o.message
+    if (typeof o.detail === 'string') return o.detail
+    if (o.error != null) return errText(o.error)
+    try {
+      return JSON.stringify(o)
+    } catch {
+      return String(v)
+    }
+  }
+  return String(v)
+}
+
 export default function ChatPage() {
   const qc = useQueryClient()
   const [currentId, setCurrentId] = useState<number | null>(null)
@@ -179,7 +198,10 @@ export default function ChatPage() {
             } catch {
               continue
             }
-            if (data.error) throw new Error((data.message as string) || (data.error as string))
+            // event: error 帧才是致命错误；普通帧里的 error 字段不误判
+            if (evName === 'error' || data.error) {
+              throw new Error(errText(data.message) || errText(data.error) || '未知错误')
+            }
             if (evName === 'step') {
               const kind = data.kind === 'result' ? 'ok' : 'run'
               asst.steps!.push({ kind, text: stepText(data as StepData) })

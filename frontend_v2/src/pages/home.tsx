@@ -196,6 +196,7 @@ export default function HomePage() {
                           src={e.coverUrl}
                           alt=""
                           loading="lazy"
+                          referrerPolicy="no-referrer"
                           className="h-12 w-12 rounded-md border border-border object-cover transition-transform duration-300 group-hover:scale-105"
                         />
                       ) : (

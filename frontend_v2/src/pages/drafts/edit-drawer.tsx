@@ -21,12 +21,14 @@ import { Drawer, DrawerHeader, DrawerTitle, DrawerBody, DrawerFooter } from '@/c
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectValue, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toaster'
 import { ScriptEditor } from './script-editor'
+import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { buildDiff } from './diff'
 import {
   VERSION_SOURCE,
@@ -366,7 +368,20 @@ export function DraftEditDrawer({
                 dangerouslySetInnerHTML={{ __html: md.render(state.script || '') }}
               />
             ) : (
-              <ScriptEditor value={state.script} onChange={(v) => setState({ ...state, script: v })} />
+              <ErrorBoundary
+                fallback={
+                  <div className="space-y-2">
+                    <p className="text-xs text-warning">块编辑器加载失败，已切换为纯文本编辑（内容不会丢）</p>
+                    <Textarea
+                      rows={14}
+                      value={state.script}
+                      onChange={(e) => setState({ ...state, script: e.target.value })}
+                    />
+                  </div>
+                }
+              >
+                <ScriptEditor value={state.script} onChange={(v) => setState({ ...state, script: v })} />
+              </ErrorBoundary>
             )}
 
             {!!id && checkInfo && (

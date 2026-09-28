@@ -23,6 +23,7 @@
 | M137 | 需求管理页 UI 溢出修复（R-148） | ✅ |
 | M138 | 下线「需求管理」网页（R-149） | ✅ |
 | M139 | 口播脚本编辑区换 Tiptap v3 块编辑器（R-150） | ✅ |
+| M156 | frontend_v2 线上 bug 修复②：AI 对话 [object Object] / 对标封面裂开 / 草稿抽屉空白防御（R-167） | ✅ |
 | M155 | NAS Docker 部署包含 frontend_v2 构建（R-166） | ✅ |
 | M154 | frontend_v2 线上 bug 修复：素材库卡顿 / 同步·拆分无动画 / 抽屉滚不到底（R-165） | ✅ |
 | M153 | 全新前端 frontend_v2 全功能 9 页重设计（React+shadcn/ui+Framer Motion，挂 /v2）（R-164） | ✅ |
@@ -50,6 +51,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
+| M156 / R-167 | ①AI 对话「出错了：[object Object]」——显式处理 `event: error` 帧 + `errText()`/`detailText()` 健壮提取（对象/嵌套/422 数组）；②对标封面裂开——后端 `unit_payload` 改 `cover_url_local`（本地优先），前端封面加 `referrerPolicy=no-referrer`；③草稿抽屉空白——本地全量复现未果（34 篇+保存链路+预览+深色+生产全通过），加 `ErrorBoundary` 兜底（编辑器崩溃降级纯文本不白屏） | 对标封面实测全加载（0 张 4xx）；错误提取单测 3 例；vitest 22 例全绿；verify.sh 全绿 | ✅ |
 | M155 / R-166 | NAS 部署闭环：Dockerfile 只构建老前端 → NAS 上 /v2 会 404。修：新增 `frontend-v2-build` 阶段（node:22-alpine，vite 7 需要 ^20.19/>=22.12）构建 frontend_v2 并 COPY 到 `/app/frontend_v2/dist`；`.dockerignore` 排除 `frontend_v2/dist/` | 静态审查路径一致（main.py 挂 /app/frontend_v2/dist）；verify.sh 全绿；NAS 下次部署实测 /v2 | ✅ |
 | M154 / R-165 | frontend_v2 三个线上 bug 修复：①素材库卡顿——MaterialCard 改 React.memo（回调稳定化+hasTask ref）/ 去 layout 动画 / 仅前 40 卡入场 / content-visibility 跳过屏外渲染；②同步·拆分无动画——use-card-tasks 新增 begin 本地 ramp + claim（直接用同步响应 media.task_id）+ finish + onSettled 自动刷新，拆分/删除卡片 spinner；③抽屉滚不到底——transform/filter 祖先使 fixed 定位异常，Drawer/重命名弹层改 createPortal 到 body | headless 实测：抽屉 top=0 覆盖全视口、滚动到底、同步卡片即时进度 17%、618 卡滚动流畅、零 console 错误；verify.sh 全绿 | ✅ |
 | M153 / R-164 | 全新前端 `frontend_v2/`（React 19+TS+Tailwind v4+shadcn/ui+Framer Motion+TanStack Query+openapi-typescript 生成客户端+TipTap React）：底座（双主题令牌/收缩侧栏/通知中心/SSE）+ 全功能 9 页重设计（主页时间线+灵感池 / 素材库卡片墙+右侧抽屉编辑 / 脚本工作台四 tab+TipTap+讨论+正文对比+版本 / 博主管理 / 博主对标+洗稿对照 / 人设档案 / AI 设置模型+提示词 / AI 对话 SSE 流式）；挂 /v2 与老前端并存；登录态独立 | frontend_v2 自测 tsc/eslint/vitest 19 例全绿 + build（vendor 分包）；Playwright headless 9 页点检零 console 错误；verify.sh 全绿；服务运行（8000/5173/3000） | ✅ |
