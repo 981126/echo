@@ -83,7 +83,9 @@ echo/
 
 ## 质量门禁（硬性）
 任何改动必须通过 `scripts/verify.sh`（lint + 类型检查 + 测试 + 构建），**不通过不算完成**。
-提示：沙箱/无 venv PATH 时用 `PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh`。
+提示：沙箱/无 venv PATH 时用 `PYTHON="$PWD/backend/.venv/bin/python" scripts/verify.sh`
+（脚本内部会 `cd backend`；verify.sh 已把相对路径的 `PYTHON` 自动转绝对路径、并用 `$PY -m ruff/mypy/pytest`
+代替裸命令名，所以相对路径也能跑通，但写成绝对路径最稳）。
 
 ## 硬性规则
 - 未先更新 PRD/里程碑且未获作者确认前，禁止写业务代码（线上 bug 直接修复除外）

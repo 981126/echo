@@ -14,6 +14,12 @@ else
     if command -v "$cand" >/dev/null 2>&1; then PY=$cand; break; fi
   done
 fi
+# 脚本会 `cd backend` 跑测试，调用方给的相对路径（如 PYTHON=backend/.venv/bin/python）会失效 →
+# 是「存在的相对路径」就转成绝对路径；裸命令名（python3）保持原样交给 PATH 查找。
+case "$PY" in
+  /*) ;;
+  *) [ -x "$PWD/$PY" ] && PY="$PWD/$PY" ;;
+esac
 # 沙箱/受限环境：把 pyc 缓存指到可写临时目录，避免 PermissionError
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${TMPDIR:-/tmp}/echo-pycache}"
 mkdir -p "$PYTHONPYCACHEPREFIX"
@@ -33,13 +39,14 @@ if [ -f backend/tests/test_core.py ]; then
 fi
 
 # 3) 完整检查（依赖已安装时）
+# 用 `$PY -m <工具>` 而不是裸命令名：不依赖 PATH（脚本会 cd backend，调用方传的相对 PATH 前缀会失效）
 if $PY -c "import fastapi, sqlalchemy, pytest, httpx" 2>/dev/null; then
   echo "==> [backend] ruff"
-  (cd backend && ruff check app tests) || FAIL=1
+  (cd backend && $PY -m ruff check app tests) || FAIL=1
   echo "==> [backend] mypy"
-  (cd backend && mypy app) || FAIL=1
+  (cd backend && $PY -m mypy app) || FAIL=1
   echo "==> [backend] pytest"
-  (cd backend && pytest -q) || FAIL=1
+  (cd backend && $PY -m pytest -q) || FAIL=1
 else
   echo "==> [backend] 第三方依赖未安装，跳过 ruff/mypy/pytest（安装 backend/requirements.txt 后启用）"
 fi
