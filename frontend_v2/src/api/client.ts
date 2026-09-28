@@ -67,6 +67,12 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   const headers = new Headers(init.headers)
   const token = getToken()
   if (token) headers.set('X-Access-Token', token)
+  // R-176 兜底：字符串 body 一律按 JSON 发送。fetch 对字符串默认 text/plain，后端（FastAPI）
+  // 解析不出 JSON body 会回 422「Input should be a valid dictionary or object to extract fields from」。
+  // 调用方显式指定的 Content-Type（如 text/plain）不覆盖；FormData 由浏览器自带 boundary，不动。
+  if (!headers.has('Content-Type') && typeof init.body === 'string') {
+    headers.set('Content-Type', 'application/json')
+  }
   const resp = await fetch(path, { ...init, headers })
   if (resp.status === 401) {
     clearToken()

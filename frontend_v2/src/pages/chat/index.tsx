@@ -175,6 +175,8 @@ export default function ChatPage() {
     try {
       const resp = await apiFetch('/api/chat/stream', {
         method: 'POST',
+        // R-176：必须显式声明 JSON，否则 fetch 默认 text/plain，FastAPI 解析不出 body → 422
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conversation_id: currentId, message: q })
       })
       if (!resp.body) throw new Error('连接失败')

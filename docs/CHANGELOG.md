@@ -1,5 +1,20 @@
 # 变更记录
 
+## [M165 / R-176] 2026-09-28 — AI 对话发送 422「Input should be a valid dictionary or object to extract fields from」修复
+
+> 作者：现在 ai 对话 进行对话就报错出错了：Input should be a valid dictionary or object to extract fields from
+
+- **根因**：报错来自 `POST /api/chat/stream` 的 **422 body 校验**，不是模型/接口坏了（带正确头的同一请求 200 正常流式）。
+  R-164 重写的新前端在 `chat/index.tsx` 用裸 `apiFetch` 发字符串 body，**漏了 `Content-Type: application/json`**；
+  `fetch` 对字符串 body 默认 `text/plain;charset=UTF-8` → FastAPI 拿不到 JSON body，把整串文本直接交给 Pydantic →
+  `model_attributes_type`。老前端 `ChatView.vue` 一直显式带头，属重写时引入的回归。实测：`text/plain` → 422 复现，`application/json` → 200。
+- **修复**：① 调用点显式 `headers: { 'Content-Type': 'application/json' }`（对齐老前端契约）；
+  ② `api/client.ts` 的 `apiFetch` 加兜底——body 是字符串且调用方未指定 Content-Type 时补 `application/json`
+  （显式指定的头不覆盖，FormData 不动），从根上堵住这类漏头 → 422；
+  ③ `client.test.ts` 新增 3 条断言（字符串 body 兜底 / 显式头不被覆盖 / FormData 不设头）。
+- **验证**：`vitest` 6 passed；Playwright 无头端到端（带令牌 → 对话页 → 发送）请求返回 **200**、气泡正常流式且无「出错了」；
+  `scripts/verify.sh` 全绿；后端(8000)/前端(3000) 保持运行。
+
 ## [M164 / R-175] 2026-09-28 — 动效规范立项（该有的动画不能省）+ AI 设置切 TAB 白闪修复
 
 > 作者：① ai设置切换tab页的时候页面会闪一下 ② 添加到文档中，做功能 该有的动画不能省，所有的动画必须要美观流畅。
