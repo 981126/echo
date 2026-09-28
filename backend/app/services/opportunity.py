@@ -302,6 +302,25 @@ def _gap_suggestions(db: Session, limit: int) -> dict:
         return {"items": [], "note": f"AI 暂不可用：{str(exc)[:100]}"}
 
 
+def digest_message(pack_items: list[dict], gap_items: list[dict], limit: int = 6) -> tuple[str, int]:
+    """把「缺口选题 + 每周灵感包」拼成可推送文案（纯逻辑，供定时任务用）。
+
+    返回 (文案, 总条数)。缺口优先（AI 主动想出来的更稀缺），其后热/评论。
+    """
+    items: list[tuple[str, str]] = []
+    for g in gap_items or []:
+        if g.get("title"):
+            items.append((f"缺口·{g.get('reason') or '该讲没讲过'}", g["title"]))
+    for p in pack_items or []:
+        if p.get("title"):
+            items.append((p.get("reason") or "灵感", p["title"]))
+    top = items[:limit]
+    message = "\n".join(f"{i + 1}. {title}（{reason[:30]}）" for i, (reason, title) in enumerate(top))
+    if len(items) > limit:
+        message += f"\n…另有 {len(items) - limit} 条，去「主页 → 内容机会」查看"
+    return message, len(items)
+
+
 def ledger(db: Session, limit: int = 50) -> dict:
     """选题账本（带 120s 缓存）：已讲过的话题 + 未使用灵感里被判为「可能已讲」的条目。"""
     cid = _cid(db) or 0

@@ -127,6 +127,43 @@ def _weekly_style_job() -> None:
         db.close()
 
 
+def _weekly_ideas_job() -> None:
+    """每周一 08:30：生成「本周灵感补给」并推送（R-188）。
+
+    缺口选题（AI，失败降级）+ 每周灵感包（本地统计）→ 站内通知（深链主页）+ best-effort 邮件。
+    """
+    db = SessionLocal()
+    try:
+        from .services import opportunity
+
+        pack = opportunity.weekly_pack(db, limit=8)
+        gap = opportunity.gap_suggestions(db, limit=5)
+        message, total = opportunity.digest_message(pack.get("items") or [], gap.get("items") or [])
+        if total == 0:
+            return
+        from .tasks import push_notification
+
+        push_notification(
+            db,
+            kind="weekly_ideas",
+            status="done",
+            title=f"本周灵感补给：{total} 个选题",
+            message=message,
+            target="/home",
+        )
+        try:
+            from .services import notify
+
+            notify.send_alert("echo 本周灵感补给", message + "\n\n去「主页 → 内容机会」一键生成。")
+        except Exception:  # noqa: BLE001 邮件是次要通道
+            pass
+    except Exception as exc:  # noqa: BLE001 周任务失败留痕（R-133）
+        db.rollback()
+        _alert("weekly_ideas", "每周灵感补给失败", str(exc))
+    finally:
+        db.close()
+
+
 def _backup_job() -> None:
     """每日备份（R-133）：检查退出码，失败写站内通知 + 邮件告警（原来 check=False + pass 全程无感）。"""
     script = Path(__file__).resolve().parents[2] / "scripts" / "backup.sh"
@@ -207,6 +244,14 @@ def setup_scheduler() -> None:
         _weekly_style_job,
         CronTrigger(day_of_week="sun", hour=3, minute=20, timezone=settings.tz),
         id="weekly_prompt_hint",
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # R-188：每周一 08:30 主动推送本周灵感补给（缺口 + 热/评论）
+    _scheduler.add_job(
+        _weekly_ideas_job,
+        CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=settings.tz),
+        id="weekly_ideas",
         misfire_grace_time=3600,
         coalesce=True,
     )
