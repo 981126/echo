@@ -13,6 +13,7 @@ class DraftOut(BaseModel):
 
     id: int
     video_id: Optional[int] = None
+    work_id: Optional[int] = None
     title: str = ""
     cover_text: str = ""
     script: str = ""
@@ -114,6 +115,7 @@ class DraftCreate(BaseModel):
 
 class DraftUpdate(BaseModel):
     video_id: Optional[int] = None
+    work_id: Optional[int] = None
     title: Optional[str] = None
     cover_text: Optional[str] = None
     script: Optional[str] = None

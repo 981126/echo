@@ -53,6 +53,9 @@ interface Cluster {
   matched: boolean
   score: number
   samples: string[]
+  tier?: 'mine' | 'industry' | 'external'
+  sources?: string[]
+  blogger_count?: number
 }
 interface AttrTag {
   tag: string
@@ -76,6 +79,11 @@ const GEN_MODES = [
 ]
 
 const normTitle = (s: string) => (s || '').toLowerCase().replace(/[\s\W_]+/g, '')
+const TIER_LABEL: Record<string, { label: string; variant: 'success' | 'warning' | 'secondary' }> = {
+  mine: { label: '我的观众', variant: 'success' },
+  industry: { label: '赛道共性', variant: 'warning' },
+  external: { label: '外部机会', variant: 'secondary' }
+}
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -94,6 +102,7 @@ export default function HomePage() {
   const [gapNote, setGapNote] = useState('')
   const [attr, setAttr] = useState<Attribution | null>(null)
   const [attrLoading, setAttrLoading] = useState(false)
+  const [backfilling, setBackfilling] = useState(false)
   const [pendingTopic, setPendingTopic] = useState('')
   const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
@@ -233,6 +242,19 @@ export default function HomePage() {
     }
   }
 
+  async function backfillLinks() {
+    setBackfilling(true)
+    try {
+      const r = await apiJson<{ linked: number; with_performance: number }>('/api/drafts/publish-links/apply', { method: 'POST', body: '{}' })
+      toast.success(`已自动关联历史发布 ${r.linked} 篇，回填表现 ${r.with_performance} 篇`)
+      await loadAttr()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBackfilling(false)
+    }
+  }
+
   async function generate(topic: string) {
     setGenerating(topic)
     try {
@@ -361,7 +383,11 @@ export default function HomePage() {
                       <span className="tnum mt-0.5 shrink-0 rounded bg-muted px-1.5 text-xs font-semibold">{c.count}人问</span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[13px]">{c.title}</span>
-                        {!!c.samples?.length && <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">来自：{c.samples.join(' / ')}</span>}
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          {c.tier && <Badge variant={TIER_LABEL[c.tier]?.variant || 'secondary'} className="text-[10px]">{TIER_LABEL[c.tier]?.label || c.tier}</Badge>}
+                          {!!c.blogger_count && c.blogger_count > 0 && <span>{c.blogger_count} 个对标</span>}
+                          {!!c.samples?.length && <span className="truncate">来自：{c.samples.join(' / ')}</span>}
+                        </span>
                       </span>
                       {c.matched && <Badge variant="secondary" className="shrink-0">贴合人设</Badge>}
                       <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(c.title)} disabled={generating !== null}>生成</Button>
@@ -413,7 +439,13 @@ export default function HomePage() {
                   表现归因（按标签聚合已发布稿件，越高越值得再做）
                 </span>
                 {attr.draft_count === 0 || !attr.by_tag.length ? (
-                  <p className="text-xs text-muted-foreground">还没有已发布且回填了表现的稿件（先记录发布信息 + 每日自动回填）</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">还没有已发布且回填了表现的稿件</span>
+                    <Button variant="outline" size="sm" onClick={backfillLinks} disabled={backfilling}>
+                      {backfilling ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      回填历史发布（按标题自动关联作品）
+                    </Button>
+                  </div>
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {attr.by_tag.map((t) => (

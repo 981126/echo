@@ -18,6 +18,7 @@ class Draft(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("creators.id"), nullable=True, index=True)  # 归属主博主（M13，R-029）
     video_id: Mapped[int | None] = mapped_column(ForeignKey("videos.id"), nullable=True, index=True)
+    work_id: Mapped[int | None] = mapped_column(ForeignKey("works.id"), nullable=True, index=True)  # R-197 关联作品（历史发布回填）
     title: Mapped[str] = mapped_column(String(255), default="")
     cover_text: Mapped[str] = mapped_column(String(100), default="")
     script: Mapped[str] = mapped_column(Text, default="")

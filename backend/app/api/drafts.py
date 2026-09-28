@@ -338,6 +338,30 @@ def create_draft(payload: DraftCreate, db: Session = Depends(get_db)):
     return draft
 
 
+@router.get("/publish-links/preview", response_model=dict)
+def publish_links_preview(db: Session = Depends(get_db)):
+    """R-197：列出「已发布草稿 ↔ 作品」的高置信度自动关联候选。"""
+    from ..services.publish_backfill import preview
+
+    return preview(db)
+
+
+@router.post("/publish-links/apply", response_model=dict)
+def publish_links_apply(db: Session = Depends(get_db)):
+    """R-197：应用自动关联并回填历史表现（可撤销）。"""
+    from ..services.publish_backfill import apply_links
+
+    return apply_links(db)
+
+
+@router.post("/publish-links/revert", response_model=dict)
+def publish_links_revert(db: Session = Depends(get_db)):
+    """R-197：撤销上一次自动关联。"""
+    from ..services.publish_backfill import revert
+
+    return revert(db)
+
+
 @router.get("/{draft_id}", response_model=DraftOut)
 def get_draft(draft_id: int, db: Session = Depends(get_db)):
     draft = db.get(Draft, draft_id)

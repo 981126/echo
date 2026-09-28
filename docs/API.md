@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 142 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 145 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -463,10 +463,42 @@ Generate Async
 
 **返回 200**：application/json → object
 
+### GET /api/drafts/publish-links/preview
+
+Publish Links Preview
+
+R-197：列出「已发布草稿 ↔ 作品」的高置信度自动关联候选（标题相似度 ≥ 0.8）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### POST /api/drafts/publish-links/apply
+
+Publish Links Apply
+
+R-197：应用自动关联并回填历史表现（写 work_id/video_id/发布信息），可撤销。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### POST /api/drafts/publish-links/revert
+
+Publish Links Revert
+
+R-197：撤销上一次自动关联（只清它写过的草稿）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
 ### GET /api/drafts/{draft_id}
 
 Get Draft
-
 **参数**
 
 - `draft_id`（path）integer，必填

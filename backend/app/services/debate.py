@@ -515,7 +515,6 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     每轮写 draft_discussions 留痕，最终稿落 drafts（含 original_script / source_ref）。
     """
     from ..models.platform import Creator
-    from .benchmark import persona_lines
 
     owner = db.get(Creator, int(payload.get("owner_id") or 0))
     if owner is None:
@@ -536,7 +535,12 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "tags": source_tags,
     }
 
-    persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
+    # R-194：对标洗稿主链路必须与普通生成/草稿讨论同源——注入完整作者上下文
+    # （人设四层 + 风格范本 + 改稿对照 + 禁用词 + 结构偏好 + 相关风格样本），
+    # 不能只喂简化人设，否则洗稿仍不像作者。
+    from .benchmark import REWRITE_SYSTEM, _rewrite_user
+
+    author_ctx = author_style_context(db, source_title)
     settings = get_settings()
     route = llm_router.snapshot(db)
     gen_slot, critic_slot = route.generation_pair()
@@ -584,13 +588,9 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         },
     )
 
-    rewrite_system = (
-        "你是口播脚本代笔。用作者的人设口吻与表达习惯，把给定素材改写成作者能直接录的原创口播稿；"
-        "不逐字抄袭、保留核心信息与结构，语言自然像本人说话。"
-        "只输出 JSON：{\"title\": string, \"cover_text\": string, \"script\": string}；"
-        "title 必须是与素材原标题不同的新标题；cover_text 是 3-8 字封面字（与 title 不同）；script 是脚本正文。"
-    )
-    rewrite_user = f"作者人设：\n{persona}\n\n参考素材标题：{source_title}\n参考素材原文：\n{source_text[:4000]}"
+    # R-194：初稿走统一「参考改写」契约 + 完整作者上下文（只借选题与信息线索）
+    rewrite_system = REWRITE_SYSTEM
+    rewrite_user = _rewrite_user(db, source_title, source_text)
 
     latest = None
     draft_llm = None
@@ -629,13 +629,16 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     _add(db, draft.id, 0, gen, "draft", latest, llm=draft_llm)
 
     critic_system = (
-        "你是脚本评审专家。对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、哪些有 AI 感、"
-        "哪些与原文重复或照搬；给出具体可执行的修改建议（简短直给）。\n"
-        f"作者人设：\n{persona}"
+        "你是脚本评审专家。对照**作者完整上下文**（人设/风格范本/语言习惯/禁用词/结构偏好）指出当前脚本"
+        "哪些地方不像作者、哪些有 AI 腔、哪些与原文结构或句子雷同照搬"
+        "（参考改写要求：只借选题与信息线索，不借结构/比喻/句群，必须补作者自己的经历与判断）；"
+        "给出具体可执行的修改建议（简短直给）。\n"
+        f"作者上下文：\n{author_ctx}"
     )
     revise_system = (
         "你是撰稿模型。根据评审意见，用作者口吻重写整篇口播脚本，只输出脚本正文，"
-        "不要解释、不要加标题，保持 1-2 分钟口播长度。"
+        "不要解释、不要加标题，保持 1-2 分钟口播长度。\n"
+        f"作者上下文（必须贴合）：\n{author_ctx}"
     )
 
     rounds = rewrite_rounds

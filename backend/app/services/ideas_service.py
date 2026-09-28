@@ -32,9 +32,11 @@ def persona_profile(db: Session) -> dict:
             text = f"{t.label or ''} {t.description or ''}".strip()
             if not text:
                 continue
-            if t.category == "redline":
+            layer = getattr(t, "layer", "") or ""
+            if t.category == "redline" or layer == "forbidden":
                 avoid.extend(words_of(text))
-            elif t.category == "topic":
+            elif layer == "stance" or t.category == "topic":
+                # R-196：内容立场（stance）全文提词参与相关度；赛道词同样计入
                 keywords.extend(words_of(text))
 
         videos = (

@@ -136,6 +136,46 @@ def _cid(db: Session) -> int | None:
     return current_creator_id(db)
 
 
+# R-195：内容机会「有来源地合并」——区分自己的观众 / 多对标共性 / 单对标外部机会
+_TIER_WEIGHT = {"mine": 40, "industry": 25, "external": 10}
+_TIER_LABEL = {"mine": "我的观众", "industry": "赛道共性", "external": "外部机会"}
+
+
+def _source_labeler(db: Session):
+    from ..models.platform import Creator
+
+    owner_id = _cid(db)
+    names = {c.id: (c.name or f"博主#{c.id}") for c in db.query(Creator).all()}
+
+    def label(cid: int | None) -> str:
+        if cid is None:
+            return "未知来源"
+        if cid == owner_id:
+            return "我的观众"
+        return f"对标·{names.get(cid, f'博主#{cid}')}"
+
+    return owner_id, label
+
+
+def _finalize_source(c: dict, owner_id: int | None, label) -> None:
+    """把聚类过程中累计的 _cids/own_count 落成 tier/来源字段，并加 tier 权重。"""
+    cids = c.pop("_cids", set())
+    blogger_ids = {x for x in cids if x and x != owner_id}
+    own_count = int(c.get("own_count") or 0)
+    c["blogger_count"] = len(blogger_ids)
+    c["own_count"] = own_count
+    c["sources"] = ([("我的观众" if own_count else "")]
+                    + sorted(label(x) for x in blogger_ids))
+    c["sources"] = [s for s in c["sources"] if s]
+    if own_count > 0:
+        c["tier"] = "mine"
+    elif len(blogger_ids) >= 2:
+        c["tier"] = "industry"
+    else:
+        c["tier"] = "external"
+    c["score"] = int(c.get("score") or 0) + _TIER_WEIGHT[c["tier"]]
+
+
 _LLM_CLUSTER_SYSTEM = (
     "你是内容策划。下面是作者评论区里观众的原话（带编号与点赞数）。请把表达**同一类问题/诉求**的评论归为一组，"
     "产出「观众提问榜」：\n"
@@ -201,6 +241,7 @@ def _llm_comment_clusters(db: Session, limit: int) -> dict:
     if len(rows) < 4:
         return _comment_clusters(db, limit)
     ann = {a["id"]: a for a in ideas_service.annotate_items(db, [{"id": r.id, "title": r.title} for r in rows])}
+    owner_id, label = _source_labeler(db)
     listing = "\n".join(f"{i}. {_clean(r.title)[:60]}（赞{int(r.likes or 0)}）" for i, r in enumerate(rows, 1))
     try:
         groups = _ask_groups(listing, _LLM_DEADLINE)
@@ -230,17 +271,21 @@ def _llm_comment_clusters(db: Session, limit: int) -> dict:
             if pt and pt not in samples:
                 samples.append(pt)
         matched = any(ann.get(rows[i - 1].id, {}).get("matched") for i in members)
-        out.append(
-            {
-                "title": title[:120],
-                "count": len(members),
-                "likes": likes,
-                "samples": samples[:3],
-                "matched": bool(matched),
-                "question": _is_question(title),
-                "score": len(members) * 10 + round(math.log1p(likes) * 5) + (20 if matched else 0) + (8 if _is_question(title) else 0),
-            }
-        )
+        own_count = sum(1 for i in members if owner_id and rows[i - 1].creator_id == owner_id)
+        cids = {rows[i - 1].creator_id for i in members}
+        cluster = {
+            "title": title[:120],
+            "count": len(members),
+            "likes": likes,
+            "own_count": own_count,
+            "_cids": cids,
+            "samples": samples[:3],
+            "matched": bool(matched),
+            "question": _is_question(title),
+            "score": len(members) * 10 + round(math.log1p(likes) * 5) + (20 if matched else 0) + (8 if _is_question(title) else 0),
+        }
+        _finalize_source(cluster, owner_id, label)
+        out.append(cluster)
     if not out:
         return _comment_clusters(db, limit)
     out.sort(key=lambda c: c["score"], reverse=True)
@@ -253,6 +298,7 @@ def _comment_clusters(db: Session, limit: int) -> dict:
     rows = _unused_ideas(db, "comment", _SCAN_LIMIT)
     if not rows:
         return {"clusters": [], "total_comments": 0}
+    owner_id, label = _source_labeler(db)
     ann = {a["id"]: a for a in ideas_service.annotate_items(db, [{"id": r.id, "title": r.title} for r in rows])}
     clusters: list[dict] = []
     for r in rows:
@@ -260,10 +306,13 @@ def _comment_clusters(db: Session, limit: int) -> dict:
         n = _norm(title)
         if len(n) < 4 or _low_value(title):
             continue
+        is_own = 1 if (owner_id and r.creator_id == owner_id) else 0
         for c in clusters:
             if _sim(n, c["_norm"]) >= _SIM_THRESHOLD:
                 c["count"] += 1
                 c["likes"] += int(r.likes or 0)
+                c["own_count"] += is_own
+                c["_cids"].add(r.creator_id)
                 if len(c["samples"]) < 4 and r.post_title:
                     c["samples"].append(r.post_title[:60])
                 if ann.get(r.id, {}).get("matched"):
@@ -275,6 +324,8 @@ def _comment_clusters(db: Session, limit: int) -> dict:
                     "title": title[:120],
                     "count": 1,
                     "likes": int(r.likes or 0),
+                    "own_count": is_own,
+                    "_cids": {r.creator_id},
                     "samples": [r.post_title[:60]] if r.post_title else [],
                     "matched": bool(ann.get(r.id, {}).get("matched")),
                     "question": _is_question(title),
@@ -290,6 +341,7 @@ def _comment_clusters(db: Session, limit: int) -> dict:
             + (20 if c["matched"] else 0)
             + (8 if c.get("question") else 0)
         )
+        _finalize_source(c, owner_id, label)
         out.append(c)
     out.sort(key=lambda c: c["score"], reverse=True)
     total = (
@@ -314,15 +366,20 @@ def _weekly_pack(db: Session, limit: int) -> dict:
 
     cc = comment_clusters(db, limit=40)
     for c in cc["clusters"]:
+        tier = c.get("tier", "external")
+        tier_txt = _TIER_LABEL.get(tier, "")
         items.append(
             {
                 "title": c["title"],
                 "slot": "comment",
+                "tier": tier,
+                "sources": c.get("sources", []),
+                "blogger_count": c.get("blogger_count", 0),
                 "demand": c["count"],
                 "likes": c["likes"],
                 "matched": c["matched"],
                 "samples": c["samples"],
-                "reason": f"评论区被问 {c['count']} 次" + ("（贴合人设）" if c["matched"] else ""),
+                "reason": f"[{tier_txt}] 评论区被问 {c['count']} 次" + ("（贴合人设）" if c["matched"] else ""),
             }
         )
 
@@ -456,18 +513,47 @@ def topic_attribution(db: Session, limit: int = 15) -> dict:
     return _cached(f"attr:{cid}:{limit}", lambda: _topic_attribution(db, limit), ttl=300.0)
 
 
+def _video_engagement(db: Session, video) -> float:
+    """素材表现（优先平台实时，退回指标快照）；无数据返回 0。"""
+    from .metrics import _platform_breakdown
+
+    totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0}
+    has = False
+    for r in _platform_breakdown(db, video):
+        for k in totals:
+            if r.get(k) is not None:
+                has = True
+                totals[k] += int(r.get(k) or 0)
+    if not has:
+        from ..models.metrics import MetricsSnapshot
+
+        s = (
+            db.query(MetricsSnapshot)
+            .filter(MetricsSnapshot.video_id == video.id)
+            .order_by(MetricsSnapshot.snapshot_date.desc())
+            .first()
+        )
+        if s is not None:
+            has = True
+            totals = {"plays": s.plays or 0, "likes": s.likes or 0, "favorites": s.favorites or 0, "comments": s.comments or 0}
+    return _engagement(totals) if has else 0.0
+
+
 def _topic_attribution(db: Session, limit: int) -> dict:
     import json
 
     from ..models.draft import Draft
+    from ..models.video import Video
 
-    q = db.query(Draft).filter(Draft.status.in_(["used", "done"]))
     cid = _cid(db)
-    if cid:
-        q = q.filter(Draft.creator_id == cid)
     by_tag: dict[str, list[float]] = {}
     rows: list[dict] = []
-    for d in q.all():
+
+    # 1) 已发布草稿（有表现回填的）
+    dq = db.query(Draft).filter(Draft.status.in_(["used", "done"]))
+    if cid:
+        dq = dq.filter(Draft.creator_id == cid)
+    for d in dq.all():
         try:
             perf = json.loads(d.performance or "{}")
         except (TypeError, ValueError):
@@ -476,9 +562,24 @@ def _topic_attribution(db: Session, limit: int) -> dict:
         if not totals:
             continue
         eng = _engagement(totals)
-        rows.append({"title": d.title or "", "engagement": eng, "tags": _draft_tags(d.tags)})
-        for tag in _draft_tags(d.tags):
+        tags = _draft_tags(d.tags)
+        rows.append({"title": d.title or "", "engagement": eng, "tags": tags})
+        for tag in tags:
             by_tag.setdefault(tag, []).append(eng)
+
+    # 2) 已发布素材（R-197：历史数据主要在 videos/works，不在草稿）
+    vq = db.query(Video).filter(Video.is_ad.is_(False), Video.status == "published")
+    if cid:
+        vq = vq.filter(Video.creator_id == cid)
+    for v in vq.all():
+        eng = _video_engagement(db, v)
+        if eng <= 0:
+            continue
+        tags = list(dict.fromkeys(_draft_tags(v.main_topics) + _draft_tags(v.tags)))
+        rows.append({"title": v.title or "", "engagement": eng, "tags": tags})
+        for tag in tags:
+            by_tag.setdefault(tag, []).append(eng)
+
     if not rows:
         return {"by_tag": [], "top": [], "bottom": [], "draft_count": 0, "good_tags": []}
     tag_stats = [

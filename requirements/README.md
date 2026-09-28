@@ -7,6 +7,10 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-197 | 2026-09-28 | 历史已发布内容自动关联+表现回填：drafts.work_id + 标题相似度≥0.8 关联 works（可撤销）+ preview/apply/revert | ✅ 已完成 | M186（已完成） | drafts/publish_backfill、R-184/R-189 |
+| R-196 | 2026-09-28 | 热点/评论匹配接入内容立场：stance 全文提词进 keywords，avoid 取 forbidden 层 | ✅ 已完成 | M185（已完成） | ideas_service、R-072/R-182 |
+| R-195 | 2026-09-28 | 内容机会「有来源地合并」：簇带 tier(自己/多对标/单对标)、来源博主数、own_count 权重；每日用自己、周包纳入对标 | ✅ 已完成 | M184（已完成） | opportunity、R-185/R-140 |
+| R-194 | 2026-09-28 | 对标洗稿主链路接完整 author_style_context + 「只借选题与信息」契约（去掉“保留核心信息与结构”） | ✅ 已完成 | M183（已完成） | debate/benchmark、R-118/R-181 |
 | R-193 | 2026-09-28 | 时间线从主页移到博主管理页顶部（抽成 TimelineCard 复用组件） | ✅ 已完成 | M182（已完成） | frontend_v2、R-010/R-016 |
 | R-192 | 2026-09-28 | 内容机会进 AI 对话（工具 get_content_opportunities）+ 选题归因（按标签聚合表现并加权灵感包）+ 评论聚类接模型1 语义聚类（失败回退本地） | ✅ 已完成 | M181（已完成） | opportunity/chat_service、R-185/R-187/R-189 |
 | R-191 | 2026-09-28 | 选题账本铺到主页灵感列表：新增轻量 `GET /api/opportunities/covered` + 灵感条目标「可能已讲」 | ✅ 已完成 | M180（已完成） | opportunity、R-185 |

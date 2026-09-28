@@ -39,16 +39,74 @@ def performance_for_video(db: Session, video_id: int) -> dict | None:
     }
 
 
+def performance_for_work(db: Session, work_id: int) -> dict | None:
+    """聚合某作品（works）各平台帖的最新互动；无数据返回 None（R-197）。"""
+    from ..models.platform import PlatformPost, PlatformPostStat
+
+    posts = db.query(PlatformPost).filter(PlatformPost.work_id == work_id).all()
+    if not posts:
+        return None
+    order = ["douyin", "bilibili", "xiaohongshu"]
+    by_platform: dict[str, dict] = {}
+    for p in posts:
+        stat = (
+            db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id == p.id)
+            .order_by(PlatformPostStat.stat_date.desc())
+            .first()
+        )
+        if p.platform not in by_platform:
+            by_platform[p.platform] = {
+                "platform": p.platform,
+                "plays": stat.plays if stat else None,
+                "likes": stat.likes if stat else None,
+                "favorites": stat.favorites if stat else None,
+                "comments": stat.comments if stat else None,
+            }
+    rows = [by_platform[p] for p in order if p in by_platform] + [
+        v for k, v in by_platform.items() if k not in order
+    ]
+    totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0}
+    has = False
+    for r in rows:
+        for k in totals:
+            if r.get(k) is not None:
+                has = True
+                totals[k] += int(r.get(k) or 0)
+    if not has:
+        return None
+    return {
+        "work_id": work_id,
+        "platforms": rows,
+        "totals": totals,
+        "refreshed_at": _app_now().isoformat(),
+    }
+
+
+def performance_for_draft(db: Session, draft: Draft) -> dict | None:
+    """优先按关联素材；没有素材时按关联作品聚合（R-197）。"""
+    if draft.video_id:
+        return performance_for_video(db, int(draft.video_id))
+    if draft.work_id:
+        return performance_for_work(db, int(draft.work_id))
+    return None
+
+
 def refresh_published_performance(db: Session, creator_id: int | None = None) -> int:
-    """刷新所有「已发布且绑定素材」草稿的表现，返回更新条数。"""
+    """刷新所有「已发布且关联了素材或作品」草稿的表现，返回更新条数。"""
     import json
 
-    q = db.query(Draft).filter(Draft.status.in_(["used", "done"]), Draft.video_id.isnot(None))
+    from sqlalchemy import or_
+
+    q = db.query(Draft).filter(
+        Draft.status.in_(["used", "done"]),
+        or_(Draft.video_id.isnot(None), Draft.work_id.isnot(None)),
+    )
     if creator_id:
         q = q.filter(Draft.creator_id == creator_id)
     updated = 0
     for d in q.all():
-        perf = performance_for_video(db, int(d.video_id or 0))
+        perf = performance_for_draft(db, d)
         if perf is None:
             continue
         d.performance = json.dumps(perf, ensure_ascii=False)
