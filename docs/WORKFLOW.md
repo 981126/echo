@@ -45,6 +45,7 @@
 ## 五、定义完成（Definition of Done）
 - [ ] 代码通过 `scripts/verify.sh`
 - [ ] AI 已自测：verify + 相关接口冒烟 + 前端关键交互，均通过
+- [ ] 动效点检：新交互都有动效且流畅，切换类无空白闪帧（首帧 opacity ≥0.6、落定 1/none）——规范见 `DESIGN.md` §8
 - [ ] 服务运行中：后端/前端已启动并加载最新代码，health 与页面可访问
 - [ ] 验收标准逐条可验证
 - [ ] 需求状态已更新，PRD/里程碑/CHANGELOG 已同步

@@ -212,3 +212,46 @@
 - 加表/列：models/*.py + db.py 幂等迁移函数（init_db 注册）；改完生成 DATABASE.md。
 - 改平台字段：先看 platform_sync 与 tikhub `_real_*` 解析函数。
 - 改生成上下文：generation.py + prompt_service + ai_prompts 页面（版本化，不要写死进系统提示词之外的代码）。
+
+## 8. 前端动效规范（frontend_v2，R-175 起强制）
+> 作者要求：**做功能该有的动画不能省，所有的动画必须要美观流畅**。动效是产品的一部分，不是可选装饰；
+> 代码评审/自测时按本节逐条对。
+
+### 8.1 动效令牌（唯一来源：`frontend_v2/src/lib/motion.ts`）
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `EASE_OUT_EXPO` | `[0.16, 1, 0.3, 1]` | 全站统一曲线（入场/位移都走它） |
+| `EASE_SPRING` | `spring(stiffness 380, damping 34)` | 抽屉/弹窗等"物理感"位移 |
+| `pageVariants` | opacity 0→1 + y 12→0 + blur 4→0，0.32s | 路由级页面切换（`AppShell` 的 `<Outlet>`） |
+| `listVariants` + `itemVariants` | stagger 0.045s + y 14→0，0.34s | 列表/卡片墙入场 |
+| `cardHover` / `fadeIn` | y -3 / opacity 0→1 | 卡片悬停、轻量出现 |
+| `ThinkingDots`（`components/ui/thinking-dots.tsx`） | 三点循环跳动 | AI 长任务"正在思考" |
+
+### 8.2 必须有的动效（缺一不可）
+- 路由切换：页面入场（`pageVariants`，由 `AppShell` 统一提供，页面自身不要再包一层整页动画）。
+- 列表/卡片墙：父 `listVariants` + 子 `itemVariants`，**只播一次**（内嵌组件定义会导致每次 re-render 重播，R-169/R-171/R-173 三次踩坑）。
+- TAB 切换：`components/ui/tabs.tsx` 的 `TabsContent` 统一入场（Radix 未选中会卸载 Content → 每次切回都会播）。
+- 抽屉/弹窗：遮罩淡入 + 面板位移（`ui/drawer.tsx`、`ui/dialog.tsx`）；开关都要有退场。
+- 加载与状态变化：骨架屏、进度条（`SyncProgressBar`）、AI 长任务状态条（讨论/洗稿/回炉，R-173）——**"在跑"必须有可见的动态**，
+  不能让用户猜是不是结束了。
+- 交互反馈：按钮/卡片 hover、按下、选中态（0.15–0.22s，用 CSS transition 即可）。
+
+### 8.3 三条硬规则（踩过坑，别再犯）
+1. **不能省**：新页面/新交互一律给动效；"先不做动画"不算完成。
+2. **切换类动画禁止从 `opacity: 0` 起步**：新内容挂载时旧内容已被卸载（Radix `Presence` / 条件渲染），
+   从 0 开始会先渲染出一帧空白 → 整块内容白闪一下。**R-175 实测**：AI 设置切 tab 时 `opacity: 0.00` 帧让大卡片白闪；
+   改为 `opacity: 0.85 + y 8`、0.22s 后消失。**起步 ≥0.6 + 位移表达"新内容进来了"**。
+3. **不改变布局、必须收口**：位移 ≤12px、缩放 ≥0.96，不做高度动画（会连带滚动跳变）；
+   动画结束必须落到 `opacity: 1 / transform: none`，不允许卡在中间值（R-173 的"轮询不停/状态卡住"就是判据写错的教训）。
+
+### 8.4 反例（已踩过的坑）
+- 从 `opacity: 0` 起步 → 切换时白闪（R-175）。
+- 组件定义在另一个组件函数体内 → 每次 re-render 都是新类型 → 整棵子树重建、入场动画重播（R-169/R-171/R-173）。
+- `AnimatePresence mode="wait"` 包 React 19 的 `Outlet` → 页内 setState 误触发整页卸载重挂（R-164 实测）。
+- 动画状态与后端状态各写一套 → 判据永不成立（R-173：等 `done/idle/failed` 三个永不出现的值）。
+
+### 8.5 点检方法（自测用）
+- **数值探针**：无头浏览器里用 `requestAnimationFrame` 采样目标元素的 `opacity/transform`，检查
+  ① 首帧不透明（≥0.6）② 落定为 `1 / none` ③ 时长与令牌一致；顺带记录滚动容器 `scrollTop/scrollHeight` 有无跳变。
+- **逐帧截图**：CDP `Page.startScreencast`（`everyNthFrame: 1`）抓切换前后 15 帧，肉眼确认没有空白帧/闪白。
+- 交互点检：主页、素材库、脚本工作台（含抽屉 4 个 tab）、AI 设置、博主对标、博主管理、人设、AI 对话逐个切一遍。

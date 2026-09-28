@@ -52,4 +52,12 @@ describe('TabsContent 入场动效（R-174）', () => {
     expect(second).toBeTruthy()
     expect(second).not.toBe(first)
   })
+
+  it('入场首帧不得全透明（R-175：旧 Content 已卸载，从 opacity:0 起步会闪一帧空白）', () => {
+    render(<Demo />)
+    const wrapper = activePanel().firstElementChild as HTMLElement
+    // framer-motion 在挂载时就把 initial 写进内联样式，可直接断言
+    expect(Number(wrapper.style.opacity || '1')).toBeGreaterThanOrEqual(0.6)
+    expect(wrapper.style.transform).toContain('translateY')
+  })
 })
