@@ -65,6 +65,8 @@ const GEN_MODES = [
   { key: 'experiment', label: '实验复盘' }
 ]
 
+const normTitle = (s: string) => (s || '').toLowerCase().replace(/[\s\W_]+/g, '')
+
 export default function HomePage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -100,6 +102,10 @@ export default function HomePage() {
     queryKey: ['topic-pool'],
     queryFn: () => apiJson<{ items: IdeaItem[] }>('/api/platform/topic-pool')
   })
+  const coveredQ = useQuery({
+    queryKey: ['opportunities', 'covered'],
+    queryFn: () => apiJson<{ titles: string[] }>('/api/opportunities/covered?limit=300')
+  })
 
   const refreshHot = useMutation({
     mutationFn: () => apiJson<{ fetched: number }>('/api/topics/refresh', { method: 'POST', body: '{}' }),
@@ -115,6 +121,16 @@ export default function HomePage() {
     () => buildTimelineModel(videosQ.data?.items ?? [], worksQ.data?.items ?? []),
     [videosQ.data, worksQ.data]
   )
+
+  const coveredNorm = useMemo(
+    () => (coveredQ.data?.titles ?? []).map(normTitle).filter((t) => t.length >= 4),
+    [coveredQ.data]
+  )
+  const isMaybeRepeated = (title: string) => {
+    const n = normTitle(title)
+    if (n.length < 4) return false
+    return coveredNorm.some((c) => n.includes(c) || c.includes(n))
+  }
 
   // 灵感池：评论（topic-pool）+ 热榜（hot），按来源过滤，「换一批」轮转
   const ideas = useMemo(() => {
@@ -347,6 +363,7 @@ export default function HomePage() {
                       <span className="tnum shrink-0 text-xs text-muted-foreground">👍 {fmtNum(it.likes)}</span>
                     ) : null}
                     <span className="min-w-0 flex-1 truncate text-[13px]">{it.title}</span>
+                    {isMaybeRepeated(it.title) && <Badge variant="warning" className="shrink-0">可能已讲</Badge>}
                     <Button
                       size="sm"
                       variant="ghost"

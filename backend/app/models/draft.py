@@ -33,6 +33,7 @@ class Draft(Base):
     publish_url: Mapped[str] = mapped_column(String(500), default="")  # R-184 发布链接
     publish_platform: Mapped[str] = mapped_column(String(20), default="")  # R-184 发布平台
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # R-184 发布时间
+    performance: Mapped[str] = mapped_column(Text, default="{}")  # R-189 发布后表现回填 JSON
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(

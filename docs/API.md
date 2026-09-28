@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 140 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 141 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -1645,6 +1645,18 @@ R-187：缺口选题——AI 基于「已讲话题 + 人设」给出该讲但没
 **参数**
 
 - `limit`（query）integer，默认 6
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/opportunities/covered
+
+Covered Titles
+
+R-191：已讲过的话题标题（轻量）——供前端给灵感列表标「可能已讲」。
+
+**参数**
+
+- `limit`（query）integer，默认 300
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 

@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Trash2, Star, LoaderCircle } from 'lucide-react'
 import { apiJson } from '@/api/client'
 import { cn } from '@/lib/utils'
-import { fmtDate } from '@/lib/format'
+import { fmtDate, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -113,6 +113,12 @@ function DraftTile({
         >
           已发布{d.publish_platform ? ` · ${PLATFORM_LABEL[d.publish_platform] || d.publish_platform}` : ''}
         </a>
+      )}
+      {!!d.performance?.totals && (
+        <p className="tnum mt-0.5 text-[11px] text-muted-foreground">
+          表现：播放 {fmtNum(d.performance.totals.plays || 0)} · 赞 {fmtNum(d.performance.totals.likes || 0)} · 藏{' '}
+          {fmtNum(d.performance.totals.favorites || 0)} · 评 {fmtNum(d.performance.totals.comments || 0)}
+        </p>
       )}
 
       {/* R-173：AI 长任务进行中/中断的状态条 */}

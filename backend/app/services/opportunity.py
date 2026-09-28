@@ -38,6 +38,7 @@ def _cached(key: str, fn):
 _EMOJI_TAG = re.compile(r"\[[^\]]{1,8}\]")
 _AT_RE = re.compile(r"@\S+")
 _QUESTION_HINTS = ("怎么", "如何", "能不能", "是不是", "为什么", "吗", "？", "?", "求", "想问", "请教")
+_PRAISE_HINTS = ("支持", "含金量", "点赞", "沙发", "哈哈", "加油", "感谢", "好听", "三连", "关注了", "666", "学到了", "牛", "不错", "笑死", "爱了")
 
 
 def _clean(text: str) -> str:
@@ -55,12 +56,32 @@ def _is_question(text: str) -> bool:
     return any(h in (text or "") for h in _QUESTION_HINTS)
 
 
+def _low_value(text: str) -> bool:
+    """过滤无信息量的评论（纯赞美/太短/纯符号），避免污染观众提问榜。"""
+    t = _clean(text)
+    n = _norm(t)
+    if len(n) < 4:
+        return True
+    if _is_question(t):
+        return False
+    if len(t) <= 14 and any(p in t for p in _PRAISE_HINTS):
+        return True
+    return False
+
+
+def _bigrams(s: str) -> set[str]:
+    return {s[i : i + 2] for i in range(len(s) - 1)} if len(s) > 1 else {s}
+
+
 def _sim(a: str, b: str) -> float:
+    """相似度 = max(子串包含, 字符 bigram Jaccard, SequenceMatcher)，兼顾中文短句。"""
     if not a or not b:
         return 0.0
     if a in b or b in a:
         return 1.0
-    return SequenceMatcher(None, a, b).ratio()
+    ba, bb = _bigrams(a), _bigrams(b)
+    jac = len(ba & bb) / len(ba | bb) if (ba | bb) else 0.0
+    return max(jac, SequenceMatcher(None, a, b).ratio())
 
 
 def covered_titles(db: Session, limit: int = 400) -> list[str]:
@@ -129,7 +150,7 @@ def _comment_clusters(db: Session, limit: int) -> dict:
     for r in rows:
         title = _clean(r.title)
         n = _norm(title)
-        if len(n) < 4:
+        if len(n) < 4 or _low_value(title):
             continue
         for c in clusters:
             if _sim(n, c["_norm"]) >= _SIM_THRESHOLD:
@@ -163,7 +184,12 @@ def _comment_clusters(db: Session, limit: int) -> dict:
         )
         out.append(c)
     out.sort(key=lambda c: c["score"], reverse=True)
-    return {"clusters": out[:limit], "total_comments": len(rows)}
+    total = (
+        db.query(TopicIdea)
+        .filter(TopicIdea.source == "comment", TopicIdea.used.is_(False))
+        .count()
+    )
+    return {"clusters": out[:limit], "total_comments": total, "scanned": len(rows)}
 
 
 def weekly_pack(db: Session, limit: int = 20) -> dict:
@@ -300,6 +326,12 @@ def _gap_suggestions(db: Session, limit: int) -> dict:
         return {"items": items[:limit], "note": ""}
     except Exception as exc:  # noqa: BLE001 AI 不可用不报错
         return {"items": [], "note": f"AI 暂不可用：{str(exc)[:100]}"}
+
+
+def covered(db: Session, limit: int = 300) -> dict:
+    """已讲过的话题标题（带 120s 缓存，轻量）——供前端给灵感列表标「可能已讲」。"""
+    cid = _cid(db) or 0
+    return _cached(f"cov:{cid}:{limit}", lambda: {"titles": covered_titles(db)[:limit]})
 
 
 def digest_message(pack_items: list[dict], gap_items: list[dict], limit: int = 6) -> tuple[str, int]:

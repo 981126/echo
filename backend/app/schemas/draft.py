@@ -28,6 +28,7 @@ class DraftOut(BaseModel):
     publish_url: str = ""
     publish_platform: str = ""
     published_at: Optional[datetime] = None
+    performance: dict = {}
     version: int = 1
     # R-173：该草稿当前的 AI 长任务状态（讨论/洗稿/回炉/生成），无任务时为 None。
     # 由 list/get 接口填充，ORM 上没有该属性（默认 None）。
@@ -38,6 +39,19 @@ class DraftOut(BaseModel):
     @field_validator("quality", mode="before")
     @classmethod
     def _parse_quality(cls, value):
+        if isinstance(value, str):
+            import json
+
+            try:
+                data = json.loads(value)
+                return data if isinstance(data, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return value or {}
+
+    @field_validator("performance", mode="before")
+    @classmethod
+    def _parse_performance(cls, value):
         if isinstance(value, str):
             import json
 

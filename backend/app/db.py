@@ -325,6 +325,8 @@ def _migrate_draft_publish() -> None:
             conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN publish_platform VARCHAR(20) NOT NULL DEFAULT ''")
         if "published_at" not in cols:
             conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN published_at DATETIME")
+        if "performance" not in cols:
+            conn.exec_driver_sql("ALTER TABLE drafts ADD COLUMN performance TEXT NOT NULL DEFAULT '{}'")
 
 
 def _migrate_sunset_review() -> None:

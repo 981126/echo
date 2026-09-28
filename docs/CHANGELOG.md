@@ -1,5 +1,14 @@
 # 变更记录
 
+## [M178~M180 / R-189~R-191] 2026-09-28 — 发布回填 + 聚类增强 + 账本 UI
+
+> 承接 R-180~R-188 的收尾打磨。
+
+- **R-189 发布后表现定时自动回填**：`drafts.performance` + `services/draft_performance.refresh_published_performance` + 每日 05:00 任务；草稿卡片显示播放/赞/藏/评。
+- **R-190 评论聚类本地增强**：过滤纯赞美/无信息评论；相似度改 `max(bigram Jaccard, SequenceMatcher)`；`total_comments` 口径修正（真实总数 + scanned）。
+- **R-191 选题账本 UI 化**：轻量 `GET /api/opportunities/covered` + 主页灵感条目标「可能已讲」。
+- 测试 `tests/test_r189_publish_backfill.py` 等；`scripts/verify.sh` 全绿。
+
 ## [M177 / R-188] 2026-09-28 — 每周灵感补给定时推送
 
 > 承接 R-185/R-187：让系统主动把灵感推给作者，而不是等作者来点。

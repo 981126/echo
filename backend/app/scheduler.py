@@ -127,6 +127,22 @@ def _weekly_style_job() -> None:
         db.close()
 
 
+def _publish_backfill_job() -> None:
+    """每日 05:00：刷新已发布草稿的表现回填（R-189）。"""
+    db = SessionLocal()
+    try:
+        from .services.draft_performance import refresh_published_performance
+
+        n = refresh_published_performance(db)
+        if n:
+            log.info("发布表现回填：更新 %d 篇", n)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        _alert("publish_backfill", "发布表现回填失败", str(exc))
+    finally:
+        db.close()
+
+
 def _weekly_ideas_job() -> None:
     """每周一 08:30：生成「本周灵感补给」并推送（R-188）。
 
@@ -252,6 +268,14 @@ def setup_scheduler() -> None:
         _weekly_ideas_job,
         CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=settings.tz),
         id="weekly_ideas",
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # R-189：每日 05:00 回填已发布稿件的表现
+    _scheduler.add_job(
+        _publish_backfill_job,
+        CronTrigger(hour=5, minute=0, timezone=settings.tz),
+        id="publish_backfill",
         misfire_grace_time=3600,
         coalesce=True,
     )

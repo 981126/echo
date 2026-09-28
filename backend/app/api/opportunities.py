@@ -33,3 +33,9 @@ def topic_ledger(limit: int = 50, db: Session = Depends(get_db)):
 def gap_suggestions(limit: int = 6, db: Session = Depends(get_db)):
     """缺口选题（R-187）：AI 基于「已讲话题 + 人设」给出该讲但没讲过的选题。"""
     return opportunity.gap_suggestions(db, limit=max(1, min(limit, 12)))
+
+
+@router.get("/covered", response_model=dict)
+def covered_titles(limit: int = 300, db: Session = Depends(get_db)):
+    """已讲过的话题标题（R-191，轻量）：供前端给灵感列表标「可能已讲」。"""
+    return opportunity.covered(db, limit=max(1, min(limit, 800)))
