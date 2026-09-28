@@ -15,6 +15,7 @@
 | R-174 | 2026-09-28 | 对标页封面尺寸对齐素材库（网格改 2/3/4 列）+ 展示口径改「前3+最新」（固定 4 条，顺延补位，转写补齐同步）+ 全站 TAB 切换动画（`ui/tabs.tsx` 统一） | ✅ 已完成 | M163（已完成） | frontend_v2、benchmark.py、R-152/R-109/R-164 |
 | R-173 | 2026-09-28 | 草稿卡片 AI 任务状态：讨论/洗稿/回炉/生成中给跳动动画（`{模型} {阶段} 第 x/y 轮`），失败显示「上次讨论中断」；抽屉讨论 tab 状态条 + 实时补留痕 + 结束判定修复（原来等 done/idle 永不触发）；修 DraftTile 内嵌定义导致的卡片动画重放 | ✅ 已完成 | M162（已完成） | frontend_v2、debate.py、drafts API、R-118/R-134/R-155/R-169/R-171 |
 | R-172 | 2026-09-28 | 博主对标封面长宽高统一为 4:3：封面框是 flex item，`min-height:auto` 被竖版封面固有高度顶开（344×459/678），改 absolute 图片 + overflow-hidden 固定比例；作品弹窗加载骨架 3:4→4:3 | ✅ 已完成 | M161（已完成） | frontend_v2、R-164/R-167 |
+| R-170 | 2026-09-28 | 脚本工作台删除草稿报 Method Not Allowed 修复：新前端误用 DELETE（无此路由），改回 PATCH status=deleted 逻辑删除 | ✅ 已完成 | M159（已完成） | frontend_v2、R-158/R-169 |
 | R-169 | 2026-09-28 | 脚本工作台列表草稿不可见修复：framer-motion 变体未传播到 TabsContent 内卡片（显式 initial/animate） | ✅ 已完成 | M158（已完成） | frontend_v2、R-164/R-167 |
 | R-168 | 2026-09-28 | 老前端 `frontend/` 标记废弃：以后启动/修改项目一律指新前端 `frontend_v2/`（老前端不删、构建防腐保留） | ✅ 已完成 | M157（已完成） | AGENTS/README/QUICKSTART/PRD/ARCH、R-164 |
 | R-167 | 2026-09-28 | frontend_v2 线上 bug 修复②：AI 对话 [object Object]（错误帧显式处理+健壮提取）/ 对标封面裂开（后端改本地封面+no-referrer）/ 草稿抽屉空白防御（ErrorBoundary 降级） | ✅ 已完成 | M156（已完成） | frontend_v2、benchmark.py、R-164/R-165 |

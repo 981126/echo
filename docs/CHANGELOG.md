@@ -145,6 +145,16 @@
 - **验证**：修复后 33 张封面框唯一尺寸 344×258（4:3）；博主管理作品弹窗 263×197、素材库 265×199 回归正常；
   `scripts/verify.sh` 全绿；服务保持运行。
 
+## [M159 / R-170] 2026-09-28 — 脚本工作台删除草稿报 Method Not Allowed
+
+> 作者：我点击删除脚本工作台的脚本报错 Method Not Allowed。
+
+- **根因**：后端无 `DELETE /api/drafts/{id}` 路由；草稿删除按设计为逻辑删除（`status='deleted'`，
+  老前端走 `PATCH {status:'deleted'}`）。新前端 `doDelete()` 误用 `DELETE` → 405。
+- **修复**：`frontend_v2/src/pages/drafts/index.tsx` 改用 `PATCH {status:'deleted'}`，与后端/老前端契约一致。
+- **验证**：无头实测点删除→确认→`PATCH /api/drafts/36` 返回 200、卡片消失、提示「已删除」（修复前 405）；
+  `scripts/verify.sh` 全绿；服务保持运行。
+
 ## [M158 / R-169] 2026-09-28 — 脚本工作台草稿卡片不可见（Framer Motion 变体未传播）
 
 > 作者：脚本工作台，每次刷新页面重新打开，里面的明明有 2 篇草稿，却看不到。
