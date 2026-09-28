@@ -152,6 +152,11 @@ def _weekly_ideas_job() -> None:
     try:
         from .services import opportunity
 
+        # R-192：预热「模型1 语义聚类」缓存（每周一次，之后界面点开即得，不必现场等）
+        try:
+            opportunity.comment_clusters(db, limit=15, use_llm=True)
+        except Exception:  # noqa: BLE001 预热失败不影响推送
+            pass
         pack = opportunity.weekly_pack(db, limit=8)
         gap = opportunity.gap_suggestions(db, limit=5)
         message, total = opportunity.digest_message(pack.get("items") or [], gap.get("items") or [])

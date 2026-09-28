@@ -1,5 +1,14 @@
 # 变更记录
 
+## [M181 / R-192] 2026-09-28 — 内容机会进 AI 对话 + 选题归因 + 模型1 语义聚类
+
+> 承接 R-185/R-187：把内容机会接进对话、接进历史表现、把聚类升级为语义。
+
+- **AI 对话工具** `get_content_opportunities`：一次返回观众提问榜 / 每周灵感包 / 缺口选题。
+- **选题归因**：按 `drafts.tags` 聚合已发布稿件表现 → `GET /api/opportunities/attribution`；命中「好标签」的每周灵感 **+15** 加权；主页「看表现归因」。
+- **模型1 语义聚类**：`/api/opportunities/comments?use_llm=true`（默认）用模型1 把评论（≤60 条）归并成规范问题；硬超时 100s、缓存 6h、每周任务预热；失败/超时回退本地聚类（DeepSeek 无 `/embeddings`，故用 LLM 语义归并，不新增供应商）。
+- 测试 `tests/test_r192_opportunities_in_chat_and_attr.py`；`scripts/verify.sh` 全绿（31 表 / 142 路由）。
+
 ## [M178~M180 / R-189~R-191] 2026-09-28 — 发布回填 + 聚类增强 + 账本 UI
 
 > 承接 R-180~R-188 的收尾打磨。

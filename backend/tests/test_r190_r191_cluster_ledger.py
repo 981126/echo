@@ -19,6 +19,7 @@ from app.services import opportunity
 
 @pytest.fixture()
 def db(tmp_path):
+    opportunity._CACHE.clear()
     eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()

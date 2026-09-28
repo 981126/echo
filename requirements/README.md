@@ -7,6 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-192 | 2026-09-28 | 内容机会进 AI 对话（工具 get_content_opportunities）+ 选题归因（按标签聚合表现并加权灵感包）+ 评论聚类接模型1 语义聚类（失败回退本地） | ✅ 已完成 | M181（已完成） | opportunity/chat_service、R-185/R-187/R-189 |
 | R-191 | 2026-09-28 | 选题账本铺到主页灵感列表：新增轻量 `GET /api/opportunities/covered` + 灵感条目标「可能已讲」 | ✅ 已完成 | M180（已完成） | opportunity、R-185 |
 | R-190 | 2026-09-28 | 评论聚类本地增强：过滤纯赞美/无信息评论 + 相似度改 max(bigram Jaccard, SequenceMatcher) + 总数口径修正 | ✅ 已完成 | M179（已完成） | opportunity、R-185 |
 | R-189 | 2026-09-28 | 发布后表现定时自动回填：drafts.performance + 每日 05:00 刷新 + 草稿卡片展示 | ✅ 已完成 | M178（已完成） | drafts/scheduler、R-184 |

@@ -55,6 +55,17 @@ interface Cluster {
   score: number
   samples: string[]
 }
+interface AttrTag {
+  tag: string
+  count: number
+  avg_engagement: number
+}
+interface Attribution {
+  by_tag: AttrTag[]
+  good_tags: string[]
+  draft_count: number
+  avg_engagement?: number
+}
 
 // R-183 创作模式（空 = 自动，由人设+样本决定）
 const GEN_MODES = [
@@ -82,6 +93,8 @@ export default function HomePage() {
   const [gap, setGap] = useState<PackItem[]>([])
   const [gapLoading, setGapLoading] = useState(false)
   const [gapNote, setGapNote] = useState('')
+  const [attr, setAttr] = useState<Attribution | null>(null)
+  const [attrLoading, setAttrLoading] = useState(false)
   const [pendingTopic, setPendingTopic] = useState('')
   const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
@@ -219,6 +232,18 @@ export default function HomePage() {
       toast.error((e as Error).message)
     } finally {
       setGapLoading(false)
+    }
+  }
+
+  async function loadAttr() {
+    setAttrLoading(true)
+    try {
+      const r = await apiJson<Attribution>('/api/opportunities/attribution?limit=15')
+      setAttr(r)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setAttrLoading(false)
     }
   }
 
@@ -402,6 +427,10 @@ export default function HomePage() {
               {gapLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               找缺口选题
             </Button>
+            <Button size="sm" variant="ghost" onClick={loadAttr} disabled={attrLoading}>
+              {attrLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}
+              看表现归因
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
             {!!clusters.length && (
@@ -459,8 +488,26 @@ export default function HomePage() {
             {!!gapNote && !gap.length && (
               <p className="text-xs text-muted-foreground">{gapNote}</p>
             )}
-            {!clusters.length && !pack.length && !gap.length && (
-              <p className="py-3 text-center text-sm text-muted-foreground">点上方按钮：看观众反复问什么、生成本周灵感包，或让 AI 找缺口选题</p>
+            {attr && (
+              <div>
+                <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  表现归因（按标签聚合已发布稿件，越高越值得再做）
+                </span>
+                {attr.draft_count === 0 || !attr.by_tag.length ? (
+                  <p className="text-xs text-muted-foreground">还没有已发布且回填了表现的稿件（先记录发布信息 + 每日自动回填）</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {attr.by_tag.map((t) => (
+                      <Badge key={t.tag} variant={attr.good_tags.includes(t.tag) ? 'success' : 'secondary'} className="text-[11px]">
+                        {t.tag} · {fmtNum(Math.round(t.avg_engagement))}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {!clusters.length && !pack.length && !gap.length && !attr && (
+              <p className="py-3 text-center text-sm text-muted-foreground">点上方按钮：看观众反复问什么、生成本周灵感包、让 AI 找缺口选题，或看表现归因</p>
             )}
           </CardContent>
         </Card>

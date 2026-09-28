@@ -19,6 +19,7 @@ from app.services import opportunity
 
 @pytest.fixture()
 def db(tmp_path):
+    opportunity._CACHE.clear()
     eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
@@ -27,13 +28,19 @@ def db(tmp_path):
     eng.dispose()
 
 
-def test_gap_degrades_without_llm(db):
+def test_gap_degrades_without_llm(db, monkeypatch):
     owner = Creator(kind="owner", name="我", is_current=True)
     db.add(owner)
     db.commit()
     db.add(PersonaTag(creator_id=owner.id, label="直白犀利", category="style", layer="core_dna", status="confirmed", version=1))
     db.commit()
-    # 未配置模型：应返回空 items + note，而不是抛错
+
+    class _Boom:
+        def call_json(self, *a, **k):
+            raise RuntimeError("no llm")
+
+    monkeypatch.setattr("app.services.persona.PersonaService", lambda *a, **k: _Boom())
+    # 模型不可用：应返回空 items + note，而不是抛错
     res = opportunity.gap_suggestions(db, limit=5)
     assert res["items"] == []
     assert res["note"]

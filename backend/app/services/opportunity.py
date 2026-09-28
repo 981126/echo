@@ -21,14 +21,17 @@ from ..models.hot_topic import TopicIdea
 _SIM_THRESHOLD = 0.5
 _COVERED_THRESHOLD = 0.62
 _SCAN_LIMIT = 500  # 只对互动最高的一批评论聚类，避免 O(n²) 卡死
+_LLM_SCAN_LIMIT = 60  # 交给模型语义聚类的评论条数上限（太大易超时/截断）
+_LLM_DEADLINE = 100.0  # 模型聚类硬超时（秒）：超时立即回退本地聚类，避免界面卡死
+_LLM_CACHE_TTL = 21600.0  # 模型聚类结果缓存 6 小时（调用较慢，尽量复用；每周任务会预热）
 _CACHE_TTL = 120.0
 _CACHE: dict[str, tuple[float, object]] = {}
 
 
-def _cached(key: str, fn):
+def _cached(key: str, fn, ttl: float = _CACHE_TTL):
     now = time.monotonic()
     hit = _CACHE.get(key)
-    if hit and now - hit[0] < _CACHE_TTL:
+    if hit and now - hit[0] < ttl:
         return hit[1]
     value = fn()
     _CACHE[key] = (now, value)
@@ -133,10 +136,115 @@ def _cid(db: Session) -> int | None:
     return current_creator_id(db)
 
 
-def comment_clusters(db: Session, limit: int = 15) -> dict:
-    """观众提问榜（带 120s 缓存）：把未使用评论按近义聚簇，返回按需求分排序的簇列表。"""
+_LLM_CLUSTER_SYSTEM = (
+    "你是内容策划。下面是作者评论区里观众的原话（带编号与点赞数）。请把表达**同一类问题/诉求**的评论归为一组，"
+    "产出「观众提问榜」：\n"
+    "1. 每组给一个**规范化、可直接当选题问题看**的中文标题（≤30 字，不要照抄某一条原话）；\n"
+    "2. 列出组成员的编号 members；\n"
+    "3. 按需求强度排序（被问次数多、点赞高的组更靠前）；\n"
+    "4. 过滤掉纯赞美、无信息、纯表情、广告的评论（不要为它们建组）；\n"
+    "5. 只输出 JSON，不要解释："
+    '{"groups":[{"title":"规范化问题","members":[1,2,3],"reason":"一句话说明这组在问什么"}]}'
+)
+
+
+def comment_clusters(db: Session, limit: int = 15, use_llm: bool = False) -> dict:
+    """观众提问榜（带缓存）：未使用评论聚类。
+
+    use_llm=True（R-192）：先用模型1 做**语义聚类**（把同一类问题归并成规范问题），失败自动回退本地聚类。
+    """
     cid = _cid(db) or 0
+    if use_llm:
+        return _cached(f"ccl:{cid}:{limit}", lambda: _llm_comment_clusters(db, limit), ttl=_LLM_CACHE_TTL)
     return _cached(f"cc:{cid}:{limit}", lambda: _comment_clusters(db, limit))
+
+
+def _ask_groups(listing: str, deadline: float) -> list:
+    """调模型1 做语义聚类，带硬超时（超时返回空 → 调用方回退本地）。"""
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FTimeout
+
+    from .persona import PersonaService
+
+    def _run() -> list:
+        data = PersonaService().call_json(
+            "ideas",
+            [
+                {"role": "system", "content": _LLM_CLUSTER_SYSTEM},
+                {"role": "user", "content": f"作者赛道：求职/面试/赚钱/知识。\n评论区原话：\n{listing}\n\n请分组。"},
+            ],
+            temperature=0.3,
+            max_tokens=3000,
+        )
+        return data.get("groups") or []
+
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(_run).result(timeout=deadline)
+    except FTimeout:
+        return []
+    finally:
+        ex.shutdown(wait=False)
+
+
+def _llm_comment_clusters(db: Session, limit: int) -> dict:
+    """模型1 语义聚类（R-192）；失败/无结果返回 None → 调用方回退本地聚类。"""
+    from . import ideas_service
+
+    rows = _unused_ideas(db, "comment", _LLM_SCAN_LIMIT)
+    total = (
+        db.query(TopicIdea)
+        .filter(TopicIdea.source == "comment", TopicIdea.used.is_(False))
+        .count()
+    )
+    rows = [r for r in rows if not _low_value(r.title)]
+    if len(rows) < 4:
+        return _comment_clusters(db, limit)
+    ann = {a["id"]: a for a in ideas_service.annotate_items(db, [{"id": r.id, "title": r.title} for r in rows])}
+    listing = "\n".join(f"{i}. {_clean(r.title)[:60]}（赞{int(r.likes or 0)}）" for i, r in enumerate(rows, 1))
+    try:
+        groups = _ask_groups(listing, _LLM_DEADLINE)
+    except Exception:  # noqa: BLE001 模型不可用/超时 → 回退本地聚类
+        return _comment_clusters(db, limit)
+    if not groups:
+        return _comment_clusters(db, limit)
+    out: list[dict] = []
+    for g in groups:
+        if not isinstance(g, dict):
+            continue
+        title = str(g.get("title", "")).strip()
+        members: list[int] = []
+        for x in g.get("members") or []:
+            try:
+                idx = int(x)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= idx <= len(rows):
+                members.append(idx)
+        if not title or not members:
+            continue
+        likes = sum(int(rows[i - 1].likes or 0) for i in members)
+        samples: list[str] = []
+        for i in members:
+            pt = (rows[i - 1].post_title or "")[:60]
+            if pt and pt not in samples:
+                samples.append(pt)
+        matched = any(ann.get(rows[i - 1].id, {}).get("matched") for i in members)
+        out.append(
+            {
+                "title": title[:120],
+                "count": len(members),
+                "likes": likes,
+                "samples": samples[:3],
+                "matched": bool(matched),
+                "question": _is_question(title),
+                "score": len(members) * 10 + round(math.log1p(likes) * 5) + (20 if matched else 0) + (8 if _is_question(title) else 0),
+            }
+        )
+    if not out:
+        return _comment_clusters(db, limit)
+    out.sort(key=lambda c: c["score"], reverse=True)
+    return {"clusters": out[:limit], "total_comments": total, "scanned": len(rows), "engine": "llm"}
 
 
 def _comment_clusters(db: Session, limit: int) -> dict:
@@ -189,7 +297,7 @@ def _comment_clusters(db: Session, limit: int) -> dict:
         .filter(TopicIdea.source == "comment", TopicIdea.used.is_(False))
         .count()
     )
-    return {"clusters": out[:limit], "total_comments": total, "scanned": len(rows)}
+    return {"clusters": out[:limit], "total_comments": total, "scanned": len(rows), "engine": "local"}
 
 
 def weekly_pack(db: Session, limit: int = 20) -> dict:
@@ -240,15 +348,22 @@ def _weekly_pack(db: Session, limit: int) -> dict:
         )
 
     out: list[dict] = []
+    good_tags = [_norm(t) for t in (topic_attribution(db).get("good_tags") or [])]
     for it in items:
         duplicate = _is_covered(it["title"], covered)
+        nt = _norm(it["title"])
+        perf_hit = any(g and (g in nt or nt in g) for g in good_tags)
         score = (
             it["demand"] * 10
             + round(math.log1p(it["likes"]) * 5)
             + (20 if it["matched"] else 0)
             + (15 if not duplicate else -40)
+            + (15 if perf_hit else 0)
         )
         it["duplicate"] = duplicate
+        it["perf_hit"] = perf_hit
+        if perf_hit:
+            it["reason"] = (it.get("reason") or "") + "·历史这类表现好"
         it["score"] = max(0, score)
         out.append(it)
     out.sort(key=lambda x: x["score"], reverse=True)
@@ -326,6 +441,73 @@ def _gap_suggestions(db: Session, limit: int) -> dict:
         return {"items": items[:limit], "note": ""}
     except Exception as exc:  # noqa: BLE001 AI 不可用不报错
         return {"items": [], "note": f"AI 暂不可用：{str(exc)[:100]}"}
+
+
+def _engagement(totals: dict) -> float:
+    return float(totals.get("plays") or 0) + float(totals.get("likes") or 0) * 5 + float(totals.get("favorites") or 0) * 3 + float(totals.get("comments") or 0) * 10
+
+
+def topic_attribution(db: Session, limit: int = 15) -> dict:
+    """选题归因（R-192）：按草稿标签聚合已发布稿件的表现，看出「哪类选题数据好」。
+
+    数据来自 R-184/R-189 的发布表现回填（drafts.performance）。无数据时返回空。
+    """
+    cid = _cid(db) or 0
+    return _cached(f"attr:{cid}:{limit}", lambda: _topic_attribution(db, limit), ttl=300.0)
+
+
+def _topic_attribution(db: Session, limit: int) -> dict:
+    import json
+
+    from ..models.draft import Draft
+
+    q = db.query(Draft).filter(Draft.status.in_(["used", "done"]))
+    cid = _cid(db)
+    if cid:
+        q = q.filter(Draft.creator_id == cid)
+    by_tag: dict[str, list[float]] = {}
+    rows: list[dict] = []
+    for d in q.all():
+        try:
+            perf = json.loads(d.performance or "{}")
+        except (TypeError, ValueError):
+            perf = {}
+        totals = perf.get("totals") if isinstance(perf, dict) else None
+        if not totals:
+            continue
+        eng = _engagement(totals)
+        rows.append({"title": d.title or "", "engagement": eng, "tags": _draft_tags(d.tags)})
+        for tag in _draft_tags(d.tags):
+            by_tag.setdefault(tag, []).append(eng)
+    if not rows:
+        return {"by_tag": [], "top": [], "bottom": [], "draft_count": 0, "good_tags": []}
+    tag_stats = [
+        {"tag": tag, "count": len(vals), "avg_engagement": round(sum(vals) / len(vals), 1)}
+        for tag, vals in by_tag.items()
+        if tag
+    ]
+    tag_stats.sort(key=lambda x: (x["avg_engagement"], x["count"]), reverse=True)
+    overall = sum(r["engagement"] for r in rows) / len(rows)
+    good = [t["tag"] for t in tag_stats[: max(3, limit // 3)] if t["avg_engagement"] >= overall]
+    rows.sort(key=lambda r: r["engagement"], reverse=True)
+    return {
+        "by_tag": tag_stats[:limit],
+        "good_tags": good,
+        "draft_count": len(rows),
+        "avg_engagement": round(overall, 1),
+        "top": [{"title": r["title"], "engagement": r["engagement"]} for r in rows[:5]],
+        "bottom": [{"title": r["title"], "engagement": r["engagement"]} for r in rows[-5:]],
+    }
+
+
+def _draft_tags(raw) -> list[str]:
+    import json
+
+    try:
+        data = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [str(x).strip() for x in data if str(x).strip()] if isinstance(data, list) else []
 
 
 def covered(db: Session, limit: int = 300) -> dict:

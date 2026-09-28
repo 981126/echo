@@ -12,9 +12,12 @@ router = APIRouter()
 
 
 @router.get("/comments", response_model=dict)
-def comment_clusters(limit: int = 15, db: Session = Depends(get_db)):
-    """观众提问榜：未使用评论按近义聚类，按需求分排序。"""
-    return opportunity.comment_clusters(db, limit=max(1, min(limit, 50)))
+def comment_clusters(limit: int = 15, use_llm: bool = True, db: Session = Depends(get_db)):
+    """观众提问榜：未使用评论聚类，按需求分排序。
+
+    R-192：默认用**模型1 语义聚类**（use_llm=true）；失败自动回退本地聚类；use_llm=false 强制本地。
+    """
+    return opportunity.comment_clusters(db, limit=max(1, min(limit, 50)), use_llm=use_llm)
 
 
 @router.get("/weekly", response_model=dict)
@@ -39,3 +42,9 @@ def gap_suggestions(limit: int = 6, db: Session = Depends(get_db)):
 def covered_titles(limit: int = 300, db: Session = Depends(get_db)):
     """已讲过的话题标题（R-191，轻量）：供前端给灵感列表标「可能已讲」。"""
     return opportunity.covered(db, limit=max(1, min(limit, 800)))
+
+
+@router.get("/attribution", response_model=dict)
+def topic_attribution(limit: int = 15, db: Session = Depends(get_db)):
+    """选题归因（R-192）：按标签聚合已发布稿件的表现，看出哪类选题数据好。"""
+    return opportunity.topic_attribution(db, limit=max(1, min(limit, 50)))

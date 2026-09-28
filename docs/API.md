@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 141 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 142 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
 
@@ -1604,11 +1604,12 @@ Library Cards
 
 Comment Clusters
 
-R-185：观众提问榜——未使用评论按近义聚类，按需求分排序。
+R-185/R-192：观众提问榜——未使用评论聚类，按需求分排序；默认用**模型1 语义聚类**（use_llm=true），失败回退本地聚类。
 
 **参数**
 
 - `limit`（query）integer，默认 15
+- `use_llm`（query）boolean，默认 true
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 
@@ -1657,6 +1658,18 @@ R-191：已讲过的话题标题（轻量）——供前端给灵感列表标「
 **参数**
 
 - `limit`（query）integer，默认 300
+- `x-access-token`（header）string
+**返回 200**：application/json → object
+
+### GET /api/opportunities/attribution
+
+Topic Attribution
+
+R-192：选题归因——按标签聚合已发布稿件的表现（来自 R-184/R-189 回填），看出哪类选题数据好；并用于给每周灵感包加权。
+
+**参数**
+
+- `limit`（query）integer，默认 15
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 

@@ -193,6 +193,22 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_content_opportunities",
+            "description": (
+                "找选题：返回三路灵感——观众提问榜（评论聚类）、每周灵感包（热度/观众需求）、"
+                "缺口选题（AI 基于已讲话题+人设给出该讲没讲过的）。回答「我该讲什么/没灵感/下周发什么」时用它。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "want": {"type": "string", "description": "comment / weekly / gap / all，默认 all"}
+                },
+            },
+        },
+    },
 ]
 
 
@@ -288,6 +304,30 @@ def _search_drafts(db: Session, args: dict) -> dict:
     }
 
 
+def _get_content_opportunities(db: Session, args: dict) -> dict:
+    """三路选题灵感（R-192）：观众提问榜（本地聚类，避免嵌套 LLM）/ 每周灵感包 / 缺口选题。"""
+    from . import opportunity
+
+    want = str(args.get("want") or "all")
+    out: dict = {}
+    if want in ("all", "comment"):
+        cc = opportunity.comment_clusters(db, limit=8, use_llm=False)
+        out["comment_clusters"] = [
+            {"title": c["title"], "asked_by": c["count"], "matched_persona": c["matched"]}
+            for c in cc.get("clusters", [])
+        ]
+    if want in ("all", "weekly"):
+        out["weekly_pack"] = [
+            {"title": i["title"], "why": i["reason"]} for i in opportunity.weekly_pack(db, limit=12).get("items", [])
+        ]
+    if want in ("all", "gap"):
+        gap = opportunity.gap_suggestions(db, limit=6)
+        out["gap"] = [{"title": i["title"], "why": i["reason"]} for i in gap.get("items", [])]
+        if gap.get("note"):
+            out["gap_note"] = gap["note"]
+    return out
+
+
 def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -> dict:
     """执行一个工具调用。`context` 带会话信息（写操作提案要记录来源会话）。"""
     if name == "search_videos":
@@ -360,6 +400,8 @@ def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -
         return _search_drafts(db, args)
     if name == "sql_query":
         return chat_sql.run(_db_path_of(db), str(args.get("sql") or ""))
+    if name == "get_content_opportunities":
+        return _get_content_opportunities(db, args)
     # R-147 P2：写操作只登记「待确认提案」，由作者在界面点确认后才执行
     if name in agent_actions.ACTION_LABELS:
         try:
