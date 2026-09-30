@@ -52,7 +52,7 @@ export function Sidebar({
             animate={{ opacity: 1, x: 0 }}
             className="text-[15px] font-semibold tracking-tight"
           >
-            echo 回声
+            echo
           </motion.span>
         )}
       </div>

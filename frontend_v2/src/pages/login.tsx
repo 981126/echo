@@ -66,16 +66,8 @@ export default function LoginPage() {
             transition={{ delay: 0.22, duration: 0.5, ease: EASE_OUT_EXPO }}
             className="text-2xl font-semibold tracking-tight"
           >
-            echo 回声
+            echo
           </motion.h1>
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.34, duration: 0.5 }}
-            className="text-sm text-muted-foreground"
-          >
-            让 AI 越来越懂你的人设
-          </motion.p>
         </div>
 
         <motion.form
