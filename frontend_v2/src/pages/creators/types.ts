@@ -48,6 +48,13 @@ export interface SyncJob {
   finished_at?: string | null
 }
 
+// R-219：sync-all 跳过的博主（结构化，前端按博主展示跳过提示条）
+export interface SyncSkipped {
+  creator_id: number
+  name: string
+  reason: string
+}
+
 export interface PlatformPostItem {
   id: number
   account_id: number

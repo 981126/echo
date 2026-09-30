@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -30,9 +30,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toaster'
-import type { CreatorMeta, AccountMeta, SyncJob } from './types'
+import type { CreatorMeta, AccountMeta, SyncJob, SyncSkipped } from './types'
 import { AccountRow } from './account-row'
-import { SyncProgressBar } from './sync-progress-bar'
+import { SyncProgressBar, SyncSkippedBar } from './sync-progress-bar'
 import { PostsDialog } from './posts-dialog'
 import { TimelineCard } from '@/components/timeline-card'
 
@@ -57,6 +57,27 @@ interface AccountForm {
 const EMPTY_CREATOR: CreatorForm = { id: 0, kind: 'owner', name: '', parent_id: null, note: '' }
 const EMPTY_ACCOUNT: AccountForm = { id: 0, creator_id: 0, platform: 'douyin', nickname: '', home_link: '', platform_user_id: '', cookie: '' }
 
+// R-219：完成/失败的同步条延迟消失——done 停留 8s、failed 停留 60s（含原因），超时淡出；
+// 历史旧记录（超阈值）打开页面不误显示。后端时间是无时区尾缀的北京时间（core/timeutil），
+// 浏览器不在 +08:00 时区时补偏移再比较，避免时区差导致条永不消失/立即消失。
+const DONE_LINGER_MS = 8000
+const FAILED_LINGER_MS = 60000
+
+function jobAgeMs(job: SyncJob): number {
+  const raw = job.finished_at || job.started_at
+  if (!raw) return Number.POSITIVE_INFINITY
+  const iso = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  const hasZone = /Z$|[+-]\d{2}:?\d{2}$/.test(iso)
+  const t = new Date(hasZone ? iso : `${iso}+08:00`).getTime()
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : Date.now() - t
+}
+
+function visibleJob(job: SyncJob | null): SyncJob | null {
+  if (!job) return null
+  if (job.status === 'running') return job
+  return jobAgeMs(job) < (job.status === 'failed' ? FAILED_LINGER_MS : DONE_LINGER_MS) ? job : null
+}
+
 // R-171：CreatorBlock 必须定义在组件外部——定义在 CreatorsPage 内部会因每次渲染都是新组件类型，
 // 导致 jobs 轮询更新时整块卡片被 remount，进度条反复播放进入动画（视觉上「消失又出现」）。
 interface CreatorBlockHandlers {
@@ -80,6 +101,7 @@ function CreatorBlock({
   job,
   running,
   syncingAll,
+  skipped,
   hasBenchmarks,
   h
 }: {
@@ -88,6 +110,7 @@ function CreatorBlock({
   job: SyncJob | null
   running: boolean
   syncingAll: boolean
+  skipped: SyncSkipped | null
   hasBenchmarks: boolean
   h: CreatorBlockHandlers
 }) {
@@ -156,6 +179,7 @@ function CreatorBlock({
       </div>
 
       <AnimatePresence>{job && <SyncProgressBar job={job} />}</AnimatePresence>
+      <AnimatePresence>{!job && skipped && <SyncSkippedBar reason={skipped.reason} />}</AnimatePresence>
 
       <div className="space-y-2">
         {c.accounts.map((a) => (
@@ -193,6 +217,7 @@ export default function CreatorsPage() {
   const [showBudget, setShowBudget] = useState(false)
   const [budgetLimit, setBudgetLimit] = useState<number>(2000)
   const [syncingAll, setSyncingAll] = useState(false)
+  const [skippedAll, setSkippedAll] = useState<SyncSkipped[]>([])
 
   const creatorsQ = useQuery({ queryKey: ['creators', 'meta'], queryFn: () => apiJson<CreatorMeta[]>('/api/creators') })
   const currentQ = useQuery({
@@ -203,23 +228,43 @@ export default function CreatorsPage() {
     queryKey: ['platform', 'budget'],
     queryFn: () => apiJson<{ limit: number; used: number; remaining: number }>('/api/platform/budget')
   })
+  // R-219：拉最近全部状态任务（不再只筛 running），done/failed 条据此延迟淡出
   const jobsQ = useQuery({
-    queryKey: ['sync-jobs', 'running'],
-    queryFn: () => apiJson<{ items: SyncJob[] }>('/api/platform/jobs?status=running&limit=50'),
+    queryKey: ['sync-jobs', 'recent'],
+    queryFn: () => apiJson<{ items: SyncJob[] }>('/api/platform/jobs?limit=50'),
     refetchInterval: 4000
   })
+
+  // 延迟淡出需要秒级重渲染：仅在存在窗口期内的 done/failed 条时开 1s 心跳，空闲零开销。
+  // 每次渲染重算（不 memo）：条全部淡出后心跳自动停。
+  const [, tick] = useReducer((n: number) => n + 1, 0)
+  const hasLingering = (jobsQ.data?.items ?? []).some(
+    (j) => j.status !== 'running' && jobAgeMs(j) < FAILED_LINGER_MS
+  )
+  useEffect(() => {
+    if (!hasLingering) return
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  }, [hasLingering])
 
   const creators = useMemo(() => creatorsQ.data ?? [], [creatorsQ.data])
   const owners = useMemo(() => creators.filter((c) => c.kind === 'owner'), [creators])
   const benchmarksOf = (c: CreatorMeta) => creators.filter((b) => b.kind === 'benchmark' && b.parent_id === c.id)
   const current = currentQ.data
 
-  // 每 creator 取最新一条 running job
+  // 每 creator 取最新一条 job；done/failed 按 R-219 阈值过滤（超时 → null → 淡出）
   const jobFor = (c: CreatorMeta): SyncJob | null => {
     const jobs = (jobsQ.data?.items ?? []).filter((j) => Number(j.creator_id) === c.id)
-    return jobs[0] ?? null
+    return visibleJob(jobs[0] ?? null)
   }
-  const runningCreators = new Set((jobsQ.data?.items ?? []).map((j) => Number(j.creator_id)))
+  const runningCreators = new Set(
+    (jobsQ.data?.items ?? []).filter((j) => j.status === 'running').map((j) => Number(j.creator_id))
+  )
+  // R-219：本轮 sync-all 被跳过的博主显示灰条；该博主真跑起来（有 running job）后移除
+  const skipFor = (c: CreatorMeta): SyncSkipped | null => {
+    const s = skippedAll.find((x) => x.creator_id === c.id)
+    return s && !runningCreators.has(c.id) ? s : null
+  }
 
   const reload = () => {
     qc.invalidateQueries({ queryKey: ['creators'] })
@@ -250,6 +295,7 @@ export default function CreatorsPage() {
       await apiJson(`/api/creators/${switchTo.id}/activate`, { method: 'POST' })
       toast.success(`已切换到「${switchTo.name}」，整套数据随之切换`)
       setSwitchTo(null)
+      setSkippedAll([]) // R-219：切换主博主后旧批次的跳过提示不再适用
       qc.invalidateQueries()
     } catch (e) {
       toast.error((e as Error).message)
@@ -351,6 +397,9 @@ export default function CreatorsPage() {
     try {
       await apiJson('/api/platform/sync', { method: 'POST', body: JSON.stringify(body) })
       toast.success(msg)
+      // R-219：手动重试即清掉该博主的「本轮跳过」提示
+      const cid = Number(body.creator_id)
+      if (Number.isFinite(cid) && cid > 0) setSkippedAll((prev) => prev.filter((s) => s.creator_id !== cid))
       qc.invalidateQueries({ queryKey: ['sync-jobs'] })
     } catch (e) {
       toast.error((e as Error).message)
@@ -360,8 +409,14 @@ export default function CreatorsPage() {
   async function syncAll() {
     setSyncingAll(true)
     try {
-      const r = await apiJson<{ creator_count: number; skipped?: string[] }>('/api/platform/sync-all', { method: 'POST' })
-      toast.success(`已为 ${r.creator_count} 个博主入队同步${r.skipped?.length ? `（跳过：${r.skipped.join('、')}）` : ''}`)
+      const r = await apiJson<{ creator_count: number; skipped?: SyncSkipped[] }>('/api/platform/sync-all', { method: 'POST' })
+      // R-219：跳过者落为卡片下的灰条（而不是只弹一次 toast）
+      setSkippedAll(r.skipped ?? [])
+      toast.success(
+        `已为 ${r.creator_count} 个博主入队同步${
+          r.skipped?.length ? `（跳过：${r.skipped.map((s) => `${s.name}(${s.reason})`).join('、')}）` : ''
+        }`
+      )
       qc.invalidateQueries({ queryKey: ['sync-jobs'] })
     } catch (e) {
       toast.error((e as Error).message)
@@ -466,10 +521,10 @@ export default function CreatorsPage() {
           <motion.div key={c.id} variants={itemVariants}>
             <Card className={c.is_current ? 'border-accent/50' : ''}>
               <CardContent className="space-y-4 py-4">
-                <CreatorBlock c={c} job={jobFor(c)} running={runningCreators.has(c.id)} syncingAll={syncingAll} hasBenchmarks={benchmarksOf(c).length > 0} h={handlers} />
+                <CreatorBlock c={c} job={jobFor(c)} running={runningCreators.has(c.id)} syncingAll={syncingAll} skipped={skipFor(c)} hasBenchmarks={benchmarksOf(c).length > 0} h={handlers} />
                 {benchmarksOf(c).map((bm) => (
                   <div key={bm.id} className="ml-4 border-l-2 border-border pl-4">
-                    <CreatorBlock c={bm} benchmark job={jobFor(bm)} running={runningCreators.has(bm.id)} syncingAll={syncingAll} hasBenchmarks={false} h={handlers} />
+                    <CreatorBlock c={bm} benchmark job={jobFor(bm)} running={runningCreators.has(bm.id)} syncingAll={syncingAll} skipped={skipFor(bm)} hasBenchmarks={false} h={handlers} />
                   </div>
                 ))}
               </CardContent>

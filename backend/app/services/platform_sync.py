@@ -989,21 +989,22 @@ def enqueue_all_top15_sync(db: Session, owner: Creator) -> dict:
     - 已有 platform_sync pending/running 的博主（含无启用账号者）跳过，汇总在 skipped；
     - 为每个入队博主**预置一条 running 的 SyncJob**（阶段「排队中…」），
       这样前端轮询 `/api/platform/jobs?status=running` 时所有博主卡片立即出现动画；
-    - 返回 `{entries, skipped, total}`；entries 元素为 `{task_id, creator_id, job_id, name}`。
+    - 返回 `{entries, skipped, total}`；entries 元素为 `{task_id, creator_id, job_id, name}`；
+      R-219：skipped 改结构化 `[{creator_id, name, reason}]`（前端按博主展示跳过提示条）。
     """
     from .benchmark import benchmarks_of_owner
 
     creators = [owner] + benchmarks_of_owner(db, owner)
     running = _running_sync_creator_ids(db)
-    skipped: list[str] = []
+    skipped: list[dict] = []
     entries: list[dict] = []
     for c in creators:
         name = c.name or f"博主#{c.id}"
         if c.id in running:
-            skipped.append(f"{name}(已在运行)")
+            skipped.append({"creator_id": c.id, "name": name, "reason": "已在运行"})
             continue
         if _enabled_account_count(db, c.id) == 0:
-            skipped.append(f"{name}(无启用账号)")
+            skipped.append({"creator_id": c.id, "name": name, "reason": "无启用账号"})
             continue
         job = SyncJob(job_type="daily", scope="daily", creator_id=c.id, status="running", progress_note="排队中…")
         db.add(job)

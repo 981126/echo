@@ -74,14 +74,16 @@ def test_enqueue_skips_running_and_no_account(db):
             payload=json.dumps({"scope": "daily", "creator_id": bm1.id}),
         )
     )
-    db.add(Creator(kind="benchmark", parent_id=owner.id, name="对标无账号"))  # 无启用账号
+    no_acc = Creator(kind="benchmark", parent_id=owner.id, name="对标无账号")
+    db.add(no_acc)  # 无启用账号
     db.commit()
 
     res = enqueue_all_top15_sync(db, owner)
 
     assert [e["creator_id"] for e in res["entries"]] == [owner.id, bm2.id]
-    assert any("对标A" in s for s in res["skipped"])
-    assert any("对标无账号" in s for s in res["skipped"])
+    # R-219：skipped 结构化 [{creator_id, name, reason}]，前端按博主展示跳过提示条
+    assert {"creator_id": bm1.id, "name": "对标A", "reason": "已在运行"} in res["skipped"]
+    assert {"creator_id": no_acc.id, "name": "对标无账号", "reason": "无启用账号"} in res["skipped"]
 
 
 def test_consumer_reuses_precreated_jobs_and_reruns(db, monkeypatch):

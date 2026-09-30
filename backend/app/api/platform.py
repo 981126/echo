@@ -420,7 +420,8 @@ def trigger_sync_all(db: Session = Depends(get_db)):
     if not enq["entries"]:
         detail = "没有可同步的博主（可能都在运行中或未配置账号）"
         if enq["skipped"]:
-            detail += "：" + "、".join(enq["skipped"])
+            # R-219：skipped 为结构化 [{creator_id, name, reason}]
+            detail += "：" + "、".join(f"{s['name']}({s['reason']})" for s in enq["skipped"])
         raise HTTPException(status_code=400, detail=detail)
     task_id = start_task(
         "platform_sync",
