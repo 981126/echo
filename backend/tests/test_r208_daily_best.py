@@ -44,8 +44,15 @@ def test_push_daily_best_picks_and_notifies(db, monkeypatch):
     _cand(db, "选题B", 60, "B 的口播稿正文")
     db.commit()
     monkeypatch.setattr(pl, "_pick_daily_best_index", lambda db, items: 1)
+    # R-221：显式用 spy 顶掉发信，断言「推了什么」；绝不再让夹具稿落到真实 SMTP 上
+    sent: list[dict] = []
+    monkeypatch.setattr(pl, "send_daily_best", lambda item, run_date, settings=None: sent.append(item) or True)
     res = pl.push_daily_best(db, today_key())
     assert res is not None and res["title"] == "选题B"
+    assert len(sent) == 1 and sent[0]["title"] == "选题B"
+    assert sent[0]["script"] == "B 的口播稿正文"
+    assert sent[0]["reason"].startswith("【今日最佳 · 热榜】")
+    assert sent[0]["cover_text"] == ""
     nt = db.query(Notification).filter(Notification.kind == "daily_best").first()
     assert nt is not None
     assert "B 的口播稿正文" in nt.message and "选题理由" in nt.message

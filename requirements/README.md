@@ -7,6 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-221 | 2026-09-30 | 垃圾邮件根因：**pytest 在真发信**——`test_r208_daily_best.py` 的夹具稿（选题B / B 的口播稿正文）经 `push_daily_best` → `notify._send` 用了仓库根 `.env` 的真实 QQ SMTP，每跑一次 verify 就发一封；`tests/conftest.py` 清空 SMTP 配置（fail-closed）+ `SMTP_SSL` 兜底闸门（`RealMailAttempted` 不继承 Exception，吞不掉）+ R-208 用例改 spy 断言推送内容 + 新增 `test_r221_mail_isolation.py`；业务代码零改动 | ✅ 已完成 | M223（已完成） | notify/pipeline、tests/conftest、R-208/R-140/R-141、verify.sh |
 | R-220 | 2026-09-30 | 素材库切页同步遮罩必现：修「/api/tasks 先回、/api/library 后回」竞速导致恢复扫描静默丢任务——未认领池 + cards 变化（首帧/翻页）自动重映射补挂遮罩；恢复查询纳入 pending；SSE 未知非终态任务入池不再丢弃；后端零改动；不做 SSE 回放 | ✅ 已完成 | M222（已完成） | frontend_v2 videos/use-card-tasks、R-202/R-093/R-091/R-175 |
 | R-219 | 2026-09-30 | 博主管理同步进度可见性：并发 sync-all 下先完成的博主进度条不再瞬间消失——done 停留约 8s「同步完成」绿条、failed 停留约 60s 失败条；跳过者（已在运行/无启用账号）卡片下灰色提示条；「排队中」条保持；skipped 接口返回改结构化 `[{creator_id,name,reason}]`；批次范围不变（仍只当前主博主+对标） | ✅ 已完成 | M221（已完成） | platform_sync、platform API、frontend_v2 creators、R-162/R-163/R-070/R-175 |
 | R-218 | 2026-09-30 | 移动端适配（320px 起）：兑现 D-018「Web 做响应式」的欠债——**导航重构**（底部 Tab 栏 5 项：主页/素材库/脚本工作台/灵感/AI 对话；博主对标/博主管理/人设/AI 设置收进「更多」）+ 抽屉与弹窗移动端全屏化 + 逐页适配（P0：博主管理「一行一字」竖排硬伤、脚本工作台 tab 裁切/底栏遮挡、灵感随手记；P1：素材库/AI 对话/人设/AI 设置/登录）+ 基座（触控≥44px、字号≥12px、安全区、md=768 断点）+ 移动端点检与回归；**不做手机录像、不做提词器手机适配、不做 PWA/原生 App**；后端零改动 | ✅ 已确认（待实施） | M218/M219/M220 | frontend_v2、D-045（细化 D-018）、R-175/R-202/R-205、verify.sh |

@@ -1,5 +1,17 @@
 # 变更记录
 
+## [M223 / R-221] 2026-09-30 — 垃圾邮件根因：pytest 在用真实 SMTP 发夹具稿 ✅ 已完成（测试隔离，业务代码零改动）
+
+> 作者：「服务一直在发垃圾邮件，这是bug吧，下面是邮件内容 echo · 今日选题与脚本 / 1. 选题B / 平台：douyin · 匹配度：60 · 【今日最佳 · 热榜】理由 / 封面字：（无） / B 的口播稿正文」
+
+- **根因**：不是服务在发——是**测试在发**。邮件正文与 `tests/test_r208_daily_best.py` 的夹具逐字一致；该用例调用 `pl.push_daily_best()` → `notify.send_daily_best` → `_send`，而 `tests/conftest.py` 只隔离了数据目录/API Key，**没隔离 SMTP**，`app/config.py` 的 `env_file=(".env","../.env")` 让 pytest（CWD=`backend`）读到仓库根 `.env` 的真实 QQ 邮箱配置 → 真的 login + sendmail；每跑一次 `scripts/verify.sh`（pytest 全套）就多一封。反证：真实库 `pipeline_runs` 只有历史 1 条、`notifications` 从无 `daily_best`、`app_kv` 无 `daily_best_pushed:*` → 运行中的服务从未触发该推送。
+- **做了什么**（`tests/conftest.py`）：
+  - **fail-closed**：导入 app 前清空 `ECHO_SMTP_USER/ECHO_SMTP_AUTH_CODE/ECHO_MAIL_TO`（环境变量优先于 `.env`）→ `mail_config_problem()` 必然返回「未配置」，默认配置下任何用例都发不出信。
+  - **兜底闸门**（autouse）：`notify.smtplib.SMTP_SSL` 装 tripwire，抛 `RealMailAttempted(BaseException)`——故意不继承 `Exception`，`_send` 的 `except Exception`（R-141）吞不掉，谁补回配置真发信就当场炸穿用例。
+  - `test_r208_daily_best.py` 发信改 spy 断言推送内容（标题/正文/理由/封面字），不再依赖环境真实 SMTP；新增 `tests/test_r221_mail_isolation.py` 三条锁定（默认配置 `_send` 返回 False／配置合法被闸门拦下／夹具稿在测试环境只写站内通知）。
+- **明确不做**：不动 `notify.py` 与流水线语义（邮件仍是次要通道、失败不判 failed）；不动 `send_daily_digest` 的「force 重跑再发一封」语义（UI 不传 `force`，要改属新需求）。
+- **自测**：`scripts/verify.sh` 全绿；邮件相关 4 个测试文件 25 例全过、零外发（修复前用假 SMTP 捕获到原用例真实外发报文，修复后闸门无一被触发）。
+
 ## [M222 / R-220] 2026-09-30 — 素材库切页同步遮罩必现：未认领池 + 卡片到位补挂 ✅ 已完成（前端 only，后端零改动）
 
 > 作者：「博主管理点击同步后，切换到素材库有时候，素材卡片会展示同步动画，有时候不会，我知道他在同步，是因为查询任务接太慢了还是什么原因」
