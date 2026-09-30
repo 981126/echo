@@ -21,7 +21,7 @@
 | `draft_discussions` | 双模型讨论留痕（R-023）：围绕草稿的每轮讨论消息（模型/轮次/内容）。 |
 | `draft_versions` | 草稿版本留痕（R-156）：每次定稿保存一条当前稿快照（正文/标题/封面字/标签），source=manual 手动定稿 / ai_discuss 讨论后自动定稿；版本链供改稿差异分析与生成 few-shot。 |
 | `drafts` | 脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿；prompt_version 记录生成时启用的提示词版本（R-129 M116），用于按版本聚合反馈。 |
-| `feedback` | 作者反馈：草稿 1-5 星/采用与否，R-022 后含四维分节分（hook/pace/ending/style_score），信号回流人设学习。 |
+| `feedback` | 作者反馈：R-211 起活信号=评价文本 comment + LLM 复盘心得 insight（完成/不采用触发分析）；rating/liked/四维分仅历史数据。 |
 | `hot_topics` | 热点记录：平台+标题+日期去重；供选题匹配（R-025 扩充来源，R-065 后走 TikHub 热搜）。 |
 | `inspiration_notes` | 灵感随手记（R-186）：一句观察/截图/经历存原料库（text/image_url/source），可一键提炼成选题并生成草稿（status=new/used，draft_id）。 |
 | `metrics_snapshots` | 本地素材(videos)每日指标快照：手动录入/批量导入/抓取/平台同步聚合，驱动看板增长曲线与复盘。 |
@@ -301,19 +301,20 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 
 ## `feedback`
 
-作者反馈：草稿 1-5 星/采用与否，R-022 后含四维分节分（hook/pace/ending/style_score），信号回流人设学习。
+作者反馈。R-211 起：**评价文本（comment）+ LLM 复盘心得（insight）**是唯一活信号；学习触发改状态流转（完成=好/不采用=差），rating/liked/四维分仅留历史数据、不再参与学习。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
 | `id` | INTEGER | ✔ | 否 |  |
 | `draft_id` | INTEGER |  | 否 |  |
-| `liked` | BOOLEAN |  | 是 |  |
-| `rating` | INTEGER |  | 是 |  |
-| `comment` | TEXT |  | 否 |  |
-| `hook_score` | INTEGER |  | 是 |  |
-| `pace_score` | INTEGER |  | 是 |  |
-| `ending_score` | INTEGER |  | 是 |  |
-| `style_score` | INTEGER |  | 是 |  |
+| `liked` | BOOLEAN |  | 是 | R-211 起仅存结论快照（不参与学习查询） |
+| `rating` | INTEGER |  | 是 | R-211 起弃用（历史数据） |
+| `comment` | TEXT |  | 否 | 「记反馈」评价文本 |
+| `hook_score` | INTEGER |  | 是 | R-211 起弃用（历史数据） |
+| `pace_score` | INTEGER |  | 是 | R-211 起弃用（历史数据） |
+| `ending_score` | INTEGER |  | 是 | R-211 起弃用（历史数据） |
+| `style_score` | INTEGER |  | 是 | R-211 起弃用（历史数据） |
+| `insight` | TEXT |  | 否 | R-211：完成/不采用触发的 LLM 复盘心得 |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
 **索引**：`ix_feedback_draft_id`（draft_id）

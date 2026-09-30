@@ -2,7 +2,7 @@
 #
 # 两个作用：
 # 1) 别把本机的大目录（node_modules 192M / .venv 283M / data 112M）上传给 docker daemon；
-# 2) **正确性**：Dockerfile 里 `COPY frontend/ ./` 会把宿主机的 frontend/ 整个覆盖进去，
+# 2) **正确性**：Dockerfile 里 `COPY frontend_v2/ ./` 会把宿主机的 frontend_v2/ 整个覆盖进去，
 #    若包含宿主机装的 node_modules（macOS 二进制），会覆盖镜像内 npm install 装的
 #    Linux 版 esbuild/rollup → `npm run build` 直接失败（平台不匹配）。
 .env
@@ -23,7 +23,6 @@ venv/
 
 # Node / 前端
 node_modules/
-frontend/dist/
 frontend_v2/dist/
 .vite/
 

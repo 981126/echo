@@ -10,8 +10,7 @@ from ..db import get_db
 from ..models.notification import Notification
 from ..models.prompt import AiPrompt
 from ..services import prompt_service
-from ..services.prompt_service import PromptOptimizeError
-from ..tasks import start_task
+from ..tasks import find_running_task, start_task
 
 router = APIRouter()
 
@@ -179,14 +178,16 @@ def enable_prompt(key: str, payload: PromptEnableIn, db: Session = Depends(get_d
 
 @router.post("/{key}/optimize", response_model=dict)
 def optimize_prompt(key: str, payload: PromptOptimizeIn, db: Session = Depends(get_db)):
-    """产出候选（R-129：按 key 语料 + 契约自检 + 自动排队金样本评测）。"""
+    """产出候选（R-129：按 key 语料 + 契约自检 + 自动排队金样本评测）。
+
+    R-202：改为后台任务，点完返回 `task_id`；失败原因在 `task.error`（前端任务态提示）。
+    """
     if key not in prompt_service.PROMPT_META:
         raise HTTPException(status_code=404, detail="未知提示词类别")
-    try:
-        row = prompt_service.optimize(db, key, payload.material or "")
-    except PromptOptimizeError as exc:
-        raise HTTPException(status_code=422, detail=exc.reason) from exc
-    return _out(row)
+    tid = find_running_task("prompt_optimize", {"key": key})
+    if tid:
+        return {"task_id": tid}
+    return {"task_id": start_task("prompt_optimize", {"key": key, "material": payload.material or ""}, prompt_service.optimize_task)}
 
 
 @router.post("/optimize-rules", response_model=dict)

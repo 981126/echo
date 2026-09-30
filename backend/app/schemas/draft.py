@@ -34,6 +34,10 @@ class DraftOut(BaseModel):
     # R-173：该草稿当前的 AI 长任务状态（讨论/洗稿/回炉/生成），无任务时为 None。
     # 由 list/get 接口填充，ORM 上没有该属性（默认 None）。
     debate: Optional[dict] = None
+    # R-210：纯手写（AI 从未参与：无讨论记录、无 AI 侧版本），由 list/get 接口填充
+    pure_manual: bool = False
+    # R-211：最新一条「记反馈」评价文本（卡片 textarea 预填），由 list/get 接口填充
+    feedback_comment: str = ""
     created_at: datetime
     updated_at: datetime
 

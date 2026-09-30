@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
 
-export default defineConfig(({ mode }) => ({
-  // 生产挂 /v2（FastAPI 静态托管），开发用根路径
-  base: mode === 'production' ? '/v2/' : '/',
+export default defineConfig(() => ({
+  // R-208：老前端已下线，生产直接挂根路径 /（FastAPI 静态托管）
+  base: '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) }

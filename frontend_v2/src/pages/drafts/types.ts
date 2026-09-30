@@ -47,11 +47,25 @@ export interface Draft {
     mock?: boolean
     gen_model?: string
     referee_model?: string
+    issues?: string[]
+    passed?: boolean
+    style_coverage?: number
+    /** R-207：风格诊断（只展示、不触发重写） */
+    diagnostics?: {
+      style_coverage?: number
+      style_matched?: string[]
+      style_missing?: string[]
+      ai_cliche?: string[]
+    }
     [k: string]: unknown
   }
   version: number
   /** R-173：无任务时为 null/undefined */
   debate?: DebateState | null
+  /** R-210：纯手写（AI 从未参与）——卡片右上角「纯手写」标 */
+  pure_manual?: boolean
+  /** R-211：最新一条「记反馈」评价文本（卡片 textarea 预填） */
+  feedback_comment?: string
   created_at: string
   updated_at: string
 }
@@ -154,19 +168,6 @@ export function discussionModelInfo(discussions: Discussion[], d?: Draft | null)
   return d ? modelInfo(d) : ''
 }
 
-export const DIM_DEFS = [
-  { key: 'hook_score', label: '钩子' },
-  { key: 'pace_score', label: '节奏' },
-  { key: 'ending_score', label: '结尾' },
-  { key: 'style_score', label: '像我' }
-] as const
-
-export const DIM_OPTS = [
-  { v: 5, label: '好' },
-  { v: 3, label: '中' },
-  { v: 1, label: '差' }
-] as const
-
 const SOURCE_LABEL: Record<string, string> = {
   manual: '手动',
   daily: '每日',
@@ -203,6 +204,7 @@ export function modelInfo(d: Draft): string {
 
 export const VERSION_SOURCE: Record<string, { label: string; variant: 'default' | 'secondary' | 'success' | 'warning' }> = {
   manual: { label: '手动定稿', variant: 'default' },
+  rollback: { label: '作者回退', variant: 'warning' }, // R-209：回退留痕（推翻 R-157 不留痕）
   ai_generate: { label: 'AI 生成', variant: 'secondary' },
   ai_discuss: { label: 'AI 讨论', variant: 'secondary' },
   rewrite_before: { label: '洗稿前 ASR', variant: 'secondary' },
@@ -216,7 +218,8 @@ export const AI_KIND_LABELS: Record<string, string> = {
   discuss: '双模型讨论',
   rewrite: '洗稿讨论',
   rework: '回炉重写',
-  generate: 'AI 生成'
+  generate: 'AI 生成',
+  feedback: '学习分析' // R-211：完成/不采用触发的反馈学习
 }
 
 export function aiKindLabel(kind?: string): string {

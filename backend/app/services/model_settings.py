@@ -49,9 +49,13 @@ VENDORS: dict[str, dict] = {
 ASR_MODES: dict[str, str] = {
     "aliyun": "阿里云 FileTrans",
     "siliconflow": "硅基流动",
+    "tencent": "腾讯云录音文件识别",
     "mock": "模拟（不调用真实 ASR）",
 }
 ASR_SILICONFLOW_MODELS = ["Qwen/Qwen3-ASR-1.7B", "FunAudioLLM/SenseVoiceSmall"]
+# 腾讯云录音文件识别引擎（R-200）：大模型2.0 / 大模型1.0 / 通用
+ASR_TENCENT_MODELS = ["16k_zh_en_2.0", "16k_zh_en", "16k_zh"]
+ASR_TENCENT_DEFAULT = "16k_zh_en_2.0"
 
 SLOT_KEYS = {
     "model1": ("model1_vendor", "model1_model", "model1_key"),
@@ -98,6 +102,24 @@ def _default_slot(slot: str) -> tuple[str, str]:
     return ("deepseek", "deepseek-flash") if slot == "model1" else ("kimi", "kimi-k2.6")
 
 
+def default_asr_model(mode: str) -> str:
+    """按服务商给出默认 ASR 模型（避免切服务商后沿用上一家的模型名）。"""
+    settings = get_settings()
+    if mode == "siliconflow":
+        return settings.siliconflow_asr_model
+    if mode == "tencent":
+        return (getattr(settings, "tencent_asr_engine_model", "") or ASR_TENCENT_DEFAULT).strip()
+    return ""
+
+
+def _coerce_asr_model(mode: str, model: str) -> str:
+    """修正模型名：腾讯引擎必须命中白名单，缺失则回退该服务商默认。"""
+    model = (model or "").strip()
+    if mode == "tencent" and model not in ASR_TENCENT_MODELS:
+        return ASR_TENCENT_DEFAULT
+    return model or default_asr_model(mode)
+
+
 def get_model_config(db: Session) -> dict:
     """读取当前配置（含旧 generation_model 的无感迁移）。"""
     config: dict = {}
@@ -122,7 +144,7 @@ def get_model_config(db: Session) -> dict:
         migrated = True
 
     asr_mode = _kv_get(db, "asr_mode") or get_settings().asr_mode
-    asr_model = _kv_get(db, "asr_model") or get_settings().siliconflow_asr_model
+    asr_model = _coerce_asr_model(asr_mode, _kv_get(db, "asr_model"))
 
     config.update(
         {
@@ -169,6 +191,16 @@ def save_model_config(db: Session, payload: dict) -> dict:
             raise ModelConfigError("选择硅基流动前请先在 .env 配置 ECHO_SILICONFLOW_API_KEY")
     if asr_mode == "aliyun" and not (settings.aliyun_asr_access_key_id and settings.aliyun_asr_app_key):
         raise ModelConfigError("选择阿里云 ASR 前请先在 .env 配置 ECHO_ALIYUN_ASR_ACCESS_KEY_ID / ECHO_ALIYUN_ASR_APP_KEY")
+    if asr_mode == "tencent":
+        asr_model = asr_model or ASR_TENCENT_DEFAULT
+        if asr_model not in ASR_TENCENT_MODELS:
+            raise ModelConfigError(
+                f"腾讯云 ASR 引擎不受支持：{asr_model}；可选：{'/'.join(ASR_TENCENT_MODELS)}"
+            )
+        if not (settings.tencent_asr_secret_id and settings.tencent_asr_secret_key):
+            raise ModelConfigError(
+                "选择腾讯云 ASR 前请先在 .env 配置 ECHO_TENCENT_ASR_SECRET_ID / ECHO_TENCENT_ASR_SECRET_KEY"
+            )
 
     for slot, (kv_vendor, kv_model, kv_key) in SLOT_KEYS.items():
         item = payload[slot]
@@ -244,6 +276,8 @@ __all__ = [
     "VENDORS",
     "ASR_MODES",
     "ASR_SILICONFLOW_MODELS",
+    "ASR_TENCENT_MODELS",
+    "ASR_TENCENT_DEFAULT",
     "ROLES",
     "ModelConfigError",
     "get_model_config",
@@ -251,6 +285,7 @@ __all__ = [
     "resolve_slots",
     "generation_roles",
     "asr_config",
+    "default_asr_model",
     "topics_count",
     "save_topics_count",
 ]

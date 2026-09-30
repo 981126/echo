@@ -16,7 +16,12 @@ from ..schemas.persona import (
     PersonaTagOut,
     PersonaTagUpdate,
 )
-from ..services.ingest import persona_init_task, persona_incremental_task, persona_rebuild_task
+from ..services.ingest import (
+    persona_auto_confirm_backlog_task,
+    persona_init_task,
+    persona_incremental_task,
+    persona_rebuild_task,
+)
 from ..tasks import start_task
 
 router = APIRouter()
@@ -181,6 +186,27 @@ def rebuild_persona(db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="已有人设重建/初始化任务进行中，请稍候再试")
     cid = current_creator_id(db)
     task_id = start_task("persona_rebuild", {"creator_id": cid}, persona_rebuild_task)
+    return {"task_id": task_id}
+
+
+@router.post("/auto-confirm-backlog")
+def auto_confirm_backlog(db: Session = Depends(get_db)):
+    """R-208：按同规则批量处理历史积压的待确认建议（后台任务，非禁区+高置信自动进档）。"""
+    from ..models.task import BackgroundTask
+
+    dup = (
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.kind == "persona_auto_confirm_backlog",
+            BackgroundTask.status.in_(["pending", "running"]),
+        )
+        .order_by(BackgroundTask.id.desc())
+        .first()
+    )
+    if dup is not None:
+        raise HTTPException(status_code=409, detail="已有「待确认建议清理」任务进行中，请稍候再试")
+    cid = current_creator_id(db)
+    task_id = start_task("persona_auto_confirm_backlog", {"creator_id": cid}, persona_auto_confirm_backlog_task)
     return {"task_id": task_id}
 
 

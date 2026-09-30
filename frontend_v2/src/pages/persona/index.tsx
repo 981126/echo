@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -13,9 +13,11 @@ import {
   Quote,
   SlidersHorizontal,
   Fingerprint,
-  TriangleAlert
+  TriangleAlert,
+  Undo2
 } from 'lucide-react'
 import { apiJson } from '@/api/client'
+import { useActiveWork } from '@/hooks/use-active-work'
 import { cn } from '@/lib/utils'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -39,6 +41,7 @@ interface PersonaTag {
   evidence?: string
   frequency?: number
   last_seen_at?: string | null
+  confirm_strength?: number
   status: string
 }
 
@@ -102,6 +105,21 @@ export default function PersonaPage() {
   const [avoidText, setAvoidText] = useState('')
   const [savingStyle, setSavingStyle] = useState(false)
   const [styleDraft, setStyleDraft] = useState<{ avoid: string[]; sample: number; anchors: number[] } | null>(null)
+
+  // R-202：进行中状态以服务端任务为准（切页/刷新回来仍在跑 → 仍显示动画）
+  const { tasks: activeTasks } = useActiveWork()
+  const personaActive = activeTasks.filter((t) => t.kind.startsWith('persona_'))
+  const prevPersonaIds = useRef<Set<number>>(new Set())
+  useEffect(() => {
+    const ids = new Set(personaActive.map((t) => t.id))
+    let lost = false
+    for (const id of prevPersonaIds.current) if (!ids.has(id)) lost = true
+    if (lost) qc.invalidateQueries({ queryKey: ['persona'] })
+    prevPersonaIds.current = ids
+  }, [personaActive, qc])
+  const runningActive = running || personaActive.some((t) => t.kind === 'persona_init')
+  const rebuildingActive = rebuilding || personaActive.some((t) => t.kind === 'persona_rebuild')
+  const checkingActive = checking || personaActive.some((t) => t.kind === 'persona_incremental')
 
   const suggestedQ = useQuery({
     queryKey: ['persona', 'suggested'],
@@ -339,6 +357,7 @@ export default function PersonaPage() {
             <Badge variant={cat.variant}>{cat.label}</Badge>
             <Badge variant="secondary">{LAYER_LABEL[layerOf(t)] || layerOf(t)}</Badge>
             {t.dimension && t.category !== 'redline' && <Badge variant="secondary">{t.dimension}</Badge>}
+            {t.confirm_strength === 1 && <Badge variant="outline">自动</Badge>}
             {!!t.frequency && <span className="text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
           </div>
           {t.description && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.description}</p>}
@@ -346,6 +365,17 @@ export default function PersonaPage() {
         </div>
         {!picking && (
           <div className="flex shrink-0 gap-1">
+            {t.confirm_strength === 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                title="撤销自动确认（移回待确认，需人工）"
+                onClick={() => decide(t, 'rejected')}
+              >
+                <Undo2 className="h-3.5 w-3.5" /> 撤销
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditForm({ id: t.id, label: t.label, description: t.description, dimension: t.dimension, category: t.category, layer: layerOf(t), evidence: t.evidence || '' })}>
               <Pencil className="h-3.5 w-3.5" />
             </Button>
@@ -363,14 +393,14 @@ export default function PersonaPage() {
       {/* 顶部任务条 */}
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-2">
         <Fingerprint className="h-4 w-4 text-accent" />
-        <span className="text-sm text-muted-foreground">人设 = 标签 + 描述 + 红线，AI 建议需你确认</span>
+        <span className="text-sm text-muted-foreground">人设 = 标签 + 描述 + 红线；高频无冲突的建议自动进档，红线需你确认</span>
         <span className="flex-1" />
-        <Button variant="secondary" size="sm" onClick={initPersona} disabled={running}>
-          {running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+        <Button variant="secondary" size="sm" onClick={initPersona} disabled={runningActive}>
+          {runningActive ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
           用历史转写稿初始化人设
         </Button>
-        <Button variant="outline" size="sm" onClick={() => setRebuildOpen(true)} disabled={rebuilding}>
-          {rebuilding ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <TriangleAlert className="h-3.5 w-3.5" />}
+        <Button variant="outline" size="sm" onClick={() => setRebuildOpen(true)} disabled={rebuildingActive}>
+          {rebuildingActive ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <TriangleAlert className="h-3.5 w-3.5" />}
           推倒重建（四层）
         </Button>
       </motion.div>
@@ -395,8 +425,8 @@ export default function PersonaPage() {
               <span className="text-xs text-muted-foreground">还没有校验记录</span>
             )}
             <span className="flex-1" />
-            <Button variant="outline" size="sm" onClick={recheck} disabled={checking}>
-              {checking ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            <Button variant="outline" size="sm" onClick={recheck} disabled={checkingActive}>
+              {checkingActive ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               重跑增量校验
             </Button>
           </CardContent>

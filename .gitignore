@@ -1,9 +1,12 @@
-# 环境与密钥
+# 环境与密钥：.env 的一切变体都不入库，只保留模板
 .env
-*.env.local
+.env.*
+*.env
+!.env.example
 
-# 运行时数据（NAS 卷）
+# 运行时数据（NAS 卷 / 本地数据目录；.env 的 ECHO_DATA_DIR 指哪就忽略哪）
 data/
+echo_resource/
 
 # 发布包产物（R-145：scripts/release.sh 输出）
 dist_release/
@@ -22,6 +25,17 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+.eslintcache
+
+# 测试 / 点检框架产物
+test-results/
+playwright-report/
+
+# 本地点检产物：Playwright 点检脚本与截图（仅本机用，不入库；文件保留在本地）
+/frontend_v2/*.png
+/frontend_v2/r[0-9]*.mjs
+/frontend_v2/*-audit.mjs
+/frontend_v2/*-shots.mjs
 
 # 系统
 .DS_Store

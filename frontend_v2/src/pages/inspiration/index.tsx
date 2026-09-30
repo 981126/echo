@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import { NotebookPen, Send, Sparkles, Trash2, LoaderCircle, Check } from 'lucide-react'
 import { apiJson } from '@/api/client'
+import { useActiveWork } from '@/hooks/use-active-work'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,13 @@ export default function InspirationPage() {
     queryFn: () => apiJson<Note[]>('/api/inspiration?limit=200')
   })
   const notes = useMemo(() => notesQ.data ?? [], [notesQ.data])
+
+  // R-202：随手记发展出的草稿若仍在生成（generate_draft 任务），回来仍显示「生成中」
+  const { tasks: activeTasks } = useActiveWork()
+  const genDraftIds = useMemo(
+    () => new Set(activeTasks.filter((t) => t.kind === 'generate_draft').map((t) => Number(t.payload.draft_id || 0))),
+    [activeTasks]
+  )
 
   async function save() {
     const body = text.trim()
@@ -138,7 +146,11 @@ export default function InspirationPage() {
                         {n.created_at ? String(n.created_at).replace('T', ' ').slice(0, 16) : ''}
                       </span>
                     </div>
-                    {n.status === 'used' ? (
+                    {genDraftIds.has(Number(n.draft_id || 0)) ? (
+                      <Badge variant="default" className="shrink-0">
+                        <LoaderCircle className="h-3 w-3 animate-spin" /> 生成中
+                      </Badge>
+                    ) : n.status === 'used' ? (
                       <Badge variant="secondary" className="shrink-0"><Check className="h-3 w-3" /> 已用</Badge>
                     ) : (
                       <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => develop(n)} disabled={busyId === n.id}>

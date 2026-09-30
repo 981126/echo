@@ -105,6 +105,14 @@ def send_daily_digest(db: Session, run_date: str, settings=None) -> bool:
     return _send(subject, html, settings)
 
 
+def send_daily_best(item: dict, run_date: str, settings=None) -> bool:
+    """R-208：推送「今日最佳」单篇（选题理由 + 口播稿全文），复用每日 digest 模板。"""
+    settings = settings or get_settings()
+    html = build_digest_html([item], settings.web_base_url)
+    subject = f"【echo】今日最佳（{run_date}）：{str(item.get('title', ''))[:30]}"
+    return _send(subject, html, settings)
+
+
 def send_failure_alert(db: Session, run: object, settings=None) -> bool:
     settings = settings or get_settings()
     html = build_failure_html(str(getattr(run, "error", "未知错误")))

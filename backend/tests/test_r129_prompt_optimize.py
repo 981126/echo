@@ -198,7 +198,7 @@ def test_reject_candidate_marks_rejected(db):
 
 def test_version_effect_aggregates_feedback(db):
     owner = _owner(db)
-    d1 = Draft(creator_id=owner.id, script="一稿", source="ai", prompt_version=3)
+    d1 = Draft(creator_id=owner.id, script="一稿", source="ai", prompt_version=3, status="done")
     d2 = Draft(creator_id=owner.id, script="二稿", source="ai", prompt_version=3)
     d3 = Draft(creator_id=owner.id, script="三稿", source="ai", prompt_version=1)
     db.add_all([d1, d2, d3])
@@ -213,6 +213,7 @@ def test_version_effect_aggregates_feedback(db):
     db.commit()
     effect = ps.version_effect(db, "generation")
     by_ver = {r["version"]: r for r in effect}
+    # R-211：used 口径=status done（完成即认可）；avg_rating 仅统计历史评分
     assert by_ver[3]["drafts"] == 2 and by_ver[3]["avg_rating"] == 4.0 and by_ver[3]["used"] == 1
     assert by_ver[1]["avg_rating"] == 2.0
     assert ps.version_effect(db, "correct") == []

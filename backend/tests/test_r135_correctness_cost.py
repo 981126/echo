@@ -13,8 +13,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models.draft import Draft
-from app.models.feedback import Feedback
 from app.models.kv import Kv
 from app.models.hot_topic import TopicIdea
 from app.models.platform import Creator
@@ -169,27 +167,4 @@ def test_comment_candidates_filters_by_creator(db):
     assert "对标的评论灵感" not in titles, "对标博主的评论灵感不应进入主博主选题"
 
 
-# ---------- 四维分回流 ----------
-
-
-def test_dim_examples_injected_when_feedback_exists(db):
-    owner = Creator(kind="owner", name="我", is_current=True)
-    db.add(owner)
-    db.flush()
-    draft = Draft(creator_id=owner.id, title="稿子", script="开场钩子句。中段内容。结尾引导句。", source="ai")
-    db.add(draft)
-    db.flush()
-    db.add(Feedback(draft_id=draft.id, hook_score=5, pace_score=4, ending_score=5, style_score=5))
-    db.commit()
-    text = gen._dim_examples(db)
-    assert "开场钩子" in text and "结尾引导" in text
-    assert "开场钩子" in gen.generation_user_message(db, "选题")
-
-
-def test_dim_examples_empty_without_feedback(db):
-    owner = Creator(kind="owner", name="我", is_current=True)
-    db.add(owner)
-    db.flush()
-    db.add(Draft(creator_id=owner.id, title="稿子", script="内容。", source="ai"))
-    db.commit()
-    assert gen._dim_examples(db) == ""
+# R-211：四维分随反馈体系重构下线（`_dim_examples` 已删除，不再注入生成上下文）

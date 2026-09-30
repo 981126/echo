@@ -127,6 +127,14 @@ def _migrate_feedback_dims() -> None:
             conn.exec_driver_sql(f"ALTER TABLE feedback ADD COLUMN {ddl}")
 
 
+def _migrate_feedback_insight() -> None:
+    """R-211：feedback 增加 insight 列（状态流转触发分析的 LLM 心得）。"""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(feedback)").fetchall()}
+        if "insight" not in cols:
+            conn.exec_driver_sql("ALTER TABLE feedback ADD COLUMN insight TEXT NOT NULL DEFAULT ''")
+
+
 def _migrate_topic_candidate_slot() -> None:
     """R-073：topic_candidates 增加 slot 列（comment|hot|ai）。"""
     with engine.begin() as conn:
@@ -572,6 +580,7 @@ def init_db() -> None:
     _migrate_creator_scope()
     _migrate_account_avatars()
     _migrate_feedback_dims()
+    _migrate_feedback_insight()
     _migrate_chat()
     _migrate_comment_likes()
     _migrate_sync_progress()

@@ -653,3 +653,17 @@ def _ledger(db: Session, limit: int) -> dict:
         "maybe_repeated": dup,
         "pool_comments": cc["total_comments"],
     }
+
+
+# ---------- R-202：后台任务 worker（结果落 task.result，供切页回填） ----------
+
+def clusters_task(db: Session, payload: dict) -> dict:
+    return comment_clusters(db, limit=int(payload.get("limit", 15)), use_llm=bool(payload.get("use_llm", True)))
+
+
+def weekly_task(db: Session, payload: dict) -> dict:
+    return weekly_pack(db, limit=int(payload.get("limit", 20)))
+
+
+def gap_task(db: Session, payload: dict) -> dict:
+    return gap_suggestions(db, limit=int(payload.get("limit", 6)))

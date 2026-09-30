@@ -101,32 +101,6 @@ def _housekeep_job() -> None:
         db.close()
 
 
-def _weekly_style_job() -> None:
-    """每周日 03:20 提示：素材/人设已更新，可手动重跑生成提示词候选（R-131：不再自动产出候选）。"""
-    db = SessionLocal()
-    try:
-        from .services.generation import _all_texts
-
-        rows = _all_texts(db)
-        if len(rows) < 5:
-            return  # 语料太少不值得提示
-        from .tasks import push_notification
-
-        push_notification(
-            db,
-            kind="prompt_refresh_hint",
-            status="done",
-            title="每周提示：可重跑生成提示词候选",
-            message="素材/人设已更新；到「AI 提示词」页手动点一次「AI 基于真实样本优化」（会自动做金样本评测并给出对比分）",
-            target="/prompts?key=generation",
-        )
-    except Exception as exc:  # noqa: BLE001 周任务失败要留痕（R-133）
-        db.rollback()
-        _alert("weekly_prompt_hint", "每周提示任务失败", str(exc))
-    finally:
-        db.close()
-
-
 def _publish_backfill_job() -> None:
     """每日 05:00：刷新已发布草稿的表现回填（R-189）。"""
     db = SessionLocal()
@@ -260,14 +234,8 @@ def setup_scheduler() -> None:
         misfire_grace_time=3600,
         coalesce=True,
     )
-    # R-057/R-131：每周提示重跑生成提示词候选（周日 03:20，不再自动产出候选）
-    _scheduler.add_job(
-        _weekly_style_job,
-        CronTrigger(day_of_week="sun", hour=3, minute=20, timezone=settings.tz),
-        id="weekly_prompt_hint",
-        misfire_grace_time=3600,
-        coalesce=True,
-    )
+    # R-057/R-131/R-208：原「每周提示重跑提示词候选」定时任务已删除——
+    # 提示词优化改为素材到量自动触发（prompt_service.maybe_auto_optimize_prompt）。
     # R-188：每周一 08:30 主动推送本周灵感补给（缺口 + 热/评论）
     _scheduler.add_job(
         _weekly_ideas_job,

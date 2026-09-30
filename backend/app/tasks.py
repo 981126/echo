@@ -8,69 +8,16 @@ import threading
 
 from .db import SessionLocal
 from .core.log import get_logger
+from .core.task_meta import KIND_LABELS, target as task_target
 from .models.notification import Notification
 from .models.task import BackgroundTask
 from .services.events import publish
 
 log = get_logger("tasks")
 
-KIND_LABELS = {
-    "import_video": "素材转写",
-    "persona_init": "人设初始化",
-    "persona_incremental": "人设增量校验",
-    "prompt_eval": "提示词候选评测",
-    "prompt_rule_optimize": "规则型提示词优化",
-    "prompt_refresh_hint": "提示词优化提醒",
-    "daily_pipeline": "每日流水线",
-    "diff_analysis": "草稿差异分析",
-    "generate_draft": "AI 文案生成",
-    "platform_sync": "平台数据同步",
-    "platform_sync_single": "素材数据同步",
-    "platform_media": "素材媒体补齐",
-    "card_sync": "素材同步",
-    "benchmark_rerun": "重新对标",
-    "benchmark_analyze": "AI 分析",
-    "benchmark_rewrite": "洗稿",
-    "llm_fallback": "模型降级",
-    "model_selfcheck": "双模型兼容性自检",
-    "schema_check": "库结构自检",
-}
-
 
 def _target(kind: str, payload: dict, result) -> str:
-    if kind == "import_video":
-        return f"/videos?edit={payload.get('video_id', '')}"
-    if kind == "platform_media":
-        if isinstance(result, dict) and result.get("video_id"):
-            return f"/videos?edit={result['video_id']}"
-        return "/videos"
-    if kind == "persona_init":
-        return "/persona"
-    if kind == "persona_incremental":
-        return "/persona"
-    if kind == "prompt_eval":
-        return f"/prompts?key={payload.get('key', '')}"
-    if kind == "prompt_rule_optimize":
-        return "/prompts"
-    if kind == "prompt_refresh_hint":
-        return "/prompts?key=generation"
-    if kind == "daily_pipeline":
-        return "/home"
-    if kind == "diff_analysis":
-        return f"/drafts?id={payload.get('draft_id', '')}"
-    if kind == "generate_draft":
-        if isinstance(result, dict) and result.get("draft_id"):
-            return f"/drafts?id={result['draft_id']}"
-        return "/drafts"
-    if kind in ("platform_sync", "platform_sync_single"):
-        return "/creators"
-    if kind == "benchmark_rerun":
-        return "/benchmark"
-    if kind in ("benchmark_analyze", "benchmark_rewrite"):
-        return "/benchmark"
-    if kind == "model_selfcheck":
-        return "/prompts"
-    return "/home"
+    return task_target(kind, payload, result)
 
 
 def _notify(db, *, kind: str, payload: dict, status: str, result=None, error: str = "") -> None:
@@ -107,6 +54,31 @@ def push_notification(db, *, kind: str, status: str, title: str, message: str, t
     publish("notification.new", {"id": nt.id, "kind": nt.kind, "status": nt.status, "title": nt.title, "message": nt.message, "target": nt.target or ""})
 
 
+def find_running_task(kind: str, payload_match: dict | None = None) -> int | None:
+    """同 kind（可选 payload 字段匹配）的 pending/running 任务 id，用于防重复入队（R-202）。"""
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(BackgroundTask)
+            .filter(
+                BackgroundTask.kind == kind,
+                BackgroundTask.status.in_(["pending", "running"]),
+            )
+            .order_by(BackgroundTask.id.desc())
+            .limit(50)
+            .all()
+        )
+        for row in rows:
+            if not payload_match:
+                return row.id
+            pd = row.payload_dict()
+            if all(str(pd.get(k)) == str(v) for k, v in payload_match.items()):
+                return row.id
+        return None
+    finally:
+        db.close()
+
+
 def start_task(kind: str, payload: dict, fn) -> int:
     db = SessionLocal()
     try:
@@ -124,6 +96,22 @@ def start_task(kind: str, payload: dict, fn) -> int:
 def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
     db = SessionLocal()
 
+    def _emit(status: str, progress: int, note: str, error: str = "") -> None:
+        """广播任务状态（R-202：带 kind/label/target，顶栏「进行中」指示器直接消费）。"""
+        data = {
+            "id": task_id,
+            "kind": kind,
+            "label": KIND_LABELS.get(kind, kind),
+            "target": task_target(kind, payload, None),
+            "status": status,
+            "progress": progress,
+            "note": note or "",
+            "payload": payload,
+        }
+        if error:
+            data["error"] = error
+        publish("task.update", data)
+
     def _update(pct: int | None = None, note: str = "") -> None:
         """任务函数（三参签名 fn(db,payload,update)）实时回写进度/阶段说明（R-081）。"""
         task = db.get(BackgroundTask, task_id)
@@ -134,7 +122,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
         if note:
             task.note = note[:255]
         db.commit()
-        publish("task.update", {"id": task_id, "status": task.status, "progress": task.progress, "note": task.note or "", "payload": payload})
+        _emit(task.status, task.progress, task.note or "")
 
     try:
         task = db.get(BackgroundTask, task_id)
@@ -143,6 +131,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
         task.status = "running"
         task.progress = 5
         db.commit()
+        _emit("running", task.progress, task.note or "")
         params = inspect.signature(fn).parameters
         if len(params) >= 3:
             result = fn(db, payload, _update)
@@ -159,7 +148,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
                 except (TypeError, ValueError):
                     task.result = str(result)
             db.commit()
-            publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": payload})
+            _emit("done", 100, "完成")
         _notify(db, kind=kind, payload=payload, status="done", result=result)
         if kind == "import_video":
             _maybe_optimize_prompt(db, payload)
@@ -171,7 +160,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             task.status = "failed"
             task.error = str(exc)[:2000]
             db.commit()
-            publish("task.update", {"id": task_id, "status": "failed", "progress": task.progress, "note": task.note or "", "error": task.error[:500], "payload": payload})
+            _emit("failed", task.progress, task.note or "", error=task.error[:500])
         try:
             _notify(db, kind=kind, payload=payload, status="failed", error=str(exc))
         except Exception:  # noqa: BLE001 R-133：通知失败不得影响终态（否则会把已成功的任务改判 failed）
@@ -182,9 +171,9 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
 
 
 def _maybe_optimize_prompt(db, payload: dict) -> None:
-    """素材导入后的提示词提醒（R-131）：**不再自动产出候选**，只在累计到阈值时发一条提醒。"""
+    """素材导入后的提示词优化（R-131→R-208）：累计到阈值时自动排队优化生成提示词。"""
     from .models.video import Video
-    from .services.prompt_service import maybe_notify_prompt_refresh
+    from .services.prompt_service import maybe_auto_optimize_prompt
 
     try:
         video = db.get(Video, int(payload.get("video_id") or 0))
@@ -193,8 +182,8 @@ def _maybe_optimize_prompt(db, payload: dict) -> None:
         text = video.transcript.corrected_text or video.transcript.transcript_text
         if not text:
             return
-        maybe_notify_prompt_refresh(db)
-    except Exception:  # noqa: BLE001 提醒失败不影响导入主流程
+        maybe_auto_optimize_prompt(db)
+    except Exception:  # noqa: BLE001 优化入队失败不影响导入主流程
         db.rollback()
 
 

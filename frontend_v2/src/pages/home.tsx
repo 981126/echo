@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { RefreshCw, Shuffle, Sparkles, LoaderCircle, Lightbulb } from 'lucide-react'
 import { apiJson } from '@/api/client'
+import { startTask, waitTaskResult } from '@/api/task'
+import { useTaskScope } from '@/hooks/use-task-scope'
 import { platformName, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -93,19 +95,23 @@ export default function HomePage() {
   const [angleOpen, setAngleOpen] = useState(false)
   const [angles, setAngles] = useState<Angle[]>([])
   const [mode, setMode] = useState('')
-  const [pack, setPack] = useState<PackItem[]>([])
-  const [packLoading, setPackLoading] = useState(false)
-  const [clusters, setClusters] = useState<Cluster[]>([])
-  const [clustersLoading, setClustersLoading] = useState(false)
-  const [gap, setGap] = useState<PackItem[]>([])
-  const [gapLoading, setGapLoading] = useState(false)
-  const [gapNote, setGapNote] = useState('')
   const [attr, setAttr] = useState<Attribution | null>(null)
   const [attrLoading, setAttrLoading] = useState(false)
-  const [backfilling, setBackfilling] = useState(false)
   const [pendingTopic, setPendingTopic] = useState('')
   const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
+
+  // R-202：内容机会/抓取/回填改为后台任务，scope 存在 sessionStorage → 切页/刷新可恢复
+  const packScope = useTaskScope<{ items: PackItem[] }>('opportunity_weekly')
+  const clustersScope = useTaskScope<{ clusters: Cluster[] }>('opportunity_clusters')
+  const gapScope = useTaskScope<{ items: PackItem[]; note?: string }>('opportunity_gap')
+  const backfillScope = useTaskScope<{ linked: number; with_performance: number }>('publish_backfill')
+  const hotScope = useTaskScope<{ fetched: number }>('hot_refresh')
+
+  const pack = packScope.data?.items ?? []
+  const clusters = clustersScope.data?.clusters ?? []
+  const gap = gapScope.data?.items ?? []
+  const gapNote = gapScope.data?.note ?? ''
 
   const hotQ = useQuery({
     queryKey: ['topics', 'hot'],
@@ -120,15 +126,14 @@ export default function HomePage() {
     queryFn: () => apiJson<{ titles: string[] }>('/api/opportunities/covered?limit=300')
   })
 
-  const refreshHot = useMutation({
-    mutationFn: () => apiJson<{ fetched: number }>('/api/topics/refresh', { method: 'POST', body: '{}' }),
-    onSuccess: (r) => {
+  async function refreshHot() {
+    const r = await hotScope.run('/api/topics/refresh')
+    if (r) {
       toast.success(`已抓取 ${r.fetched} 条热点`)
       qc.invalidateQueries({ queryKey: ['topics'] })
       qc.invalidateQueries({ queryKey: ['topic-pool'] })
-    },
-    onError: (e) => toast.error(e.message)
-  })
+    }
+  }
 
   const coveredNorm = useMemo(
     () => (coveredQ.data?.titles ?? []).map(normTitle).filter((t) => t.length >= 4),
@@ -181,11 +186,9 @@ export default function HomePage() {
     setAngleLoading(true)
     setAngles([])
     try {
-      const r = await apiJson<{ items?: Angle[]; angles?: Angle[] }>('/api/drafts/angles', {
-        method: 'POST',
-        body: JSON.stringify({ topic })
-      })
-      setAngles(r.items ?? r.angles ?? [])
+      const id = await startTask('/api/drafts/angles', { topic })
+      const r = await waitTaskResult<{ angles?: Angle[] }>(id)
+      setAngles(r.angles ?? [])
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -193,41 +196,16 @@ export default function HomePage() {
     }
   }
 
-  async function loadPack() {
-    setPackLoading(true)
-    try {
-      const r = await apiJson<{ items: PackItem[] }>('/api/opportunities/weekly?limit=20')
-      setPack(r.items || [])
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setPackLoading(false)
-    }
+  function loadPack() {
+    void packScope.run('/api/opportunities/weekly?limit=20')
   }
 
-  async function loadClusters() {
-    setClustersLoading(true)
-    try {
-      const r = await apiJson<{ clusters: Cluster[] }>('/api/opportunities/comments?limit=15')
-      setClusters(r.clusters || [])
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setClustersLoading(false)
-    }
+  function loadClusters() {
+    void clustersScope.run('/api/opportunities/comments?limit=15')
   }
 
-  async function loadGap() {
-    setGapLoading(true)
-    try {
-      const r = await apiJson<{ items: PackItem[]; note?: string }>('/api/opportunities/gap?limit=6')
-      setGap(r.items || [])
-      setGapNote(r.note || '')
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setGapLoading(false)
-    }
+  function loadGap() {
+    void gapScope.run('/api/opportunities/gap?limit=6')
   }
 
   async function loadAttr() {
@@ -242,17 +220,13 @@ export default function HomePage() {
     }
   }
 
-  async function backfillLinks() {
-    setBackfilling(true)
-    try {
-      const r = await apiJson<{ linked: number; with_performance: number }>('/api/drafts/publish-links/apply', { method: 'POST', body: '{}' })
-      toast.success(`已自动关联历史发布 ${r.linked} 篇，回填表现 ${r.with_performance} 篇`)
-      await loadAttr()
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setBackfilling(false)
-    }
+  function backfillLinks() {
+    void backfillScope.run('/api/drafts/publish-links/apply').then((r) => {
+      if (r) {
+        toast.success(`已自动关联历史发布 ${r.linked} 篇，回填表现 ${r.with_performance} 篇`)
+        void loadAttr()
+      }
+    })
   }
 
   async function generate(topic: string) {
@@ -271,83 +245,6 @@ export default function HomePage() {
 
   return (
     <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-6">
-      {/* 灵感池 */}
-      <motion.section variants={itemVariants}>
-        <Card>
-          <CardHeader className="flex-row flex-wrap items-center gap-2">
-            <Lightbulb className="h-4 w-4 text-accent" />
-            <CardTitle>灵感池</CardTitle>
-            <CardDescription>评论与热榜按人设相关度均衡展示 · 人工挑选</CardDescription>
-            <div className="flex-1" />
-            <Tabs value={sourceTab} onValueChange={setSourceTab}>
-              <TabsList className="h-8">
-                <TabsTrigger value="all" className="text-xs">全部</TabsTrigger>
-                <TabsTrigger value="comment" className="text-xs">只看评论</TabsTrigger>
-                <TabsTrigger value="hot" className="text-xs">只看热榜</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <Tooltip delayDuration={0}>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" onClick={() => setBatch((b) => b + 1)}>
-                  <Shuffle className="h-3.5 w-3.5" /> 换一批
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>轮转展示其它灵感</TooltipContent>
-            </Tooltip>
-            <Button variant="secondary" size="sm" onClick={() => refreshHot.mutate()} disabled={refreshHot.isPending}>
-              {refreshHot.isPending ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              抓取更新
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {hotQ.isLoading || poolQ.isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Skeleton key={i} className="h-9 w-full" />
-                ))}
-              </div>
-            ) : !shown.length ? (
-              <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-                暂无灵感（点「抓取更新」或等每日自动同步）
-              </div>
-            ) : (
-              <motion.ul variants={listVariants} initial="initial" animate="animate" className="divide-y divide-border/60">
-                {shown.map((it) => (
-                  <motion.li key={`${it.source}-${it.id}`} variants={itemVariants} className="flex items-center gap-2 py-2.5">
-                    <span className="w-12 shrink-0 text-xs text-muted-foreground">
-                      {platformName(it.platform, '综合')}
-                    </span>
-                    <Badge variant={it.source === 'hot' ? 'secondary' : 'default'}>
-                      {it.source === 'hot' ? '热榜' : '评论'}
-                    </Badge>
-                    {it.matched || (it.score ?? 0) > 0 ? (
-                      <Badge variant="success">相关</Badge>
-                    ) : it.source === 'hot' ? (
-                      <Badge variant="secondary">低相关</Badge>
-                    ) : null}
-                    {it.source === 'comment' && it.likes ? (
-                      <span className="tnum shrink-0 text-xs text-muted-foreground">👍 {fmtNum(it.likes)}</span>
-                    ) : null}
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{it.title}</span>
-                    {isMaybeRepeated(it.title) && <Badge variant="warning" className="shrink-0">可能已讲</Badge>}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-accent"
-                      disabled={generating !== null}
-                      onClick={() => pickAngle(it.title)}
-                    >
-                      {generating === it.title ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      生成文案
-                    </Button>
-                  </motion.li>
-                ))}
-              </motion.ul>
-            )}
-          </CardContent>
-        </Card>
-      </motion.section>
-
       {/* 内容机会（R-185）：观众提问榜 + 每周灵感包 */}
       <motion.section variants={itemVariants}>
         <Card>
@@ -356,16 +253,16 @@ export default function HomePage() {
             <CardTitle>内容机会</CardTitle>
             <CardDescription>评论聚类「观众提问」+ 每周灵感包（自动去掉已讲过的话题）</CardDescription>
             <span className="flex-1" />
-            <Button variant="outline" size="sm" onClick={loadClusters} disabled={clustersLoading}>
-              {clustersLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
+            <Button variant="outline" size="sm" onClick={loadClusters} disabled={clustersScope.running}>
+              {clustersScope.running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="h-3.5 w-3.5" />}
               观众提问榜
             </Button>
-            <Button size="sm" onClick={loadPack} disabled={packLoading}>
-              {packLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            <Button size="sm" onClick={loadPack} disabled={packScope.running}>
+              {packScope.running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               生成本周灵感包
             </Button>
-            <Button size="sm" variant="outline" onClick={loadGap} disabled={gapLoading}>
-              {gapLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            <Button size="sm" variant="outline" onClick={loadGap} disabled={gapScope.running}>
+              {gapScope.running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               找缺口选题
             </Button>
             <Button size="sm" variant="ghost" onClick={loadAttr} disabled={attrLoading}>
@@ -441,8 +338,8 @@ export default function HomePage() {
                 {attr.draft_count === 0 || !attr.by_tag.length ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-muted-foreground">还没有已发布且回填了表现的稿件</span>
-                    <Button variant="outline" size="sm" onClick={backfillLinks} disabled={backfilling}>
-                      {backfilling ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    <Button variant="outline" size="sm" onClick={backfillLinks} disabled={backfillScope.running}>
+                      {backfillScope.running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                       回填历史发布（按标题自动关联作品）
                     </Button>
                   </div>
@@ -459,6 +356,83 @@ export default function HomePage() {
             )}
             {!clusters.length && !pack.length && !gap.length && !attr && (
               <p className="py-3 text-center text-sm text-muted-foreground">点上方按钮：看观众反复问什么、生成本周灵感包、让 AI 找缺口选题，或看表现归因</p>
+            )}
+          </CardContent>
+        </Card>
+      </motion.section>
+
+      {/* 灵感池 */}
+      <motion.section variants={itemVariants}>
+        <Card>
+          <CardHeader className="flex-row flex-wrap items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-accent" />
+            <CardTitle>灵感池</CardTitle>
+            <CardDescription>评论与热榜按人设相关度均衡展示 · 人工挑选</CardDescription>
+            <div className="flex-1" />
+            <Tabs value={sourceTab} onValueChange={setSourceTab}>
+              <TabsList className="h-8">
+                <TabsTrigger value="all" className="text-xs">全部</TabsTrigger>
+                <TabsTrigger value="comment" className="text-xs">只看评论</TabsTrigger>
+                <TabsTrigger value="hot" className="text-xs">只看热榜</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={() => setBatch((b) => b + 1)}>
+                  <Shuffle className="h-3.5 w-3.5" /> 换一批
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>轮转展示其它灵感</TooltipContent>
+            </Tooltip>
+            <Button variant="secondary" size="sm" onClick={refreshHot} disabled={hotScope.running}>
+              {hotScope.running ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              抓取更新
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {hotQ.isLoading || poolQ.isLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} className="h-9 w-full" />
+                ))}
+              </div>
+            ) : !shown.length ? (
+              <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
+                暂无灵感（点「抓取更新」或等每日自动同步）
+              </div>
+            ) : (
+              <motion.ul variants={listVariants} initial="initial" animate="animate" className="divide-y divide-border/60">
+                {shown.map((it) => (
+                  <motion.li key={`${it.source}-${it.id}`} variants={itemVariants} className="flex items-center gap-2 py-2.5">
+                    <span className="w-12 shrink-0 text-xs text-muted-foreground">
+                      {platformName(it.platform, '综合')}
+                    </span>
+                    <Badge variant={it.source === 'hot' ? 'secondary' : 'default'}>
+                      {it.source === 'hot' ? '热榜' : '评论'}
+                    </Badge>
+                    {it.matched || (it.score ?? 0) > 0 ? (
+                      <Badge variant="success">相关</Badge>
+                    ) : it.source === 'hot' ? (
+                      <Badge variant="secondary">低相关</Badge>
+                    ) : null}
+                    {it.source === 'comment' && it.likes ? (
+                      <span className="tnum shrink-0 text-xs text-muted-foreground">👍 {fmtNum(it.likes)}</span>
+                    ) : null}
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{it.title}</span>
+                    {isMaybeRepeated(it.title) && <Badge variant="warning" className="shrink-0">可能已讲</Badge>}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-accent"
+                      disabled={generating !== null}
+                      onClick={() => pickAngle(it.title)}
+                    >
+                      {generating === it.title ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      生成文案
+                    </Button>
+                  </motion.li>
+                ))}
+              </motion.ul>
             )}
           </CardContent>
         </Card>

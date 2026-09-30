@@ -38,6 +38,7 @@ FEATURE_LABELS: dict[str, str] = {
     "correct": "转写校对",
     "chat": "AI 对话",
     "diff": "差异分析",
+    "feedback_analysis": "反馈学习",
     "prompt_optimize": "提示词优化",
     "prompt_eval": "金样本评测",
     "benchmark": "对标分析",

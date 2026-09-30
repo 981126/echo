@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, Trash2, Star, LoaderCircle } from 'lucide-react'
+import { Plus, Trash2, PenLine, LoaderCircle } from 'lucide-react'
 import { apiJson } from '@/api/client'
-import { cn } from '@/lib/utils'
 import { fmtDate, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
@@ -15,7 +14,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from '@/components/ui/toaster'
 import { DraftAiStatus } from './draft-ai-status'
 import { DraftEditDrawer, EMPTY_DRAFT, type DraftEditState } from './edit-drawer'
-import { DIM_DEFS, DIM_OPTS, modelInfo, srcLabel, srcTitle, type Draft } from './types'
+import { modelInfo, srcLabel, srcTitle, type Draft } from './types'
 
 const STATUS_TABS = [
   { key: 'draft', label: '草稿' },
@@ -26,20 +25,24 @@ const STATUS_TABS = [
 
 type Status = (typeof STATUS_TABS)[number]['key']
 
+/** R-211：「记反馈」行内展开状态（每篇草稿一份） */
+interface FeedbackUI {
+  open: boolean
+  text: string
+  saving: boolean
+}
+
 /** 卡片上的操作回调（R-173：DraftTile/Actions 提到模块作用域，靠 handlers 传参） */
 interface TileHandlers {
   open: (d: Draft) => void
-  rate: (d: Draft, i: number) => void
-  setDim: (id: number, key: string, v: number) => void
-  submitDims: (d: Draft) => void
   setStatus: (d: Draft, status: Status, msg: string) => void
   remove: (d: Draft) => void
-  like: (d: Draft, liked: boolean) => void
+  toggleFeedback: (d: Draft) => void
+  setFeedbackText: (id: number, text: string) => void
+  submitFeedback: (d: Draft) => void
 }
 
 const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
-
-const dimOf = (dims: Record<number, Record<string, number | null>>, id: number) => dims[id] || {}
 
 function Actions({ d, busy, h }: { d: Draft; busy: boolean; h: TileHandlers }) {
   return (
@@ -75,18 +78,19 @@ function DraftTile({
   d,
   index,
   busy,
-  rating,
-  dims,
+  fb,
   h
 }: {
   d: Draft
   index: number
   busy: boolean
-  rating: number
-  dims: Record<string, number | null>
+  fb: FeedbackUI | undefined
   h: TileHandlers
 }) {
   const info = modelInfo(d)
+  // R-207：红线才是硬问题（标红）；口癖/高频词覆盖率只做诊断（微标，不阻断）
+  const redlineHit = d.quality?.passed === false && !d.quality?.mock && !!d.quality?.issues?.length
+  const coverage = d.quality?.diagnostics?.style_coverage
   return (
     <motion.article
       layout
@@ -98,7 +102,13 @@ function DraftTile({
       onClick={() => h.open(d)}
       className="group cursor-pointer rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)] transition-all hover:-translate-y-0.5 hover:border-accent/40"
     >
-      <h3 className="line-clamp-2 min-h-10 text-[14px] font-semibold leading-snug">{d.title || '（无标题）'}</h3>
+      <div className="flex items-start gap-2">
+        <h3 className="line-clamp-2 min-h-10 flex-1 text-[14px] font-semibold leading-snug">{d.title || '（无标题）'}</h3>
+        {/* R-210：纯手写（AI 从未参与）标 */}
+        {!!d.pure_manual && (
+          <Badge variant="success" className="mt-0.5 shrink-0 text-[10px]">纯手写</Badge>
+        )}
+      </div>
       <p className="mt-1 truncate text-xs text-muted-foreground">
         {srcLabel(d)}
         {srcTitle(d) ? ` · ${srcTitle(d)}` : ''} · {fmtDate(d.updated_at)}
@@ -134,53 +144,66 @@ function DraftTile({
           {!!d.quality?.fallback && <Badge variant="warning" className="text-[10px]">由备用模型生成</Badge>}
         </div>
       )}
+      {(redlineHit || coverage != null) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {redlineHit && <Badge variant="destructive" className="text-[10px]">踩红线</Badge>}
+          {coverage != null && (
+            <Badge
+              variant="secondary"
+              className="text-[10px] font-normal text-muted-foreground"
+              title="口癖/高频词覆盖率（仅诊断，不作为重写依据）"
+            >
+              像作者 {Math.round(coverage * 100)}%
+            </Badge>
+          )}
+        </div>
+      )}
       <div className="mt-3">
         <Actions d={d} busy={busy} h={h} />
       </div>
-      {(d.status === 'draft' || d.status === 'used' || d.status === 'done') && (
-        <div className="mt-2 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <span className="text-[11px] text-muted-foreground">快速反馈</span>
-          <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => h.like(d, true)}>好</Button>
-          <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => h.like(d, false)}>差</Button>
-        </div>
-      )}
-      {d.status === 'draft' && (
-        <div className="mt-3 space-y-1.5 border-t border-border pt-2.5" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-0.5">
-            <span className="mr-1 text-[11px] text-muted-foreground">打分</span>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <button key={i} onClick={() => h.rate(d, i)} className="cursor-pointer p-0.5">
-                <Star
-                  className={cn('h-3.5 w-3.5 transition-colors', rating >= i ? 'fill-warning text-warning' : 'text-muted-foreground/40 hover:text-warning')}
-                />
-              </button>
-            ))}
-            <span className="ml-1 text-[10px] text-muted-foreground">
-              {rating ? `${rating} 分` : '← 打分是 AI 学你偏好最强的信号'}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {DIM_DEFS.map((def) => (
-              <span key={def.key} className="flex items-center gap-0.5 text-[11px]">
-                <span className="text-muted-foreground">{def.label}</span>
-                {DIM_OPTS.map((opt) => (
-                  <button
-                    key={def.key + opt.v}
-                    onClick={() => h.setDim(d.id, def.key, opt.v)}
-                    className={cn(
-                      'cursor-pointer rounded px-1 transition-colors',
-                      dims[def.key] === opt.v ? 'bg-accent-soft text-accent' : 'text-muted-foreground/50 hover:text-foreground'
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </span>
-            ))}
-            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => h.submitDims(d)}>记反馈</Button>
-          </div>
-        </div>
-      )}
+      {/* R-211：记反馈（文本评价，AI 在完成/不采用时结合评价学习）；星级/四维/快速反馈已下线 */}
+      <div className="mt-2 border-t border-border pt-2" onClick={(e) => e.stopPropagation()}>
+        <button
+          className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          onClick={() => h.toggleFeedback(d)}
+        >
+          <PenLine className="h-3 w-3" />
+          记反馈
+          {!fb?.open && !!d.feedback_comment && <span className="text-accent">· 已写</span>}
+        </button>
+        <AnimatePresence initial={false}>
+          {fb?.open && (
+            <motion.div
+              key="fb"
+              initial={{ height: 0, opacity: 0.4, y: -4 }}
+              animate={{ height: 'auto', opacity: 1, y: 0 }}
+              exit={{ height: 0, opacity: 0.4, y: -4 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="overflow-hidden"
+            >
+              <textarea
+                value={fb.text}
+                onChange={(e) => h.setFeedbackText(d.id, e.target.value)}
+                placeholder="写下你的评价：好在哪 / 差在哪（完成或不采用时，AI 会结合评价复盘学习）"
+                rows={3}
+                className="mt-1.5 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              <div className="mt-1 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  disabled={fb.saving || !fb.text.trim()}
+                  onClick={() => h.submitFeedback(d)}
+                >
+                  {fb.saving && <LoaderCircle className="h-3 w-3 animate-spin" />}
+                  提交评价
+                </Button>
+                <span className="text-[10px] text-muted-foreground">完成 = 好 / 不采用 = 差，会触发 AI 复盘</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </motion.article>
   )
 }
@@ -193,8 +216,7 @@ export default function DraftsPage() {
   const [editDraft, setEditDraft] = useState<Draft | null>(null)
   const [deleteDraft, setDeleteDraft] = useState<Draft | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [ratings, setRatings] = useState<Record<number, number>>({})
-  const [dims, setDims] = useState<Record<number, Record<string, number | null>>>({})
+  const [fbMap, setFbMap] = useState<Record<number, FeedbackUI>>({})
   const [busyId, setBusyId] = useState(0)
 
   const draftsQ = useQuery({
@@ -268,53 +290,55 @@ export default function DraftsPage() {
     }
   }
 
-  async function rate(d: Draft, i: number) {
-    try {
-      await apiJson(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ liked: null, rating: i }) })
-      setRatings({ ...ratings, [d.id]: i })
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
+  /** R-212：自动保存建出的稿被清空并关闭抽屉 → 逻辑删除它（与卡片【删除】同口径），不留空卡片 */
+  function discardAutoDraft(id: number) {
+    qc.setQueryData<Draft[]>(['drafts'], (rows) => (rows ?? []).filter((d) => d.id !== id))
+    apiJson(`/api/drafts/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'deleted' }) })
+      .catch(() => {
+        /* 删不掉就不删（列表刷新后还能看到，作者可手动删） */
+      })
+      .finally(() => qc.invalidateQueries({ queryKey: ['drafts'] }))
   }
 
-  async function like(d: Draft, liked: boolean) {
-    try {
-      await apiJson(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ liked }) })
-      toast.success(liked ? '已标记：好' : '已标记：差')
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
+  // R-211：记反馈——行内展开（预填已写评价）；提交只存文本，学习在「完成/不采用」时触发
+  function toggleFeedback(d: Draft) {
+    const cur = fbMap[d.id]
+    setFbMap({
+      ...fbMap,
+      [d.id]: cur
+        ? { ...cur, open: !cur.open }
+        : { open: true, text: d.feedback_comment || '', saving: false }
+    })
   }
 
-  function setDim(id: number, key: string, v: number) {
-    const cur = dims[id] || {}
-    setDims({ ...dims, [id]: { ...cur, [key]: cur[key] === v ? null : v } })
+  function setFeedbackText(id: number, text: string) {
+    const cur = fbMap[id]
+    if (cur) setFbMap({ ...fbMap, [id]: { ...cur, text } })
   }
 
-  async function submitDims(d: Draft) {
-    const sel = dims[d.id] || {}
-    const body: Record<string, unknown> = { liked: null }
-    for (const def of DIM_DEFS) {
-      if (sel[def.key] != null) body[def.key] = sel[def.key]
-    }
+  async function submitFeedback(d: Draft) {
+    const cur = fbMap[d.id]
+    if (!cur || !cur.text.trim()) return
+    setFbMap({ ...fbMap, [d.id]: { ...cur, saving: true } })
     try {
-      await apiJson(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify(body) })
-      setDims({ ...dims, [d.id]: {} })
-      toast.success('已记录分节反馈')
+      await apiJson(`/api/drafts/${d.id}/feedback`, { method: 'POST', body: JSON.stringify({ comment: cur.text.trim() }) })
+      toast.success('评价已记录，完成/不采用时会一起复盘')
+      setFbMap((m) => ({ ...m, [d.id]: { ...m[d.id], saving: false, open: false } }))
+      qc.invalidateQueries({ queryKey: ['drafts'] })
     } catch (e) {
       toast.error((e as Error).message)
+      setFbMap((m) => ({ ...m, [d.id]: { ...m[d.id], saving: false } }))
     }
   }
 
   // 稳定的 handlers：DraftTile 在模块作用域，回调走这里（R-173 顺手去掉每渲染新建函数）
   const handlers: TileHandlers = {
     open,
-    rate,
-    setDim,
-    submitDims,
     setStatus,
     remove: setDeleteDraft,
-    like
+    toggleFeedback,
+    setFeedbackText,
+    submitFeedback
   }
 
   return (
@@ -323,7 +347,7 @@ export default function DraftsPage() {
         <Button size="sm" onClick={createDraft}>
           <Plus className="h-3.5 w-3.5" /> 新建草稿
         </Button>
-        <span className="text-xs text-muted-foreground">打分与分节反馈会回流训练生成偏好</span>
+        <span className="text-xs text-muted-foreground">完成 = 好 / 不采用 = 差，会触发 AI 复盘学习；记反馈可写下你的评价</span>
       </motion.div>
 
       <motion.div variants={itemVariants}>
@@ -357,8 +381,7 @@ export default function DraftsPage() {
                         d={d}
                         index={i}
                         busy={busyId === d.id}
-                        rating={ratings[d.id] || 0}
-                        dims={dimOf(dims, d.id)}
+                        fb={fbMap[d.id]}
                         h={handlers}
                       />
                     ))}
@@ -386,6 +409,7 @@ export default function DraftsPage() {
           qc.invalidateQueries({ queryKey: ['drafts'] })
           setEditState((prev) => (prev ? { ...prev, id } : prev))
         }}
+        onDiscardEmpty={discardAutoDraft}
       />
 
       <ConfirmDialog

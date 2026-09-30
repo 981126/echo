@@ -22,16 +22,15 @@
 
 ## 技术栈速览（现状，均为真实接入）
 - 后端：Python FastAPI + APScheduler（单进程单体，轻量低内存）
-- 前端（当前，R-164）：**React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion（`frontend_v2/`）**——
-  **默认前端**。「启动项目 / 修改项目」一律指它（dev 3000，生产挂 `/v2`）
-- ~~老前端：Vue 3 + Vite + Naive UI SPA~~ **已废弃（R-168）**：`frontend/` 只读保留（生产挂根路径兜底），
-  禁止改代码/加功能/修 bug；verify 保留其构建防腐直到后续决定下线（下线属新需求）
+- 前端：**React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion（`frontend_v2/`）**——
+  **唯一前端**。「启动项目 / 修改项目」一律指它（dev 3000；生产挂根路径 `/`）
+- 老前端 Vue 3（`frontend/`）**已于 R-208 下线删除**：不再存在，生产根路径由 `frontend_v2` 承担
 - 数据库：SQLite + SQLAlchemy 2.x；运行时数据目录由 `.env` 的 `ECHO_DATA_DIR`/`ECHO_DB_PATH` 决定（当前 `echo_resource/`，**不是**仓库 `data/`）；schema 用幂等轻量迁移（Alembic 是 tech-debt，未落地）：**加表**靠 `create_all` 自动建、**加字段必须手写 `_migrate_*`**（`create_all` 不给已有表补列），启动时 `core/schema_guard` 会自检「模型声明 vs 实际库」并报警；迁移记在 `schema_migrations`，增量上线流程见 `docs/QUICKSTART.md` §8
 - 真实外部服务（2026-09-06 起全部 real，配置非法会启动报错，见 R-068）：
   - 平台数据：TikHub（抖音/B站/小红书，含主页/作品/统计/评论）
   - LLM：模型1 / 模型2 两个可配置槽位（厂家 + 模型 ID + API Key，界面「AI 设置 → 模型设置」；当前默认 模型1=DeepSeek `deepseek-flash`、模型2=Kimi `kimi-k2.6`）。
     脚本生成走「生成方 × 评审方」双模型讨论（可相同）；其余 AI 功能默认模型1，出错/超时/空正文/输出不合法自动降级模型2（R-139）
-  - ASR：阿里云录音文件识别 FileTrans（+OSS 中转），上传前 ffmpeg 抽音轨
+  - ASR：服务商可选 阿里云录音文件识别 FileTrans（+OSS 中转）/ 硅基流动 Qwen/Qwen3-ASR-1.7B（免费）/ 腾讯云录音文件识别（本地音频 base64 直传，R-200），上传前 ffmpeg 抽音轨
   - 热点：TikHub 热搜（real）
   - 邮件：QQ 邮箱 SMTP
 - 部署：Docker Compose（NAS）；开发在笔记本
@@ -44,8 +43,7 @@ echo/
 ├── docs/               # 项目大脑：PRD/PRODUCT/ARCHITECTURE/DESIGN/WORKFLOW/DECISIONS/milestones/CHANGELOG/API/DATABASE/QUICKSTART/GLOSSARY/FAQ
 ├── requirements/       # 需求归档（事实源）：R-xxx.md + README 索引
 ├── backend/            # FastAPI：app/（api/services/models/core/schemas）tests/ scripts/
-├── frontend/           # ⚠️ 已废弃（R-168）：Vue 3 老前端，只读保留，禁止修改
-├── frontend_v2/        # 当前前端（R-164，React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion）：dev 3000 / 生产挂 /v2
+├── frontend_v2/        # 唯一前端（R-164，React 19 + TS + Tailwind v4 + shadcn/ui + Framer Motion）：dev 3000 / 生产挂根路径 /
 ├── scripts/            # 项目级脚本：verify.sh（质量门禁）/ backup.sh / update.sh / check_doc_consistency.py
 └── data/               # 仓库内遗留空目录（实际数据在 .env 指向的 echo_resource/）
 ```
@@ -70,6 +68,8 @@ echo/
 8. **优先级**：现在做还是排期？
 9. **动效（R-175 起必问）**：这个交互该有什么动画？列表/卡片入场、TAB 切换、抽屉/弹窗开关、
    加载与状态变化都要给到位——**该有的动画不能省**，且必须美观流畅（规范见 `docs/DESIGN.md` §8）。
+10. **非实时返回（R-202 起必问）**：这个功能是同步返回还是耗时/后台返回？**所有非实时结果都必须有进行中动效**，
+    且切页/刷新回来仍能恢复「进行中」——否则用户会误以为已完成（规范见 `docs/DESIGN.md` §8.6）。
 
 ## 工程标准（五维，强制）
 - **简单**：不过度设计；新增依赖必须说明理由；拒绝重复代码；路由薄、业务厚
@@ -80,6 +80,9 @@ echo/
 - **表现力（R-175 起强制）**：动效不是装饰而是必备——新页面/新交互「该有的动画不能省」，且必须**美观流畅、不闪、不跳**；
   统一用 `frontend_v2/src/lib/motion.ts` 的动效令牌；**切换类动画禁止从 `opacity: 0` 起步**（会先闪一帧空白，R-175 实测），
   收口必须落到 `opacity 1 / transform none`；规范与点检方法见 `docs/DESIGN.md` §8
+- **非实时结果必须可见（R-202 起强制）**：凡「非实时返回 / 耗时」的功能（后端异步任务 + 同步慢接口），
+  **必须**有进行中动效（spinner/进度条/覆盖层/顶栏「进行中 N」），且切页/刷新回来后只要后端仍在跑就**必须仍显示进行中**——
+  **绝不允许卸载即消失造成「已完成」的错觉**；不满足 = 功能不算完成（规范见 `docs/DESIGN.md` §8.6）
 
 ## 质量门禁（硬性）
 任何改动必须通过 `scripts/verify.sh`（lint + 类型检查 + 测试 + 构建），**不通过不算完成**。

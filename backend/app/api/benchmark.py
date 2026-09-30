@@ -10,16 +10,16 @@ from ..db import get_db
 from ..models.platform import Creator
 from ..services.benchmark import (
     benchmarks_of_owner,
-    ensure_top_with_text,
     resolve_rewrite_source,
     target_units,
     unit_payload,
     analyze_worker,
+    prepare_worker,
     rerun_worker,
     rewrite_worker,
 )
 from ..services.creator_service import get_current_creator
-from ..tasks import start_task
+from ..tasks import find_running_task, start_task
 
 router = APIRouter()
 
@@ -52,19 +52,19 @@ class PrepareIn(BaseModel):
 
 @router.post("/prepare", response_model=dict)
 def benchmark_prepare(payload: PrepareIn, db: Session = Depends(get_db)):
-    """对某个对标博主补齐文案（前3+最新缺转写自动下载+转写，无文案顺延），返回有文案的 4 条。
+    """对某个对标博主补齐文案（前3+最新缺转写自动下载+转写，无文案顺延）。
 
-    同步执行，转写耗时可能几分钟；前端给 loading 提示。
+    R-202：改为后台任务（转写耗时可能几分钟），点完即返回 `task_id`，前端任务态显示进行中；
+    完成后刷新 `/top` 即可（结果已落库）。
     """
     owner = _owner(db)
     bm = db.get(Creator, payload.benchmark_id)
     if bm is None or bm.kind != "benchmark" or bm.parent_id != owner.id:
         raise HTTPException(status_code=404, detail="对标博主不存在")
-    picked = ensure_top_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
-    items = []
-    for u in picked:
-        items.append(unit_payload(db, u, owner_id=owner.id))
-    return {"benchmark_id": bm.id, "name": bm.name, "items": items}
+    tid = find_running_task("benchmark_prepare", {"benchmark_id": bm.id})
+    if tid:
+        return {"task_id": tid}
+    return {"task_id": start_task("benchmark_prepare", {"benchmark_id": bm.id, "owner_id": owner.id}, prepare_worker)}
 
 
 class TextIn(BaseModel):

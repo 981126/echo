@@ -102,7 +102,7 @@ def import_video_task(db, payload: dict) -> None:
             text = transcriber.transcribe(path)
         except TranscriptionError as exc:
             # R-094：转写失败也落 asr_status=failed，并给可读原因
-            model = asr["model"] if asr["mode"] == "siliconflow" else ""
+            model = asr["model"] if asr["mode"] in ("siliconflow", "tencent") else ""
             if video.transcript is None:
                 video.transcript = Transcript(video_id=video.id, asr_status="failed", asr_provider=asr["mode"], asr_model=model)
                 db.add(video.transcript)
@@ -124,7 +124,7 @@ def import_video_task(db, payload: dict) -> None:
                     corrected_text=corrected,
                     asr_status="done",
                     asr_provider=asr["mode"],
-                    asr_model=asr["model"] if asr["mode"] == "siliconflow" else "",
+                    asr_model=asr["model"] if asr["mode"] in ("siliconflow", "tencent") else "",
                 )
             )
         else:
@@ -132,7 +132,7 @@ def import_video_task(db, payload: dict) -> None:
             video.transcript.corrected_text = corrected
             video.transcript.asr_status = "done"
             video.transcript.asr_provider = asr["mode"]
-            video.transcript.asr_model = asr["model"] if asr["mode"] == "siliconflow" else ""
+            video.transcript.asr_model = asr["model"] if asr["mode"] in ("siliconflow", "tencent") else ""
         db.commit()
         db.refresh(video)
 
@@ -184,6 +184,30 @@ def _pick_new_text(materials: list[tuple[Video, str]], payload: dict) -> str:
     return materials[-1][1]
 
 
+def _notify_auto_confirmed(db, res: dict) -> None:
+    """R-208：把本次自动确认进档案的人设建议通知作者（可到人设页撤销）。"""
+    from .persona_profile import AUTO_CONFIRM_MIN_FREQ
+
+    n = int(res.get("auto_confirmed") or 0)
+    if not n:
+        return
+    labels = [str(x) for x in (res.get("auto_labels") or [])]
+    head = "、".join(labels[:5]) + ("…" if len(labels) > 5 else "")
+    from ..tasks import push_notification
+
+    push_notification(
+        db,
+        kind="persona_auto_confirm",
+        status="done",
+        title=f"已自动确认 {n} 条人设建议",
+        message=(
+            f"命中素材 ≥{AUTO_CONFIRM_MIN_FREQ} 篇且与你已确认档案无冲突，已直接进档案参与生成：{head}。"
+            "如不认可，可到人设页撤销。"
+        ),
+        target="/persona",
+    )
+
+
 def persona_init_task(db, payload: dict, update=None) -> dict:
     """后台任务：逐篇提炼 → AI 归纳合并去重 → 生成人设建议（R-126/R-128）。
 
@@ -215,6 +239,7 @@ def persona_init_task(db, payload: dict, update=None) -> dict:
     profile = persona_profile.merge_profile(parts, service_factory=lambda: PersonaService())
     persona_profile.annotate_profile_stats(profile, parts, materials)
     res = persona_profile.persist_suggestions(db, cid, profile, skip_existing=True)
+    _notify_auto_confirmed(db, res)
     tail = "（已达上限被截断，建议先确认后再跑一次）" if res.get("truncated") else ""
     if update:
         update(100, f"完成：新增建议 {res['added']} 条（版本 v{res['version']}）{tail}")
@@ -266,6 +291,7 @@ def persona_incremental_task(db, payload: dict, update=None) -> dict:
     verdict = persona_profile.compare_profiles(incremental, full, service_factory=lambda: PersonaService())
     persona_profile.annotate_profile_stats(verdict["chosen"], parts, materials)
     res = persona_profile.persist_suggestions(db, cid, verdict["chosen"], skip_existing=True)
+    _notify_auto_confirmed(db, res)
     db.add(
         PersonaCheck(
             creator_id=cid,
@@ -364,6 +390,7 @@ def persona_rebuild_task(db, payload: dict, update=None) -> dict:
     profile = persona_profile.merge_profile(parts, service_factory=lambda: PersonaService())
     persona_profile.annotate_profile_stats(profile, parts, materials)
     res = persona_profile.persist_suggestions(db, cid, profile, skip_existing=False)
+    _notify_auto_confirmed(db, res)
 
     new_labels = [str(t.get("label", "")) for t in profile.get("tags") or [] if isinstance(t, dict)]
     added, expired = _diff_labels(old_labels, new_labels)
@@ -403,6 +430,80 @@ def persona_rebuild_task(db, payload: dict, update=None) -> dict:
             f"过期 {len(expired)} 条"
         )
     }
+
+
+def persona_auto_confirm_backlog_task(db, payload: dict, update=None) -> dict:
+    """R-208：一次性清理历史积压的待确认建议。
+
+    用当前素材重算每条建议的命中篇数（内容缓存命中则不重复调 AI），
+    再把「非禁区 + 频次达标 + 未被拒绝」的自动确认进档案，其余保持待确认。
+    """
+    from . import persona_profile
+
+    owner_id = current_creator_id(db)
+    cid = payload.get("creator_id") or owner_id
+    if owner_id and cid != owner_id:
+        cid = owner_id
+    # R-208：M13 之前的历史建议 creator_id 为空（不可见脏数据）——归属当前主博主后统一处理
+    if cid:
+        from ..models.persona import PersonaTag
+
+        orphans = (
+            db.query(PersonaTag)
+            .filter(PersonaTag.status == "suggested", PersonaTag.creator_id.is_(None))
+            .all()
+        )
+        for t in orphans:
+            t.creator_id = cid
+        if orphans:
+            db.commit()
+    materials = _owner_materials(db, cid)
+    if not materials:
+        return {"message": "没有可用转写稿，跳过待确认建议清理"}
+    total = len(materials)
+    texts = [t for _v, t in materials]
+    if update:
+        update(5, f"重算待确认建议频次（{total} 篇）…")
+
+    def _progress(done: int, todo: int) -> None:
+        if update:
+            update(min(80, 5 + int(75 * done / max(todo, 1))), f"重算频次（{done}/{todo}）…")
+
+    parts = persona_profile.extract_pieces(db, texts, service_factory=lambda: PersonaService(), progress=_progress)
+    if update:
+        update(88, "按规则自动确认高置信建议…")
+    res = persona_profile.auto_confirm_backlog(db, cid, parts, materials)
+    if update:
+        update(100, f"完成：检查 {res['checked']} 条，自动确认 {res['confirmed']} 条")
+    return {"message": f"待确认建议清理：检查 {res['checked']} 条，自动确认 {res['confirmed']} 条"}
+
+
+_BACKLOG_DONE_KEY = "persona_auto_confirm_backlog_v1"
+
+
+def maybe_auto_confirm_backlog_on_startup() -> None:
+    """R-208：启动时一次性把存量堆积按同规则处理（Kv 标记保证只跑一次，后台线程执行）。"""
+    from ..db import SessionLocal
+    from ..models.kv import Kv
+    from ..models.persona import PersonaTag
+
+    db = SessionLocal()
+    try:
+        if db.get(Kv, _BACKLOG_DONE_KEY) is not None:
+            return
+        if db.query(PersonaTag).filter(PersonaTag.status == "suggested").count() == 0:
+            db.add(Kv(key=_BACKLOG_DONE_KEY, value="1"))
+            db.commit()
+            return
+        from ..tasks import start_task
+
+        start_task("persona_auto_confirm_backlog", {}, persona_auto_confirm_backlog_task)
+        db.add(Kv(key=_BACKLOG_DONE_KEY, value="1"))
+        db.commit()
+    except Exception:  # noqa: BLE001 清理是尽力而为，绝不能影响启动
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _rerun_if_pending(db, cid: int | None) -> None:

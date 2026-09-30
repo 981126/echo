@@ -17,6 +17,7 @@ const InspirationPage = lazy(() => import('@/pages/inspiration'))
 const ChatPage = lazy(() => import('@/pages/chat'))
 const PersonaPage = lazy(() => import('@/pages/persona'))
 const PromptsPage = lazy(() => import('@/pages/prompts'))
+const PrompterPage = lazy(() => import('@/pages/prompter'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,6 +43,17 @@ const router = createHashRouter([
       <Page>
         <LoginPage />
       </Page>
+    )
+  },
+  {
+    // R-214/R-215：提词器 + 内置录像——**顶层路由，不进 AppShell**（无导航/顶栏，真正全屏）
+    path: '/prompter/:draftId',
+    element: (
+      <RequireAuth>
+        <Page>
+          <PrompterPage />
+        </Page>
+      </RequireAuth>
     )
   },
   {

@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Menu, Search, X } from 'lucide-react'
 import { Sidebar } from './sidebar'
 import { ThemeToggle } from './theme-toggle'
 import { NotificationBell } from './notification-bell'
+import { ActiveWorkIndicator } from './active-work-indicator'
 import { useEventStream } from '@/hooks/use-events'
+import { ActiveWorkProvider } from '@/hooks/use-active-work'
 import { pageVariants, pageTransition } from '@/lib/motion'
 
 const TITLES: Record<string, string> = {
@@ -23,47 +25,59 @@ const TITLES: Record<string, string> = {
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileNav, setMobileNav] = useState(false)
+  const [mobileNavMounted, setMobileNavMounted] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
   useEventStream()
 
+  // R-205：移动端抽屉导航退出动画——关闭后先保持挂载、animate 切到关闭态再卸载
+  // （AnimatePresence 在本项目 React19+framer v12 下 exit 不触发）。
+  useEffect(() => {
+    if (mobileNav) {
+      setMobileNavMounted(true)
+      return
+    }
+    const timer = window.setTimeout(() => setMobileNavMounted(false), 340)
+    return () => window.clearTimeout(timer)
+  }, [mobileNav])
+
   const title = TITLES[location.pathname] ?? 'echo'
 
   return (
-    <div className="flex h-full">
+    <ActiveWorkProvider>
+      <div className="flex h-full">
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
 
-      {/* 移动端抽屉导航 */}
-      <AnimatePresence>
-        {mobileNav && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/45 md:hidden"
-              onClick={() => setMobileNav(false)}
-            />
-            <motion.div
-              initial={{ x: -280 }}
-              animate={{ x: 0 }}
-              exit={{ x: -280 }}
-              transition={{ type: 'spring', stiffness: 360, damping: 36 }}
-              className="fixed inset-y-0 left-0 z-50 w-64 md:hidden"
-            >
-              <div className="relative h-full">
-                <Sidebar collapsed={false} onToggle={() => setMobileNav(false)} />
-                <button
-                  onClick={() => setMobileNav(false)}
-                  className="absolute right-2 top-4 rounded-md p-1.5 text-muted-foreground hover:bg-muted cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      {/* 移动端抽屉导航（R-205：受控 animate + 延迟卸载，保证退出动画） */}
+      {mobileNavMounted && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: mobileNav ? 1 : 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ pointerEvents: mobileNav ? 'auto' : 'none' }}
+            className="fixed inset-0 z-40 bg-black/45 md:hidden"
+            onClick={() => setMobileNav(false)}
+          />
+          <motion.div
+            initial={{ x: -280 }}
+            animate={{ x: mobileNav ? 0 : -280 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 36 }}
+            style={{ pointerEvents: mobileNav ? 'auto' : 'none' }}
+            className="fixed inset-y-0 left-0 z-50 w-64 md:hidden"
+          >
+            <div className="relative h-full">
+              <Sidebar collapsed={false} onToggle={() => setMobileNav(false)} />
+              <button
+                onClick={() => setMobileNav(false)}
+                className="absolute right-2 top-4 rounded-md p-1.5 text-muted-foreground hover:bg-muted cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card/60 px-4 backdrop-blur">
@@ -101,6 +115,7 @@ export function AppShell() {
           </div>
 
           <NotificationBell />
+          <ActiveWorkIndicator />
           <ThemeToggle />
         </header>
 
@@ -119,6 +134,7 @@ export function AppShell() {
           </motion.div>
         </main>
       </div>
-    </div>
+      </div>
+    </ActiveWorkProvider>
   )
 }

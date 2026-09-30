@@ -40,12 +40,20 @@ describe('DraftAiStatus（R-173）', () => {
     expect(container.querySelectorAll('span.block').length).toBe(3)
   })
 
-  it('failed：显示「上次讨论中断」并提示可重新讨论（不是 running 动画）', () => {
+  it('failed：显示「上次{类型}中断」并提示可重新讨论（不是 running 动画）', () => {
     render(<DraftAiStatus debate={failed} />)
     const box = screen.getByTestId('draft-ai-status')
     expect(box.dataset.state).toBe('failed')
-    expect(box.textContent).toContain('上次讨论中断')
+    expect(box.textContent).toContain('上次洗稿讨论中断') // R-211：失败文案带 kind 类型名
     expect(box.textContent).toContain('洗稿中断：timeout')
     expect(box.textContent).toContain('重新讨论')
+  })
+
+  it('failed（学习分析）：提示下次完成/不采用会重试，不提示重新讨论（R-211）', () => {
+    render(<DraftAiStatus debate={{ ...failed, kind: 'feedback', note: '学习分析中断：timeout' }} />)
+    const box = screen.getByTestId('draft-ai-status')
+    expect(box.textContent).toContain('上次学习分析中断')
+    expect(box.textContent).toContain('下次完成/不采用会重试')
+    expect(box.textContent).not.toContain('重新讨论')
   })
 })

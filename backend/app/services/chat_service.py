@@ -41,9 +41,10 @@ TOOL_DATA_RULES = (
     "3. 引用具体条目时用工具返回的真实标题与 id，不要自己改名或编号。\n"
     "4. sql_query 只能查只读视图（表名见 schema 卡片），返回的 row_count 是取回条数、"
     "truncated=true 表示还有更多；不要用它去猜没查到的数据。\n"
-    "5. 写操作（generate_draft / rework_draft / set_draft_status）只会生成**待作者确认的提案**，"
-    "不会立即执行。你必须把提案内容告诉作者并请他点击确认，"
-    "严禁说「我已经生成/我已经改好了」这类已完成的话。"
+    "5. 写操作（generate_draft / rework_draft / set_draft_status）分两类："
+    "**安全操作**（生成草稿、回炉重写、改成 草稿/采用/不采用）会返回 status=executed，表示已自动执行，"
+    "你可以如实告诉作者结果；**危险操作**（set_draft_status 里 status=deleted 删除）返回 pending_confirmation，"
+    "只会生成待确认提案，不会立即执行——这时必须请作者点击确认，严禁说「我已经删除了」这类已完成的话。"
 )
 
 TOOLS = [
@@ -402,7 +403,8 @@ def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -
         return chat_sql.run(_db_path_of(db), str(args.get("sql") or ""))
     if name == "get_content_opportunities":
         return _get_content_opportunities(db, args)
-    # R-147 P2：写操作只登记「待确认提案」，由作者在界面点确认后才执行
+    # R-147 P2 / R-208：写操作——安全操作（生成草稿/回炉/可逆改状态）免确认直接执行，
+    # 危险操作（删除等）登记「待确认提案」由作者在界面点确认后才执行
     if name in agent_actions.ACTION_LABELS:
         try:
             row = agent_actions.propose(
@@ -413,6 +415,24 @@ def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -
             )
         except agent_actions.AgentActionError as exc:
             return {"error": str(exc)}
+        if row.status == "done":
+            return {
+                "status": "executed",
+                "action_id": row.id,
+                "action": name,
+                "preview": row.preview,
+                "result": row.result or "",
+                "note": "安全操作已自动执行（无需作者确认）。请在回答里如实告诉作者结果，不要再说「等待确认」。",
+            }
+        if row.status == "failed":
+            return {
+                "status": "failed",
+                "action_id": row.id,
+                "action": name,
+                "preview": row.preview,
+                "error": row.error or "",
+                "note": "自动执行失败，请如实告诉作者失败原因。",
+            }
         return {
             "status": "pending_confirmation",
             "action_id": row.id,

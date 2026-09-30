@@ -9,8 +9,14 @@ from ..core.pipeline import today_key
 from ..db import get_db
 from ..models.hot_topic import HotTopic, TopicCandidate
 from ..services.topic_mining import fetch_and_store
+from ..tasks import find_running_task, start_task
 
 router = APIRouter()
+
+
+def _hot_refresh_task(db: Session, payload: dict) -> dict:
+    items = fetch_and_store(db)
+    return {"fetched": len(items)}
 
 
 @router.get("/gaps")
@@ -74,9 +80,11 @@ def list_hot(date: str = "", db: Session = Depends(get_db)):
 
 @router.post("/refresh")
 def refresh_hot(db: Session = Depends(get_db)):
-    """立即抓取今日热点（真实模式需 NAS 有外网）。"""
-    items = fetch_and_store(db)
-    return {"fetched": len(items)}
+    """立即抓取今日热点（真实模式需 NAS 有外网）。R-202：改为后台任务，返回 task_id。"""
+    tid = find_running_task("hot_refresh")
+    if tid:
+        return {"task_id": tid}
+    return {"task_id": start_task("hot_refresh", {}, _hot_refresh_task)}
 
 
 @router.get("")

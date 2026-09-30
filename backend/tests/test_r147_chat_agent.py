@@ -106,16 +106,27 @@ def test_views_exclude_sensitive_tables():
 # ---------- P2：写操作只提议、确认后才执行 ----------
 
 
-def test_write_tool_only_proposes(db):
-    """问「帮我生成」→ 只登记提案，**不建草稿**。"""
+def test_safe_generate_draft_auto_executes(db):
+    """R-208：生成草稿是安全操作 → 免确认直接执行（审计照记 done）。"""
     before = db.query(Draft).count()
     out = chat_service._dispatch(db, "generate_draft", {"topic": "面试技巧"})
-    assert out["status"] == "pending_confirmation"
+    assert out["status"] == "executed"
     assert out["action_id"]
-    assert db.query(Draft).count() == before, "确认前不应有任何数据被写入"
+    assert db.query(Draft).count() == before + 1
     row = db.get(AgentAction, out["action_id"])
-    assert row is not None and row.status == "pending"
+    assert row is not None and row.status == "done" and row.decided_at is not None
     assert "面试技巧" in row.preview
+
+
+def test_danger_delete_still_requires_confirm(db):
+    """R-208：删除（软删）是危险操作 → 仍需作者确认，确认前不动数据。"""
+    draft = Draft(title="稿A", script="正文", source="ai", status="draft")
+    db.add(draft)
+    db.commit()
+    out = chat_service._dispatch(db, "set_draft_status", {"draft_id": draft.id, "status": "deleted"})
+    assert out["status"] == "pending_confirmation"
+    assert db.get(Draft, draft.id).status == "draft"
+    assert db.get(AgentAction, out["action_id"]).status == "pending"
 
 
 def test_cancel_does_not_touch_data(db):
@@ -129,29 +140,31 @@ def test_cancel_does_not_touch_data(db):
     assert db.query(AgentAction).filter(AgentAction.status == "pending").count() == 0
 
 
-def test_set_draft_status_executes_on_confirm(db):
+def test_safe_set_status_auto_executes(db):
     draft = Draft(title="稿A", script="正文", source="ai", status="draft")
     db.add(draft)
     db.commit()
     out = chat_service._dispatch(db, "set_draft_status", {"draft_id": draft.id, "status": "used"})
-    assert db.get(Draft, draft.id).status == "draft", "确认前不改"
-    row = agent_actions.confirm(db, out["action_id"])
-    assert row.status == "done"
+    assert out["status"] == "executed"
     assert db.get(Draft, draft.id).status == "used"
-    assert "已标记" in row.result
+    row = db.get(AgentAction, out["action_id"])
+    assert row.status == "done" and "已标记" in row.result
 
 
-def test_generate_draft_confirm_enqueues_task(db):
+def test_safe_generate_draft_enqueues_task(db):
     out = chat_service._dispatch(db, "generate_draft", {"topic": "面试开场"})
-    row = agent_actions.confirm(db, out["action_id"])
+    row = db.get(AgentAction, out["action_id"])
     assert row.status == "done"
-    assert row.task_id, "确认后应入队后台任务"
+    assert row.task_id, "安全操作自动执行后应入队后台任务"
     # 占位草稿已建立（讨论任务随后会填内容）
     assert db.query(Draft).count() == 1
 
 
 def test_confirm_twice_rejected(db):
-    out = chat_service._dispatch(db, "generate_draft", {"topic": "x"})
+    draft = Draft(title="稿A", script="正文", source="ai", status="draft")
+    db.add(draft)
+    db.commit()
+    out = chat_service._dispatch(db, "set_draft_status", {"draft_id": draft.id, "status": "deleted"})
     agent_actions.confirm(db, out["action_id"])
     with pytest.raises(agent_actions.AgentActionError, match="不能重复确认"):
         agent_actions.confirm(db, out["action_id"])
@@ -169,7 +182,7 @@ def test_confirm_failure_is_recorded(db):
     draft = Draft(title="稿A", script="正文", source="ai", status="draft")
     db.add(draft)
     db.commit()
-    out = chat_service._dispatch(db, "set_draft_status", {"draft_id": draft.id, "status": "used"})
+    out = chat_service._dispatch(db, "set_draft_status", {"draft_id": draft.id, "status": "deleted"})
     db.delete(draft)   # 确认前草稿被删掉 → 执行必然失败
     db.commit()
     row = agent_actions.confirm(db, out["action_id"])
@@ -257,6 +270,14 @@ def test_tool_call_budget_wraps_up(db, monkeypatch):
     assert len([s for s in steps if s["kind"] == "tool"]) == 2, "工具调用数不得超过预算"
 
 
+def test_is_safe_action_whitelist(db):
+    assert agent_actions.is_safe_action("generate_draft", {})
+    assert agent_actions.is_safe_action("rework_draft", {"draft_id": 1})
+    assert agent_actions.is_safe_action("set_draft_status", {"status": "used"})
+    assert agent_actions.is_safe_action("set_draft_status", {"status": "archived"})
+    assert not agent_actions.is_safe_action("set_draft_status", {"status": "deleted"})
+
+
 def test_system_message_includes_schema_and_rules(db):
     from app.services.chat_service import TOOL_DATA_RULES
 
@@ -271,4 +292,4 @@ def test_system_message_includes_schema_and_rules(db):
     system = seen[0]["content"]
     assert TOOL_DATA_RULES.strip() in system
     assert "v_videos" in system, "必须把只读视图 schema 告诉模型，否则写不出对的 SQL"
-    assert "只会生成**待作者确认的提案**" in system
+    assert "安全操作" in system and "pending_confirmation" in system

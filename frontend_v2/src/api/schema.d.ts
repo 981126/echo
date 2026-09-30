@@ -71,6 +71,9 @@ export interface paths {
         /**
          * List Videos
          * @description 素材列表（R-076）：creator_id>0 查指定博主；0 或不传=当前主博主。
+         *
+         *     R-179：可见性口径（当前主博主 + R-107 禁用账号排除）抽到 `services.video_query`，
+         *     与 `/api/library` 共用一份，避免两处漂移。
          */
         get: operations["list_videos_api_videos_get"];
         put?: never;
@@ -272,7 +275,7 @@ export interface paths {
         head?: never;
         /**
          * Update Tag
-         * @description 编辑人设标签（标签/描述/类别）。
+         * @description 编辑人设标签（标签/描述/类别/分层/证据）。
          */
         patch: operations["update_tag_api_persona_tags__tag_id__patch"];
         trace?: never;
@@ -333,6 +336,28 @@ export interface paths {
          *     R-125：已有进行中(pending/running)的 persona_init 时拒绝重复入队，防连点/重复点击重复生成。
          */
         post: operations["init_persona_api_persona_init_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/persona/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild Persona
+         * @description R-182 方案B：推倒重建人设档案（清空旧档案 → 四层全量重建为待确认建议）。
+         *
+         *     已有重建/初始化任务进行中时拒绝重复入队，防连点。清空前请确已备份（启动/手动备份均可）。
+         */
+        post: operations["rebuild_persona_api_persona_rebuild_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -412,7 +437,9 @@ export interface paths {
         };
         /**
          * List Tasks
-         * @description 后台任务列表；可按 status(running/done/failed) 与 kind 过滤（R-081：恢复卡片进度用）。
+         * @description 后台任务列表；`status` 支持逗号分隔多值（如 `running,pending`，R-202），`kind` 同样支持多值。
+         *
+         *     无状态时按 id 倒序；筛「进行中」时按创建时间正序（先入队先显示）。
          */
         get: operations["list_tasks_api_tasks_get"];
         put?: never;
@@ -490,9 +517,10 @@ export interface paths {
         put?: never;
         /**
          * Benchmark Prepare
-         * @description 对某个对标博主补齐文案（前3+最新缺转写自动下载+转写，无文案顺延），返回有文案的 4 条。
+         * @description 对某个对标博主补齐文案（前3+最新缺转写自动下载+转写，无文案顺延）。
          *
-         *     同步执行，转写耗时可能几分钟；前端给 loading 提示。
+         *     R-202：改为后台任务（转写耗时可能几分钟），点完即返回 `task_id`，前端任务态显示进行中；
+         *     完成后刷新 `/top` 即可（结果已落库）。
          */
         post: operations["benchmark_prepare_api_benchmark_prepare_post"];
         delete?: never;
@@ -631,6 +659,8 @@ export interface paths {
         /**
          * Suggest Angles
          * @description 选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。
+         *
+         *     R-202：改为后台任务（LLM 可能较慢），点完返回 `task_id`，角度在 `task.result`。
          */
         post: operations["suggest_angles_api_drafts_angles_post"];
         delete?: never;
@@ -736,6 +766,10 @@ export interface paths {
         /**
          * List Discussions
          * @description 脚本讨论留痕（R-023）：按轮次返回聊天式消息。
+         *
+         *     R-178：每条附**实际出结果**的模型（`used_slot/vendor/model_id` + 服务端算好的 `model_label`，
+         *     如 `DeepSeek · deepseek-flash`）；历史行没记过模型 → `model_label` 为空，前端显示「未记录模型（历史）」。
+         *     `kind='run'` 是某一次讨论的运行头（content 为 JSON：当时配置的生成方/评审方 + 轮次 + 是否降级）。
          */
         get: operations["list_discussions_api_drafts__draft_id__discussions_get"];
         put?: never;
@@ -781,6 +815,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/drafts/publish-links/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Publish Links Preview
+         * @description R-197：列出「已发布草稿 ↔ 作品」的高置信度自动关联候选。
+         */
+        get: operations["publish_links_preview_api_drafts_publish_links_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/drafts/publish-links/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Links Apply
+         * @description R-197：应用自动关联并回填历史表现（可撤销）。R-202：改为后台任务，返回 task_id。
+         */
+        post: operations["publish_links_apply_api_drafts_publish_links_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/drafts/publish-links/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Links Revert
+         * @description R-197：撤销上一次自动关联。
+         */
+        post: operations["publish_links_revert_api_drafts_publish_links_revert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/drafts/{draft_id}": {
         parameters: {
             query?: never;
@@ -797,6 +891,28 @@ export interface paths {
         head?: never;
         /** Update Draft */
         patch: operations["update_draft_api_drafts__draft_id__patch"];
+        trace?: never;
+    };
+    "/api/drafts/{draft_id}/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Draft Performance
+         * @description R-184：已发布稿件的表现（绑定素材存在时，返回各平台最新互动聚合）。
+         *
+         *     未关联素材 / 无平台数据时返回 platforms=[]，前端提示「先关联素材并同步」。
+         */
+        get: operations["draft_performance_api_drafts__draft_id__performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/drafts/{draft_id}/versions": {
@@ -1065,7 +1181,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh Hot
-         * @description 立即抓取今日热点（真实模式需 NAS 有外网）。
+         * @description 立即抓取今日热点（真实模式需 NAS 有外网）。R-202：改为后台任务，返回 task_id。
          */
         post: operations["refresh_hot_api_topics_refresh_post"];
         delete?: never;
@@ -1293,6 +1409,8 @@ export interface paths {
         /**
          * Optimize Prompt
          * @description 产出候选（R-129：按 key 语料 + 契约自检 + 自动排队金样本评测）。
+         *
+         *     R-202：改为后台任务，点完返回 `task_id`；失败原因在 `task.error`（前端任务态提示）。
          */
         post: operations["optimize_prompt_api_prompts__key__optimize_post"];
         delete?: never;
@@ -2139,6 +2257,206 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Library Cards
+         * @description 素材库卡片页（每批默认 20 条）。
+         *
+         *     返回 `{total, filtered_total, facets:{tags}, items, next_cursor, has_more}`：
+         *     - `total` 是**未筛选**的卡片总数，`filtered_total` 是当前筛选命中的总数（页头「共 N · 筛选后 M」）；
+         *     - `next_cursor` 原样回传即可取下一批；后台同步插入新条目也不会重复/漏条（游标按 `(date,kind,id)` 定位）；
+         *     - `facets.tags` 是标签多选的候选（来自全部卡片，不受当前筛选影响）。
+         */
+        get: operations["library_cards_api_library_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/opportunities/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Comment Clusters
+         * @description 观众提问榜（后台任务）：未使用评论聚类，按需求分排序；R-192 默认用模型1 语义聚类。
+         */
+        post: operations["comment_clusters_api_opportunities_comments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/opportunities/weekly": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Weekly Pack
+         * @description 每周灵感补给包（后台任务）：需求 × 人设 × 热度 × 缺口 综合打分，去重去已讲。
+         */
+        post: operations["weekly_pack_api_opportunities_weekly_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/opportunities/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Topic Ledger
+         * @description 选题账本：已讲过的话题与「可能已讲」的池中灵感。
+         */
+        get: operations["topic_ledger_api_opportunities_ledger_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/opportunities/gap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gap Suggestions
+         * @description 缺口选题（后台任务，R-187）：AI 基于「已讲话题 + 人设」给出该讲但没讲过的选题。
+         */
+        post: operations["gap_suggestions_api_opportunities_gap_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/opportunities/covered": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Covered Titles
+         * @description 已讲过的话题标题（R-191，轻量）：供前端给灵感列表标「可能已讲」。
+         */
+        get: operations["covered_titles_api_opportunities_covered_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/opportunities/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Topic Attribution
+         * @description 选题归因（R-192）：按标签聚合已发布稿件的表现，看出哪类选题数据好。
+         */
+        get: operations["topic_attribution_api_opportunities_attribution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inspiration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notes */
+        get: operations["list_notes_api_inspiration_get"];
+        put?: never;
+        /** Create Note */
+        post: operations["create_note_api_inspiration_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inspiration/{note_id}/develop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Develop Note
+         * @description 把随手记提炼成选题并直接入队生成一篇草稿；标记该条已用。
+         */
+        post: operations["develop_note_api_inspiration__note_id__develop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inspiration/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Note */
+        delete: operations["delete_note_api_inspiration__note_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -2374,6 +2692,11 @@ export interface components {
             conversation_id?: number | null;
             /** Message */
             message: string;
+            /**
+             * Mode
+             * @default ops
+             */
+            mode: string;
         };
         /** ConversationCreate */
         ConversationCreate: {
@@ -2494,6 +2817,8 @@ export interface components {
             id: number;
             /** Video Id */
             video_id?: number | null;
+            /** Work Id */
+            work_id?: number | null;
             /**
              * Title
              * @default
@@ -2561,6 +2886,25 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Publish Url
+             * @default
+             */
+            publish_url: string;
+            /**
+             * Publish Platform
+             * @default
+             */
+            publish_platform: string;
+            /** Published At */
+            published_at?: string | null;
+            /**
+             * Performance
+             * @default {}
+             */
+            performance: {
+                [key: string]: unknown;
+            };
+            /**
              * Version
              * @default 1
              */
@@ -2584,6 +2928,8 @@ export interface components {
         DraftUpdate: {
             /** Video Id */
             video_id?: number | null;
+            /** Work Id */
+            work_id?: number | null;
             /** Title */
             title?: string | null;
             /** Cover Text */
@@ -2596,6 +2942,12 @@ export interface components {
             } | null;
             /** Tags */
             tags?: string[] | null;
+            /** Publish Url */
+            publish_url?: string | null;
+            /** Publish Platform */
+            publish_platform?: string | null;
+            /** Published At */
+            published_at?: string | null;
             /** Status */
             status?: string | null;
         };
@@ -2648,6 +3000,11 @@ export interface components {
         GenerateIn: {
             /** Topic */
             topic: string;
+            /**
+             * Mode
+             * @default
+             */
+            mode: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2709,6 +3066,24 @@ export interface components {
              * @default false
              */
             reset_budgets: boolean;
+        };
+        /** NoteIn */
+        NoteIn: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Image Url
+             * @default
+             */
+            image_url: string;
+            /**
+             * Source
+             * @default text
+             */
+            source: string;
         };
         /** NotificationOut */
         NotificationOut: {
@@ -2816,6 +3191,16 @@ export interface components {
              */
             category: string;
             /**
+             * Layer
+             * @default stance
+             */
+            layer: string;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /**
              * Source
              * @default manual
              */
@@ -2842,6 +3227,28 @@ export interface components {
              * @default style
              */
             category: string;
+            /**
+             * Layer
+             * @default stance
+             */
+            layer: string;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /**
+             * Frequency
+             * @default 0
+             */
+            frequency: number;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /**
+             * Confirm Strength
+             * @default 1
+             */
+            confirm_strength: number;
             /**
              * Source
              * @default ai
@@ -2885,6 +3292,16 @@ export interface components {
              * @default style
              */
             category: string;
+            /**
+             * Layer
+             * @default stance
+             */
+            layer: string;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
         };
         /**
          * PlatformLinkOut
@@ -3033,6 +3450,16 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * Target
+             * @default
+             */
+            target: string;
         };
         /** TextIn */
         TextIn: {
@@ -4046,6 +4473,37 @@ export interface operations {
             };
         };
     };
+    rebuild_persona_api_persona_rebuild_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     latest_persona_check_api_persona_check_latest_get: {
         parameters: {
             query?: never;
@@ -4888,6 +5346,105 @@ export interface operations {
             };
         };
     };
+    publish_links_preview_api_drafts_publish_links_preview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_links_apply_api_drafts_publish_links_apply_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_links_revert_api_drafts_publish_links_revert_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_draft_api_drafts__draft_id__get: {
         parameters: {
             query?: never;
@@ -4945,6 +5502,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_performance_api_drafts__draft_id__performance_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                draft_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -7764,6 +8356,405 @@ export interface operations {
                 "application/json": components["schemas"]["MergeIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    library_cards_api_library_get: {
+        parameters: {
+            query?: {
+                creator_id?: number;
+                cursor?: string;
+                limit?: number;
+                platforms?: string[];
+                status?: string;
+                video?: string;
+                ad?: string;
+                kw?: string;
+                tags?: string[];
+                likes_min?: number | null;
+                likes_max?: number | null;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    comment_clusters_api_opportunities_comments_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+                use_llm?: boolean;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    weekly_pack_api_opportunities_weekly_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    topic_ledger_api_opportunities_ledger_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gap_suggestions_api_opportunities_gap_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    covered_titles_api_opportunities_covered_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    topic_attribution_api_opportunities_attribution_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_notes_api_inspiration_get: {
+        parameters: {
+            query?: {
+                status?: string;
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_note_api_inspiration_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    develop_note_api_inspiration__note_id__develop_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                note_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_note_api_inspiration__note_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                note_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

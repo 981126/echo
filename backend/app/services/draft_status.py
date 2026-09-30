@@ -32,6 +32,7 @@ KIND_LABELS = {
     "rewrite": "洗稿讨论",
     "rework": "回炉重写",
     "generate": "AI 生成",
+    "feedback": "学习分析",  # R-211：完成/不采用触发的反馈学习
 }
 
 DEFAULT_NOTE = "AI 处理中…"

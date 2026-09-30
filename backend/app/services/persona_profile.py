@@ -21,6 +21,10 @@ from .persona import PersonaService, empty_profile, get_prompt, label_match, mer
 PASS_THRESHOLD = 0.95
 SEMANTIC_THRESHOLD = 95.0
 _PIECE_CACHE_PREFIX = "persona_piece_v1"
+# R-208：高置信自动确认——非禁区层且命中素材篇数达到该阈值的建议直接进档案（可撤销）
+AUTO_CONFIRM_MIN_FREQ = 3
+# 自动确认的标签用这个强度标记（手动=3 / 作者确认AI建议=2 / 自动=1），便于辨认与撤销
+AUTO_CONFIRM_STRENGTH = 1
 
 
 def _text_hash(text: str) -> str:
@@ -237,6 +241,25 @@ def _existing_keys(db, cid: int | None) -> set[tuple[str, str]]:
     return keys
 
 
+def _rejected_labels(db, cid: int | None) -> list[str]:
+    """作者明确拒绝过的标签——R-208：被拒过的同类不再自动确认（仍需人工）。"""
+    q = db.query(PersonaTag).filter(PersonaTag.status == "rejected")
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
+    return [t.label for t in q.all()]
+
+
+def _is_auto_confirmable(label: str, layer: str, frequency: int, rejected: list[str]) -> bool:
+    """R-208 高置信判定：非禁区层 + 命中素材篇数达阈值 + 与作者已拒绝的标签不冲突。"""
+    from .persona import FORBIDDEN, label_match
+
+    if layer == FORBIDDEN:
+        return False
+    if int(frequency or 0) < AUTO_CONFIRM_MIN_FREQ:
+        return False
+    return not any(label_match(label, r) for r in rejected)
+
+
 def current_persona_version(db, cid: int | None) -> int:
     """当前人设档案版本（max PersonaTag.version）；供草稿记录生成时的人设版本（R-130）。"""
     from sqlalchemy import func
@@ -262,9 +285,11 @@ def persist_suggestions(
     from .persona import FORBIDDEN, LAYERS, _default_layer
 
     existing = _existing_keys(db, cid) if skip_existing else set()
+    rejected = _rejected_labels(db, cid)
     version = _next_version(db, cid)
     added = 0
     truncated = False
+    auto_labels: list[str] = []
 
     def _add(label: str, description: str, dimension: str, layer: str, evidence: str, item: dict) -> None:
         nonlocal added, truncated
@@ -282,7 +307,10 @@ def persist_suggestions(
             frequency = int(item.get("frequency") or 0)
         except (TypeError, ValueError):
             frequency = 0
+        frequency = max(0, frequency)
         last_seen = item.get("last_seen_at")
+        # R-208：高置信建议直接进档案（可撤销），红线/低置信/被拒过的一律保持待确认
+        auto = _is_auto_confirmable(label, layer, frequency, rejected)
         db.add(
             PersonaTag(
                 creator_id=cid,
@@ -292,15 +320,17 @@ def persist_suggestions(
                 category=category,
                 layer=layer,
                 evidence=evidence[:200],
-                frequency=max(0, frequency),
+                frequency=frequency,
                 last_seen_at=last_seen,
-                confirm_strength=2,
+                confirm_strength=AUTO_CONFIRM_STRENGTH if auto else 2,
                 source="ai",
-                status="suggested",
+                status="confirmed" if auto else "suggested",
                 version=version,
             )
         )
         added += 1
+        if auto:
+            auto_labels.append(label[:100])
 
     for item in (profile or {}).get("tags") or []:
         if not isinstance(item, dict):
@@ -324,12 +354,51 @@ def persist_suggestions(
         if label:
             _add(label, "", "红线", FORBIDDEN, "", {})
     db.commit()
-    return {"version": version, "added": added, "truncated": truncated}
+    return {
+        "version": version,
+        "added": added,
+        "truncated": truncated,
+        "auto_confirmed": len(auto_labels),
+        "auto_labels": auto_labels,
+    }
+
+
+def auto_confirm_backlog(db, cid: int | None, parts: list[dict], materials: list[tuple]) -> dict:
+    """R-208：按同一条规则批量处理历史积压的待确认建议。
+
+    用逐篇提取结果（`parts`）重算每条建议的频次（不额外调 AI），
+    再把「非禁区 + 频次达标 + 未被作者拒绝」的自动确认进档案（可撤销）。
+    """
+    q = db.query(PersonaTag).filter(PersonaTag.status == "suggested")
+    if cid:
+        q = q.filter(PersonaTag.creator_id == cid)
+    tags = q.all()
+    if not tags:
+        return {"checked": 0, "confirmed": 0, "labels": []}
+    pseudo = {"tags": [{"label": t.label} for t in tags], "redlines": []}
+    annotate_profile_stats(pseudo, parts, materials)
+    stats = {p["label"]: (p.get("frequency") or 0, p.get("last_seen_at")) for p in pseudo["tags"]}
+    rejected = _rejected_labels(db, cid)
+    labels: list[str] = []
+    for t in tags:
+        freq, seen = stats.get(t.label, (0, None))
+        t.frequency = max(int(t.frequency or 0), int(freq or 0))
+        if seen and (t.last_seen_at is None or seen > t.last_seen_at):
+            t.last_seen_at = seen
+        if not _is_auto_confirmable(t.label, t.layer, t.frequency, rejected):
+            continue
+        t.status = "confirmed"
+        t.confirm_strength = AUTO_CONFIRM_STRENGTH
+        labels.append(t.label)
+    db.commit()
+    return {"checked": len(tags), "confirmed": len(labels), "labels": labels}
 
 
 __all__ = [
     "PASS_THRESHOLD",
     "SEMANTIC_THRESHOLD",
+    "AUTO_CONFIRM_MIN_FREQ",
+    "AUTO_CONFIRM_STRENGTH",
     "extract_pieces",
     "full_profile",
     "merge_profile",
@@ -340,5 +409,6 @@ __all__ = [
     "current_profile",
     "current_persona_version",
     "persist_suggestions",
+    "auto_confirm_backlog",
     "merge_mechanical",
 ]

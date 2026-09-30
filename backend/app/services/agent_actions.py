@@ -35,6 +35,20 @@ ACTION_LABELS: dict[str, str] = {
 DRAFT_STATUS_LABELS = {"draft": "草稿", "used": "待制作（采用）", "archived": "不采用", "deleted": "删除"}
 WRITABLE_STATUSES = tuple(DRAFT_STATUS_LABELS)
 
+# R-208：安全写操作白名单——免确认直接执行（审计照记 done），危险操作仍需作者确认。
+SAFE_ACTIONS = frozenset({"generate_draft", "rework_draft"})
+# set_draft_status 里这些可逆状态算安全；deleted（软删）仍需确认
+_SAFE_STATUSES = frozenset({"draft", "used", "archived"})
+
+
+def is_safe_action(action: str, payload: dict) -> bool:
+    """该写操作是否免确认自动执行（R-208）。"""
+    if action in SAFE_ACTIONS:
+        return True
+    if action == "set_draft_status" and str(payload.get("status") or "") in _SAFE_STATUSES:
+        return True
+    return False
+
 
 class AgentActionError(ValueError):
     """提案/执行非法：API 转 400，带可读原因。"""
@@ -75,7 +89,11 @@ def propose(
     conversation_id: int | None = None,
     message_id: int | None = None,
 ) -> AgentAction:
-    """登记一条待作者确认的写操作（不执行）。"""
+    """登记一条写操作。
+
+    R-208：安全操作（generate_draft / rework_draft / 可逆的 set_draft_status）**免确认直接执行**，
+    审计照记（status=done + result）；危险操作（删除等）仍落 `pending` 等作者确认。
+    """
     if action not in ACTION_LABELS:
         raise AgentActionError(f"不支持的动作：{action}")
     preview = build_preview(db, action, payload)
@@ -90,7 +108,35 @@ def propose(
     db.add(row)
     db.commit()
     db.refresh(row)
+    if is_safe_action(action, payload):
+        log.info("安全操作自动执行 #%s：%s（%s）", row.id, action, preview[:60])
+        return _auto_execute(db, row)
     log.info("登记待确认的 agent 操作 #%s：%s（%s）", row.id, action, preview[:60])
+    return row
+
+
+def _auto_execute(db: Session, row: AgentAction) -> AgentAction:
+    """免确认执行：成功写 done、失败写 failed（审计照记，不抛给上层）。"""
+    payload = json.loads(row.payload or "{}")
+    try:
+        task_id, result = _execute(db, row, payload)
+    except Exception as exc:  # noqa: BLE001 失败留痕给作者看
+        db.rollback()
+        fresh = get(db, row.id)
+        if fresh is not None:
+            fresh.status = "failed"
+            fresh.error = f"{type(exc).__name__}: {str(exc)[:300]}"
+            fresh.decided_at = _app_now()
+            db.commit()
+            db.refresh(fresh)
+        log.exception("安全操作自动执行失败 #%s", row.id)
+        return fresh  # type: ignore[return-value]
+    row.status = "done"
+    row.result = result
+    row.task_id = task_id
+    row.decided_at = _app_now()
+    db.commit()
+    db.refresh(row)
     return row
 
 
@@ -194,11 +240,13 @@ __all__ = [
     "ACTION_LABELS",
     "DRAFT_STATUS_LABELS",
     "WRITABLE_STATUSES",
+    "SAFE_ACTIONS",
     "AgentActionError",
     "build_preview",
     "cancel",
     "confirm",
     "get",
+    "is_safe_action",
     "list_actions",
     "propose",
     "to_dict",

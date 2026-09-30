@@ -29,10 +29,7 @@ npm install   # 首次
 npm run dev
 ```
 浏览器打开 http://localhost:3000 （访问令牌 = `.env` 的 `ECHO_ACCESS_TOKEN`）。
-也可以 `cd frontend_v2 && npm run build` 后由后端 FastAPI 托管到 http://localhost:8000/v2/。
-
-> ⚠️ 老前端 `frontend/`（Vue 3）**已废弃（R-168）**：只读保留、不再修改；
-> 其构建产物仍由后端挂根路径（http://localhost:8000）作历史兜底。
+也可以 `cd frontend_v2 && npm run build` 后由后端 FastAPI 托管到 http://localhost:8000/。
 
 ## 质量门禁
 ```bash

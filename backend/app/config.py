@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _MODE_CHOICES = {
     "tikhub_mode": {"mock", "real"},
     "hot_source_mode": {"mock", "real"},
-    "asr_mode": {"mock", "aliyun", "siliconflow"},  # R-108：ASR 服务商可切硅基流动
+    "asr_mode": {"mock", "aliyun", "siliconflow", "tencent"},  # R-108/R-200：ASR 服务商可切硅基流动/腾讯云
 }
 _MODE_DEFAULTS = {"tikhub_mode": "mock", "hot_source_mode": "mock", "asr_mode": "mock"}
 
@@ -64,8 +64,8 @@ class Settings(BaseSettings):
     pool_ideas_per_post: int = 8
     pool_ideas_per_day: int = 40
 
-    # ASR（R-108）：asr_mode = mock（开发/测试假转写）| aliyun | siliconflow
-    asr_mode: str = "mock"  # mock | aliyun | siliconflow（.env 配置用哪家，重启生效）
+    # ASR（R-108）：asr_mode = mock（开发/测试假转写）| aliyun | siliconflow | tencent
+    asr_mode: str = "mock"  # mock | aliyun | siliconflow | tencent（.env 配置用哪家，重启生效；界面可覆盖）
     asr_poll_interval: int = 15  # 阿里云 FileTrans 结果轮询间隔（秒）
     asr_poll_timeout: int = 3600  # 转写最长等待（秒），超时任务标记失败可重试
 
@@ -83,6 +83,15 @@ class Settings(BaseSettings):
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
     siliconflow_asr_model: str = "Qwen/Qwen3-ASR-1.7B"  # 免费 ASR 模型（官方定价页标注免费）；可在 .env 覆盖（ECHO_SILICONFLOW_ASR_MODEL）
+
+    # 腾讯云 ASR（R-200，asr_mode=tencent 时使用）：录音文件识别 CreateRecTask/DescribeTaskStatus
+    # 音频本地 base64 直传（SourceType=1），单文件 ≤5MB；引擎可在界面切换，默认大模型2.0
+    tencent_asr_secret_id: str = ""
+    tencent_asr_secret_key: str = ""
+    tencent_asr_region: str = "ap-guangzhou"  # 腾讯云地域（HTTP 接口 domain 与地域无关，SDK 仍需一个地域）
+    tencent_asr_endpoint: str = "asr.tencentcloudapi.com"
+    tencent_asr_engine_model: str = "16k_zh_en_2.0"  # 默认引擎（大模型2.0）；界面可覆盖
+    tencent_asr_max_audio_mb: int = 5  # 本地音频直传上限（腾讯限制 5MB）
 
     # QQ 邮箱 SMTP
     smtp_host: str = "smtp.qq.com"

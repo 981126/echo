@@ -56,11 +56,6 @@ CREATION_MODES: dict[str, dict[str, str]] = {
 }
 
 
-def mode_label(mode: str) -> str:
-    return CREATION_MODES.get((mode or "").strip(), {}).get("label", "")
-
-
-
 def _creator_filter(db: Session):
     """归属过滤：存在当前主博主时只学习该博主数据（多主博主隔离，D-028）。"""
     from .creator_service import get_current_creator
@@ -203,29 +198,21 @@ def _build_style_index(db: Session) -> "TfidfIndex":
         seen.add(key)
         docs.append(text)
         weights.append(round(_weight(db, v), 6))
-    # R-022：作者认可的高分/采用稿 = 黄金样本，更高权重
+    # R-022：作者认可的稿 = 黄金样本，更高权重
+    # R-211：认可口径从「评分/点赞」改为 status 驱动——完成（done）即认可（历史 rating/liked 弃用）
     from ..models.draft import Draft
-    from ..models.feedback import Feedback
 
-    approved = (
-        db.query(Feedback.draft_id)
-        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
-        .distinct()
-        .all()
-    )
-    draft_ids = [r[0] for r in approved][:5]
-    if draft_ids:
-        dq = db.query(Draft).filter(Draft.id.in_(draft_ids), Draft.script != "")
-        cid = _creator_filter(db)
-        if cid:
-            dq = dq.filter(Draft.creator_id == cid)
-        for d in dq.all():
-            key = (d.script or "").strip()[:200]
-            if key in seen:
-                continue
-            seen.add(key)
-            docs.append(d.script)
-            weights.append(6.0)
+    dq = db.query(Draft).filter(Draft.status == "done", Draft.script != "")
+    cid0 = _creator_filter(db)
+    if cid0:
+        dq = dq.filter(Draft.creator_id == cid0)
+    for d in dq.order_by(Draft.id.desc()).limit(5).all():
+        key = (d.script or "").strip()[:200]
+        if key in seen:
+            continue
+        seen.add(key)
+        docs.append(d.script)
+        weights.append(6.0)
     return TfidfIndex().build(docs, weights)
 
 
@@ -299,44 +286,96 @@ def _style_anchor_samples(db: Session, limit: int = 5) -> list[str]:
 
 
 def _rewrite_examples(db: Session, limit: int = 2) -> str:
-    """作者对 AI 初稿的真实修改（R-131）：最强的"像作者"信号，作为 few-shot 注入。
+    """作者对初稿的真实修改（R-131）：最强的"像作者"信号，作为 few-shot 注入。
 
-    R-156：优先用**版本链**的首版 → 终版（能看到从初稿到定稿的整体走向）；
-    没有版本时退回 `original_script → script`（老行为）。没有任何成对样本时返回空串（不注入）。
+    R-209：版本链按 source 归因——配对 = 「最后一个**作者侧**版本（manual/rollback）← 它的前一版」。
+    这样「AI 讨论后被作者回退」会正确产出【AI 稿 → 作者改回的原稿】（= 作者否定该讨论方向），
+    而不是反过来把 AI 讨论稿当成「作者改后」。没有任何作者侧版本时退回
+    `original_script → script`（老行为，仅 source="ai" 的稿有 original_script 语义）。
+    R-211：样本权重从评分/点赞改为 status 驱动（done=5 / archived=1 / 其它=3）。
     """
     from ..models.draft import Draft
-    from ..models.feedback import Feedback
-    from .draft_versions import chains_for_drafts
+    from .draft_versions import AUTHOR_SOURCES, chains_with_sources
 
     cid = _creator_filter(db)
-    rated: dict[int, object] = {fb.draft_id: fb for fb in db.query(Feedback).all()}
     q = db.query(Draft).filter(Draft.source == "ai")
     if cid:
         q = q.filter(Draft.creator_id == cid)
     drafts = q.order_by(Draft.id.desc()).limit(60).all()
-    chains = chains_for_drafts(db, drafts)
-    pairs: list[tuple[int, int, str, str]] = []
+    chains = chains_with_sources(db, drafts)
+    pairs: list[tuple[int, int, str, str, str]] = []
     for d in drafts:
+        original, edited = "", ""
+        orig_label = "初稿"
         stages = chains.get(d.id) or []
-        if len(stages) < 2:
+        author_idx = max((i for i, (src, _t) in enumerate(stages) if src in AUTHOR_SOURCES), default=None)
+        if author_idx is not None and author_idx > 0:
+            prev_src, prev_text = stages[author_idx - 1]
+            original, edited = prev_text, stages[author_idx][1]
+            orig_label = "AI 稿" if prev_src not in AUTHOR_SOURCES else "作者上一版"
+        else:
+            # 无版本链（或链上无作者定稿）时的老行为：original_script=AI 原稿 → 当前稿
+            o = (d.original_script or "").strip()
+            e = (d.script or "").strip()
+            if o and e:
+                original, edited, orig_label = o, e, "AI 原稿"
+        if not original or not edited or original == edited:
             continue
-        original, edited = stages[0], stages[-1]
-        if original == edited:
-            continue
-        fb = rated.get(d.id)
-        score = 3
-        if fb is not None and (bool(getattr(fb, "liked", False)) or int(getattr(fb, "rating", 0) or 0) >= 4):
+        if d.status == "done":
             score = 5
-        elif fb is not None and int(getattr(fb, "rating", 0) or 0) <= 2:
+        elif d.status == "archived":
             score = 1
-        pairs.append((score, d.id, original, edited))
+        else:
+            score = 3
+        pairs.append((score, d.id, orig_label, original, edited))
     if not pairs:
         return ""
     pairs.sort(key=lambda x: (-x[0], -x[1]))
-    blocks = [f"【AI 原稿】{o[:260]}\n【作者改后】{e[:260]}" for _s, _i, o, e in pairs[:limit]]
+    blocks = [f"【{label}】{o[:260]}\n【作者改后】{e[:260]}" for _s, _i, label, o, e in pairs[:limit]]
     return (
-        "作者对 AI 初稿的真实修改（重点学他的改法：删了什么、把什么改得更口语、加了什么钩子；"
-        "只学改法，不要照抄其中的具体内容）：\n" + "\n\n".join(blocks)
+        "作者对初稿的真实修改（重点学他的改法：删了什么、把什么改得更口语、加了什么钩子；"
+        "被作者改回旧版的方向就是他否定的方向；只学改法，不要照抄其中的具体内容）：\n" + "\n\n".join(blocks)
+    )
+
+
+def _reverted_lessons(db: Session, limit: int = 3) -> str:
+    """R-209：「讨论后作者又改回了自己的原稿」= 被否定的讨论方向，作为反面信号注入。
+
+    检测口径：版本链中某作者侧版本的正文与更早一版相同、且两版之间有 AI 侧版本
+    （= AI 改了一轮，作者最终恢复旧版）。手稿讨论后被回退是最典型场景。
+    """
+    from ..models.draft import Draft
+    from .draft_versions import AI_SOURCES, AUTHOR_SOURCES, chains_with_sources
+
+    cid = _creator_filter(db)
+    q = db.query(Draft).filter(Draft.status != "deleted")
+    if cid:
+        q = q.filter(Draft.creator_id == cid)
+    drafts = q.order_by(Draft.id.desc()).limit(60).all()
+    lessons: list[tuple[int, str, str]] = []
+    for d in drafts:
+        stages = chains_with_sources(db, [d]).get(d.id) or []
+        for i in range(len(stages) - 1, 0, -1):
+            src_i, text_i = stages[i]
+            if src_i not in AUTHOR_SOURCES:
+                continue
+            for j in range(i - 1, -1, -1):
+                if stages[j][1] != text_i:
+                    continue
+                between = stages[j + 1 : i]
+                ai_between = [t for s, t in between if s in AI_SOURCES]
+                if ai_between:
+                    lessons.append((d.id, ai_between[-1], text_i))
+                break
+            else:
+                continue
+            break  # 每篇稿只取最近一次回退
+    if not lessons:
+        return ""
+    blocks = [f"【AI 讨论稿】{ai[:220]}\n【作者改回自己的原稿】{orig[:220]}" for _i, ai, orig in lessons[:limit]]
+    return (
+        "作者讨论后又改回了自己原来的稿子——他不喜欢 AI 的这个讨论方向，以后避免这样改：\n"
+        + "\n\n".join(blocks)
     )
 
 
@@ -371,21 +410,17 @@ def _style_profile_lines(db: Session) -> str:
 def _structure_templates(db: Session) -> str:
     """表现最好的内容结构模板（R-131）：开场句 + 结尾引导句，只学结构不抄内容。
 
-    优先用作者认可（高星/采用）的草稿；没有时退回真实互动最高的素材转写稿。
+    优先用作者认可的稿；没有时退回真实互动最高的素材转写稿。
+    R-211：认可口径改 status 驱动——完成（done）即认可（历史 rating/liked 弃用）。
     """
     from ..models.draft import Draft
-    from ..models.feedback import Feedback
 
     cid = _creator_filter(db)
     starters: list[str] = []
-    q = (
-        db.query(Draft, Feedback)
-        .join(Feedback, Feedback.draft_id == Draft.id)
-        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
-    )
+    q = db.query(Draft).filter(Draft.status == "done", Draft.script != "")
     if cid:
         q = q.filter(Draft.creator_id == cid)
-    for d, _fb in q.order_by(Feedback.id.desc()).limit(12).all():
+    for d in q.order_by(Draft.updated_at.desc()).limit(12).all():
         script = (d.script or "").strip()
         if not script:
             continue
@@ -408,48 +443,6 @@ def _structure_templates(db: Session) -> str:
     return "表现最好的内容结构模板（只学开场与收尾的结构，内容要新）：\n" + "\n".join(f"- {x}" for x in starters)
 
 
-def _dim_examples(db: Session, per_dim: int = 1) -> str:
-    """按四维分节分挑选范例（R-135）：钩子/节奏/结尾/像作者各自得分最高的稿子片段。
-
-    此前四维分只进「提示词优化」冷路径，生成与人设学习完全不读；前端却提示「会精确回传人设学习」。
-    没有四维反馈时返回空串（不注入）。
-    """
-    from ..models.draft import Draft
-    from ..models.feedback import Feedback
-
-    cid = _creator_filter(db)
-    dims = [
-        ("hook_score", "开场钩子"),
-        ("pace_score", "内容节奏"),
-        ("ending_score", "结尾引导"),
-        ("style_score", "像作者程度"),
-    ]
-    lines: list[str] = []
-    for field, label in dims:
-        col = getattr(Feedback, field)
-        q = db.query(Draft, Feedback).join(Feedback, Feedback.draft_id == Draft.id).filter(col >= 4)
-        if cid:
-            q = q.filter(Draft.creator_id == cid)
-        row = q.order_by(col.desc(), Feedback.id.desc()).first()
-        if not row:
-            continue
-        draft, fb = row
-        script = (draft.script or "").strip()
-        if not script:
-            continue
-        sentences = [x.strip() for x in re.split(r"[。！？!?\n]+", script) if x.strip()]
-        if field == "ending_score" and sentences:
-            seg = f"…{sentences[-1][:100]}"
-        elif field == "pace_score" and len(sentences) >= 3:
-            seg = "。".join(sentences[1:3])[:140]
-        else:
-            seg = script[:140]
-        lines.append(f"- {label}（你打了 {getattr(fb, field)} 分）：{seg}")
-    if not lines:
-        return ""
-    return "作者分节打分最高的范例（按维度学：开头怎么钩、节奏怎么走、结尾怎么收）：\n" + "\n".join(lines[: per_dim * 4])
-
-
 def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
     """作者人设 + 语言习惯 + 样本/范本/结构/分节范例/对标参考的共享上下文。
 
@@ -463,7 +456,7 @@ def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
     refs = benchmark_context_lines(db)
     structure = _structure_templates(db)
     rewrites = _rewrite_examples(db)
-    dims = _dim_examples(db)
+    reverted = _reverted_lessons(db)  # R-209：被作者改回原稿的讨论方向（反面信号）
     avoid = _avoid_words(db)
     mode_info = CREATION_MODES.get((mode or "").strip())
     return "\n".join(
@@ -476,16 +469,16 @@ def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
             *[f"- {r}" for r in ctx["redlines"] or ["（无）"]],
             "",
             *([] if not ctx.get("anchors") else ["作者金句锚点（用它的短句语气，不要整句照搬）：", *[f"- {a}" for a in ctx["anchors"]], ""]),
-            "作者语言习惯（从全部素材统计，必须模仿）：",
+            "作者语言习惯（自然贴近即可，**不要硬塞口头禅/标志词**，更不要为了像而像）：",
             profile,
             *([] if not avoid else ["", "这些表达尽量别用（AI 腔/套话，用了会不像真人）：", "、".join(avoid[:20])]),
-            *([] if not anchors else ["", "作者指定为风格范本的素材（必须重点模仿其语气与节奏）：", *[f"--- 范本{i+1} ---\n{s[:400]}" for i, s in enumerate(anchors)]]),
+            *([] if not anchors else ["", "作者指定为风格范本的素材（重点体会其语气与节奏，学语气、不要照搬词句）：", *[f"--- 范本{i+1} ---\n{s[:400]}" for i, s in enumerate(anchors)]]),
             "",
             "风格样本（按选题检索的真实原文节选）：",
             *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],
             *([] if not structure else ["", structure]),
-            *([] if not dims else ["", dims]),
             *([] if not rewrites else ["", rewrites]),
+            *([] if not reverted else ["", reverted]),
             *([] if not refs else ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs]),
         ]
     )
@@ -497,24 +490,39 @@ def generation_user_message(db: Session, topic: str, mode: str = "") -> str:
 
 
 
+def style_diagnostics(db: Session, script: str) -> dict:
+    """风格诊断（R-207，纯只读、不触发重写）：口癖/高频词覆盖率 + 命中/未命中 + AI 腔词命中。
+
+    作者口径：正向模仿型指标（口癖/高频词）只做诊断，**不作为硬门禁**——
+    否则模型会为通过自检而机械塞口头禅，产出「模仿腔」。
+    """
+    text = script or ""
+    markers = _style_markers(db)
+    matched = [m for m in markers if m in text]
+    missing = [m for m in markers if m not in text]
+    coverage = round(len(matched) / len(markers), 4) if markers else 0.0
+    cliche = [w for w in _avoid_words(db) if w and w in text]
+    return {
+        "style_coverage": coverage,
+        "style_matched": matched,
+        "style_missing": missing,
+        "ai_cliche": cliche,
+    }
+
+
 def _self_check(db: Session, script: str) -> tuple[list[str], float]:
-    """生成后自检（R-131）：红线命中 / AI 腔禁用词 / 口癖覆盖率。返回 (问题列表, 口癖覆盖率)。"""
+    """生成后自检（R-207）：**只有红线**算硬问题（触发一次收口重写）。
+
+    AI 腔词、口癖/高频词覆盖率不再进 `issues`，改由 :func:`style_diagnostics` 记录为诊断，
+    只展示、不强制重写。返回值第二项保留为口癖覆盖率（诊断值），兼容旧调用。
+    """
     text = script or ""
     issues: list[str] = []
     ctx = _persona_context(db)
     for redline in ctx["redlines"]:
         if len(redline) >= 6 and redline in text:
             issues.append(f"命中红线：{redline[:20]}")
-    for word in _avoid_words(db):
-        if word and word in text:
-            issues.append(f"用了 AI 腔词：{word}")
-    markers = _style_markers(db)
-    coverage = 0.0
-    if markers:
-        coverage = sum(1 for m in markers if m in text) / len(markers)
-        if coverage == 0:
-            issues.append("没有用上作者的标志性口癖/用词")
-    return issues, round(coverage, 4)
+    return issues, style_diagnostics(db, text)["style_coverage"]
 
 
 def _mock_payload(topic: str) -> tuple[str, str, str, dict]:
@@ -581,6 +589,12 @@ def generate_draft(db: Session, topic: str, settings=None, snapshot: bool = True
                 "issues": [],
                 "passed": False,
                 "style_coverage": 0.0,
+                "diagnostics": {
+                    "style_coverage": 0.0,
+                    "style_matched": [],
+                    "style_missing": [],
+                    "ai_cliche": [],
+                },
             },
             ensure_ascii=False,
         )

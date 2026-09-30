@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import { RefreshCw, LoaderCircle, Sparkles, PenLine, Target, CircleCheck, CircleX, Wand2 } from 'lucide-react'
 import { apiJson } from '@/api/client'
+import { startTask } from '@/api/task'
+import { useActiveWork } from '@/hooks/use-active-work'
 import { platformName, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -85,18 +87,32 @@ export default function BenchmarkPage() {
     if (Object.keys(map).length) setAnalysisMap((prev) => ({ ...map, ...prev }))
   }, [topQ.data])
 
+  // R-202：进行中状态以服务端任务为准（切页/刷新回来仍在跑 → 仍显示动画）
+  const { tasks: activeTasks } = useActiveWork()
+  const benchActive = activeTasks.filter((t) =>
+    ['benchmark_analyze', 'benchmark_rewrite', 'benchmark_rerun', 'benchmark_prepare'].includes(t.kind)
+  )
+  const prevBenchIds = useRef<Set<number>>(new Set())
+  // 某个进行中任务消失（完成/失败）→ 刷新本页
   useEffect(() => {
-    ;(async () => {
-      try {
-        const running = await apiJson<{ id: number; kind: string; payload: string }[]>(
-          '/api/tasks?status=running&kind=benchmark_analyze,benchmark_rewrite&limit=20'
-        )
-        void running
-      } catch {
-        /* 忽略 */
-      }
-    })()
-  }, [])
+    const ids = new Set(benchActive.map((t) => t.id))
+    let lost = false
+    for (const id of prevBenchIds.current) if (!ids.has(id)) lost = true
+    if (lost) qc.invalidateQueries({ queryKey: ['benchmark'] })
+    prevBenchIds.current = ids
+  }, [benchActive, qc])
+
+  const activeFor = (kind: string, key: string) =>
+    benchActive.find((t) => t.kind === kind && String(t.payload.key || '') === key)
+  const busyOf = (key: string) => {
+    if (busyKey) return busyKey
+    if (activeFor('benchmark_analyze', key)) return 'a' + key
+    if (activeFor('benchmark_rewrite', key)) return 'r' + key
+    return ''
+  }
+  const rerunningActive = rerunning || benchActive.some((t) => t.kind === 'benchmark_rerun')
+  const preparingActive = (id: number) =>
+    preparingId === id || benchActive.some((t) => t.kind === 'benchmark_prepare' && Number(t.payload.benchmark_id) === id)
 
   async function rerun() {
     setRerunning(true)
@@ -122,9 +138,8 @@ export default function BenchmarkPage() {
   async function prepare(b: Benchmark) {
     setPreparingId(b.benchmark_id)
     try {
-      await apiJson('/api/benchmark/prepare', { method: 'POST', body: JSON.stringify({ benchmark_id: b.benchmark_id }) })
-      toast.success('文案补齐完成')
-      qc.invalidateQueries({ queryKey: ['benchmark'] })
+      await startTask('/api/benchmark/prepare', { benchmark_id: b.benchmark_id })
+      toast.info('转写补齐进行中（前3+最新）…')
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -205,9 +220,9 @@ export default function BenchmarkPage() {
           每个对标展示 <b className="text-foreground">前3 + 最新一篇</b>（按互动分，广告已过滤）
         </span>
         <span className="flex-1" />
-        <Button size="sm" onClick={rerun} disabled={rerunning}>
-          {rerunning ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          {rerunning ? '重新对标中…' : '重新对标'}
+        <Button size="sm" onClick={rerun} disabled={rerunningActive}>
+          {rerunningActive ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {rerunningActive ? '重新对标中…' : '重新对标'}
         </Button>
       </motion.div>
 
@@ -232,8 +247,8 @@ export default function BenchmarkPage() {
                 <CardTitle className="text-base">{b.name}</CardTitle>
                 {b.note && <CardDescription className="truncate">{b.note}</CardDescription>}
                 <span className="flex-1" />
-                <Button variant="outline" size="sm" onClick={() => prepare(b)} disabled={preparingId === b.benchmark_id}>
-                  {preparingId === b.benchmark_id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                <Button variant="outline" size="sm" onClick={() => prepare(b)} disabled={preparingActive(b.benchmark_id)}>
+                  {preparingActive(b.benchmark_id) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
                   转写补齐（前3+最新）
                 </Button>
               </CardHeader>
@@ -322,13 +337,13 @@ export default function BenchmarkPage() {
                             </AnimatePresence>
 
                             <div className="mt-auto flex items-center gap-1.5 pt-1">
-                              <Button variant="outline" size="sm" className="h-7 text-xs" disabled={busyKey === 'a' + it.key || !it.has_text} onClick={() => analyze(it)}>
-                                {busyKey === 'a' + it.key ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                              <Button variant="outline" size="sm" className="h-7 text-xs" disabled={busyOf(it.key) === 'a' + it.key || !it.has_text} onClick={() => analyze(it)}>
+                                {busyOf(it.key) === 'a' + it.key ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
                                 AI 分析
                               </Button>
                               {ana?.can && (
-                                <Button size="sm" className="h-7 text-xs" disabled={busyKey === 'r' + it.key} onClick={() => doRewrite(b, it)}>
-                                  {busyKey === 'r' + it.key ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <PenLine className="h-3 w-3" />}
+                                <Button size="sm" className="h-7 text-xs" disabled={busyOf(it.key) === 'r' + it.key} onClick={() => doRewrite(b, it)}>
+                                  {busyOf(it.key) === 'r' + it.key ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <PenLine className="h-3 w-3" />}
                                   洗稿
                                 </Button>
                               )}

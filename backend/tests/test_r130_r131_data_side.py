@@ -14,7 +14,6 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.models.draft import Draft
-from app.models.feedback import Feedback
 from app.models.kv import Kv
 from app.models.persona import PersonaTag
 from app.models.platform import Creator
@@ -100,13 +99,11 @@ def test_rewrite_examples_empty_without_pairs(db):
 def test_rewrite_examples_prefers_approved_pairs(db):
     owner = _owner(db)
     d1 = Draft(creator_id=owner.id, script="改后A", original_script="原稿A", source="ai", title="A")
-    d2 = Draft(creator_id=owner.id, script="改后B", original_script="原稿B", source="ai", title="B")
+    d2 = Draft(creator_id=owner.id, script="改后B", original_script="原稿B", source="ai", title="B", status="done")
     db.add_all([d1, d2])
-    db.flush()
-    db.add(Feedback(draft_id=d2.id, rating=5, liked=True))
     db.commit()
     text = gen._rewrite_examples(db, limit=1)
-    assert "作者改后" in text and "改后B" in text  # 高星的那对排前
+    assert "作者改后" in text and "改后B" in text  # R-211：完成（done）的那对排前
     assert "改后A" not in text
 
 
@@ -222,13 +219,18 @@ def test_generate_draft_mock_path_records_version(db):
 # ---------- R-131：降权（提醒 + 手动一键） ----------
 
 
-def test_maybe_notify_prompt_refresh_threshold(db):
-    assert ps.maybe_notify_prompt_refresh(db, threshold=3) is False
-    assert ps.maybe_notify_prompt_refresh(db, threshold=3) is False
-    assert ps.maybe_notify_prompt_refresh(db, threshold=3) is True
+def test_maybe_auto_optimize_prompt_threshold(db, monkeypatch):
+    calls: list[tuple] = []
+    import app.tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "start_task", lambda kind, payload, fn: calls.append((kind, payload)) or 1)
+    assert ps.maybe_auto_optimize_prompt(db, threshold=3) is False
+    assert ps.maybe_auto_optimize_prompt(db, threshold=3) is False
+    assert ps.maybe_auto_optimize_prompt(db, threshold=3) is True
+    assert calls == [("prompt_optimize", {"key": "generation"})]
     from app.models.notification import Notification
 
-    assert db.query(Notification).filter(Notification.kind == "prompt_refresh_hint").count() == 1
+    assert db.query(Notification).filter(Notification.kind == "prompt_optimize").count() == 1
 
 
 def test_optimize_rule_keys_task_skips_when_no_samples(db):
@@ -247,3 +249,101 @@ def test_optimize_rule_keys_task_reports_failure(db, monkeypatch):
     monkeypatch.setattr(ps, "optimize", _boom)
     result = ps.optimize_rule_keys_task(db, {"keys": ["video_tags"]})
     assert len(result["failed"]) == 1
+
+
+# ---------- R-207：硬自检只留红线；口癖/高频词覆盖率仅诊断 ----------
+
+
+def test_self_check_only_redline_is_hard_and_cliche_is_diagnostic(db):
+    """R-207：AI 腔词、口癖覆盖率为 0 都不再进 issues（不触发重写），只进 diagnostics。"""
+    _owner(db)
+    _set_kv(db, "ai_no_words", json.dumps(["赋能"], ensure_ascii=False))
+    script = "我们先赋能用户，再谈增长。"
+    hard, coverage = gen._self_check(db, script)
+    assert hard == []  # 无红线 → 没有硬问题
+    assert coverage == 0.0
+    diag = gen.style_diagnostics(db, script)
+    assert diag["ai_cliche"] == ["赋能"]  # AI 腔词只诊断
+    assert diag["style_coverage"] == 0.0
+    assert set(diag) == {"style_coverage", "style_matched", "style_missing", "ai_cliche"}
+
+
+def test_self_check_redline_is_hard(db):
+    """红线仍是硬问题（唯一触发收口重写的自检项）。"""
+    owner = _owner(db)
+    db.add(
+        PersonaTag(
+            creator_id=owner.id,
+            label="不卖课不收费割韭菜",
+            description="",
+            category="redline",
+            status="confirmed",
+            version=1,
+        )
+    )
+    db.commit()
+    hard, _cov = gen._self_check(db, "我不卖课不收费割韭菜，直接说重点。")
+    assert any("红线" in i for i in hard)
+
+
+def _fake_pair(db, monkeypatch, script: str):
+    """装配假的双模型 + 计数「红线收口重写」是否发生。"""
+    from app.services import debate, llm_router, model_settings
+
+    gen_slot, critic_slot = model_settings.generation_roles(db)
+    counter = {"selfcheck": 0}
+
+    class _FakeClient:
+        def __init__(self, slot):
+            self.slot = slot
+
+        def chat_json(self, messages, **kwargs):  # noqa: ANN001, ANN003
+            return {"title": "标题", "cover_text": "封面", "script": script, "shells": {}}
+
+        def chat(self, messages, **kwargs):  # noqa: ANN001, ANN003
+            return script
+
+    def _fake_chat_once(llm, system, user, *args, **kwargs):  # noqa: ANN001, ANN003
+        if str(user).startswith("这是你自己刚写的脚本"):
+            counter["selfcheck"] += 1
+        return "我不卖课不收费割韭菜。" if counter["selfcheck"] else script
+
+    monkeypatch.setattr(llm_router, "build_client", lambda slot: _FakeClient(slot["slot"]))
+    monkeypatch.setattr(debate, "_chat_once", _fake_chat_once)
+    return counter, gen_slot, critic_slot
+
+
+def test_generate_draft_no_redline_skips_selfcheck_rewrite(db, monkeypatch):
+    _owner(db)
+    _set_kv(db, "debate_rounds", "1")
+    counter, _g, _c = _fake_pair(db, monkeypatch, "一段正常但没有任何口癖的脚本正文。")
+    draft = gen.generate_draft(db, "选题")
+    quality = json.loads(draft.quality)
+    assert quality["issues"] == []  # 无红线 → 无硬问题
+    assert quality["passed"] is True
+    assert counter["selfcheck"] == 0  # 覆盖率 0 也不再触发收口重写
+    assert quality["diagnostics"]["style_coverage"] == 0.0
+    assert quality["style_coverage"] == 0.0
+
+
+def test_generate_draft_redline_triggers_selfcheck_rewrite(db, monkeypatch):
+    owner = _owner(db)
+    db.add(
+        PersonaTag(
+            creator_id=owner.id,
+            label="不卖课不收费割韭菜",
+            description="",
+            category="redline",
+            status="confirmed",
+            version=1,
+        )
+    )
+    _set_kv(db, "debate_rounds", "1")
+    db.commit()
+    counter, _g, _c = _fake_pair(db, monkeypatch, "我不卖课不收费割韭菜，这是脚本正文。")
+    draft = gen.generate_draft(db, "选题")
+    quality = json.loads(draft.quality)
+    assert counter["selfcheck"] == 1  # 红线 → 收口重写一次
+    assert any("红线" in i for i in quality["issues"])
+    assert quality["passed"] is False
+    assert "diagnostics" in quality

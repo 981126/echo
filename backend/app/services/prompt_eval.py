@@ -7,7 +7,7 @@
 - `style`：输出覆盖作者高频口头禅/标志用词的比例（越像越好，仅对自然语言产出类 key 计分）。
 
 综合分 = 100 ×（有 style：0.5·format + 0.3·(1−redline) + 0.2·style；无 style：0.6·format + 0.4·(1−redline)）。
-评分只做展示，不设启用门槛（R-129 确认口径）。
+R-129 口径：评分只做展示。R-208 起：后台自动优化链路里，候选评分 ≥ 当前版 ×(1+`AUTO_ENABLE_DELTA`) 时自动启用。
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ GOLDEN_TOPICS = 5
 GOLDEN_VIDEOS = 8
 GOLDEN_DRAFTS = 3
 MAX_PROBES = 5
+# R-208：自动优化链路里，候选评分相对当前启用版高出该比例才自动启用（±可调）。
+AUTO_ENABLE_DELTA = 0.10
 # 回放单次生成上限：推理模型（如 kimi）会把预算花在思考上，太小会导致正文为空（R-129 实测踩过）
 MAX_OUTPUT_TOKENS = 6000
 
@@ -78,7 +80,6 @@ def _redlines(db: Session) -> list[str]:
 def golden_set(db: Session) -> dict:
     """高表现素材选题 Top5 + 高/低分草稿各 3 条 + 风格标记 + 红线。"""
     from ..models.draft import Draft
-    from ..models.feedback import Feedback
     from ..models.metrics import MetricsSnapshot
     from ..models.video import Video
 
@@ -103,24 +104,25 @@ def golden_set(db: Session) -> dict:
         scored.append((eng, v.title or "", text))
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    def _drafts(min_rating: int | None, max_rating: int | None, liked: bool = False) -> list[dict]:
-        dq = db.query(Feedback, Draft).join(Draft, Feedback.draft_id == Draft.id)
+    def _drafts(status: str, exclude_pure_manual: bool = False) -> list[dict]:
+        """R-211：金样本/反面稿口径改 status 驱动（done=认可 / archived=否定，历史 rating/liked 弃用）。"""
+        from .draft_versions import pure_manual_map
+
+        dq = db.query(Draft).filter(Draft.status == status, Draft.script != "")
         if cid:
             dq = dq.filter(Draft.creator_id == cid)
-        if liked:
-            dq = dq.filter(Feedback.liked.is_(True))
-        if min_rating is not None:
-            dq = dq.filter(Feedback.rating >= min_rating)
-        if max_rating is not None:
-            dq = dq.filter(Feedback.rating <= max_rating)
+        rows = dq.order_by(Draft.updated_at.desc()).limit(GOLDEN_DRAFTS * 2).all()
+        if exclude_pure_manual:
+            pm = pure_manual_map(db, rows)
+            rows = [d for d in rows if not pm.get(d.id, False)]
         out: list[dict] = []
-        for fb, d in dq.order_by(Feedback.id.desc()).limit(GOLDEN_DRAFTS).all():
-            if d and (d.script or "").strip():
+        for d in rows[:GOLDEN_DRAFTS]:
+            if (d.script or "").strip():
                 out.append(
                     {
                         "script": d.script.strip(),
                         "original": (d.original_script or "").strip(),
-                        "rating": fb.rating,
+                        "rating": None,
                     }
                 )
         return out
@@ -128,8 +130,8 @@ def golden_set(db: Session) -> dict:
     return {
         "topics": [t for _e, t, _x in scored[:GOLDEN_TOPICS] if t],
         "videos": [(t, x) for _e, t, x in scored[:GOLDEN_VIDEOS]],
-        "high_drafts": _drafts(4, None) or _drafts(None, None, liked=True),
-        "low_drafts": _drafts(None, 2),
+        "high_drafts": _drafts("done"),
+        "low_drafts": _drafts("archived", exclude_pure_manual=True),  # R-210：手写稿放弃≠写得差
         "markers": _style_markers(db),
         "redlines": _redlines(db),
     }
@@ -393,7 +395,7 @@ def start_prompt_eval(db: Session, key: str, version: int) -> int | None:
 
 
 def prompt_eval_task(db: Session, payload: dict, update=None) -> dict:
-    """后台任务：跑金样本回放评分 + 写通知（R-129 M115）。"""
+    """后台任务：跑金样本回放评分 + R-208 自动启用/静默丢弃 + 写通知。"""
     from ..tasks import push_notification
 
     key = str(payload.get("key") or "")
@@ -403,16 +405,39 @@ def prompt_eval_task(db: Session, payload: dict, update=None) -> dict:
     row = evaluate(db, key, version, update=update)
     if row is None:
         return {"message": "候选不存在，跳过评测"}
+    enabled = False
     if not row.supported:
         message = f"评测跳过：{row.reason}"
+    elif row.base_score <= 0:
+        # 当前版没有可比评分（内容为空/无效）：不作判断，保留候选待作者查看
+        message = f"候选 v{version} 得分 {row.candidate_score:.0f}；当前版无可比评分，候选保留待人工查看"
+    elif row.candidate_score >= row.base_score * (1 + AUTO_ENABLE_DELTA):
+        from .prompt_service import enable_version
+
+        enable_version(db, key, version)
+        enabled = True
+        gain = (row.candidate_score - row.base_score) / row.base_score * 100
+        cand_row = db.query(AiPrompt).filter(AiPrompt.key == key, AiPrompt.version == version).first()
+        note = (cand_row.note or "").strip() if cand_row is not None else ""
+        change = f"；变更说明：{note[:120]}" if note else ""
+        message = (
+            f"已自动启用候选 v{version}（评分 {row.candidate_score:.0f} vs v{row.base_version} {row.base_score:.0f}，"
+            f"+{gain:.0f}%）{change}；如不认可可回滚到 v{row.base_version}"
+        )
     else:
-        message = f"候选 v{version} 得分 {row.candidate_score:.0f} / 当前 v{row.base_version} 得分 {row.base_score:.0f}"
+        # R-208：不更好静默丢弃（留痕 rejected，不发通知、不打扰作者）
+        from .prompt_service import reject_candidate
+
+        reject_candidate(db, key, version)
+        if update:
+            update(100, f"候选 v{version} 未明显更好，已静默丢弃")
+        return {"message": f"候选 v{version}（{row.candidate_score:.0f} vs {row.base_score:.0f}）未明显更好，已丢弃"}
     try:
         push_notification(
             db,
-            kind="prompt_eval",
+            kind="prompt_auto_enable" if enabled else "prompt_eval",
             status="done",
-            title=f"{key} 候选评测完成",
+            title=f"{key} 候选自动启用" if enabled else f"{key} 候选评测完成",
             message=message,
             target=f"/prompts?key={key}",
         )

@@ -1,4 +1,4 @@
-"""ASR 转写适配器：mock（开发/测试）| 阿里云 FileTrans | 硅基流动（R-108）。"""
+"""ASR 转写适配器：mock（开发/测试）| 阿里云 FileTrans | 硅基流动 | 腾讯云（R-108/R-200）。"""
 
 from __future__ import annotations
 
@@ -38,6 +38,10 @@ class Transcriber:
             from .siliconflow_asr import SiliconFlowASR  # 延迟导入，避免循环
 
             return SiliconFlowASR(settings=self.settings, model=self.model).transcribe_file(path)
+        if mode == "tencent":
+            from .tencent_asr import TencentAsr  # 延迟导入，避免循环
+
+            return TencentAsr(settings=self.settings, model=self.model).transcribe_file(path)
         raise TranscriptionError(f"未知 asr_mode: {mode}")
 
     def _mock_transcript(self, path: Path) -> str:

@@ -71,10 +71,10 @@ def _client(db):
     return TestClient(app)
 
 
-# ---------- 回滚：纯覆盖、不额外留痕 ----------
+# ---------- 回滚：覆盖写回 + 留一版（R-209 推翻 R-157「不留痕」） ----------
 
 
-def test_rollback_overwrites_draft_without_new_version(db):
+def test_rollback_overwrites_draft_and_keeps_trace(db):
     d = Draft(title="旧标题", script="v1正文", tags=json.dumps(["a"], ensure_ascii=False))
     db.add(d)
     db.commit()
@@ -90,7 +90,11 @@ def test_rollback_overwrites_draft_without_new_version(db):
     got = db.get(Draft, d.id)
     assert (got.title, got.script) == ("旧标题", "v1正文")
     assert json.loads(got.tags) == ["a"]
-    assert len(list_versions(db, d.id)) == 2, "回滚不额外留痕"
+    versions = list_versions(db, d.id)
+    assert len(versions) == 3, "R-209：回滚留一版（source=rollback）"
+    assert versions[-1].source == "rollback"
+    assert f"回退到版本 #{v1.id}" in (versions[-1].note or "")
+    assert versions[-1].script == "v1正文"
 
 
 def test_rollback_404_for_missing_or_foreign_version(db):
@@ -168,15 +172,50 @@ def test_maybe_start_diff_analysis_only_from_second_version(db, monkeypatch):
 
     kinds: list[str] = []
     monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 1)
-    d = Draft(title="t", script="v1")
+    d = Draft(title="t", script="v1", source="ai")
     db.add(d)
     db.commit()
-    snapshot_version(db, d, note="第一版")
+    snapshot_version(db, d, source="ai_generate", note="第一版")
     assert maybe_start_diff_analysis(db, d) is False
     assert kinds == []
 
     d.script = "v2"
     db.commit()
-    snapshot_version(db, d, note="第二版")
+    snapshot_version(db, d, source="manual", note="第二版")
     assert maybe_start_diff_analysis(db, d) is True
+    assert kinds == ["diff_analysis"]
+
+
+def test_maybe_start_diff_analysis_skips_non_attributable(db, monkeypatch):
+    """R-209/R-210：终版是 AI 侧（作者未定稿）或链中无 AI 侧版本（纯手写自改）都不入队。"""
+    from app.services.diff_analysis import maybe_start_diff_analysis
+
+    kinds: list[str] = []
+    monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 1)
+
+    # 纯手写链（manual → manual）：不分析（R-210，手写稿只学正文）
+    d1 = Draft(title="t1", script="v1")
+    db.add(d1)
+    db.commit()
+    snapshot_version(db, d1, source="manual")
+    d1.script = "v2"
+    db.commit()
+    snapshot_version(db, d1, source="manual")
+    assert maybe_start_diff_analysis(db, d1) is False
+
+    # 讨论刚跑完（manual → ai_discuss）：终版是 AI 侧，不分析（R-209 防归因反转）
+    d2 = Draft(title="t2", script="原稿")
+    db.add(d2)
+    db.commit()
+    snapshot_version(db, d2, source="manual")
+    d2.script = "讨论后正文"
+    db.commit()
+    snapshot_version(db, d2, source="ai_discuss")
+    assert maybe_start_diff_analysis(db, d2) is False
+
+    # 回退后（manual → ai_discuss → rollback）：终版是作者侧，分析（学到「作者否了讨论方向」）
+    d2.script = "原稿"
+    db.commit()
+    snapshot_version(db, d2, source="rollback")
+    assert maybe_start_diff_analysis(db, d2) is True
     assert kinds == ["diff_analysis"]

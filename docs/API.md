@@ -1,8 +1,8 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 145 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 146 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
-> 前端托管：老前端 `frontend/dist` 挂根路径；全新前端 `frontend_v2/dist`（R-164）挂 `/v2`（均非 API 路由，不计入下表）。
+> 前端托管：`frontend_v2/dist`（R-164/R-208）挂**根路径 `/`**（非 API 路由，不计入下表）。
 
 ## videos
 
@@ -173,6 +173,17 @@ List Persona
 - `status`（query）string
 - `x-access-token`（header）string
 **返回 200**：application/json → array
+
+### POST /api/persona/auto-confirm-backlog
+
+Auto Confirm Backlog
+
+R-208：按同规则批量处理历史积压的待确认建议（后台任务，非禁区+高置信自动进档）。
+
+**参数**
+
+- `x-access-token`（header）string
+**返回 200**：application/json → object
 
 ### GET /api/persona/check/latest
 
@@ -386,6 +397,7 @@ List Drafts
 
 R-173：每条草稿附带 `debate` 字段（无任务为 `null`）——`{"state","kind","note","actor","phase","round","rounds"}`，
 卡片据此显示「讨论/洗稿/回炉/生成中」动画与「上次讨论中断」标记（单次批量查询，无 N+1）。
+R-210/R-211：另附 `pure_manual`（纯手写=AI 从未参与，卡片「纯手写」标）与 `feedback_comment`（最新评价文本，记反馈预填）。
 
 **参数**
 
@@ -418,7 +430,7 @@ Create Draft
 
 Suggest Angles
 
-选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。
+选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。R-202 起改为**后台任务**（返回 `{task_id}`，角度在 `task.result`）。
 
 **参数**
 
@@ -478,7 +490,7 @@ R-197：列出「已发布草稿 ↔ 作品」的高置信度自动关联候选�
 
 Publish Links Apply
 
-R-197：应用自动关联并回填历史表现（写 work_id/video_id/发布信息），可撤销。
+R-197：应用自动关联并回填历史表现（写 work_id/video_id/发布信息），可撤销。R-202 起改为**后台任务**（返回 `{task_id}`，结果在 `task.result`）。
 
 **参数**
 
@@ -508,6 +520,10 @@ Get Draft
 ### PATCH /api/drafts/{draft_id}
 
 Update Draft
+
+R-211：`status` 进入 `done`（完成=认可）或 `archived`（不采用=否定，纯手写稿豁免）时，异步触发「反馈学习分析」
+（`feedback_analysis` 后台任务：LLM 分析正文+版本链+评价文本为什么好/差，心得落 `feedback.insight` 注入生成上下文）；
+卡片状态条显示「学习分析中」（`debate.kind="feedback"`），不阻塞返回。
 
 **参数**
 
@@ -568,6 +584,8 @@ R-178：每条附**实际出结果**的模型——`used_slot` / `vendor` / `mod
 ### POST /api/drafts/{draft_id}/feedback
 
 Feedback
+
+R-211：活用法是「记反馈」文本评价（`comment`）；`liked/rating/四维分` 字段保留兼容但已弃用（不再参与学习）。学习由状态流转触发（PATCH 进 done/archived）。
 
 **参数**
 
@@ -639,7 +657,7 @@ R-156：草稿的定稿版本留痕（时间正序，含正文，供前端本地
 
 Draft Version Rollback
 
-R-157：回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存；不额外留痕、不改草稿状态。草稿或版本不存在 → 404。
+R-209（推翻 R-157 不留痕）：回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存，**留一版 `source="rollback"`**（note「回退到版本 #N」，版本链终点反映真实内容，供学习正确归因）；若回退跨过了 AI 侧版本（=否定 AI 产出），最近讨论运行头回填 `reverted: true`。草稿或版本不存在 → 404。
 
 **参数**
 
@@ -819,7 +837,7 @@ List Hot
 
 Refresh Hot
 
-立即抓取今日热点（真实模式需 NAS 有外网）。
+立即抓取今日热点（真实模式需 NAS 有外网）。R-202 起改为**后台任务**（返回 `{task_id}`，结果在 `task.result`）。
 
 **参数**
 
@@ -985,6 +1003,8 @@ Rerun Eval
 ### POST /api/prompts/{key}/optimize
 
 Optimize Prompt
+
+R-202 起改为**后台任务**（返回 `{task_id}`；失败原因在 `task.error`，前端任务态提示）。
 
 **参数**
 
@@ -1399,11 +1419,18 @@ Trigger Sync
 Trigger Sync All
 
 R-162：一键同步当前主博主 + 其全部对标博主最新15条（daily 同口径）。为每个博主入队并预置同步记录（所有卡片立即可见动画），由一个后台消费者按队列逐个消费；运行中的博主跳过并汇总；完成后自动重新对标。
+R-219：`skipped` 为结构化数组 `[{creator_id: int, name: str, reason: str}]`（reason：`已在运行` / `无启用账号`），前端按博主展示跳过提示条。
 
 **参数**
 
 - `x-access-token`（header）string
 **返回 200**：application/json → object
+
+**返回示例（200）**
+
+```json
+{ "task_id": 12, "creator_count": 3, "skipped": [{ "creator_id": 7, "name": "对标A", "reason": "已在运行" }] }
+```
 
 ### GET /api/platform/topic-pool
 
@@ -1632,30 +1659,30 @@ Library Cards
 
 ## opportunities
 
-### GET /api/opportunities/comments
+### POST /api/opportunities/comments
 
 Comment Clusters
 
-R-185/R-192：观众提问榜——未使用评论聚类，按需求分排序；默认用**模型1 语义聚类**（use_llm=true），失败回退本地聚类。
+R-185/R-192：观众提问榜——未使用评论聚类，按需求分排序；默认用**模型1 语义聚类**（use_llm=true），失败回退本地聚类。R-202 起改为**后台任务**（点完返回 `{task_id}`，结果在 `task.result`）。
 
 **参数**
 
 - `limit`（query）integer，默认 15
 - `use_llm`（query）boolean，默认 true
 - `x-access-token`（header）string
-**返回 200**：application/json → object
+**返回 200**：application/json → object（`{task_id}`）
 
-### GET /api/opportunities/weekly
+### POST /api/opportunities/weekly
 
 Weekly Pack
 
-R-185：每周灵感补给包——需求 × 人设 × 热度 × 缺口 综合打分，去重并剔除已讲过的话题。
+R-185：每周灵感补给包——需求 × 人设 × 热度 × 缺口 综合打分，去重并剔除已讲过的话题。R-202 起改为**后台任务**（返回 `{task_id}`，结果在 `task.result`）。
 
 **参数**
 
 - `limit`（query）integer，默认 20
 - `x-access-token`（header）string
-**返回 200**：application/json → object
+**返回 200**：application/json → object（`{task_id}`）
 
 ### GET /api/opportunities/ledger
 
@@ -1669,17 +1696,17 @@ R-185：选题账本——已讲过的话题 + 池中被判为「可能已讲」
 - `x-access-token`（header）string
 **返回 200**：application/json → object
 
-### GET /api/opportunities/gap
+### POST /api/opportunities/gap
 
 Gap Suggestions
 
-R-187：缺口选题——AI 基于「已讲话题 + 人设」给出该讲但没讲过的选题（避开重复）；AI 不可用返回空 + note。
+R-187：缺口选题——AI 基于「已讲话题 + 人设」给出该讲但没讲过的选题（避开重复）；AI 不可用返回空 + note。R-202 起改为**后台任务**（返回 `{task_id}`，结果在 `task.result`）。
 
 **参数**
 
 - `limit`（query）integer，默认 6
 - `x-access-token`（header）string
-**返回 200**：application/json → object
+**返回 200**：application/json → object（`{task_id}`）
 
 ### GET /api/opportunities/covered
 
@@ -1770,7 +1797,7 @@ Health
 
 ### POST /api/benchmark/prepare
 
-转写补齐「前3+最新」文案并返回有文案的 4 条（无文案顺延，R-174）。
+转写补齐「前3+最新」文案并返回有文案的 4 条（无文案顺延，R-174）。R-202 起改为**后台任务**（返回 `{task_id}`；完成后刷新 `/top` 即可，结果已落库）。
 
 ### POST /api/benchmark/analyze
 
@@ -1834,7 +1861,7 @@ failed=「上次讨论中断」）。状态存 `app_kv['draft_ai:{id}']`（不�
 
 Get Asr Config
 
-查看当前 ASR 服务商与模型配置（R-138 起读运行时配置 `app_kv`，设置页保存后立即生效）。
+查看当前 ASR 服务商与模型配置（R-138 起读运行时配置 `app_kv`，设置页保存后立即生效）。服务商可选 `mock | aliyun | siliconflow | tencent`（R-200）。
 
 **参数**
 
@@ -1859,7 +1886,7 @@ Get Models
 
 AI 设置 → 模型设置：当前模型1/2（厂家/模型/Key）、生成方/评审方、ASR 服务商与模型、讨论轮次、每日篇数（R-138）。
 
-返回还包含：`vendors`（厂家目录：可选模型 / 默认模型 / 是否已有 .env Key）、`warnings`（含双模型兼容性自检告警）、`selfcheck`（最近一次自检结果，R-139）、`budgets`（各功能推理预算，R-143：每项含 `label/desc/default/requested/value/floor/ceiling/custom`，`value` 是实际生效值）、`migrated_from_legacy`。
+返回还包含：`vendors`（厂家目录：可选模型 / 默认模型 / 是否已有 .env Key）、`asr`（`mode/model/options/siliconflow_models/tencent_models`，R-200 增腾讯引擎列表 `16k_zh_en_2.0|16k_zh_en|16k_zh`）、`warnings`（含双模型兼容性自检告警）、`selfcheck`（最近一次自检结果，R-139）、`budgets`（各功能推理预算，R-143：每项含 `label/desc/default/requested/value/floor/ceiling/custom`，`value` 是实际生效值）、`migrated_from_legacy`。
 
 **参数**
 
@@ -1871,6 +1898,7 @@ AI 设置 → 模型设置：当前模型1/2（厂家/模型/Key）、生成方/
 Put Models
 
 保存模型设置（厂家非法 / 缺少 Key / 生成方评审方非法 / ASR 配置非法 → 400 且带可读原因）；保存即生效、无需重启（R-138）。
+ASR：`siliconflow` 需模型非空且 `.env` 有 `ECHO_SILICONFLOW_API_KEY`；`aliyun` 需 `.env` 有 `ECHO_ALIYUN_ASR_ACCESS_KEY_ID/APP_KEY`；`tencent`（R-200）需模型命中 `16k_zh_en_2.0|16k_zh_en|16k_zh` 且 `.env` 有 `ECHO_TENCENT_ASR_SECRET_ID/SECRET_KEY`。
 保存后会异步入队一次「双模型兼容性自检」（线程任务 kind=`model_selfcheck`），结果由 `GET /api/settings/models` 的 `selfcheck` 带回（R-139）。
 
 **参数**

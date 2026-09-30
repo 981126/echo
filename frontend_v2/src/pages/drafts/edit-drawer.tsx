@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Save,
@@ -12,11 +13,16 @@ import {
   MessageSquare,
   RotateCcw,
   Cpu,
+  CloudCheck,
+  CloudUpload,
+  CloudOff,
+  CircleAlert,
+  Captions,
 } from 'lucide-react'
 import MarkdownIt from 'markdown-it'
 import { apiJson } from '@/api/client'
 import { cn } from '@/lib/utils'
-import { fmtDate } from '@/lib/format'
+import { fmtDate, fmtTime } from '@/lib/format'
 import { Drawer, DrawerHeader, DrawerTitle, DrawerBody, DrawerFooter } from '@/components/ui/drawer'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -30,8 +36,11 @@ import { toast } from '@/components/ui/toaster'
 import { ScriptEditor } from './script-editor'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { DraftAiStatus } from './draft-ai-status'
+import { createAutoSaver, type AutoSaveStatus } from './autosave'
+import { clearLocalCopy, readLocalCopy, type LocalDraftCopy } from './local-copy'
+import { countNewRows, isNearBottom, maxRowId } from './discuss-follow'
 import { buildDiff } from './diff'
-import { softIn } from '@/lib/motion'
+import { itemVariants, listVariants, softIn } from '@/lib/motion'
 import {
   VERSION_SOURCE,
   discussionModelInfo,
@@ -133,7 +142,8 @@ export function DraftEditDrawer({
   open,
   onClose,
   onSaved,
-  onCreated
+  onCreated,
+  onDiscardEmpty
 }: {
   draft: Draft | null // null = 新建（本地空白稿）
   state: DraftEditState
@@ -143,9 +153,13 @@ export function DraftEditDrawer({
   onClose: () => void
   onSaved: () => void
   onCreated: (id: number) => void
+  /** R-212：自动保存建出的稿被清空 → 让页面把它逻辑删除（不留空卡片） */
+  onDiscardEmpty: (id: number) => void
 }) {
+  const navigate = useNavigate()
   const [saving, setSaving] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
+  const [prompterOpening, setPrompterOpening] = useState(false)
   const [preview, setPreview] = useState(false)
   const [checkInfo, setCheckInfo] = useState<CheckInfo | null>(null)
   const [reworking, setReworking] = useState(false)
@@ -160,9 +174,110 @@ export function DraftEditDrawer({
   const [viewVer, setViewVer] = useState<DraftVersion | null>(null)
   const [rollingBack, setRollingBack] = useState(0)
   const [videos, setVideos] = useState<VideoOpt[]>([])
+  // R-206：tab 受控——切进「讨论」tab 时才能把最新留痕滚进视野（Radix 切 tab 会重挂 Content）
+  const [tab, setTab] = useState('edit')
+  const viewportRef = useRef<HTMLDivElement>(null) // 讨论留痕的滚动视口（ScrollArea 的 Viewport）
+  const atBottomRef = useRef(true) // 是否贴着最新（翻看历史时不抢滚动条）
+  const lastSeenIdRef = useRef(0) // 已看到的留痕 id 游标
+  const [pendingNew, setPendingNew] = useState(0) // 未看到的新留痕条数（浮出「N 条新留痕 ↓」）
+
+  // R-212：只有「本次由【新建草稿】进入」的会话开实时保存（打开已有稿仍走【保存】/【取消】）
+  const autoEnabled = draft === null
+  const [autoStatus, setAutoStatus] = useState<AutoSaveStatus>('idle')
+  const [autoSavedAt, setAutoSavedAt] = useState<Date | null>(null)
+  const [autoAttempt, setAutoAttempt] = useState(0) // R-213：离线重试次数
+  const [localCopy, setLocalCopy] = useState<LocalDraftCopy | null>(null) // R-213：未同步的本地副本（提示条）
+  // 常驻挂载的组件：回调与最新内容都走 ref，保存器只建一次也不会读到陈旧闭包
+  const latestRef = useRef(state)
+  const onCreatedRef = useRef(onCreated)
+  const onDiscardEmptyRef = useRef(onDiscardEmpty)
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    latestRef.current = state
+    onCreatedRef.current = onCreated
+    onDiscardEmptyRef.current = onDiscardEmpty
+    onCloseRef.current = onClose
+  })
+  const autoSaver = useMemo(
+    () =>
+      createAutoSaver({
+        read: () => latestRef.current,
+        create: (body) => apiJson<Draft>('/api/drafts', { method: 'POST', body: JSON.stringify(body) }),
+        update: async (draftId, body) => {
+          await apiJson(`/api/drafts/${draftId}`, { method: 'PATCH', body: JSON.stringify(body) })
+        },
+        onCreate: (newId) => onCreatedRef.current(newId),
+        onDiscard: (deadId) => onDiscardEmptyRef.current(deadId),
+        onStatus: (s, at, attempt) => {
+          setAutoStatus(s)
+          if (at) setAutoSavedAt(at)
+          if (attempt != null) setAutoAttempt(attempt)
+          // 服务器确认落库 → 本地副本已无意义（提示条跟着收掉）
+          if (s === 'saved') setLocalCopy(null)
+        }
+      }),
+    []
+  )
+  // 新一轮新建：清掉上一轮的 id/指纹（组件跨会话常驻）；这层必须排在下面 schedule 之前
+  useEffect(() => {
+    if (!open) return
+    autoSaver.reset()
+    setAutoStatus('idle')
+    setAutoSavedAt(null)
+    setAutoAttempt(0)
+  }, [open, draft, autoSaver])
+  // R-213：打开抽屉时读一次本地副本——只认「属于当前这篇」的那份（副本 id=0 ↔ 新建草稿会话）
+  useEffect(() => {
+    if (!open) return
+    const copy = readLocalCopy()
+    const mine = !!copy && (copy.id ? copy.id === state.id : draft === null)
+    setLocalCopy(mine ? copy : null)
+  }, [open, draft, state.id])
+  // R-213：浏览器恢复联网 → 立刻重试还没落库的内容（不用干等退避）
+  useEffect(() => {
+    const onOnline = () => autoSaver.retryNow()
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [autoSaver])
+  useEffect(() => () => autoSaver.dispose(), [autoSaver])
+  // 任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
+  useEffect(() => {
+    if (!open || !autoEnabled) return
+    autoSaver.schedule()
+  }, [open, autoEnabled, state, autoSaver])
+
+  /** R-212：关抽屉（遮罩 / X / Esc /【关闭】）时立刻补一次保存——防抖窗口里最后几个字也不丢 */
+  function handleClose() {
+    if (autoEnabled) autoSaver.closeOut()
+    onCloseRef.current()
+  }
+
+  /** R-213：把本地副本回填编辑器（回填后由自动保存负责落库；成功前本地副本不动） */
+  function restoreLocalCopy() {
+    if (!localCopy) return
+    setLocalCopy(null)
+    setState(localCopy.state)
+    setAutoStatus('dirty')
+    toast.success('已恢复断网时暂存的内容，正在重新保存')
+  }
+
+  /** R-213：明确丢弃这份本地副本（作者确认不要了） */
+  function dropLocalCopy() {
+    clearLocalCopy()
+    setLocalCopy(null)
+  }
 
   const id = state.id
   const discussing = debate?.state === 'running'
+
+  /** R-206：滚到最新。`auto` 用于切进 tab（不能慢悠悠地滚，否则新留痕的入场动画又跑掉了） */
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const vp = viewportRef.current
+    if (!vp) return
+    vp.scrollTo({ top: vp.scrollHeight, behavior })
+    atBottomRef.current = true
+    setPendingNew(0)
+  }, [])
 
   /** R-173：取一次服务端 AI 状态（打开抽屉、回炉后都用它同步） */
   async function refreshDebate(targetId = id) {
@@ -186,8 +301,14 @@ export function DraftEditDrawer({
 
   // 讨论/版本随 id 加载
   useEffect(() => {
+    // R-206：tab 改成受控后关闭抽屉不会连带卸载 Tabs，这里显式复位，保持「每次打开都从编辑 tab 开始」
+    if (!open) setTab('edit')
     sawRunningRef.current = false
     startedAtRef.current = 0
+    // R-206：换草稿要清掉「跟随最新」的游标，否则新稿的历史留痕会被当成新消息
+    lastSeenIdRef.current = 0
+    atBottomRef.current = true
+    setPendingNew(0)
     if (!open || !id) {
       setDiscussions([])
       setVersions([])
@@ -231,7 +352,7 @@ export function DraftEditDrawer({
         else toast.success('讨论完成，正文已更新')
         onSaved()
         const d = await apiJson<Draft>(`/api/drafts/${id}`)
-        setState({
+        const synced: DraftEditState = {
           id: d.id,
           title: d.title,
           cover_text: d.cover_text,
@@ -241,13 +362,16 @@ export function DraftEditDrawer({
           publish_platform: d.publish_platform || '',
           publish_url: d.publish_url || '',
           published_at: d.published_at || ''
-        })
+        }
+        setState(synced)
+        // R-212：这是服务端刚写回来的内容，标记已落库，别让自动保存再重复 PATCH 一遍
+        autoSaver.markSaved(synced)
       } catch {
         /* 抖动继续 */
       }
     }, 3000)
     return () => clearInterval(timer)
-  }, [discussing, id, onSaved, setState])
+  }, [discussing, id, onSaved, setState, autoSaver])
 
   // R-178：最近一次讨论的运行头（配置的生成方/评审方）——必须在 early return 之前，遵守 hooks 规则
   const currentRun = useMemo(() => latestRun(discussions), [discussions])
@@ -259,10 +383,51 @@ export function DraftEditDrawer({
     return buildDiff(l.script || '', r.script || '')
   }, [cmpLeft, cmpRight, versions])
 
+  // R-206：讨论留痕是「只往下长」的直播式列表——贴底时自动跟随最新，翻看历史时只累加提示。
+  useEffect(() => {
+    const maxId = maxRowId(discussions)
+    if (!maxId) return
+    const firstLoad = lastSeenIdRef.current === 0
+    const added = countNewRows(discussions, lastSeenIdRef.current)
+    lastSeenIdRef.current = maxId
+    if (firstLoad) {
+      // 首次加载：讨论在跑就直接贴底（最新在最下面）；已结束则从头看
+      if (discussing) scrollToBottom('auto')
+      return
+    }
+    if (!added) return
+    if (atBottomRef.current) scrollToBottom()
+    else setPendingNew((n) => n + added)
+  }, [discussions, discussing, scrollToBottom])
+
+  // R-206：「是否贴底」必须在**滚动视口挂载的那一刻**接管。实测 Radix 的 TabsContent 比这一层
+  // 晚一个 commit 才把内容挂上（`[tab]` 的 effect 里 ref 与 DOM 都还是 null），所以用回调 ref。
+  const detachScrollRef = useRef<(() => void) | null>(null)
+  const attachViewport = useCallback((el: HTMLDivElement | null) => {
+    detachScrollRef.current?.()
+    detachScrollRef.current = null
+    viewportRef.current = el
+    if (!el) return
+    const onScroll = () => {
+      const near = isNearBottom(el)
+      atBottomRef.current = near
+      if (near) setPendingNew(0)
+    }
+    onScroll()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    detachScrollRef.current = () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // R-206：切进「讨论」tab 时若讨论正在跑，直接落到底部——否则新留痕的入场动画又播在屏幕外
+  useEffect(() => {
+    if (tab !== 'discuss' || !discussing) return
+    const raf = requestAnimationFrame(() => scrollToBottom('auto'))
+    return () => cancelAnimationFrame(raf)
+  }, [tab, discussing, scrollToBottom])
+
   const canDiscuss = !!(state.script.trim() || draft?.original_script?.trim())
 
-  if (!open) return null
-
+  // R-205：不再 `if (!open) return null` —— 否则父组件先卸载，抽屉的退出动画根本没机会播。
   async function ensureSaved(): Promise<number> {
     const body = {
       title: state.title,
@@ -284,6 +449,21 @@ export function DraftEditDrawer({
     return created.id
   }
 
+  /** R-214：进提词器前先把当前改动补存（提词页按 id 只读拉取，保证与眼前这版一致） */
+  async function openPrompter() {
+    if (!state.script.trim()) return
+    setPrompterOpening(true)
+    try {
+      const did = await ensureSaved()
+      if (autoEnabled) autoSaver.markSaved(state)
+      navigate(`/prompter/${did}`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setPrompterOpening(false)
+    }
+  }
+
   async function save() {
     if (!state.title.trim() && !state.script.trim() && !state.cover_text.trim()) {
       toast.warning('内容为空，未保存')
@@ -292,6 +472,7 @@ export function DraftEditDrawer({
     setSaving(true)
     try {
       await ensureSaved()
+      if (autoEnabled) autoSaver.markSaved(state) // R-212：已手动落库，别再补一次自动保存
       toast.success('已保存')
       onSaved()
       onClose()
@@ -388,7 +569,7 @@ export function DraftEditDrawer({
   const q = draft?.quality || {}
 
   return (
-    <Drawer open={open} onOpenChange={(v) => !v && onClose()} width="min(860px, 96vw)">
+    <Drawer open={open} onOpenChange={(v) => !v && handleClose()} width="min(860px, 96vw)">
       <DrawerHeader>
         <DrawerTitle>{id ? `草稿 #${id}` : '新建草稿'}</DrawerTitle>
         {sourceRef?.source_title && (
@@ -407,6 +588,27 @@ export function DraftEditDrawer({
       </DrawerHeader>
 
       <DrawerBody>
+        {/* R-213：断网/后端不可达时留在浏览器里的那一次改动——不静默覆盖服务端内容，让作者选 */}
+        <AnimatePresence>
+          {!!localCopy && (
+            <motion.div
+              data-testid="draft-local-copy"
+              initial={{ opacity: 0.85, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0.85, y: -6, transition: { duration: 0.15 } }}
+              transition={softIn}
+              className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs"
+            >
+              <CloudOff className="h-3.5 w-3.5 shrink-0 text-warning" />
+              <span className="flex-1">
+                发现一份<b>没同步到服务器</b>的本地内容
+                {fmtTime(localCopy.at) ? `（${fmtTime(localCopy.at)} 暂存）` : ''}，要恢复到编辑器吗？
+              </span>
+              <Button size="sm" className="h-6 px-2 text-[11px]" onClick={restoreLocalCopy}>恢复</Button>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={dropLocalCopy}>丢弃</Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -466,7 +668,8 @@ export function DraftEditDrawer({
           </div>
         </div>
 
-        <Tabs defaultValue="edit" className="mt-4">
+        {/* R-206：受控 Tabs —— 切进讨论 tab 时要能把最新留痕滚进视野 */}
+        <Tabs value={tab} onValueChange={setTab} className="mt-4">
           <TabsList>
             <TabsTrigger value="edit">编辑</TabsTrigger>
             <TabsTrigger value="discuss">讨论（双模型留痕）</TabsTrigger>
@@ -479,6 +682,18 @@ export function DraftEditDrawer({
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-muted-foreground">口播脚本（Markdown，可插图）</label>
               <span className="flex-1" />
+              {/* R-214：一键进全屏提词器（先补存当前改动，提词页读到的一定是眼前这版；只读不回写） */}
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid="draft-prompter"
+                disabled={!state.script.trim()}
+                title={state.script.trim() ? '全屏提词 + 录像（先保存当前内容再进入）' : '正文为空，无法提词'}
+                onClick={() => void openPrompter()}
+              >
+                {prompterOpening ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Captions className="h-3.5 w-3.5" />}
+                提词器
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => setPreview(!preview)}>
                 {preview ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 {preview ? '返回编辑' : '预览'}
@@ -552,8 +767,13 @@ export function DraftEditDrawer({
             ) : (
               <div className="space-y-3">
                 {/* R-173：顶部状态条——正在思考的模型 + 三点跳动 + 第 x/y 轮；中断时给出标记 */}
-                <AnimatePresence initial={false}>
-                  {!!debate && <DraftAiStatus key={debate.state + debate.note} debate={debate} />}
+                {/* R-206：key 只跟 state（running↔failed）。原先 key 含 note，讨论每换一步就整条重挂：
+                    三点动画被打断重来、状态区先空一下、下面的留痕列表被顶上顶下 */}
+                {/* R-206：**不能**给这层 `initial={false}`——它会让子组件的 `initial` 变成 false，
+                    三点跳动的关键帧动画（`opacity:[…]`/`y:[…]` 循环）会停在第一帧不再跑（生产包实测：98 帧里
+                    `opacity` 恒 0.25、`transform` 恒 none、零个 WAAPI 动画）。草稿页卡片的同一组件没有这层就没问题。 */}
+                <AnimatePresence>
+                  {!!debate && <DraftAiStatus key={debate.state} debate={debate} />}
                 </AnimatePresence>
                 {!discussions.length && !discussing && (
                   <div className="flex h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
@@ -584,50 +804,116 @@ export function DraftEditDrawer({
                     {currentRun.degraded === true && <Badge variant="warning">存在降级</Badge>}
                   </motion.div>
                 )}
-                <ScrollArea className="max-h-[52vh]">
-                  <div className="space-y-2.5 pr-2">
+                {/* R-207：生成自检（红线=硬问题；口癖/高频词覆盖率/AI 腔词=只诊断、不触发重写） */}
+                {!!draft?.quality?.diagnostics && (
+                  <div className="rounded-lg border border-border p-2.5">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <Stethoscope className="h-3.5 w-3.5 shrink-0 text-accent" />
+                      <span className="font-medium">生成自检</span>
+                      {draft.quality.passed === false ? (
+                        <Badge variant="destructive" className="text-[10px]">踩红线</Badge>
+                      ) : (
+                        <Badge variant="success" className="text-[10px]">无红线</Badge>
+                      )}
+                      <span className="tnum text-muted-foreground">
+                        像作者 {Math.round((draft.quality.diagnostics.style_coverage ?? 0) * 100)}%
+                      </span>
+                      <span className="text-muted-foreground/70">（口癖/高频词覆盖率仅诊断，不作为重写依据）</span>
+                    </div>
+                    {!!draft.quality.issues?.length && (
+                      <ul className="mt-1 list-inside list-disc text-[11px] text-destructive">
+                        {draft.quality.issues.map((iss, i) => (
+                          <li key={i}>{iss}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {!!(draft.quality.diagnostics.style_matched?.length || draft.quality.diagnostics.style_missing?.length) && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {(draft.quality.diagnostics.style_matched || []).map((w) => (
+                          <Badge key={w} variant="success" className="text-[10px]">{w}</Badge>
+                        ))}
+                        {(draft.quality.diagnostics.style_missing || []).map((w) => (
+                          <span key={w} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{w}</span>
+                        ))}
+                      </div>
+                    )}
+                    {!!draft.quality.diagnostics.ai_cliche?.length && (
+                      <p className="mt-1 text-[11px] text-warning">
+                        AI 腔词：{draft.quality.diagnostics.ai_cliche.join('、')}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <div className="relative">
+                  <ScrollArea className="max-h-[52vh]" viewportRef={attachViewport}>
+                    {/* R-206：用 §8.2 的标准列表入场（`listVariants` + `itemVariants`，与草稿页卡片墙同一套观感）。
+                        原先外层 `initial={false}` 把「切进 tab 时已经在的这批留痕」的入场动画整个吃掉（实测 110 帧 0 帧在动），
+                        后来改成单条 `softIn`（0.85→1 + y10）又太轻——作者反馈「手动切到讨论 tab 没有动画」，逐帧截图确认肉眼分辨不出。
+                        注意：这里**不能**再用 `initial={false}`，否则又变回「一进 tab 就全在」。 */}
+                    <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-2.5 pr-2">
+                      <AnimatePresence>
+                        {discussions.filter((m) => !isRunRow(m)).map((m) => (
+                          <motion.div
+                            key={m.id}
+                            variants={itemVariants}
+                            className={cn(
+                              'rounded-lg border px-3 py-2.5',
+                              m.kind === 'critique' ? 'border-accent/30 bg-accent-soft/40' : 'border-border bg-muted/40'
+                            )}
+                          >
+                            <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                              <b>{discussRoleLabel(m)}</b>
+                              {/* R-178：显示真实模型 + 版本，不再显示 model1/model2（系统说明行没有模型，不挂标签） */}
+                              {TALK_KINDS.has(m.kind) && (
+                                <motion.span
+                                  initial={{ opacity: 0.85 }}
+                                  animate={{ opacity: 1 }}
+                                  transition={softIn}
+                                  className={cn(
+                                    'rounded px-1 py-0.5 text-[10px]',
+                                    m.model_label ? 'bg-accent-soft text-accent' : 'bg-muted text-muted-foreground'
+                                  )}
+                                  title={m.model_id ? `${m.vendor}/${m.model_id}` : '这条留痕产生时还没有记录模型版本'}
+                                >
+                                  {discussModelLabel(m)}
+                                </motion.span>
+                              )}
+                              <span className="text-muted-foreground">
+                                {{ draft: '初稿', critique: '评审', revise: '修订', note: '说明' }[m.kind as string] || m.kind} · 第{m.round}轮
+                              </span>
+                              {!!m.created_at && (
+                                <span className="text-muted-foreground/70">{fmtDate(m.created_at)}</span>
+                              )}
+                            </div>
+                            <p className="whitespace-pre-wrap text-xs leading-relaxed">{m.content}</p>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </motion.div>
+                  </ScrollArea>
+                  {/* R-206：作者向上翻看历史时不抢滚动条，改成可点的「N 条新留痕 ↓」。
+                      钉在滚动区**右上角**（不是底部）：DrawerBody 本身可滚，tab 内容比可视区高
+                      （标题/封面上方那半屏表单 + 列表 52vh），底部的浮层会被 body 裁掉一半；
+                      顶端则始终在视野内，且作者翻历史时正好在看这一带。用实底 `bg-card` 才压得住正文。 */}
+                  <div className="pointer-events-none absolute right-2 top-2 z-10">
                     <AnimatePresence initial={false}>
-                      {discussions.filter((m) => !isRunRow(m)).map((m) => (
-                        <motion.div
-                          key={m.id}
-                          initial={{ opacity: 0.85, y: 10 }}
+                      {pendingNew > 0 && (
+                        <motion.button
+                          key="pending-new"
+                          data-testid="discuss-new-badge"
+                          initial={{ opacity: 0.85, y: -6 }}
                           animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }}
                           transition={softIn}
-                          className={cn(
-                            'rounded-lg border px-3 py-2.5',
-                            m.kind === 'critique' ? 'border-accent/30 bg-accent-soft/40' : 'border-border bg-muted/40'
-                          )}
+                          onClick={() => scrollToBottom()}
+                          className="pointer-events-auto cursor-pointer rounded-full border border-accent/40 bg-card px-3 py-1 text-[11px] font-medium text-accent shadow-[var(--shadow-card)]"
                         >
-                          <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                            <b>{discussRoleLabel(m)}</b>
-                            {/* R-178：显示真实模型 + 版本，不再显示 model1/model2（系统说明行没有模型，不挂标签） */}
-                            {TALK_KINDS.has(m.kind) && (
-                              <motion.span
-                                initial={{ opacity: 0.85 }}
-                                animate={{ opacity: 1 }}
-                                transition={softIn}
-                                className={cn(
-                                  'rounded px-1 py-0.5 text-[10px]',
-                                  m.model_label ? 'bg-accent-soft text-accent' : 'bg-muted text-muted-foreground'
-                                )}
-                                title={m.model_id ? `${m.vendor}/${m.model_id}` : '这条留痕产生时还没有记录模型版本'}
-                              >
-                                {discussModelLabel(m)}
-                              </motion.span>
-                            )}
-                            <span className="text-muted-foreground">
-                              {{ draft: '初稿', critique: '评审', revise: '修订', note: '说明' }[m.kind as string] || m.kind} · 第{m.round}轮
-                            </span>
-                            {!!m.created_at && (
-                              <span className="text-muted-foreground/70">{fmtDate(m.created_at)}</span>
-                            )}
-                          </div>
-                          <p className="whitespace-pre-wrap text-xs leading-relaxed">{m.content}</p>
-                        </motion.div>
-                      ))}
+                          {pendingNew} 条新留痕 ↓
+                        </motion.button>
+                      )}
                     </AnimatePresence>
                   </div>
-                </ScrollArea>
+                </div>
                 {!discussing && (!!discussions.length || debate?.state === 'failed') && (
                   <div className="pt-1 text-center">
                     <Button variant="secondary" size="sm" disabled={!canDiscuss} onClick={startDiscussion}>重新讨论</Button>
@@ -725,8 +1011,50 @@ export function DraftEditDrawer({
           定稿
         </Button>
         <span className="flex-1" />
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <X className="h-3.5 w-3.5" /> 取消
+        {/* R-212：新建稿改动会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
+        {autoEnabled && (
+          <motion.span
+            key={autoStatus}
+            data-testid="draft-autosave"
+            data-state={autoStatus}
+            initial={{ opacity: 0.85, y: 3 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={softIn}
+            className={cn(
+              'flex items-center gap-1 text-[11px]',
+              autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
+            )}
+          >
+            {autoStatus === 'offline' ? (
+              <>
+                <CloudOff className="h-3 w-3 text-warning" />
+                连不上服务器，已本地暂存{autoAttempt > 1 ? `（重试 ${autoAttempt}）` : ''}
+              </>
+            ) : autoStatus === 'dirty' || autoStatus === 'saving' ? (
+              <>
+                <LoaderCircle className="h-3 w-3 animate-spin" />
+                保存中…
+              </>
+            ) : autoStatus === 'saved' ? (
+              <>
+                <CloudCheck className="h-3 w-3 text-accent" />
+                已自动保存{autoSavedAt ? ` ${fmtTime(autoSavedAt)}` : ''}
+              </>
+            ) : autoStatus === 'error' ? (
+              <>
+                <CircleAlert className="h-3 w-3" />
+                自动保存失败，点【保存】重试
+              </>
+            ) : (
+              <>
+                <CloudUpload className="h-3 w-3" />
+                改动会自动保存
+              </>
+            )}
+          </motion.span>
+        )}
+        <Button variant="ghost" size="sm" onClick={handleClose}>
+          <X className="h-3.5 w-3.5" /> {autoEnabled ? '关闭' : '取消'}
         </Button>
       </DrawerFooter>
 

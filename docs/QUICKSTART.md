@@ -9,6 +9,7 @@
   - TikHub：`ECHO_TIKHUB_API_KEY`（平台数据/热搜）
   - DeepSeek / Kimi：`ECHO_DEEPSEEK_API_KEY` / `ECHO_KIMI_API_KEY`
   - 阿里云：ASR（AccessKey + AppKey）与 OSS（bucket/region）
+  - 硅基流动 / 腾讯云（可选，二选一或都不用）：`ECHO_SILICONFLOW_API_KEY` / 腾讯云 `ECHO_TENCENT_ASR_SECRET_ID/SECRET_KEY`
   - QQ 邮箱 SMTP：`ECHO_SMTP_USER/AUTH_CODE/MAIL_TO`（可选，推送用）
   - 访问令牌：`ECHO_ACCESS_TOKEN`（登录用）
 
@@ -31,15 +32,12 @@ npm install          # 首次
 npm run dev          # http://localhost:3000
 ```
 登录：打开页面输入 `ECHO_ACCESS_TOKEN`。
-也可只跑后端（已 `npm run build` 时 FastAPI 托管：新前端 http://localhost:8000/v2/）。
-
-> ⚠️ 老前端 `frontend/`（Vue 3，dev 5173）**已废弃（R-168）**：只读保留、不再修改；
-> 其构建产物仍由后端挂根路径（http://localhost:8000）兜底，直到后续决定下线。
+也可只跑后端（已 `npm run build` 时 FastAPI 托管：http://localhost:8000/）。
 
 ## 4. 首次使用流程
 1. **博主管理**：新建主博主 → 为它配置抖音/B站/小红书账号（填主页分享链接，系统自动解析平台 ID）
 2. **同步数据**：点「同步前 15 条」或「全量同步」，页面显示进度条；完成后云端作品进入素材库/看板
-3. **素材**：上传视频 → 编辑页「语音转文字」（真实阿里云）→ 确认标签
+3. **素材**：上传视频 → 编辑页「语音转文字」（服务商见「AI 设置 → 模型设置」，默认 .env 的 `ECHO_ASR_MODE`）→ 确认标签
 4. **选题/生成**：主页「抓取更新」→ 挑灵感 → 工作台生成/改写 → 保存/发布
 5. **选题/对标**：主页热点灵感 + 博主对标页分析/洗稿（数据看板与 ABCD 复盘已下线）
 

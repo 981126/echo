@@ -37,7 +37,7 @@ echo 的目标：让 AI 越来越懂作者的人设 ——
 ## 4. 数据从哪来（真实，无 mock）
 - 平台互动：TikHub（抖音/B站/小红书）真实接口
 - 热点：TikHub 各平台热搜
-- 语音转文字：阿里云录音文件识别（FileTrans + OSS 中转，自动抽音轨）
+- 语音转文字：录音文件识别（自动抽音轨）——服务商可配阿里云 FileTrans + OSS 中转 / 硅基流动 / 腾讯云（R-108/R-200）
 - AI 生成/对话：DeepSeek（V4.1 Flash，`deepseek-flash`）+ Kimi 真实模型（生成默认 Kimi）
 - 邮件：QQ 邮箱 SMTP（每日推送）
 

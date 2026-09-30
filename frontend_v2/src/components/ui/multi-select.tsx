@@ -51,7 +51,7 @@ export function MultiSelect({
         <Popover.Content
           align="start"
           sideOffset={6}
-          className="z-50 w-56 rounded-lg border border-border bg-card p-1 shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+          className="z-50 w-56 rounded-lg border border-border bg-card p-1 shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
         >
           <ScrollArea className="max-h-64">
             {options.length === 0 ? (

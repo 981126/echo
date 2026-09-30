@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
@@ -13,7 +13,9 @@ import {
   FlaskConical
 } from 'lucide-react'
 import { apiJson } from '@/api/client'
-import { listVariants, itemVariants } from '@/lib/motion'
+import { startTask } from '@/api/task'
+import { useActiveWork } from '@/hooks/use-active-work'
+import { listVariants, itemVariants, softIn } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -37,6 +39,7 @@ interface VendorMeta {
 interface ModelSlot {
   vendor: string
   model: string
+  key: string
   base_url: string
   key_present: boolean
   key_from_env: boolean
@@ -71,7 +74,7 @@ interface ModelsPayload {
   model2: ModelSlot
   gen_role: string
   referee_role: string
-  asr: { mode: string; model: string; options: Record<string, string>; siliconflow_models: string[] }
+  asr: { mode: string; model: string; options: Record<string, string>; siliconflow_models: string[]; tencent_models: string[] }
   debate_rounds: number
   topics_count: number
   vendors: Record<string, VendorMeta>
@@ -119,7 +122,8 @@ const ROLE_OPTS = [
 
 export default function PromptsPage() {
   const qc = useQueryClient()
-  const [tab, setTab] = useState('__models')
+  const [section, setSection] = useState<'basic' | 'advanced'>('basic')
+  const [promptKey, setPromptKey] = useState('')
   const [savingModels, setSavingModels] = useState(false)
   const [optimizingKey, setOptimizingKey] = useState('')
   const [ruleOptimizing, setRuleOptimizing] = useState(false)
@@ -141,12 +145,33 @@ export default function PromptsPage() {
   const modelsQ = useQuery({ queryKey: ['settings', 'models'], queryFn: () => apiJson<ModelsPayload>('/api/settings/models') })
   const keysQ = useQuery({ queryKey: ['prompts', 'keys'], queryFn: () => apiJson<PromptItem[]>('/api/prompts/keys') })
 
+  // R-202：进行中状态以服务端任务为准（切页/刷新回来仍在跑 → 仍显示动画）
+  const { tasks: activeTasks } = useActiveWork()
+  const promptActive = activeTasks.filter((t) =>
+    ['prompt_optimize', 'prompt_eval', 'prompt_rule_optimize', 'model_selfcheck'].includes(t.kind)
+  )
+  const prevPromptIds = useRef<Set<number>>(new Set())
+  useEffect(() => {
+    const ids = new Set(promptActive.map((t) => t.id))
+    let lost = false
+    for (const id of prevPromptIds.current) if (!ids.has(id)) lost = true
+    if (lost) qc.invalidateQueries({ queryKey: ['prompts', 'keys'] })
+    prevPromptIds.current = ids
+  }, [promptActive, qc])
+
+  const ruleOptimizingActive = ruleOptimizing || promptActive.some((t) => t.kind === 'prompt_rule_optimize')
+  const optimizingActive = (key: string) =>
+    optimizingKey === key ||
+    promptActive.some((t) => t.kind === 'prompt_optimize' && String(t.payload.key || '') === key)
+  const evalActive = (key: string) =>
+    evalBusy === key || promptActive.some((t) => t.kind === 'prompt_eval' && String(t.payload.key || '') === key)
+
   const models = modelsQ.data
 
   useEffect(() => {
     if (!models) return
-    setM1({ vendor: models.model1.vendor, model: models.model1.model, key: '' })
-    setM2({ vendor: models.model2.vendor, model: models.model2.model, key: '' })
+    setM1({ vendor: models.model1.vendor, model: models.model1.model, key: models.model1.key || '' })
+    setM2({ vendor: models.model2.vendor, model: models.model2.model, key: models.model2.key || '' })
     setGenRole(models.gen_role)
     setRefereeRole(models.referee_role)
     setAsrMode(models.asr.mode)
@@ -166,13 +191,30 @@ export default function PromptsPage() {
   }, [keysQ.data])
 
   const items = useMemo(() => keysQ.data ?? [], [keysQ.data])
+  const currentItem = items.find((i) => i.key === promptKey) || null
+  const item = currentItem
+
+  useEffect(() => {
+    if (!promptKey && items.length) setPromptKey(items[0].key)
+  }, [items, promptKey])
+
+  function changeAsrMode(mode: string) {
+    setAsrMode(mode)
+    const defaults: Record<string, string> = {
+      siliconflow: models?.asr.siliconflow_models[0] || '',
+      tencent: models?.asr.tencent_models[0] || '',
+      aliyun: '',
+      mock: ''
+    }
+    setAsrModel(defaults[mode] ?? '')
+  }
 
   async function saveModels() {
     setSavingModels(true)
     try {
       const body: Record<string, unknown> = {
-        model1: { vendor: m1.vendor, model: m1.model, api_key: m1.key },
-        model2: { vendor: m2.vendor, model: m2.model, api_key: m2.key },
+        model1: { vendor: m1.vendor, model: m1.model, key: m1.key },
+        model2: { vendor: m2.vendor, model: m2.model, key: m2.key },
         gen_role: genRole,
         referee_role: refereeRole,
         asr_mode: asrMode,
@@ -204,9 +246,8 @@ export default function PromptsPage() {
   async function optimize(item: PromptItem) {
     setOptimizingKey(item.key)
     try {
-      await apiJson(`/api/prompts/${item.key}/optimize`, { method: 'POST', body: JSON.stringify({ material: '' }) })
-      toast.success('已生成候选版本（下方查看对比）')
-      qc.invalidateQueries({ queryKey: ['prompts', 'keys'] })
+      await startTask(`/api/prompts/${item.key}/optimize`, { material: '' })
+      toast.info('优化进行中，完成后自动刷新（失败见通知）')
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -268,37 +309,23 @@ export default function PromptsPage() {
   return (
     <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-4">
       <motion.p variants={itemVariants} className="text-xs text-muted-foreground">
-        「模型设置」保存即生效；其余 tab 是各功能提示词（默认不建议改）。「像不像作者」主要由人设页的运行时上下文决定。
+        「基础」放日常要用的（模型 / Key / ASR / 每日篇数 / 讨论轮次），保存即生效；「高级」放推理预算、提示词与版本评测（默认不建议改）。「像不像作者」主要由人设页的运行时上下文决定。
       </motion.p>
 
-      <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">讨论轮次：</span>
-        <Input type="number" min={1} max={10} className="h-8 w-20 text-xs" value={debateRounds} onChange={(e) => setDebateRounds(Number(e.target.value))} />
-        <Button variant="outline" size="sm" onClick={optimizeRules} disabled={ruleOptimizing}>
-          {ruleOptimizing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-          一键优化规则型
-        </Button>
-      </motion.div>
-
       <motion.div variants={itemVariants}>
-        <Tabs value={tab} onValueChange={setTab}>
-          <ScrollArea className="w-full">
-            <TabsList>
-              <TabsTrigger value="__models">
-                <Cpu className="h-3.5 w-3.5" /> 模型设置
-              </TabsTrigger>
-              {items.map((it) => (
-                <TabsTrigger key={it.key} value={it.key}>
-                  {it.label}
-                  {it.group === 'persona_engine' && <Badge variant="secondary" className="text-[10px]">人设引擎</Badge>}
-                  {it.has_candidate && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </ScrollArea>
+        <Tabs value={section} onValueChange={(v) => setSection(v as 'basic' | 'advanced')}>
+          <TabsList className="h-auto w-full flex-wrap justify-start">
+            <TabsTrigger value="basic">
+              <Cpu className="h-3.5 w-3.5" /> 基础
+            </TabsTrigger>
+            <TabsTrigger value="advanced">
+              <Wand2 className="h-3.5 w-3.5" /> 高级
+              {items.some((it) => it.has_candidate) && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}
+            </TabsTrigger>
+          </TabsList>
 
-          {/* 模型设置 */}
-          <TabsContent value="__models">
+          {/* 基础 */}
+          <TabsContent value="basic">
             {modelsQ.isLoading || !models ? (
               <Skeleton className="h-64 w-full" />
             ) : (
@@ -370,7 +397,7 @@ export default function PromptsPage() {
 
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs text-muted-foreground">ASR 服务商：</span>
-                      <Select value={asrMode} onValueChange={setAsrMode}>
+                      <Select value={asrMode} onValueChange={changeAsrMode}>
                         <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {Object.entries(models.asr.options || {}).map(([o, label]) => (
@@ -378,25 +405,52 @@ export default function PromptsPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                      {asrMode === 'siliconflow' && (
-                        <>
+                      {(asrMode === 'siliconflow' || asrMode === 'tencent') && (
+                        <motion.span
+                          key={asrMode}
+                          initial={{ opacity: 0.85, x: 6 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={softIn}
+                          className="flex flex-wrap items-center gap-2"
+                        >
                           <span className="text-xs text-muted-foreground">ASR 模型：</span>
                           <Select value={asrModel} onValueChange={setAsrModel}>
                             <SelectTrigger className="h-9 w-64"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              {models.asr.siliconflow_models.map((m) => (
+                              {(asrMode === 'tencent' ? models.asr.tencent_models : models.asr.siliconflow_models).map((m) => (
                                 <SelectItem key={m} value={m}>{m}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
-                        </>
+                        </motion.span>
                       )}
                       <span className="text-xs text-muted-foreground">每日自动生成篇数：</span>
                       <Input type="number" min={1} max={10} className="h-9 w-20 text-xs" value={topicsCount} onChange={(e) => setTopicsCount(Number(e.target.value))} />
+                      <span className="text-xs text-muted-foreground">讨论轮次：</span>
+                      <Input type="number" min={1} max={10} className="h-9 w-20 text-xs" value={debateRounds} onChange={(e) => setDebateRounds(Number(e.target.value))} />
                     </div>
                   </CardContent>
                 </Card>
 
+                <div className="flex items-center gap-2">
+                  <Button onClick={saveModels} disabled={savingModels}>
+                    {savingModels ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    保存（立即生效）
+                  </Button>
+                  <Button variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ['settings', 'models'] })}>
+                    <RefreshCw className="h-4 w-4" /> 重新读取
+                  </Button>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* 高级 */}
+          <TabsContent value="advanced" className="space-y-4">
+            {modelsQ.isLoading || !models ? (
+              <Skeleton className="h-64 w-full" />
+            ) : (
+              <div className="space-y-4">
                 {/* 推理预算 */}
                 <Card>
                   <CardHeader className="flex-row items-center gap-2">
@@ -475,11 +529,33 @@ export default function PromptsPage() {
                 )}
               </div>
             )}
-          </TabsContent>
 
-          {/* 提示词 tabs */}
-          {items.map((item) => (
-            <TabsContent key={item.key} value={item.key} className="space-y-4">
+            <Card>
+              <CardHeader className="flex-row flex-wrap items-center gap-2">
+                <CardTitle>功能提示词</CardTitle>
+                <CardDescription>默认不建议改；改动会影响对应功能的产出质量（「AI 基于真实样本优化」会自动做金样本评测）</CardDescription>
+                <span className="flex-1" />
+                <Button variant="outline" size="sm" onClick={optimizeRules} disabled={ruleOptimizingActive}>
+                  {ruleOptimizingActive ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                  一键优化规则型
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <Select value={promptKey} onValueChange={setPromptKey}>
+                  <SelectTrigger className="h-9 w-full sm:w-80"><SelectValue placeholder="选择提示词" /></SelectTrigger>
+                  <SelectContent>
+                    {items.map((it) => (
+                      <SelectItem key={it.key} value={it.key}>
+                        {it.label}{it.group === 'persona_engine' ? '（人设引擎）' : ''}{it.has_candidate ? ' · 有候选' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CardContent>
+            </Card>
+
+            {item && (
+              <>
               <Card>
                 <CardHeader className="flex-row flex-wrap items-center gap-2">
                   <CardTitle>当前启用 · v{item.enabled_version}</CardTitle>
@@ -497,8 +573,8 @@ export default function PromptsPage() {
                     <Button size="sm" onClick={() => savePrompt(item)}>
                       <Save className="h-3.5 w-3.5" /> 保存为新版本并启用
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={() => optimize(item)} disabled={optimizingKey === item.key}>
-                      {optimizingKey === item.key ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    <Button variant="secondary" size="sm" onClick={() => optimize(item)} disabled={optimizingActive(item.key)}>
+                      {optimizingActive(item.key) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                       AI 基于真实样本优化（候选）
                     </Button>
                   </div>
@@ -516,7 +592,7 @@ export default function PromptsPage() {
                     ) : item.eval ? (
                       <Badge variant="secondary">未评测：{item.eval.reason}</Badge>
                     ) : (
-                      <Badge variant="secondary">{evalBusy === item.key ? '评测中…' : '暂无评测'}</Badge>
+                      <Badge variant="secondary">{evalActive(item.key) ? '评测中…' : '暂无评测'}</Badge>
                     )}
                     {!!item.eval?.detail?.candidate && (
                       <span className="text-xs text-muted-foreground">
@@ -524,8 +600,8 @@ export default function PromptsPage() {
                       </span>
                     )}
                     <span className="flex-1" />
-                    <Button variant="outline" size="sm" onClick={() => rerunEval(item)} disabled={evalBusy === item.key}>
-                      {evalBusy === item.key ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />}
+                    <Button variant="outline" size="sm" onClick={() => rerunEval(item)} disabled={evalActive(item.key)}>
+                      {evalActive(item.key) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />}
                       {item.eval ? '重跑评测' : '跑评测'}
                     </Button>
                     <Button size="sm" onClick={() => enable(item, item.candidate_version)}>启用此版本</Button>
@@ -597,8 +673,9 @@ export default function PromptsPage() {
                   )}
                 </CardContent>
               </Card>
-            </TabsContent>
-          ))}
+              </>
+            )}
+          </TabsContent>
         </Tabs>
       </motion.div>
 

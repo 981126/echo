@@ -15,12 +15,19 @@ from ..models.draft import Draft
 from ..models.draft_version import DraftVersion
 from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
 from ..services import draft_flow
-from ..services.draft_versions import finalize_version, list_versions, version_payload
+from ..services.draft_versions import (
+    AI_SOURCES,
+    finalize_version,
+    latest_comment_map,
+    list_versions,
+    pure_manual_map,
+    version_payload,
+)
 from ..services.diff_analysis import diff_task
 from ..services.feedback import add_feedback
 from ..services.generation import generate_draft
 from ..services.persona import PersonaService
-from ..tasks import start_task
+from ..tasks import find_running_task, start_task
 
 router = APIRouter()
 
@@ -110,14 +117,10 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
     return {"task_id": task_id, "draft_id": draft_id}
 
 
-@router.post("/angles", response_model=dict)
-def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
-    """选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。"""
+def _compute_angles(db: Session, topic: str, platform: str) -> dict:
+    """选题→3 个切入角度（R-030）。抽出来供后台任务复用（R-202）。"""
     from ..services.generation import benchmark_context_lines
 
-    topic = (payload.topic or "").strip()
-    if not topic:
-        raise HTTPException(status_code=400, detail="topic 不能为空")
     persona = PersonaService()
     refs = benchmark_context_lines(db)
     system = (
@@ -127,8 +130,8 @@ def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
         '{"angles":[{"title":"完整选题标题(直接可用于生成脚本)","hook":"开头钩子句","reason":"为什么这个角度能火"}]}'
     )
     user_parts = [f"选题：{topic}"]
-    if payload.platform:
-        user_parts.append(f"目标平台：{payload.platform}")
+    if platform:
+        user_parts.append(f"目标平台：{platform}")
     if refs:
         user_parts.append("参考风格（仅借鉴语气/结构，观点用你自己的）：\n" + refs)
     try:
@@ -157,6 +160,25 @@ def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
             {"title": f"聊{topic}前，先避开这 3 个坑", "hook": "如果你正在这个话题上，这条一定要看完。", "reason": "避坑清单，实用转发高"},
         ],
     }
+
+
+def _angles_task(db: Session, payload: dict) -> dict:
+    return _compute_angles(db, str(payload.get("topic") or ""), str(payload.get("platform") or ""))
+
+
+@router.post("/angles", response_model=dict)
+def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
+    """选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。
+
+    R-202：改为后台任务（LLM 可能较慢），点完返回 `task_id`，角度在 `task.result`。
+    """
+    topic = (payload.topic or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic 不能为空")
+    tid = find_running_task("draft_angles", {"topic": topic})
+    if tid:
+        return {"task_id": tid}
+    return {"task_id": start_task("draft_angles", {"topic": topic, "platform": payload.platform or ""}, _angles_task)}
 
 
 @router.get("/{draft_id}/check", response_model=dict)
@@ -308,10 +330,15 @@ def list_drafts(
     rows = q.order_by(Draft.updated_at.desc()).limit(limit).all()
     # R-173：一次批量查询带上「AI 长任务状态」，卡片据此显示讨论中动画（无 N+1）
     states = draft_status.read_many(db, [r.id for r in rows])
+    # R-210：批量判定「纯手写」；R-211：批量带最新评价文本（卡片记反馈预填）
+    pm = pure_manual_map(db, rows)
+    comments = latest_comment_map(db, [r.id for r in rows])
     out = []
     for r in rows:
         item = DraftOut.model_validate(r)
         item.debate = states.get(r.id)
+        item.pure_manual = pm.get(r.id, False)
+        item.feedback_comment = comments.get(r.id, "")
         out.append(item)
     return out
 
@@ -348,10 +375,13 @@ def publish_links_preview(db: Session = Depends(get_db)):
 
 @router.post("/publish-links/apply", response_model=dict)
 def publish_links_apply(db: Session = Depends(get_db)):
-    """R-197：应用自动关联并回填历史表现（可撤销）。"""
-    from ..services.publish_backfill import apply_links
+    """R-197：应用自动关联并回填历史表现（可撤销）。R-202：改为后台任务，返回 task_id。"""
+    tid = find_running_task("publish_backfill")
+    if tid:
+        return {"task_id": tid}
+    from ..services.publish_backfill import apply_task
 
-    return apply_links(db)
+    return {"task_id": start_task("publish_backfill", {}, apply_task)}
 
 
 @router.post("/publish-links/revert", response_model=dict)
@@ -369,6 +399,8 @@ def get_draft(draft_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="草稿不存在")
     item = DraftOut.model_validate(draft)
     item.debate = draft_status.read(db, draft_id)  # R-173：抽屉刷新正文时也能拿到状态
+    item.pure_manual = pure_manual_map(db, [draft]).get(draft.id, False)  # R-210
+    item.feedback_comment = latest_comment_map(db, [draft.id]).get(draft.id, "")  # R-211
     return item
 
 
@@ -386,9 +418,15 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
         setattr(draft, field, value)
     db.commit()
     db.refresh(draft)
-    # 改稿差异分析（异步，学习作者的改写偏好；R-156 起按版本链分析）
+    # 改稿差异分析（异步，学习作者的改写偏好；R-156 起按版本链分析，R-209 起按 source 归因）
     if draft.original_script and draft.script and draft.script != draft.original_script:
         start_task("diff_analysis", {"draft_id": draft.id}, diff_task)
+    # R-211：状态流转 = 反馈信号——进 done/archived 触发「为什么好/差」学习分析（异步，不阻塞）
+    new_status = data.get("status")
+    if new_status in ("done", "archived"):
+        from ..services import feedback_analysis
+
+        feedback_analysis.maybe_trigger(db, draft, str(new_status))
     return draft
 
 
@@ -468,9 +506,11 @@ def draft_finalize(draft_id: int, payload: FinalizeIn, db: Session = Depends(get
 
 @router.post("/{draft_id}/versions/{version_id}/rollback", response_model=dict)
 def draft_version_rollback(draft_id: int, version_id: int, db: Session = Depends(get_db)):
-    """R-157：回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存。
+    """回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存。
 
-    按作者口径：**只覆盖保存**，不额外留痕、不改草稿状态。
+    R-209（推翻 R-157「只覆盖保存、不留痕」）：回退**留一版**（`source="rollback"`），
+    版本链终点反映真实内容——否则差异分析/改稿样本会把 AI 讨论的产出错当「作者定稿」。
+    若回退跨过了 AI 侧版本（= 否定了 AI 的产出），同时把最近讨论运行头回填 `reverted: true`。
     """
     draft = db.get(Draft, draft_id)
     if draft is None:
@@ -478,10 +518,20 @@ def draft_version_rollback(draft_id: int, version_id: int, db: Session = Depends
     ver = db.get(DraftVersion, version_id)
     if ver is None or ver.draft_id != draft_id:
         raise HTTPException(status_code=404, detail="版本不存在")
+    # 回退前版本链的最新一版：若是 AI 侧且比目标版新，说明作者否掉了 AI 的产出
+    prior = list_versions(db, draft_id)
+    crossed_ai = bool(
+        prior and prior[-1].id > ver.id and (prior[-1].source or "") in AI_SOURCES
+    )
     draft.title = ver.title or ""
     draft.cover_text = ver.cover_text or ""
     draft.script = ver.script or ""
     draft.tags = ver.tags or "[]"
     db.commit()
     db.refresh(draft)
-    return {"ok": True, "draft_id": draft.id, "rolled_back_to": ver.id}
+    new_ver = finalize_version(db, draft, source="rollback", note=f"回退到版本 #{ver.id}")
+    if crossed_ai:
+        from ..services.debate import mark_latest_run_reverted
+
+        mark_latest_run_reverted(db, draft_id)
+    return {"ok": True, "draft_id": draft.id, "rolled_back_to": ver.id, "version": version_payload(new_ver)}

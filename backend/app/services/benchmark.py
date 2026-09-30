@@ -397,62 +397,6 @@ def _llm(db: Session | None = None):
     return llm_router.primary_llm(db, "benchmark")
 
 
-def analyze_talkable(db: Session, owner: Creator, unit: dict) -> dict:
-    text = unit.get("text") or _unit_text(db, unit)
-    if not text:
-        return {"can": False, "reason": "该素材还没有可用文案（先转写补齐）", "suggestion": ""}
-    persona = "\n".join(persona_lines(db, owner)) or "（尚未建人设档案）"
-    try:
-        res = _llm(db).chat_json(
-            [
-                {"role": "system", "content": "你是我的内容选题顾问。只输出 JSON：{\"can\":bool,\"reason\":string,\"suggestion\":string}"},
-                {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
-            ],
-            temperature=0.4,
-            max_tokens=budget_settings.budget_for(db, "benchmark_analyze"),
-        )
-        return {"can": bool(res.get("can")), "reason": str(res.get("reason") or ""), "suggestion": str(res.get("suggestion") or "")}
-    except Exception as exc:  # noqa: BLE001
-        return {"can": False, "reason": f"AI 分析暂不可用：{exc}", "suggestion": ""}
-
-
-def rewrite_script(db: Session, owner: Creator, unit: dict, title: str = "") -> dict:
-    """按人设改写文案；返回 {title, script, draft_id}。"""
-    text = unit.get("text") or _unit_text(db, unit)
-    if not text:
-        raise ValueError("该素材还没有可用文案（先转写补齐）")
-    llm = _llm(db)
-    script = llm.chat(
-        [
-            {"role": "system", "content": REWRITE_SYSTEM},
-            {"role": "user", "content": _rewrite_user(db, title or unit["post"].title, text)},
-        ],
-        temperature=0.7,
-        max_tokens=budget_settings.budget_for(db, "rewrite"),
-    ).strip()
-    new_title = title or (unit["post"].title or "")[:60]
-    # 存脚本草稿（归属当前主博主，标注对标来源）
-    from ..models.draft import Draft
-    from .creator_service import current_creator_id
-
-    cid = owner.id if owner.kind == "owner" else current_creator_id(db)
-    from .persona_profile import current_persona_version
-
-    draft = Draft(
-        creator_id=cid,
-        title=new_title,
-        script=script,
-        original_script=text,
-        source="ai",
-        status="draft",
-        persona_version=current_persona_version(db, cid),  # R-130：人设变化可控
-    )
-    db.add(draft)
-    db.commit()
-    db.refresh(draft)
-    return {"title": new_title, "script": script, "draft_id": draft.id}
-
-
 def analyze_text(db: Session, owner: Creator, text: str) -> dict:
     """对给定文案做“我能不能讲”分析（对标页用，文案来自前端已 prepare 数据）。"""
     if not (text or "").strip():
@@ -470,42 +414,6 @@ def analyze_text(db: Session, owner: Creator, text: str) -> dict:
         return {"can": bool(res.get("can")), "reason": str(res.get("reason") or ""), "suggestion": str(res.get("suggestion") or "")}
     except Exception as exc:  # noqa: BLE001
         return {"can": False, "reason": f"AI 分析暂不可用：{exc}", "suggestion": ""}
-
-
-def rewrite_text(db: Session, owner: Creator, title: str, text: str, source_ref: dict | None = None) -> dict:
-    """按人设把文案改写成原创口播稿并存脚本草稿；记录来源素材（source_ref）。"""
-    if not (text or "").strip():
-        raise ValueError("该素材还没有可用文案（先转写补齐）")
-    llm = _llm(db)
-    script = llm.chat(
-        [
-            {"role": "system", "content": REWRITE_SYSTEM},
-            {"role": "user", "content": _rewrite_user(db, title, text)},
-        ],
-        temperature=0.7,
-        max_tokens=budget_settings.budget_for(db, "rewrite"),
-    ).strip()
-    new_title = (title or "")[:60] or "对标洗稿"
-    from ..models.draft import Draft
-    from .creator_service import current_creator_id
-
-    cid = owner.id if owner.kind == "owner" else current_creator_id(db)
-    from .persona_profile import current_persona_version
-
-    draft = Draft(
-        creator_id=cid,
-        title=new_title,
-        script=script,
-        original_script=text,
-        source="ai",
-        status="draft",
-        source_ref=json.dumps(source_ref, ensure_ascii=False) if source_ref else "{}",
-        persona_version=current_persona_version(db, cid),  # R-130：人设变化可控
-    )
-    db.add(draft)
-    db.commit()
-    db.refresh(draft)
-    return {"title": new_title, "script": script, "draft_id": draft.id, "original_script": text, "source_ref": source_ref or {}}
 
 
 def _json_list(raw: str) -> list[str]:
@@ -796,3 +704,13 @@ def maybe_start_benchmark_rerun(db: Session, refetch: bool = True) -> str:
 
     task_id = start_task("benchmark_rerun", {"owner_id": owner.id, "refetch": refetch}, rerun_worker)
     return f"started:{task_id}"
+
+
+# ---------- R-202：转写补齐改为后台任务（原同步，转写耗时几分钟） ----------
+
+def prepare_worker(db: Session, payload: dict, update=None) -> dict:
+    bm = db.get(Creator, int(payload.get("benchmark_id") or 0))
+    if bm is None:
+        raise ValueError("对标博主不存在")
+    picked = ensure_top_with_text(db, bm, limit_candidates=15)
+    return {"benchmark_id": bm.id, "name": bm.name, "count": len(picked)}

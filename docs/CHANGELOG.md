@@ -1,5 +1,246 @@
 # 变更记录
 
+## [M222 / R-220] 2026-09-30 — 素材库切页同步遮罩必现：未认领池 + 卡片到位补挂 ✅ 已完成（前端 only，后端零改动）
+
+> 作者：「博主管理点击同步后，切换到素材库有时候，素材卡片会展示同步动画，有时候不会，我知道他在同步，是因为查询任务接太慢了还是什么原因」
+
+- **根因**：不是任务接口慢——`/api/tasks` 很快，**输给了更慢的 `/api/library`**。卡片同步遮罩（`use-card-tasks.ts`）的切页恢复只有 mount 时一次扫描：冷缓存时扫描先回、卡片列表为空，card_sync 按 `post_id` 匹配不到卡片被**静默丢弃且永不重试**；热缓存才有动画。叠加：跨页 SSE 丢失（订阅随页卸载、无回放）、恢复查询只筛 running、翻页新增卡片不补认领。
+- **做了什么**（`use-card-tasks.ts`）：
+  - **未认领池**（taskId→TaskRow）：恢复扫描与 SSE 未知非终态任务统一入池，不再静默丢弃；终态/已被认领出池。
+  - **自动补挂**：cards 每次变化（首帧到位/翻页加载）对池重新 `cardKeyForPayload`，命中即挂遮罩 + 5s 轮询并出池（`claimPool` 纯函数，可单测）。
+  - 恢复查询改 `status=pending,running`（`/api/tasks` 已支持多值，后端零改动）；命中但卡片已被其它任务接管 → 留池待重试。
+- **明确不做**：服务端 SSE 回放（超范围）；「作品列表未拉完前素材库无卡片可显示」的空窗由顶栏「进行中 N」负责（数据依赖非 bug）；后端零改动。
+- **自测**：`scripts/verify.sh` 全绿；vitest `use-card-tasks.test.ts` 7 例全过；headless `r220-library-mask-race.mjs` 5 项全绿——复现竞速（/api/tasks 立即回、/api/library 延迟 800ms），卡片到位后遮罩必现、5s 轮询保持、落定 opacity 1、无页面报错。
+
+## [M221 / R-219] 2026-09-30 — 博主管理同步进度可见性：完成条延迟消失 + 跳过者可见提示 ✅ 已完成
+
+> 作者：「为什么博主管理页面 同步按钮在转圈说明正在同步，但是有些博主下面的进度条没有了、」
+
+- **根因**：进度条唯一存活条件 = 该博主有 `status=running` 的 SyncJob（4s 轮询），而 sync-all 线程池**并发**消费、各博主独立完成即从 running 列表除名 → 先完成者进度条瞬间消失，与整批「还在转圈」矛盾；被 skip 的博主（已在运行/无启用账号）从不建 job，天生没条。
+- **做了什么**：
+  - **完成不瞬删**：done 停留约 8s 绿条「同步完成」+ 进度 100%；failed 停留约 60s 红条含失败原因摘要；超阈值 `jobFor` 返回 null → AnimatePresence 淡出（收口 opacity 1→0）；历史旧记录（超阈值）打开页面不误显示。
+  - **时区修正**：后端时间为无尾缀北京时间（`core/timeutil`），前端 `jobAgeMs` 对无时区尾缀时间串补 `+08:00` 再比较，避免浏览器异时区导致条永不/立即消失。
+  - **心跳**：仅当存在窗口期内的 done/failed 条时开 1s 重渲染心跳（每渲染重算、条淡完自动停），空闲零开销。
+  - **排队条保持**：入队预置「排队中…」running job（R-163 已有）不回退。
+  - **跳过者可见**：`enqueue_all_top15_sync` 的 `skipped` 改结构化 `[{creator_id, name, reason}]`；sync-all 响应落本地 state，博主卡片下渲染灰色虚线提示条「本轮同步跳过：原因」（软入场）；该博主开跑 / 手动重试 / 切换主博主 / 下次 sync-all 覆盖时移除；toast 文案适配。
+  - **数据源**：前端 jobsQ 改拉 `/api/platform/jobs?limit=50` 全状态（接口契约不变），`runningCreators` 只统计 running。
+- **改动**：后端 `platform_sync.py`（skipped 结构化）、`api/platform.py`（400 detail 拼接适配）；前端 `creators/types.ts`（+SyncSkipped）、`sync-progress-bar.tsx`（done/failed/SyncSkippedBar 三形态）、`creators/index.tsx`（jobs 全状态 + 延迟淡出 + 跳过条）。
+- **明确不做**：批次范围不变（仍只当前主博主+对标，R-162 口径）；单博主懒建 job 不动；`/api/platform/jobs` 契约不变。
+- **自测**：`scripts/verify.sh` 全绿（ruff + mypy + pytest + 前端 lint/tsc/build + 文档一致性 31 表/146 路由）；`test_r162_sync_all_queue.py` skipped 结构化断言通过。
+
+## [M217 / R-217] 2026-09-30 — 品牌文案精简：登录页去标语 + 界面去「回声」汉字 ✅ 已完成（纯前端，后端零改动）
+
+> 作者：「登陆页的【让 AI 越来越懂你的人设】、【回声】去掉，包括登陆后左上角 【回声】汉字也去掉」
+
+- **做了什么**：界面品牌标识统一为 **`echo` + 图标**，界面上不再出现中文「回声」。
+  - 登录页标题 `echo 回声` → **`echo`**；**整行删除标语「让 AI 越来越懂你的人设」**。
+  - 登录后左上角（侧栏）`echo 回声` → **`echo`**。
+  - 浏览器标签页 `echo · 回声` → **`echo`**。
+- **新增/改动**：改 `frontend_v2/src/pages/login.tsx`（标题文案 + 删标语 `<motion.p>`）、
+  `frontend_v2/src/components/layout/sidebar.tsx`（品牌文案）、`frontend_v2/index.html`（`<title>`）；
+  新点检脚本 `frontend_v2/r217-brand-text.mjs`。**后端零改动**（无新接口/新表/新定时任务/无 LLM 成本）。
+- **关键决策（反问结论）**：① 作者确认**只删「回声」两字**，`echo` 与图标 `Waves` 保留（不是整块品牌区删掉）；
+  ② 浏览器标签页**一并改**为 `echo`；③ **邮件主题/正文里的品牌文案不动**（`【echo】今日选题与脚本…` / `【echo】今日最佳…` / 失败告警），
+  故 `backend/app/services/notify.py` 未改；④ 不动图标/配色/间距/登录鉴权逻辑，不改其它页面文案。
+- **动效（R-175）**：删标语后其余入场动画**保持原样**（图标 spring、`h1` 淡入、表单 `y:12`），未引入任何从 `opacity:0` 起步的新动画；未改布局参数。
+- **自测**：`scripts/verify.sh` **全绿**（ruff + mypy + pytest + 前端 lint/tsc/build + 文档一致性 31 表/146 路由）；
+  headless `r217-brand-text.mjs` 对 **dev(3000) 与生产 dist(8000) 各跑一次全绿**——标签页标题、`h1` 恰为 `echo`、登录页与侧栏均无「回声」/无标语、图标保留、
+  **入场确在动（opacity 取值 31–32 种）且落定 `opacity 1 / transform none`**、侧栏折叠不受影响（收起后 64px、品牌字样隐藏，展开回来）；截图肉眼复核通过。
+- **明确不做**：不改邮件品牌文案、不改图标与配色、不排查其它页面文案。
+- **已知留口**：登录页卡片下方仍有 `echo v2 · 全新界面预览`（`login.tsx:110`）——作者本次未提及，**按要求未动**。
+
+## [M214 / R-214 + R-215] 2026-09-29 — 提词器 + 内置网页录像 ✅ 已完成（全屏提词页里直接录 1080p 口播，后端零改动）
+
+> 作者：「我想要个提词器，让我能很清楚的看着字录视频，眼睛不用乱飘」→「先别做，提词器还需要一个视频录像功能，可以让我直接录视频」→「把没做的需求做了」。
+
+- **做了什么**：草稿抽屉「口播脚本」标题行新增【提词器】（点击时先 `ensureSaved()` 补存当前改动，进页面前保证提词的就是眼前这版）→
+  顶层路由 `#/prompter/:draftId` **不进 `AppShell`**（真正全屏、无导航/顶栏，`Esc` 回草稿列表）。同一页里：纯黑暖白大字号提词 + 匀速滚动 + 分段高亮 + 镜像，
+  并且可以直接开摄像头录像（`getUserMedia` 取 Ace Pro UVC 1080p + 内置麦），录完内联回放 →【重录】/【下载】/【存入素材库】。
+- **新增/改动**：新 `frontend_v2/src/pages/prompter/`（`prompter-text.ts` 纯逻辑 + `recorder.ts` 纯逻辑 + `index.tsx` 页面 + 两个单测共 40 例）；
+  改 `src/App.tsx`（顶层路由）、`src/pages/drafts/edit-drawer.tsx`（入口按钮 + 先补存）；新点检脚本 `frontend_v2/r214-prompter.mjs`。**后端零改动**（只读 `GET /api/drafts/{id}` + 既有 `POST /api/videos/upload`）。
+- **关键设计（实施时定的）**：
+  - **读字基准线 = 屏幕上沿往下「一个行高」**（不是屏幕高度百分比）：首行贴屏幕上沿后作者读的就是最上面那行；固定百分比会出现「一进页面高亮第 3 段、第一段永远轮不到」且换视口/字号就失效。
+    现口径下「进页面=第 1 段、滚到底=最后一段、段随滚动单调前进」在任意字号/视口都成立（单测锁死）。
+  - **底部占位 = 视口高 − 基准线**，滚动上限再按「最后一段上沿 − 基准线」夹一次 → **停下 = 全部念完**（不是滚过一整屏空白）；稿子短到不用滚时不停表，由作者按空格停。
+  - **踩坑**：Chromium 会把小数 `scrollTop` 取整，若每帧从 DOM 读回再累加，13.4px/s 的推进被永久抹成 0（表现：按了播放、计时在走、正文一动不动）。改浮点 ref 记账 + `Math.round` 变化时才写 DOM。
+  - 空格语义：未开摄像头时=提词播放/暂停；开摄像头后空闲=开始录制、倒计时/录制中=停止（优先）；倒计时中 `-`/`+` 调秒数，其余时候调字号。
+  - 格式协商 `mp4/avc1 → webm/vp9 → webm/vp8 → webm`，状态带**明示实际格式**；MP4 录后校验（读不出有限时长即判 Chrome 已知缺陷）→ **自动退回 WebM** 并提示重录。
+  - 预览小窗打开时给正文留右侧 316px 空带（几何点检断言「预览左沿 ≥ 正文右沿」），不压正文。
+  - 动效（R-175）：正文区**逐帧零动画**（段高亮只换字色）；控制条 3s 无操作淡出、鼠标/按键唤醒；倒计时数字/REC 红点呼吸/回放面板用 `softIn`，都不从 `opacity:0` 起步。
+- **自测**：纯逻辑单测 40 例；headless `r214-prompter.mjs` 对 dev(3000) 与生产 dist(8000) **各跑一次全绿**（含 fake 媒体流「倒计时→录 3s→空格停止→回放时长 3.30s→下载文件名→入库打桩 + Node 直连后端真上传 108MB→DELETE 清理」、正文区 40 帧零动画、rAF 60.5fps、长稿滚动堆增长 0.0MB、抽屉入口直达）；`scripts/verify.sh` 全绿。
+- **明确不做**（沿用登记结论）：语音跟读（R-216）、手机/粘贴任意文字入口、云转码/强制 MP4、分段重录拼接、多机位、美颜滤镜、提词页内改稿。**未做**：File System Access 边录边写（规格里是「可选」）。
+
+## [M214 / R-215] 2026-09-29 — （原登记记录，保留）提词器内置网页录像 🔲 已登记（作者决定先不做，与 R-214 合并交付）
+
+> 作者：「先别做，提词器还需要一个视频录像功能，可以让我直接录视频」
+
+- **现状（已核实）**：① 后端**本就吃得下浏览器录像**——`backend/app/api/videos.py:28` 的 `VIDEO_EXTS` 已含 `.webm`，`POST /api/videos/upload` 直接可用，**后端零改动**；② Ace Pro **官方支持连接电脑作为 Webcam（UVC）**，浏览器 `getUserMedia` 免驱取流；③ `MediaRecorder` 在 Chrome 稳定产 **WebM(VP8/VP9+Opus)**，**MP4/h264 有产出损坏文件的已知缺陷** → 以 WebM 为可靠基线。
+- **反问结论**：画质选 **1080p 够用、要浏览器直录最快路径**（已看过 Photo Booth 相机模式）；收音**先用笔记本内置麦**（保留设备选择）；文件**直入素材库 + 同时可下载**；控制**3s 倒计时 + 空格开始/停止 + 重录**；**与提词器同页**（不切页）；**后端零改动**；语音跟读顺延 **R-216**。
+- **本期规格**：`getUserMedia({video:1920×1080@30, audio:内置麦})` → 3s 倒计时（Esc 跳过）→ `MediaRecorder` 1s `timeslice` 分片，块留内存（可选 File System Access 边录边写）；**格式协商 mp4→vp9→vp8→webm 并明示实际格式**（MP4 录后校验异常自动退回 WebM）；录制中提词自动匀速滚动 + REC 呼吸 + 时长累加，空格=停止（优先于播放/暂停）；录后内联回放 +【重录】/【下载】/【存入素材库】（`uploadFile('/api/videos/upload')`，入库后接既有转写，按 R-033 不自动转写）；超 5 分钟自动停。
+- **明示限制**：WebM 在剪映/PR 里不如 MP4 顺（本期不做云转码）；内置麦有房间噪音；画质上限=UVC 输出 1080p。
+- **明确不做**：分段重录拼接、多机位、美颜滤镜、云转码、自动发布、提词页内改稿。
+- 详细规格与验收清单见 `requirements/R-215-prompter-recorder.md`。
+
+## [M214 / R-214] 2026-09-29 — （原登记记录，保留）录音提词器（全屏提词页）🔲 已登记（作者决定先不做）
+
+> 作者：「我想要个提词器，让我能很清楚的看着字录视频，眼睛不用乱飘」（附现场照片：镜头架在行李箱顶，稿子在镜头后方墙上显示器里，机身挡住文字）。
+
+- **根因（照片 + 全仓检索）**：仓库内**无任何提词器代码**；现场问题是**镜头与提词屏不同向**（屏在镜头后约 1 米、偏高，被行李箱/机身遮挡）——看镜头看不到字、看字眼睛下垂 → 必然乱飘。作者确认可把笔记本摆到**镜头正下方**，因此方案按「笔记本全屏提词」设计。
+- **反问结论**：稿子直接用草稿 `script`（一键进入）；**只读不回写**；控制项全选但**范围取「先做能立刻用的最小版」** → **语音跟读明确排 R-215**；本期**纯前端零云服务、后端零改动**（复用 `GET /api/drafts/{id}`）。
+- **本期范围（M214）**：顶层路由 `#/prompter/:draftId`（不进 `AppShell`，无导航/顶栏）；纯黑底暖白大字号（默认约 56px/28–120）+ 行距 1.4–2.4，**首行贴屏幕上沿**；`rAF` 恒速滚动 + 快捷键（空格/↑↓/±/`[`/`]`/`M`/`R`/`Esc`）；按空行分段 + 当前段高亮（只换字色、无位移动画）；镜像 `scaleX(-1)`；已录时长 + 中文约 4 字/秒预估剩余；设置持久化 `localStorage`；控制条 3s 无操作淡出（正文区零动画，R-175）。
+- **明确不做**：语音跟读（R-215）、手机/粘贴文字入口、提词页内改稿、任何后端改动。
+- 详细规格与验收清单见 `requirements/R-214-teleprompter.md`。
+
+## [M205 / R-213] 2026-09-29 — 断网兜底：草稿「本地暂存 + 自动重试 + 恢复提示」
+
+> 作者：「如果我断网了呢，现在是检测改动就保存吗？」
+
+- **修复前实测**（Playwright 拦住 `/api/drafts` 写请求）：断网后打字 → 状态位报失败；**停手 5s 0 次重试**；断网期间关抽屉 → 服务端没有、localStorage 也没有任何副本 → **内容真丢**；网络恢复后继续打字才自愈（每次发的是完整内容）。
+- **改法**（纯前端，后端零改动）：
+  - 新 `pages/drafts/local-copy.ts`：一份「还没同步到服务器」的 localStorage 副本（内容 + 时间 + 草稿 id），读写都不抛，脏数据读成 `null`。
+  - `autosave.ts`：`schedule()` **先写本地副本再排防抖**；`pending`（最新未确认内容）在服务器确认落库且没有更新内容时才 `storage.clear()`；**失败分类**——`4xx` 直接 `'error'` 不重试，网络/5xx 转 `'offline'` 并按 `1s→2s→…→30s` 退避重试（重试读 `pending`，**抽屉关了也继续补存**）；新增 `retryNow()`（`window online` 立刻补）与 `flush()`；`dispose()` **不清副本**（刷新后仍可恢复）。
+  - `edit-drawer.tsx`：打开抽屉读一次副本，**只在「副本 id 与当前稿匹配」时**在表单上方弹提示条（`data-testid="draft-local-copy"`，`softIn` 起步 0.85）——【恢复】回填、【丢弃】删副本，**不静默覆盖**服务端内容；状态位新增离线态「连不上服务器，已本地暂存（重试 N）」。
+- **测试**：`autosave.test.ts` 扩到 18 例（新增：先落本地/成功才清/退避 1-2-4s/4xx 不重试/`retryNow` 立刻补/断网关抽屉后仍用「关那一刻」的内容补存/`dispose` 不清副本/改回服务器已有版本不留无用副本）；新 `local-copy.test.ts` 3 例（往返、清空、坏 JSON 与字段类型降级）。
+- **自测**：verify 全绿；真实链路 `r213-offline.mjs` 全绿（断网打字 → `offline` + 副本 + 停手仍在退避重试 → 关抽屉不丢 → 刷新后提示条恢复内容 → 联网补存成功且副本清掉）；R-212 点检复跑无回归。
+
+## [M204 / R-212] 2026-09-29 — 新建草稿实时保存（修「点到抽屉外面，写的东西全没了」）
+
+> 作者：「我新建草稿打了一堆字，不小心点了其他地方导致抽屉关了，写的东西就没了，当我新建草稿做了任何变动都应该实时保存」
+
+- **根因**：新建草稿的内容原先**只在内存里**——`pages/drafts/index.tsx#createDraft()` 只 `setEditState({...EMPTY_DRAFT})`（`draft=null`），整篇内容要等点【保存】才 `POST`；而抽屉的遮罩点击 / 右上角 X / Esc 都走 `onClose() → setEditState(null)`，服务端根本没有这条记录，内容随之丢弃且不可恢复。
+- **改法**：新增 `pages/drafts/autosave.ts`（不含 React/DOM 的纯逻辑）+ 抽屉接线。
+  - 只对「本次由【新建草稿】进入」的会话启用（会话内持续有效）；**打开已有草稿仍保持【保存】/【取消】语义不变**（按作者选择的最小范围）。
+  - 任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）→ 防抖 900ms 落库：首次 `POST /api/drafts`（沿用 R-154「全空不建稿」），拿到 id 后 `PATCH`；内容指纹相同不重复写。
+  - **单飞 + 队列串行**：保存进行中又有改动则排队，当前这次完成后继续写最新内容——否则保存期间敲的字会被漏掉（回归用例已锁）。
+  - **关抽屉瞬间补一次**：遮罩 / X / Esc /【关闭】都先 `closeOut()` 再关，防抖窗口里最后几个字也不丢。【保存】成功与讨论回填的服务端内容用 `markSaved()` 记账，避免重复 PATCH。
+  - **空稿自动删除**：自动建出的稿若被清空 → 关闭时回调 `onDiscard(id)`，页面先乐观移除列表行再 `PATCH {status:'deleted'}`（与卡片【删除】同口径），不留「（无标题）」垃圾卡片。
+  - 组件跨抽屉会话常驻挂载（R-205 的延迟卸载）→ 每次打开必须 `saver.reset()`，否则会复用上一轮的 id 把内容写到上一张稿上。
+- **动效（R-175/R-202）**：底部常驻状态位 `data-testid="draft-autosave"`：`保存中…`（spinner）→ `已自动保存 HH:MM`（云勾）/ `自动保存失败，点【保存】重试`；用 `softIn`（`0.85→1` + y 3，**不从 opacity 0 起步**），收口 `opacity 1 / transform none`。自动保存会话里【取消】改称【关闭】（内容已保存，不存在"取消掉不存"）。
+- **测试**：`autosave.test.ts` 11 例（空白不建稿 / 防抖合并成一次且落最后内容 / 建后改走 PATCH 不重复建 / **在飞期间继续输入不漏字** / 关抽屉立刻补存 / 清空后关闭丢弃 / `markSaved` 后不重复写 / `reset` 隔离上一轮 id）；`fmtTime` 复用。
+- **自测**：verify 全绿（lint + tsc + vitest + build + 文档一致性 31 表/146 路由）；headless 真实链路：新建 → 打字 → 点遮罩关闭 → 重开内容还在；清空后关闭列表无空卡片；状态位动效无空白闪帧。
+
+## [M198–M202 / R-208] 2026-09-29 — 自动化加固与系统瘦身（去审批化，聚焦「话题+文案」核心）
+
+> 作者：「我不想经常上系统这里需要我审批那里需要我审批，我需要它提供符合我这个博主人设的话题，和大概的文案，这是最核心的」。
+
+- **M198 人设建议高置信自动确认 ✅**：`persist_suggestions` 内对「非禁区层 + 命中素材 ≥3 篇 + 与作者已拒绝标签不冲突」的建议直接 `status=confirmed`（`confirm_strength=1`，区别于手动=3/人工确认=2），红线层永远人工、被拒过的不再自动确认；每次自动确认写站内通知（kind=`persona_auto_confirm`，附标签名，可一键回滚）。存量积压：新增 `persona_auto_confirm_backlog_task` + 启动时一次性触发（Kv `persona_auto_confirm_backlog_v1` 保证只跑一次），用逐篇提取结果重算频次后按同规则批量处理（内容缓存命中零 LLM）。人设页已确认项加「自动」徽标 + 「撤销」按钮。
+- **M199 提示词优化后台全自动 ✅**：`maybe_notify_prompt_refresh`（只发提醒）→ `maybe_auto_optimize_prompt`（素材到量自动排队 `generation` 优化，样本不足静默跳过）；`prompt_eval_task` 评测后「候选 ≥ 当前版 ×1.10」自动启用 + 通知（附变更说明与「可回滚到 vN」），不更好则静默丢弃（候选转 rejected、不打扰），当前版无可比评分时保留候选待人工；删除 `weekly_prompt_hint` 定时任务。
+- **M200 每日「今日最佳」推送 ✅**：流水线收尾新增 `push_daily_best`——AI 从当天已生成的稿子里按「人设契合 × 热度」选 1 篇（失败退回分数最高），站内通知（kind=`daily_best`，正文含选题理由 + **完整口播稿**）+ best-effort 邮件单篇推送（复用 digest 模板）；同一天 Kv 标记只推一次，推送失败不影响流水线。
+- **M201 AI 设置瘦身 + 对话写操作白名单 ✅**：AI 设置页 10 tab 收为「基础」（模型/Key/生成方评审方/ASR/每日篇数/讨论轮次 + 保存）+「高级」（推理预算/兼容性自检/一键优化规则型/功能提示词改 Select 切换 + 版本评测）；AI 对话写操作 `agent_actions.propose` 新增 `SAFE_ACTIONS`（`generate_draft` / `rework_draft` / 可逆的 `set_draft_status`）**免确认自动执行**（审计照记 done + preview/result），删除等危险操作仍 `pending` 等确认；`TOOL_DATA_RULES` 与 dispatch 同步区分 executed/pending。
+- **M202 遗留清理 + 老前端下线 ✅**：删除真死代码 `core/review.py`（复盘启发式兜底，仅测试引用）与 `core/metrics.normalize_snapshot`（无人调用）；老前端 `frontend/` 目录**删除**，`verify.sh` 去其构建、`main.py` 根路径改挂 `frontend_v2/dist`、vite `base` 改 `/`、Dockerfile/.dockerignore/AGENTS/README/QUICKSTART/ARCHITECTURE/DESIGN/PRD/API 同步。**核实澄清**：`metrics_snapshots` 并非死代码——它是平台数据聚合的性能缓存，生成权重/人设金句/提示词样本/赛道雷达在读它，原作者拍板保留。
+
+## [M203 / R-209+R-210+R-211] 2026-09-29 — 回退留痕与版本链归因 + 纯手写标签 + 反馈体系重构
+
+> 作者：「我手动创建了1篇草稿 点击了定稿，讨论出来的结果不如我原稿，于是我回退到了原稿，这个时候我点击采用、或者快速反馈好，他会认为是ai讨论出来的结果是好的吗，但实际我只是采用了原稿，如何让ai识别呢」
+
+- **R-209 根因**：版本链不区分「谁改的」+ 回退不留痕（R-157）→ 差异分析把 AI 讨论的改动当成作者偏好学进人设建议；改稿样本 few-shot 把「讨论后」当「作者改后」且好评后 5 分排最前——归因彻底反了，且污染在讨论完成那一刻就发生。
+- **R-209 改法**：① 版本 `source` 分**作者侧** `{manual, rollback}` / **AI 侧** `{ai_generate, ai_discuss, ai_rewrite}`；② 回退**留一版**（`source="rollback"`，note「回退到版本 #N」，**推翻 R-157**）；③ 差异分析 `analyzable` 门控（终版须作者侧、链须含 AI 侧）+ prompt 按 source 标注每版身份与归因规则；④ 改稿样本配对 = 「最后一个作者侧版本 ← 其前一版」（被回退的讨论稿变成最准的反面教材）；⑤ 回退跨过 AI 版时讨论运行头回填 `reverted: true` + 生成上下文注入「作者改回了自己的原稿」反面信号（`_reverted_lessons`，≤3 条）。
+- **R-210 纯手写**：`pure_manual` 判定（source=manual 且无讨论记录且无 AI 侧版本；讨论过即使回退也不算）；列表接口批量判定（无 N+1）；卡片右上角「纯手写」标；纯手写链不做差异分析（手写稿只学正文）。
+- **R-211 反馈体系重构**（作者：「打分、钩子、节奏、结尾、像我这些都去掉，改成一个文本框」「触发时机改成不采用、待制作点击完成」「纯人工写的点击不采用不触发学习」「历史评分弃用」）：
+  - 前端删：星级打分、四维细分（钩子/节奏/结尾/像我）、快速反馈好/差；「记反馈」改为行内展开 textarea（预填已写评价，展开/收起有动效）。
+  - 触发：`PATCH /drafts/{id}` 进 `done`（好）/ `archived`（差，纯手写豁免）→ 后台 `feedback_analysis` 任务：LLM 分析「正文 + 带归因版本链 + 评价文本」为什么好/差 → 心得落 `feedback.insight`（新列，幂等迁移）；卡片状态条「学习分析中」（`draft_status` kind=`feedback`，R-202 切页恢复）；失败留「中断」标记不阻塞状态流转。
+  - 学习通道全部改 **status 驱动**（历史 rating/liked/四维分弃用）：黄金样本/结构模板/`feedback_context`/prompt_eval 高低分稿认可=done、否定=archived 非纯手写；`feedback_context` 每条附作者亲笔评价 + 复盘心得；废稿恢复后负向自然消失（status 即事实源）；`version_effect` 认可口径同步；`_dim_examples`（四维回流）删除。
+- **排查顺手发现的死信号**（重构前事实）：快速反馈「差」（liked=False）没有任何学习通道消费；记反馈文字留言（comment）只存库没人读——本次一并激活。
+- **测试**：新增 `test_r209/210/211` 三文件 25 例（回退留痕/reverted 回填/配对归因/反面信号/纯手写边界/触发节点/心得落库/status 驱动上下文）；更新 R-129/130/135/156/157 受口径影响的旧用例；前端 `draft-ai-status` 测试补「学习分析中断」用例。
+
+## [M197 / R-207] 2026-09-29 — 硬自检只留红线；口癖/高频词覆盖率仅诊断
+
+> 作者：「高频词、口癖覆盖率这类硬自检：可做诊断，但不该强制重写。否则会逼模型机械塞口头禅，变成模仿腔」。
+
+- **问题**：`_self_check` 把「口癖覆盖率==0 / 用了 AI 腔词」也当硬问题，`run_debate` 只要 `issues` 非空就强制生成方**整篇重写一次** → 模型为过自检机械塞口头禅，产出「模仿腔」。
+- **改**：`generation._self_check` 只保留**红线**为硬问题；新增 `style_diagnostics`（口癖/高频词覆盖率 + 命中/未命中 + AI 腔词命中）**只诊断**；`run_debate` 仅在命中红线时收口重写，重写提示去掉「必须模仿」块；`Draft.quality` 增 `diagnostics`。
+- **提示词软化**：`author_style_context` 的「作者语言习惯（必须模仿）」→「自然贴近即可，不要硬塞口头禅/标志词」，范本措辞改为「体会语气、不要照搬词句」。
+- **前端**：草稿**讨论 tab** 加「生成自检」区块（红线/像作者覆盖率 + 命中口癖绿标/未命中灰标 + AI 腔词）；草稿**卡片**加「像作者 NN%」微标（诊断）+「踩红线」告警（仅 `passed=false` 且非 mock）。
+- **测试**：新增「无红线 → 不触发收口重写（计数 0）」「红线 → 重写 1 次」「AI 腔词/覆盖率 0 只进 diagnostics」用例；`scripts/verify.sh` 全绿。
+
+## [M196 / R-206] 2026-09-29 — 抽屉「讨论（双模型留痕）」tab 动效修复
+
+> 作者：「草稿页面的双模型讨论的动画很不错，为什么抽屉里面『讨论（双模型留痕）』tab 页里面的动画经常不动」。
+
+- **根因（无头数值探针 `frontend_v2/r206-discuss-tab-motion.mjs` 实测三条独立原因）**：
+  ① 列表外层 `AnimatePresence initial={false}` 把「切进 tab 时已经在的那批留痕」的入场动画吃掉了（110 帧有留痕、**0 帧在动**）；
+  ② 讨论中新留痕的入场动画**播在屏幕外**——滚动区不跟随最新，`scrollTop` 恒 0、内容 3615px / 视口 494px，新行在可视区下方 3667~3730px（同 R-199 那类坑）；
+  ③ 状态条 `key={state + note}` 让讨论每换一步就整条重挂，配上 `initial={{opacity:0, height:0}}` → 三点节点被替换、旧条高度收 0、新条从全透明长出（8s 4 次重挂、34 帧两条并存）。
+- **修**：① 去 `initial={false}`，改首屏前 6 条 `delay = min(i,5)×0.03` 轻 stagger（仍从 `0.85 + y10` 起步）；
+  ② `ui/scroll-area.tsx` 新增可选 `viewportRef`（真正的滚动元素是 Radix Viewport）；新增 `pages/drafts/discuss-follow.ts`（`isNearBottom` 24px 阈值 / `countNewRows` / `maxRowId` + 6 例单测）——贴底自动跟随，翻历史时浮出可点「N 条新留痕 ↓」（钉在滚动区右上角：`DrawerBody` 自身可滚，钉底部会被裁一半）；切进 tab 且讨论在跑时先 `behavior:'auto'` 落到底；
+  ③ 状态条 `key` 只跟 `debate.state`，入场改 `opacity 0.85 / y-4`、去掉高度动画（DESIGN §8.3 规则 2/3）。
+- **实现坑**：本项目 Radix `TabsContent` 比这一层晚一个 commit 才挂内容，`[tab]` 的 effect 里 `ref.current` 与 DOM 都还是 `null`（之后不再重跑）→ 滚动监听改用**回调 ref**。
+- **实测**：探针全绿（入场 21 动画帧 / 首帧 0.85 / 落定 `1 none`；8s 内状态条 0 重挂、0 节点替换、0 双条；新留痕自动进可视区；翻历史 `scrollTop` 13 不被抢、提示「2 条新留痕 ↓」点击后落到底且提示消失）；规范补进 DESIGN §8.2/§8.4/§8.5。
+- **第二轮（作者反馈「还是一样的没有动画，从编辑 tab 手动切到讨论 tab 就没有动画」）**：
+  ① **真凶之一**：作者用的是后端托管的 `/v2` 生产包，而页面加载的入口 `index-DN48QJlf.js` **在新 dist 里已不存在**——
+  SPA 不会自己重新拉包，所以改动根本没生效（已重新 `vite build`；见 DESIGN §8.5 新增的「必须在作者实际入口验」）；
+  ② **入场确实太轻**：第一版单条 `softIn`（0.85→1 + y 10，0.24s）逐帧截图确认「肉眼分辨不出」→ 改回 §8.2 标准列表令牌
+  `listVariants` + `itemVariants`（0→1 + y 14，0.34s，stagger 0.045），与草稿页卡片墙同一套观感（40 个动画帧、32 帧在淡入；
+  点下去 55ms 整列还在淡入、188ms 落定）；
+  ③ 受控 `Tabs` 带来的行为差异：关闭抽屉时显式把 tab 复位回「编辑」。
+### 第三轮：三点跳动「依旧没有动画」的真凶（同日）
+- 作者：「【双模型讨论…正在评审第 2/3 轮…】前面那三个跳动小点 依旧没有动画」。
+- **根因**：抽屉讨论 tab 的状态条外层是 `<AnimatePresence initial={false}>`，它把子组件 `initial` 置为 false；
+  对 `ThinkingDots` 的**关键帧数组**（`opacity:[0.25,1,0.25]` + `y:[0,-2,0]`，`repeat: Infinity`）framer 只把样式停到
+  第一帧就不再推进。`/v2` 生产包实测：**98 帧里 transform / opacity 各只有 1 种取值、`getAnimations()` 为空**
+  （`opacity` 恒 0.25）；同一组件在草稿页卡片上（没有那层 Presence）有 87/109 帧在动。给点补显式 `initial` **兜不住**（实测仍冻）。
+- **修**：① 去掉状态条那层 `initial={false}`（顺带让状态条自己的入场动画生效）；② `ThinkingDots` 改成**纯 CSS 关键帧**
+  （`index.css` 的 `@keyframes thinking-dot` + `.thinking-dot`，参数与原 framer 版一致：0.9s / ease-in-out / 0.15s 错峰），
+  「在跑」的唯一可见证据不再依赖调用方的 framer 上下文（R-202/§8.6）。
+- **实测**：`/v2` 上草稿页卡片 92 帧 / 抽屉 78 帧均有不同 transform+opacity；讨论 tab 探针仍全绿。
+
+
+## [M195 / R-205] 2026-09-29 — 抽屉/移动端导航/通知弹层退出动画
+
+> 作者：「现在抽屉没有退出动画，通知展开后退出也没有动画」。
+
+- **根因（无头逐帧实测）**：① 抽屉消费方 `videos/edit-drawer.tsx`、`drafts/edit-drawer.tsx` 有 `if (!open) return null`，关闭时**先卸载**了 `<Drawer>`，退场动画没机会播；② 抽屉/移动端导航的退场依赖 framer `AnimatePresence`，本项目 React 19 + framer-motion v12 下其 exit 不触发；③ 通知弹层只有 `animate-in`、缺 `animate-out`。
+- **修**：`Drawer` 与移动端导航改「受控 `animate` + 关闭后保留挂载、约 340ms 再卸载」；删掉两个 `edit-drawer` 的 `if (!open) return null`；通知弹层、全局「进行中」弹层、下拉/选择/多选补 `data-[state=closed]:animate-out fade-out-0 zoom-out-95`。
+- **实测**：抽屉面板 `x 760→941→1151→1427` 右滑出屏后卸载；移动端导航 `x 0→-147→-276` 左滑出屏；通知 `opacity 1→0.65→0.15→0.01→卸载`（`animationName=exit`）。build + vitest 52 例 + verify 全绿。
+
+## [M194 / R-204] 2026-09-29 — tab 选中态滑块过渡动画
+
+> 作者：「tab页签切换，选中的tab页没有过度动画」。
+
+- `frontend_v2/src/components/ui/tabs.tsx`：新增 `TabsCtx`（当前 value + 每个 Tabs 实例的 `useId`），`Tabs` 兼容受控/非受控；`TabsTrigger` 选中时渲染共享 `layoutId` 的 `motion.span` 滑块（spring stiffness 420/damping 34），在 tab 间平滑移动；去掉原来瞬间切换的 `data-[state=active]:bg-card/shadow-sm`，文案色过渡保留。
+- 全站所有 `Tabs` 生效（AI 设置/脚本工作台/抽屉/主页灵感池等）。
+- headless 实测：10 tab 切换滑块 `x 280 →（动画中 345）→ 457` 与选中项对齐、始终仅 1 个滑块、零 JS 报错。
+
+## [M193 / R-203] 2026-09-29 — AI 设置 tab 栏改为自动换行
+
+> 作者：「ai设置功能里面的tab页太多了，一页都放不下了，换行」。
+
+- `frontend_v2/src/pages/prompts/index.tsx`：去掉包 tab 栏的横向 `ScrollArea`，`TabsList` 加 `h-auto w-full flex-wrap justify-start` → 放不下自动换行。
+- headless 实测：10 个 tab 自动换 2 行，`scrollWidth == clientWidth`（无横向溢出），零 JS 报错；tab 切换入场动效不变。
+
+## [M191/M192 / R-202] 2026-09-29 — 非实时结果必须有进行中动效（切页/刷新可恢复）
+
+> 作者：「页面上很多功能调用接口都在后台计算，但我切换页面回来，发现前端没有动画了，但实际上还没执行完，会让人误解已经执行完了」。
+> 「所有非实时返回的结果，该有的动画都需要有，保持动画美观流畅，不然容易误导用户」。
+
+- **规范固化（先做）**：把该要求写进 `AGENTS.md`（工程标准 + 反问清单第10项）、`docs/DESIGN.md §8.6`、`docs/WORKFLOW.md`（反问+DoD）、`docs/PRD.md`、`docs/DECISIONS.md D-042`；**不满足 = 功能不算完成**。
+- **根因**：前端多数「进行中」用组件本地 `useState`，切页卸载即丢；部分页面（博主对标）挂载时查了 running 任务却 `void` 丢弃；同步长接口（内容机会/角度/转写补齐/单键优化）切页后结果还会丢。
+- **方案**：`background_tasks` 为唯一事实源；前端全局 `ActiveWorkProvider`（挂载回扫 + SSE `task.update` 实时 + 10s 轮询兜底）+ 顶栏「进行中 N」指示器；8 个同步慢接口转后台任务，结果落 `task.result` 回填。
+- **后端**：`core/task_meta.py`（`KIND_LABELS`/`target`，列表与通知共用）；`TaskOut` 增 `label/target`；`/api/tasks` 支持多状态（running+pending 按 created_at 正序）；SSE `task.update` 带 `kind/label/target`；`find_running_task` 同 scope 去重。转换：`benchmark_prepare`/`opportunity_clusters`/`opportunity_weekly`/`opportunity_gap`/`draft_angles`/`prompt_optimize`/`hot_refresh`/`publish_backfill`（快读接口保持同步）。
+- **前端**：`hooks/use-active-work.tsx`（Provider + `useActiveWork/useActiveTask`）、`components/layout/active-work-indicator.tsx`（顶栏指示器，`softIn` 入场）、`hooks/use-task-scope.ts`（task_id 存 sessionStorage，切页/刷新恢复并回填结果）、`api/task.ts`；对标/AI设置/人设/灵感随手记接任务态；主页 4 个内容机会 + 抓取 + 回填改任务。
+- **自测**：headless 实测点「观众提问榜」→按钮转圈+顶栏「进行中 1」→切到人设页仍「进行中 1」→回主页仍禁用→完成后指示器消失、按钮恢复、**结果自动回填**；整页刷新后指示器仍恢复。`scripts/verify.sh` 全绿（后端 445 例）。
+
+## [M190 / R-201] 2026-09-29 — 主页「内容机会」移到「灵感池」上方
+
+> 作者：「主页的内容机会放到灵感池上面」。
+
+- `frontend_v2/src/pages/home.tsx`：把「内容机会」`<motion.section>` 整块移到「灵感池」之前（仅调整上下顺序，内容/接口/懒加载不变）；入场顺序沿用 `itemVariants`，首屏先见内容机会。
+- verify 全绿；headless 点检卡片顺序正确、零 console 报错。
+
+## [M189 / R-200] 2026-09-29 — 接入腾讯云 ASR（录音文件识别）
+
+> 作者：「https://cloud.tencent.com/document/product/1093/52554 接入腾讯ASR」。
+
+- **通道**：`ECHO_ASR_MODE` 扩为 `mock|aliyun|siliconflow|tencent`（白名单护栏不变，**保留四家、不换默认**）；新增 `services/tencent_asr.py` 走腾讯云录音文件识别 `CreateRecTask` + `DescribeTaskStatus`（官方模块化 SDK `tencentcloud-sdk-python-asr`，域名 `asr.tencentcloudapi.com`）。
+- **提交方式（作者定）**：本地音频 **base64 直传**（`SourceType=1`）——自包含、不依赖阿里云 OSS/腾讯 COS；新增 `media_tools.extract_audio_compact` 把视频/超限音频抽/压成 16k 单声道 mp3（码率按目标 5MB **自适应** 16–32kbps，纯音频已达标则原样直传），超 5MB 明确报错走失败通知、**不自动切换其它服务商**（同 R-108 口径）。
+- **引擎可选（作者定，默认大模型2.0）**：`16k_zh_en_2.0 | 16k_zh_en | 16k_zh`；`model_settings` 增 `ASR_TENCENT_MODELS` 与「切服务商不沿用上一家模型名」的 mode 感知默认/校验；`GET/PUT /api/settings/models` 的 `asr` 增加 `tencent_models`。
+- **记录**：`ingest` 为腾讯落 `asr_provider=tencent`、`asr_model=引擎`（原来只有硅基流动落模型）；不新增表/列。
+- **密钥**：`ECHO_TENCENT_ASR_SECRET_ID/SECRET_KEY/REGION/ENGINE_MODEL` 只放 `.env`（界面只选服务商）。
+- **顺带修 bug**：设置页模型 API Key 保存无效——前端提交的是 `api_key`、后端 `SlotIn` 只认 `key`，且加载时恒置空 → Key 永远存不进 DB（静默回退 .env）。改为加载回显 `models.modelN.key`、提交 `key`。
+- **前端**：AI 设置服务商增「腾讯云」，腾讯/硅基流动各自引擎下拉（切换带统一动效 `softIn`）；编辑页 ASR 来源显示「腾讯云」。
+- **测试**：新增 `tests/test_tencent_asr.py` 15 例（缺密钥/提交参数与 base64/引擎覆盖/视频抽轨清理/轮询成功去时间戳/失败/超时/无分段回退/压缩直传与超限/路由/模型设置校验）；`scripts/verify.sh` 全绿（后端 441 例 + 前端 lint/vitest/build）。
+- **真实联调（已通过）**：`.env` 配好 SecretId/SecretKey 后，本地合成 18s 中文口播 mp4 → `TencentAsr(16k_zh_en_2.0)` 全链路（抽/压音轨 → base64 直传 → 轮询）**16.1s 返回、78 字准确转写**；未改动作者 app_kv 默认，服务商在「AI 设置」自行切换。
+
 ## [M188 / R-199] 2026-09-28 — 素材库换批卡动画（真凶：popLayout 量不到卡片 ref）
 
 > 作者①：「切换博主查询的时候……查询出来的结果卡片没有动画」。

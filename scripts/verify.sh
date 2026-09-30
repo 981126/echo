@@ -51,21 +51,7 @@ else
   echo "==> [backend] 第三方依赖未安装，跳过 ruff/mypy/pytest（安装 backend/requirements.txt 后启用）"
 fi
 
-# 4) 前端
-if [ -f frontend/package.json ]; then
-  if [ -d frontend/node_modules ]; then
-    echo "==> [frontend] lint"
-    (cd frontend && npm run lint) || FAIL=1
-    echo "==> [frontend] build"
-    (cd frontend && npm run build) || FAIL=1
-  else
-    echo "==> [frontend] 依赖未安装，跳过 lint/build（npm install 后启用）"
-  fi
-else
-  echo "==> [frontend] 暂无代码"
-fi
-
-# 4b) 新前端（R-164，React）
+# 4) 前端（frontend_v2，R-164；老前端 frontend/ 已于 R-208 下线）
 if [ -f frontend_v2/package.json ]; then
   if [ -d frontend_v2/node_modules ]; then
     echo "==> [frontend_v2] lint"

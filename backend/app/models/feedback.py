@@ -23,4 +23,6 @@ class Feedback(Base):
     pace_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 内容节奏 1-5
     ending_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 结尾引导 1-5
     style_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 像不像作者 1-5
+    # R-211：状态流转触发分析的 LLM 心得（为什么这篇好/差）；rating/四维分已弃用（只留历史数据）
+    insight: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

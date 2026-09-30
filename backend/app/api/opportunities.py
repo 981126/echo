@@ -1,4 +1,8 @@
-"""内容机会引擎接口（R-185）：观众提问榜 / 每周灵感包 / 选题账本。"""
+"""内容机会引擎接口（R-185）：观众提问榜 / 每周灵感包 / 选题账本。
+
+R-202：慢的、会调 LLM 的接口（提问榜/周包/缺口）改为**后台任务**，点完立即返回 `task_id`，
+结果落 `task.result`（前端切页/刷新回来回填）；轻量快读（账本/已讲/归因）保持同步。
+"""
 
 from __future__ import annotations
 
@@ -7,23 +11,24 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..services import opportunity
+from ..tasks import find_running_task, start_task
 
 router = APIRouter()
 
 
-@router.get("/comments", response_model=dict)
+@router.post("/comments", response_model=dict)
 def comment_clusters(limit: int = 15, use_llm: bool = True, db: Session = Depends(get_db)):
-    """观众提问榜：未使用评论聚类，按需求分排序。
+    """观众提问榜（后台任务）：未使用评论聚类，按需求分排序；R-192 默认用模型1 语义聚类。"""
+    payload = {"limit": max(1, min(limit, 50)), "use_llm": bool(use_llm)}
+    tid = find_running_task("opportunity_clusters")
+    return {"task_id": tid or start_task("opportunity_clusters", payload, opportunity.clusters_task)}
 
-    R-192：默认用**模型1 语义聚类**（use_llm=true）；失败自动回退本地聚类；use_llm=false 强制本地。
-    """
-    return opportunity.comment_clusters(db, limit=max(1, min(limit, 50)), use_llm=use_llm)
 
-
-@router.get("/weekly", response_model=dict)
+@router.post("/weekly", response_model=dict)
 def weekly_pack(limit: int = 20, db: Session = Depends(get_db)):
-    """每周灵感补给包：需求 × 人设 × 热度 × 缺口 综合打分，去重去已讲。"""
-    return opportunity.weekly_pack(db, limit=max(1, min(limit, 40)))
+    """每周灵感补给包（后台任务）：需求 × 人设 × 热度 × 缺口 综合打分，去重去已讲。"""
+    tid = find_running_task("opportunity_weekly")
+    return {"task_id": tid or start_task("opportunity_weekly", {"limit": max(1, min(limit, 40))}, opportunity.weekly_task)}
 
 
 @router.get("/ledger", response_model=dict)
@@ -32,10 +37,11 @@ def topic_ledger(limit: int = 50, db: Session = Depends(get_db)):
     return opportunity.ledger(db, limit=max(1, min(limit, 200)))
 
 
-@router.get("/gap", response_model=dict)
+@router.post("/gap", response_model=dict)
 def gap_suggestions(limit: int = 6, db: Session = Depends(get_db)):
-    """缺口选题（R-187）：AI 基于「已讲话题 + 人设」给出该讲但没讲过的选题。"""
-    return opportunity.gap_suggestions(db, limit=max(1, min(limit, 12)))
+    """缺口选题（后台任务，R-187）：AI 基于「已讲话题 + 人设」给出该讲但没讲过的选题。"""
+    tid = find_running_task("opportunity_gap")
+    return {"task_id": tid or start_task("opportunity_gap", {"limit": max(1, min(limit, 12))}, opportunity.gap_task)}
 
 
 @router.get("/covered", response_model=dict)

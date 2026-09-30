@@ -102,6 +102,24 @@ body {
   animation: progress-slide 1.15s ease-in-out infinite;
 }
 
+/* R-206：「模型正在思考」的三点跳动（components/ui/thinking-dots.tsx）。
+   用 CSS 关键帧而不是 framer —— 见该组件注释：外层 `AnimatePresence initial={false}` 会把
+   framer 的关键帧循环冻在第一帧；这个指示器是「在跑」的唯一可见证据（R-202/§8.6），必须无条件动。 */
+@keyframes thinking-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+.thinking-dot {
+  animation: thinking-dot 0.9s ease-in-out infinite;
+}
+
 /* TipTap 编辑器与 Markdown 预览 */
 .script-editor-content .ProseMirror {
   min-height: 300px;

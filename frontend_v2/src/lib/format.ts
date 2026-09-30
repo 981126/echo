@@ -23,3 +23,12 @@ export function fmtDate(s?: string | null): string {
   const pad = (x: number) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
+
+/** R-212：时分（自动保存时间戳「已自动保存 14:03」） */
+export function fmtTime(t?: Date | string | null): string {
+  if (!t) return ''
+  const d = t instanceof Date ? t : new Date(t)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (x: number) => String(x).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}

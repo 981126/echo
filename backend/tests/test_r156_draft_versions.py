@@ -140,20 +140,20 @@ def test_apply_diff_suggestions_uses_version_chain(db, monkeypatch):
     d = Draft(title="t", script="v2", source="ai")
     db.add(d)
     db.commit()
-    snapshot_version(db, d)
+    snapshot_version(db, d, source="ai_generate")
     d.script = "v3"
     db.commit()
-    snapshot_version(db, d)
+    snapshot_version(db, d, source="manual")  # R-209：AI 版 → 作者定稿 才是可归因的作者修改
 
     seen: dict = {}
 
-    def fake_analyze(stages, llm=None, db=None):
+    def fake_analyze(stages, db=None):
         seen["stages"] = stages
         return [{"label": "更短", "description": "少废话", "reason": "第三版删了套话"}]
 
-    monkeypatch.setattr(diff_analysis, "analyze_diff", fake_analyze)
+    monkeypatch.setattr(diff_analysis, "analyze_sourced_diff", fake_analyze)
     added = diff_analysis.apply_diff_suggestions(db, d)
-    assert seen["stages"] == ["v2", "v3"]
+    assert seen["stages"] == [("ai_generate", "v2"), ("manual", "v3")]
     assert added == 1
     tag = db.query(PersonaTag).filter(PersonaTag.label == "更短").first()
     assert tag is not None and tag.status == "suggested" and "依据" in tag.description
@@ -165,11 +165,13 @@ def test_diff_task_returns_added(db, monkeypatch):
     d = Draft(title="t", script="v2", source="ai")
     db.add(d)
     db.commit()
-    snapshot_version(db, d)
+    snapshot_version(db, d, source="ai_generate")
     d.script = "v3"
     db.commit()
-    snapshot_version(db, d)
-    monkeypatch.setattr(diff_analysis, "analyze_diff", lambda stages, llm=None, db=None: [{"label": "L", "description": "", "reason": ""}])
+    snapshot_version(db, d, source="manual")  # R-209：AI 版 → 作者定稿 才可分析
+    monkeypatch.setattr(
+        diff_analysis, "analyze_sourced_diff", lambda stages, db=None: [{"label": "L", "description": "", "reason": ""}]
+    )
     assert diff_analysis.diff_task(db, {"draft_id": d.id}) == 1
     assert diff_analysis.diff_task(db, {"draft_id": 999}) == 0
 
@@ -194,9 +196,10 @@ def test_rewrite_examples_uses_version_chain(db):
 
 def test_finalize_updates_and_snapshots(db, monkeypatch):
     _owner(db)
-    d = Draft(title="旧", script="旧正文")
+    d = Draft(title="旧", script="旧正文", source="ai")
     db.add(d)
     db.commit()
+    snapshot_version(db, d, source="ai_generate")  # AI 生成的第一版（如 AI 生成草稿落库时留的）
     kinds: list[str] = []
     monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 5)
 
@@ -207,15 +210,28 @@ def test_finalize_updates_and_snapshots(db, monkeypatch):
     assert body["version"]["source"] == "manual"
     assert db.get(Draft, d.id).title == "新"
     assert db.get(Draft, d.id).tags == '["求职"]'
-    assert kinds == [], "首版不触发差异分析（R-157）"
-
-    # 第二版起才触发版本链分析
-    _client(db).post(f"/api/drafts/{d.id}/finalize", json={"title": "新2", "script": "定稿正文改过", "tags": ["求职"]})
+    # R-209：AI 版 → 作者定稿，链可归因，触发版本链分析
     assert kinds == ["diff_analysis"]
 
     r2 = _client(db).get(f"/api/drafts/{d.id}/versions")
     assert r2.status_code == 200
     assert len(r2.json()) == 2
+
+
+def test_finalize_pure_manual_never_triggers_diff(db, monkeypatch):
+    """R-210：纯手写稿（链中无 AI 侧版本）多次定稿也不触发差异分析——手写稿只学正文。"""
+    _owner(db)
+    d = Draft(title="手写", script="旧正文")
+    db.add(d)
+    db.commit()
+    kinds: list[str] = []
+    monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 5)
+
+    r = _client(db).post(f"/api/drafts/{d.id}/finalize", json={"title": "手写", "script": "第一版正文", "tags": []})
+    assert r.status_code == 200, r.text
+    assert kinds == [], "首版不触发差异分析（R-157）"
+    _client(db).post(f"/api/drafts/{d.id}/finalize", json={"title": "手写", "script": "第二版正文", "tags": []})
+    assert kinds == [], "纯手写链不触发差异分析（R-210）"
 
 
 def test_finalize_rejects_blank(db):
@@ -252,4 +268,6 @@ def test_discussion_task_auto_snapshots_ai_version(db, monkeypatch):
     # R-157：无版本时先留「讨论前」，跑完再留「讨论后」
     assert [r.note for r in rows] == ["讨论前", "讨论后"]
     assert all(r.source == "ai_discuss" for r in rows)
-    assert kinds == ["diff_analysis"]  # 2 版才触发
+    # R-209：讨论跑完时终版是 AI 侧（作者还没定稿/回退），不触发差异分析——
+    # 否则会把 AI 自己的讨论改动错当「作者偏好」学进人设（本需求的根因）
+    assert kinds == []

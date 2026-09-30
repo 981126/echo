@@ -24,7 +24,7 @@ from . import model_settings
 from .generation import generate_draft
 from .ideas_service import annotate_items, persona_profile
 from .llm import LLMError
-from .notify import send_daily_digest, send_failure_alert
+from .notify import send_daily_best, send_daily_digest, send_failure_alert
 from .persona import PersonaService
 from .topic_mining import fetch_and_store
 
@@ -342,6 +342,109 @@ class PipelineError(RuntimeError):
         super().__init__(message)
 
 
+def _pick_daily_best_index(db: Session, items: list[dict]) -> int:
+    """R-208：让 AI 从当天几篇里按「人设契合 × 热点热度」选 1 篇；失败退回分数最高。"""
+    if len(items) == 1:
+        return 0
+    lines = []
+    for i, it in enumerate(items):
+        lines.append(
+            f"{i}. [{SLOT_LABEL.get(it['slot'], it['slot'] or '自定义')}] {it['title']}"
+            f"（人设契合分 {it['score']}；入选理由：{it['reason'][:60]}）"
+        )
+    system = (
+        "你是作者的选题主编。今天已生成以下候选选题，请按「与作者人设的契合度 × 当下热度/传播潜力」"
+        "选出**最适合今天开拍的一条**。只输出 JSON："
+        '{"index":编号,"reason":"一句话说明为什么它今天最值得拍"}'
+    )
+    user = "候选：\n" + "\n".join(lines)
+    try:
+        data = PersonaService().call_json(
+            "ideas",
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            temperature=0.3,
+        )
+        raw = (data or {}).get("index")
+        idx = int(raw) if raw is not None else -1
+        if 0 <= idx < len(items):
+            return idx
+    except Exception:  # noqa: BLE001 选优失败不能拖垮流水线，退回分数最高
+        pass
+    return max(range(len(items)), key=lambda i: items[i]["score"])
+
+
+def push_daily_best(db: Session, run_date: str, settings=None) -> dict | None:
+    """R-208：每日「今日最佳」推送——AI 选 1 篇，站内通知 + 邮件推「选题理由 + 完整口播稿」。
+
+    同一天只推一次（Kv 标记防重跑重复推送）；邮件失败不影响（R-141 次要通道）。
+    """
+    from ..models.draft import Draft
+    from ..models.kv import Kv
+    from ..tasks import push_notification
+
+    settings = settings or get_settings()
+    flag_key = f"daily_best_pushed:{run_date}"
+    if db.get(Kv, flag_key) is not None:
+        return None
+    cands = (
+        db.query(TopicCandidate)
+        .filter(TopicCandidate.run_date == run_date)
+        .order_by(TopicCandidate.score.desc())
+        .all()
+    )
+    items: list[dict] = []
+    for c in cands:
+        draft = db.get(Draft, c.draft_id) if c.draft_id else None
+        if draft is None or not (draft.script or "").strip():
+            continue
+        items.append(
+            {
+                "cand": c,
+                "draft": draft,
+                "title": c.title,
+                "slot": c.slot,
+                "score": int(c.score or 0),
+                "reason": c.reason or "",
+            }
+        )
+    if not items:
+        return None
+    chosen = items[_pick_daily_best_index(db, items)]
+    draft = chosen["draft"]
+    c = chosen["cand"]
+    slot_label = SLOT_LABEL.get(c.slot, c.slot or "自定义")
+    reason = chosen["reason"] or f"来自{slot_label}"
+    push_notification(
+        db,
+        kind="daily_best",
+        status="done",
+        title=f"今日最佳选题：{c.title[:40]}",
+        message=(
+            f"【{slot_label}】{c.title}\n\n选题理由：{reason}\n\n"
+            f"口播稿：\n{draft.script}"
+        ),
+        target=f"/drafts?id={draft.id}",
+    )
+    try:
+        send_daily_best(
+            {
+                "title": c.title,
+                "platform": c.platform,
+                "score": int(c.score or 0),
+                "reason": f"【今日最佳 · {slot_label}】{reason}",
+                "cover_text": draft.cover_text or "",
+                "script": draft.script or "",
+            },
+            run_date,
+            settings,
+        )
+    except Exception:  # noqa: BLE001 邮件次要通道，失败不影响
+        log.exception("今日最佳邮件推送失败（run_date=%s）", run_date)
+    db.add(Kv(key=flag_key, value="1"))
+    db.commit()
+    return {"draft_id": draft.id, "title": c.title, "reason": reason}
+
+
 def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> PipelineRun:
     """执行当日流水线。幂等：当天已成功且非 force 直接返回；running 超时视为卡死可重跑。
 
@@ -395,6 +498,12 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
         db.commit()
 
         sent = send_daily_digest(db, key, settings)
+        # R-208：每日「今日最佳」——AI 从当天几篇选 1 篇，通知 + 邮件推理由与口播稿全文
+        try:
+            push_daily_best(db, key, settings)
+        except Exception:  # noqa: BLE001 推送失败不能把已生成好的稿子判为失败
+            db.rollback()
+            log.exception("今日最佳推送失败（run_date=%s）", key)
         # R-140：稿子已经生成好了，邮件（次要通道）失败只记原因，不能把整轮判为 failed
         run.status = "done"
         run.generated_count = len(drafts)

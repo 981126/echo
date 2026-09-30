@@ -195,8 +195,8 @@ export function EditDrawer({
     [detail]
   )
 
-  if (!open) return null
-
+  // R-205：不再 `if (!open) return null` —— 否则父组件先卸载，抽屉的退出动画根本没机会播；
+  // 由 <Drawer> 自己管理「关闭时保持挂载 → 动画 → 卸载」。
   async function applyLinks(): Promise<void> {
     if (!state || !orig || !videoId) return
     const links: Record<string, string> = {}
@@ -332,7 +332,7 @@ export function EditDrawer({
 
   const transcript = detail?.transcript
   const asrLabel = transcript?.asr_provider
-    ? { aliyun: '阿里云', siliconflow: '硅基流动', mock: 'mock' }[transcript.asr_provider] || transcript.asr_provider
+    ? { aliyun: '阿里云', siliconflow: '硅基流动', tencent: '腾讯云', mock: 'mock' }[transcript.asr_provider] || transcript.asr_provider
     : ''
 
   return (

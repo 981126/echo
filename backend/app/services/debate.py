@@ -146,6 +146,32 @@ def _finish_run_header(db: Session, header_id: int, *, rounds_done: int, degrade
     db.commit()
 
 
+def mark_latest_run_reverted(db: Session, draft_id: int) -> bool:
+    """R-209：作者回退跨过了 AI 讨论结果——把最近一次讨论运行头回填 ``reverted: true``。
+
+    「讨论后被作者改回旧版」是双模型讨论最强的负反馈，留在运行头上，
+    以后做生成方×评审方组合效果统计时可直接取用。
+    """
+    row = (
+        db.query(DraftDiscussion)
+        .filter(DraftDiscussion.draft_id == draft_id, DraftDiscussion.kind == "run")
+        .order_by(DraftDiscussion.id.desc())
+        .first()
+    )
+    if row is None:
+        return False
+    try:
+        payload = json.loads(row.content or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    if payload.get("reverted"):
+        return False
+    payload["reverted"] = True
+    row.content = json.dumps(payload, ensure_ascii=False)
+    db.commit()
+    return True
+
+
 def _slot_meta(slot: dict) -> dict:
     """槽位配置（含可展示文案）——运行头用。"""
     vendor = str(slot.get("vendor") or "")
@@ -278,7 +304,7 @@ def run_debate(
     返回 {draft_id, title, models, fallback, rounds, degraded}，其中 origin 信息用于
     写入 `Draft.quality`，让作者一眼看出这篇稿子由哪两个模型产出、是否降级。
     """
-    from .generation import _self_check
+    from .generation import _self_check, style_diagnostics
 
     settings = settings or get_settings()
     route = llm_router.snapshot(db)
@@ -373,7 +399,7 @@ def run_debate(
     revise_system = (
         "你是撰稿模型。根据评审意见，用作者的口吻重写整篇口播脚本，"
         "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。\n"
-        f"作者语言习惯（必须模仿）：\n{style_note}"
+        f"作者语言习惯（自然贴近即可，不要硬塞口头禅/标志词）：\n{style_note}"
     )
 
     latest = draft.script
@@ -429,7 +455,8 @@ def run_debate(
         _add(db, draft.id, r, gen, "revise", latest, llm=gen_llm)
         rounds_done = r
 
-    # 3) 生成后自检（R-131）：有问题就带着问题让生成方再改一次（只 1 次，避免成本失控）
+    # 3) 生成后自检（R-207）：**只有红线**才触发一次收口重写；
+    #    口癖/高频词覆盖率、AI 腔词只做诊断（不强制重写，避免机械塞口头禅→模仿腔）。
     issues, coverage = _self_check(db, draft.script)
     if issues:
         _status(
@@ -442,9 +469,8 @@ def run_debate(
         )
         fix_user = (
             f"这是你自己刚写的脚本：\n{latest}\n\n"
-            "以下几处不符合作者风格或踩了红线，请整篇重写并避免：\n"
+            "以下几处踩了作者的**红线**，请整篇重写并避开；保持原有语气，不要为改而改、也不要硬塞口头禅：\n"
             + "\n".join(f"- {i}" for i in issues)
-            + f"\n\n作者语言习惯（必须模仿）：\n{style_note}"
         )
         try:
             fixed = _chat_once(
@@ -458,6 +484,7 @@ def run_debate(
         except Exception as exc:  # noqa: BLE001 收口失败保留原稿
             _note(db, draft.id, rounds_total + 1, f"自检收口修订失败：{str(exc)[:200]}，保留当前稿")
 
+    diagnostics = style_diagnostics(db, draft.script)
     degraded = bool(gen_llm.degraded or critic_llm.degraded or initial["model"] != gen)
     draft.quality = json.dumps(
         {
@@ -468,7 +495,8 @@ def run_debate(
             "rounds_done": rounds_done,
             "issues": issues,
             "passed": not issues,
-            "style_coverage": coverage,
+            "style_coverage": diagnostics["style_coverage"],
+            "diagnostics": diagnostics,
             "sole_model": gen == critic,
         },
         ensure_ascii=False,

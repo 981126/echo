@@ -8,12 +8,12 @@
 | 层 | 选型 | 说明 |
 |---|---|---|
 | 后端 | Python 3.12+ / FastAPI / Uvicorn | 单进程单体；路由薄、业务厚；同步阻塞业务跑在后台线程 |
-| 前端（当前，R-164） | React 19 + TS + Vite + Tailwind v4 + shadcn/ui + Framer Motion + TanStack Query | **默认前端**（R-168）：dev(3000) 代理 8000，build 后由 FastAPI 挂 **/v2**；登录态独立；API 类型由 `/openapi.json` 生成（`npm run gen:api`） |
+| 前端（R-164） | React 19 + TS + Vite + Tailwind v4 + shadcn/ui + Framer Motion + TanStack Query | **唯一前端**（R-208 起）：dev(3000) 代理 8000；build 后由 FastAPI 挂**根路径 `/`**；API 类型由 `/openapi.json` 生成（`npm run gen:api`） |
 | ~~老前端（已废弃 R-168）~~ | Vue 3 + Vite + Naive UI | 只读保留，禁止修改；build 产物仍挂根路径兜底，后续下线另立需求 |
 | 数据库 | SQLite + SQLAlchemy 2.x（R-163 起 WAL + busy_timeout） | 单用户零运维；engine `check_same_thread=False, timeout=30` 支持多线程；WAL 支持并发读写 |
 | schema 演进 | 幂等轻量迁移（`db.py` 内函数） | 每次启动 `init_db()` 检查补列/建索引；**未用 Alembic**（tech-debt） |
 | 定时任务 | APScheduler BackgroundScheduler（进程内） | 每日流水线/平台同步两轮/指标留存/备份/清理/每周风格重建 |
-| 后台任务 | `background_tasks` 表 + daemon 线程（tasks.py）+ 同步并发消费者池（sync_pool.py，R-163） | 长任务入库、结束自动写通知；同步类任务经队列线程池并行消费；无外部消息队列 |
+| 后台任务 | `background_tasks` 表 + daemon 线程（tasks.py）+ 同步并发消费者池（sync_pool.py，R-163） | 长任务入库、结束自动写通知；同步类任务经队列线程池并行消费；无外部消息队列。**R-202**：任务为「进行中」唯一事实源，`GET /api/tasks` 多状态 + SSE `task.update`（带 label/target）驱动前端顶栏「进行中 N」指示器（挂载回扫 + 10s 轮询兜底），慢的同步接口已转任务 |
 | 文件监听 | watcher.py 线程轮询 `inbox`（10s） | 拖入视频移入 videos 并建行（**不自动转写**） |
 | 外部服务 | 见 §3 | 全部真实接入（LLM/ASR/TikHub/热搜/SMTP） |
 
@@ -44,8 +44,8 @@ echo/
 │   │   └── watcher.py     # inbox 轮询
 │   ├── tests/             # pytest（183 项，离线 mock 可跑）
 │   └── .venv/
-├── frontend/src/          # views(10 页)/components(23)/composables/api/router/lib
-├── frontend_v2/src/       # R-164 全新前端（React 19+TS+Vite，Tailwind v4/shadcn/ui/Framer Motion/TanStack Query；api 由 /openapi.json 生成；生产挂 /v2）
+├── frontend_v2/src/       # 唯一前端（R-164/R-208）：React 19+TS+Vite，Tailwind v4/shadcn/ui/Framer Motion/TanStack Query；api 由 /openapi.json 生成；生产挂根路径 /
+│                          #   pages/prompter/ = R-214 提词器 + R-215 内置网页录像（顶层路由，后端零改动；纯逻辑 prompter-text.ts / recorder.ts + 40 例单测）
 └── scripts/               # verify.sh / backup.sh / update.sh
 ```
 
@@ -58,6 +58,7 @@ echo/
 | 阿里云 OSS | ASR 文件中转（临时预签名） | `aliyun_oss.py` | `ALIYUN_OSS_BUCKET/REGION` |
 | 阿里云 FileTrans | 录音文件识别 4.0 | `aliyun_filetrans.py` | `ALIYUN_ASR_ACCESS_KEY_ID/SECRET/APP_KEY`、`ASR_MODE=aliyun` |
 | 硅基流动 | 音频直传转写（Qwen/Qwen3-ASR-1.7B，免费，R-108） | `siliconflow_asr.py` | `SILICONFLOW_API_KEY/BASE_URL/ASR_MODEL`、`ASR_MODE=siliconflow` |
+| 腾讯云 | 录音文件识别（本地音频 base64 直传 ≤5MB，引擎可选，R-200） | `tencent_asr.py` | `TENCENT_ASR_SECRET_ID/SECRET_KEY/REGION/ENGINE_MODEL`、`ASR_MODE=tencent` |
 | QQ SMTP | 邮件推送 | `services/notify.py` | `SMTP_HOST/PORT/USER/AUTH_CODE/MAIL_TO` |
 
 **数据源适配器（R-062）**：`services/platform/base.py` 定义 `DataSource` Protocol
@@ -108,7 +109,7 @@ background_tasks / sync_jobs / notifications / app_kv
 - 时间列统一北京时间（core/timeutil.now，R-066）
 
 ## 7. 关键数据流
-1. **导入学习**：上传/inbox → videos 行 → 编辑页手动「语音转文字」（抽音轨→按 .env 选 阿里云 FileTrans(OSS 中转) 或 硅基流动直传，R-108→校对稿回填）→ 确认标签 → 进入人设/风格语料
+1. **导入学习**：上传/inbox → videos 行 → 编辑页手动「语音转文字」（抽音轨→按运行时 ASR 配置选 阿里云 FileTrans(OSS 中转) / 硅基流动直传 / 腾讯云录音文件识别(base64 直传)，R-108/R-200→校对稿回填）→ 确认标签 → 进入人设/风格语料
 2. **平台同步**：run_sync（daily top15 带视频下载转写 / weekly 3 / initial 全量）→ 账号并发（每平台独立线程/会话）→ 作品 upsert + 指标按天 upsert + 评论 Top50 → auto_merge 合并 work → daily 再对前15条媒体补齐（下载+转写，R-085）；**R-163** 博主级（sync-all / 每日同步）与素材级（逐素材队列）皆经 `sync_pool` 线程池并发消费、TikHub 全局令牌桶控速 → 进度实时写 sync_jobs → 完成通知
 3. **选题/生成**：热点/灵感（灵感池入池：daily 逐素材队列与全量/每周同步共用 `pool_ideas_from_comments`，限量 单帖≤8 / 每博主每天≤40，R-140）→ 人设+风格检索加权（TF-IDF/RAG）→ 双模型讨论（生成方 × 评审方）→ 草稿 → 作者改写 → 反馈回流
    - 非脚本生成的 AI 功能（人设/预打标/校对/差异/对话/提示词优化/金样本评测/对标分析）统一走 `llm_router.primary_llm`：**模型1 主用 → 模型2 降级**（报错/超时/空正文/输出不合法），参数按厂家归一化，降级写日志 + 站内通知

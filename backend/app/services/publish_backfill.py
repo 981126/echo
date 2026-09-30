@@ -135,3 +135,9 @@ def _remember(db: Session, ids: list[int]) -> None:
     else:
         row.value = value
     db.commit()
+
+
+# ---------- R-202：回填历史发布改为后台任务 ----------
+
+def apply_task(db: Session, payload: dict) -> dict:
+    return apply_links(db)

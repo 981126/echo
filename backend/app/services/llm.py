@@ -195,24 +195,3 @@ class OpenAIClient:
         if not isinstance(result, dict):
             raise LLMUnusableOutput("模型未返回合法 JSON")
         return result
-
-
-class DeepSeekClient(OpenAIClient):
-    def __init__(self, settings=None):
-        s = settings or get_settings()
-        super().__init__(s.deepseek_base_url, s.deepseek_api_key, s.deepseek_model)
-
-
-class KimiClient(OpenAIClient):
-    def __init__(self, settings=None):
-        s = settings or get_settings()
-        # kimi 推理模型只接受 temperature=1 → 不传 temperature
-        super().__init__(s.kimi_base_url, s.kimi_api_key, s.kimi_model, supports_temperature=False)
-
-
-def get_llm(name: str, settings=None):
-    """按名字取客户端：deepseek | kimi。"""
-    name = (name or "").lower()
-    if name == "kimi":
-        return KimiClient(settings)
-    return DeepSeekClient(settings)

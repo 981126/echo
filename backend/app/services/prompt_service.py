@@ -186,6 +186,7 @@ def version_effect(db: Session, key: str) -> list[dict]:
     """按提示词版本聚合草稿反馈（R-129 M116）：看出哪一版真的产出更受认可的稿子。
 
     只有 generation 会产出草稿，其它 key 返回空。
+    R-211：认可口径改 status 驱动（done=认可 / archived=否定）；历史 rating 仅作参考展示。
     """
     if key != "generation":
         return []
@@ -204,12 +205,12 @@ def version_effect(db: Session, key: str) -> list[dict]:
         )
         row["drafts"] += 1
         row["persona_versions"].add(d.persona_version or 0)
+        if d.status == "done":
+            row["used"] += 1  # R-211：完成即认可（历史 liked 口径弃用）
         for fb in fb_by_draft.get(d.id, []):
-            if fb.rating:
+            if fb.rating:  # 历史评分仅作参考（R-211 起不再产生新评分）
                 row["rated"] += 1
                 row["rating_sum"] += int(fb.rating)
-            if fb.liked:
-                row["used"] += 1
     out: list[dict] = []
     for _ver, row in sorted(agg.items(), key=lambda kv: kv[0], reverse=True):
         persona_versions = sorted(v for v in row.pop("persona_versions") if v)
@@ -243,49 +244,66 @@ def enable_version(db: Session, key: str, version: int) -> AiPrompt | None:
 
 
 def feedback_context(db: Session) -> str:
-    """作者反馈回流（R-022 / R-129 M116 加厚）：星级 + 四维分节分 + 「AI 原稿→作者改后」diff。
+    """作者反馈回流（R-211 重构）：status 即反馈信号 + 作者亲笔评价 + LLM 心得。
 
-    diff 是最强的偏好信号：它直接说明作者把 AI 稿改成了什么样。
+    - 认可 = 完成（status='done'）的稿；否定 = 不采用（status='archived'）且非纯手写的稿
+      （R-210：手写稿被放弃只是作者不想做，不代表写得差，不进负向）。
+    - 每条附：作者亲笔评价（comment，如有）+ 复盘心得（feedback.insight，R-211 状态触发的 LLM 分析）。
+    - 历史 rating/liked/四维分已弃用，不再参与。
     """
     from ..models.draft import Draft
     from ..models.feedback import Feedback
+    from .creator_service import current_creator_id
+    from .draft_versions import pure_manual_map
 
-    def _dims(fb) -> str:
-        pairs = [("钩子", fb.hook_score), ("节奏", fb.pace_score), ("结尾", fb.ending_score), ("风格", fb.style_score)]
-        shown = [f"{name}{val}" for name, val in pairs if val]
-        return f"（{'/'.join(shown)}）" if shown else ""
+    cid = current_creator_id(db)
 
-    def _line(fb, d) -> str:
-        text = (d.script or "").strip() if d else ""
-        out = f"- 评分{fb.rating if fb.rating is not None else '-'}{_dims(fb)}：{text[:200]}"
-        original = (d.original_script or "").strip() if d else ""
-        if original and text and original != text:
+    def _drafts_by_status(status: str, limit: int = 5) -> list:
+        q = db.query(Draft).filter(Draft.status == status, Draft.script != "")
+        if cid:
+            q = q.filter(Draft.creator_id == cid)
+        return q.order_by(Draft.updated_at.desc()).limit(limit).all()
+
+    highs = _drafts_by_status("done")
+    lows = [d for d in _drafts_by_status("archived", limit=20) if not pure_manual_map(db, [d]).get(d.id, False)][:5]
+
+    # 每稿最新一条非空 comment / insight（两次小查询，避免逐稿 N+1）
+    ids = [d.id for d in highs + lows]
+    comments: dict[int, str] = {}
+    insights: dict[int, str] = {}
+    if ids:
+        rows = (
+            db.query(Feedback.draft_id, Feedback.comment, Feedback.insight)
+            .filter(Feedback.draft_id.in_(ids))
+            .order_by(Feedback.id.desc())
+            .all()
+        )
+        for draft_id, comment, insight in rows:
+            if draft_id not in comments and (comment or "").strip():
+                comments[draft_id] = comment.strip()
+            if draft_id not in insights and (insight or "").strip():
+                insights[draft_id] = insight.strip()
+
+    def _line(d) -> str:
+        text = (d.script or "").strip()
+        out = f"- {text[:200]}"
+        if comments.get(d.id):
+            out += f"\n  作者评价：{comments[d.id][:150]}"
+        if insights.get(d.id):
+            out += f"\n  复盘心得：{insights[d.id][:200]}"
+        # R-209：「AI 原稿→作者改后」diff 仅对 AI 稿展示（手写稿 original_script 语义不同）
+        original = (d.original_script or "").strip()
+        if d.source == "ai" and original and text and original != text:
             out += f"\n  AI 原稿：{original[:150]}\n  作者改后：{text[:150]}"
         return out
 
     lines: list[str] = []
-    highs = (
-        db.query(Feedback, Draft)
-        .join(Draft, Feedback.draft_id == Draft.id)
-        .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
-        .order_by(Feedback.id.desc())
-        .limit(5)
-        .all()
-    )
-    lows = (
-        db.query(Feedback, Draft)
-        .join(Draft, Feedback.draft_id == Draft.id)
-        .filter(Feedback.rating <= 2)
-        .order_by(Feedback.id.desc())
-        .limit(5)
-        .all()
-    )
     if highs:
-        lines.append("作者认可（4-5 分/采用）的稿子——保持这种腔调与结构：")
-        lines.extend(_line(fb, d) for fb, d in highs if d)
+        lines.append("作者完成的稿子（认可）——保持这种腔调与结构：")
+        lines.extend(_line(d) for d in highs)
     if lows:
-        lines.append("作者不满意（1-2 分）的稿子——避免这种腔调：")
-        lines.extend(_line(fb, d) for fb, d in lows if d)
+        lines.append("作者不采用的稿子——避免这种腔调：")
+        lines.extend(_line(d) for d in lows)
     return "\n".join(lines)
 
 
@@ -464,11 +482,11 @@ def _start_eval(db: Session, key: str, version: int) -> int | None:
         return None
 
 
-def maybe_notify_prompt_refresh(db: Session, threshold: int = 10) -> bool:
-    """素材累计到阈值时，提醒作者可**手动**重跑提示词候选（R-131：不再自动产出候选）。
+def maybe_auto_optimize_prompt(db: Session, threshold: int = 10) -> bool:
+    """R-208：素材累计到阈值时**自动**排队提示词优化（不再只发提醒、不需作者手动点）。
 
-    返回是否发出了提醒。自动产出被取消的原因：generation 提示词杠杆小、成本高、候选噪音大；
-    现在改为「提醒 + 作者手动点一次（会自动做金样本评测）」。
+    自动产出候选 → 自动跑金样本评测 → 明显更好则自动启用（见 `prompt_eval.prompt_eval_task`）。
+    已有同 key 优化任务在跑时跳过本次（计数已清零，下次导入再触发）。返回是否入队。
     """
     from ..models.kv import Kv
 
@@ -483,17 +501,32 @@ def maybe_notify_prompt_refresh(db: Session, threshold: int = 10) -> bool:
         return False
     row.value = "0"
     db.commit()
-    from ..tasks import push_notification
+    from ..tasks import find_running_task, push_notification, start_task
 
+    if find_running_task("prompt_optimize", {"key": "generation"}) is not None:
+        return False
+    start_task("prompt_optimize", {"key": "generation"}, auto_optimize_generation_task)
     push_notification(
         db,
-        kind="prompt_refresh_hint",
+        kind="prompt_optimize",
         status="done",
-        title="素材有更新，可重跑提示词候选",
-        message=f"新增素材已累计 {threshold} 条；到「AI 提示词」页手动点一次「AI 基于最新素材优化」即可（会自动做金样本评测）",
+        title="素材已更新，自动开始优化生成提示词",
+        message=f"新增素材累计 {threshold} 条，已自动排队优化「生成脚本」提示词（评测明显更好会自动启用并通知）",
         target="/prompts?key=generation",
     )
     return True
+
+
+def auto_optimize_generation_task(db: Session, payload: dict, update=None) -> dict:
+    """R-208：到量自动优化——样本不足静默跳过，其余失败照常抛给任务层记错。"""
+    key = str(payload.get("key") or "generation")
+    try:
+        row = optimize(db, key)
+    except PromptOptimizeError as exc:
+        if "样本不足" in str(exc):
+            return {"message": f"{label(key)} 样本不足，跳过自动优化"}
+        raise
+    return {"key": row.key, "version": row.version}
 
 
 # 规则型提示词（有明确规则、样本可量化）：一键批量优化的对象（R-131）
@@ -527,3 +560,9 @@ def optimize_rule_keys_task(db: Session, payload: dict, update=None) -> dict:
     if failed:
         parts.append(f"失败 {len(failed)} 个")
     return {"message": "；".join(parts), "made": made, "skipped": skipped, "failed": failed}
+
+
+def optimize_task(db: Session, payload: dict) -> dict:
+    """R-202：单键提示词优化改为后台任务（LLM 较慢）；失败原因经 task.error 回传。"""
+    row = optimize(db, str(payload.get("key") or ""), str(payload.get("material") or ""))
+    return {"key": row.key, "version": row.version}

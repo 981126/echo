@@ -16,6 +16,10 @@ oss2>=2.19
 aliyun-python-sdk-core>=2.16
 imageio-ffmpeg>=0.4
 
+# 腾讯云 ASR 真实接入（R-200）：录音文件识别 CreateRecTask/DescribeTaskStatus
+# 用模块化包（只依赖 tencentcloud-sdk-python-common），避免整包 tencentcloud-sdk-python 的沉重依赖
+tencentcloud-sdk-python-asr>=3.1.177
+
 # B站 yt-dlp 直连下载兜底（R-078）
 yt-dlp>=2025.6
 

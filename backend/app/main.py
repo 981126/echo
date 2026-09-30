@@ -36,6 +36,10 @@ async def lifespan(app: FastAPI):
     # R-144 B：结构自检（模型声明的列 vs 实际库）——缺列时日志 + 站内通知，绝不阻塞启动
     schema_guard.run_startup_check(engine)
     mark_interrupted_tasks_on_startup()  # R-089：重启后清理遗留 running 任务
+    # R-208：一次性按规则清理历史积压的人设待确认建议（Kv 标记保证只跑一次，后台线程）
+    from .services.ingest import maybe_auto_confirm_backlog_on_startup
+
+    maybe_auto_confirm_backlog_on_startup()
     from .services.pipeline import mark_stale_pipeline_runs_on_startup
 
     mark_stale_pipeline_runs_on_startup()  # R-133：流水线 running 卡死自愈
@@ -133,10 +137,7 @@ app.mount("/media/videos", StaticFiles(directory=str(_settings.videos_dir)), nam
 app.mount("/uploads", StaticFiles(directory=str(_settings.uploads_dir)), name="uploads")
 
 # 托管前端构建产物（存在时挂载；/api 路由已先行注册，不受影响）
-# R-164：全新前端 frontend_v2（React）挂 /v2，与老前端并存互不影响
+# R-208：老前端 frontend/ 已下线，根路径直接托管 frontend_v2（React）
 _FRONTEND_V2_DIST = Path(__file__).resolve().parents[2] / "frontend_v2" / "dist"
 if _FRONTEND_V2_DIST.exists():
-    app.mount("/v2", StaticFiles(directory=str(_FRONTEND_V2_DIST), html=True), name="static_v2")
-_FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-if _FRONTEND_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="static")
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_V2_DIST), html=True), name="static_v2")
