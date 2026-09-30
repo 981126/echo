@@ -15,6 +15,7 @@
 5. `docs/WORKFLOW.md` —— 标准流程细则（含需求反问清单）
 6. `docs/DECISIONS.md` —— 关键决策记录（为什么这么设计，别改坏）
 7. 按需：`docs/QUICKSTART.md`（本地跑起来）、`docs/API.md`（接口，人工维护）、`docs/DATABASE.md`（表结构，人工维护）、`docs/GLOSSARY.md`（术语）、`docs/FAQ.md`
+8. **多 agent 并行开发时（动手前必读）**：`docs/PARALLEL-DEV.md` —— 一需求一 worktree 一分支（同级目录）、依赖硬链接共享、端口与数据库隔离、收尾流程，以及「不 `git add -A`／聚合文档单写者／并行时段不 gc 不改写历史不删 ref」等防污染纪律
 
 > 注意：`docs/API.md` 与 `docs/DATABASE.md` 由**人工维护**（仓库内没有生成器脚本，此前"自动生成"的描述与实际不符，R-136 已更正）。
 > 改代码后如涉及接口/表结构，请同步改这两份；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验
