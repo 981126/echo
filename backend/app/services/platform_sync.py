@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 from ..core.timeutil import now as _app_now
 
 from sqlalchemy import text
@@ -31,25 +34,58 @@ from .platform_assets import _cover_path_for, _ensure_account_avatar
 from .platform.budget import BudgetExceeded, _charge, ensure_budget, get_budget, set_budget  # noqa: F401
 from .events import publish
 from .creator_service import get_current_creator
-from .platform.base import CommentData, DataSource, make_source
+from .platform.base import CommentData, DataSource, PostData, make_source
 
 _PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
 
+# R-222：同步进度更新防抖——跨账号/线程共享同一 job_id 时减少 SQLite 写压力
+_JOB_PROGRESS_LOCK = threading.Lock()
+_job_progress_pending: dict[int, dict] = {}
+_JOB_PROGRESS_FORCE_KEYWORDS = ("完成", "失败", "拉取到", "补全", "排队中", "同步中")
+
 
 def _job_progress(db: Session, job_id: int | None, *, done: int = 0, total: int = 0, note: str | None = None) -> None:
-    """R-070：累加写同步任务进度（done/total 原子累加），进度更新失败不影响同步主体。"""
+    """R-070/R-222：累加写同步任务进度（done/total 原子累加），进度更新失败不影响同步主体。
+
+    新增防抖：同 job_id 的多次小进度会先累计，每 2s（可配）或遇到阶段关键词/完成时统一 flush，
+    显著降低 SQLite 写锁竞争。
+    """
     if not job_id:
         return
+    settings = get_settings()
+    debounce = float(getattr(settings, "sync_progress_debounce_seconds", 2.0) or 2.0)
+    now = time.monotonic()
+    force = note and any(k in note for k in _JOB_PROGRESS_FORCE_KEYWORDS)
+
+    with _JOB_PROGRESS_LOCK:
+        pending = _job_progress_pending.setdefault(
+            job_id, {"done": 0, "total": 0, "last_note": "", "last_at": 0}
+        )
+        pending["done"] += max(0, int(done))
+        pending["total"] += max(0, int(total))
+        if note:
+            pending["last_note"] = note
+        last_at = pending["last_at"]
+        if not force and last_at and now - last_at < debounce:
+            return
+        flush_done = pending["done"]
+        flush_total = pending["total"]
+        flush_note = note or pending["last_note"]
+        pending["done"] = 0
+        pending["total"] = 0
+        pending["last_note"] = ""
+        pending["last_at"] = now
+
     try:
-        if note is None:
+        if flush_note:
             db.execute(
-                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t WHERE id = :id"),
-                {"d": max(0, int(done)), "t": max(0, int(total)), "id": job_id},
+                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t, progress_note = :n WHERE id = :id"),
+                {"d": flush_done, "t": flush_total, "n": flush_note[:200], "id": job_id},
             )
         else:
             db.execute(
-                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t, progress_note = :n WHERE id = :id"),
-                {"d": max(0, int(done)), "t": max(0, int(total)), "n": (note or "")[:200], "id": job_id},
+                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t WHERE id = :id"),
+                {"d": flush_done, "t": flush_total, "id": job_id},
             )
         db.commit()
         row = db.query(SyncJob).filter(SyncJob.id == job_id).first()
@@ -93,19 +129,38 @@ def _upsert_profile_snapshot(db: Session, account: CreatorAccount, client: DataS
         row.raw = json.dumps(profile.raw, ensure_ascii=False)
     if profile.nickname:
         account.nickname = profile.nickname
-    _ensure_account_avatar(db, account, profile)
-    db.commit()
+    db.commit()  # 先提交快照/昵称，释放写锁
+    avatar_path = _ensure_account_avatar(account, profile)  # 事务外下载头像
+    if avatar_path:
+        account.avatar_path = avatar_path
+        db.commit()  # 短事务更新头像路径
 
 
-def _ensure_post(db: Session, account: CreatorAccount, post, client: DataSource) -> PlatformPost:
-    row = (
-        db.query(PlatformPost)
-        .filter(
-            PlatformPost.platform == account.platform,
-            PlatformPost.platform_post_id == post.platform_post_id,
+def _ensure_post(
+    db: Session,
+    account: CreatorAccount,
+    post,
+    client: DataSource,
+    *,
+    commit: bool = True,
+    existing: dict[tuple[str, str], PlatformPost] | None = None,
+) -> PlatformPost:
+    """确保单条 PlatformPost 存在并写入当天统计。
+
+    R-222：新增 `commit=False` 批量模式与 `existing` 预加载字典，用于消除 N+1 与逐行 commit。
+    批量模式下调用方负责在合适的时机统一 commit；封面下载仍由调用方在事务外处理。
+    """
+    key = (account.platform, post.platform_post_id)
+    row = existing.get(key) if existing else None
+    if row is None:
+        row = (
+            db.query(PlatformPost)
+            .filter(
+                PlatformPost.platform == account.platform,
+                PlatformPost.platform_post_id == post.platform_post_id,
+            )
+            .first()
         )
-        .first()
-    )
     if row is None:
         row = PlatformPost(
             account_id=account.id,
@@ -120,6 +175,8 @@ def _ensure_post(db: Session, account: CreatorAccount, post, client: DataSource)
         )
         db.add(row)
         db.flush()
+        if existing is not None:
+            existing[key] = row
     else:
         row.title = post.title or row.title
         row.desc = post.desc or row.desc
@@ -127,29 +184,61 @@ def _ensure_post(db: Session, account: CreatorAccount, post, client: DataSource)
         row.publish_time = post.publish_time or row.publish_time
         if post.raw:
             row.raw = json.dumps(post.raw, ensure_ascii=False)
+        if existing is not None:
+            existing[key] = row
     if post.tags:
         row.tags = json.dumps(list(dict.fromkeys(post.tags))[:20], ensure_ascii=False)
-    if not row.cover_path:
-        row.cover_path = _cover_path_for(
-            db, account.platform, post.platform_post_id, post.title, post.cover_url
-        )
     # 单条统计：列表自带统计则不额外请求（省额度）；否则拉单作品详情
     if post.stats:
-        _write_stat(db, row, post.stats)
+        _write_stat(db, row, post.stats, commit=False)
     else:
         try:
             stats = client.fetch_post_stats(account.platform, post.platform_post_id, account)
             _charge(db)
-            _write_stat(db, row, stats)
+            _write_stat(db, row, stats, commit=False)
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001 单条失败不中断
             db.rollback()
-    db.commit()
+    if commit:
+        db.commit()  # 提交作品与统计，释放写锁
     return row
 
 
-def _write_stat(db: Session, post: PlatformPost, stats: dict) -> None:
+def _ensure_covers_batch(db: Session, account: CreatorAccount, posts: list[PlatformPost], post_data_map: dict[int, PostData]) -> None:
+    """R-222：批量下载封面，事务外 I/O 不阻塞作品入库；只更新缺失 cover_path 的行。
+
+    post_data_map: post.id -> 原始 PostData（取 cover_url/title）
+    """
+    needed = [p for p in posts if p.id and not p.cover_path and p.id in post_data_map]
+    if not needed:
+        return
+    cover_names: dict[int, str] = {}
+    for post in needed:
+        pd = post_data_map.get(post.id)
+        if not pd:
+            continue
+        try:
+            cover_name = _cover_path_for(
+                account.platform, post.platform_post_id, post.title, pd.cover_url
+            )
+            if cover_name:
+                cover_names[post.id] = cover_name
+        except Exception:  # noqa: BLE001 单张封面失败不中断
+            pass
+    if cover_names:
+        try:
+            for post_id, name in cover_names.items():
+                db_post = db.get(PlatformPost, post_id)
+                if db_post is not None:
+                    db_post.cover_path = name
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+
+
+def _write_stat(db: Session, post: PlatformPost, stats: dict, *, commit: bool = True) -> None:
+    """R-222：新增 commit=False 批量模式，由调用方统一 commit。"""
     extra = stats.get("extra") or {}
     row = (
         db.query(PlatformPostStat)
@@ -170,7 +259,8 @@ def _write_stat(db: Session, post: PlatformPost, stats: dict) -> None:
     else:
         for k, v in data.items():
             setattr(row, k, v)
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def _raw_of(post) -> dict:
@@ -205,34 +295,48 @@ def _norm_comment_items(items) -> list[CommentData]:
     return out
 
 
-def _upsert_comments(db: Session, post: PlatformPost, comments: list[CommentData], limit: int = 50) -> dict:
-    """按点赞降序保留 Top limit 条入库；同文本去重（点赞取更高值）。返回 {added, updated}。"""
+def _upsert_comments(
+    db: Session,
+    post: PlatformPost,
+    comments: list[CommentData],
+    limit: int = 50,
+    *,
+    commit: bool = True,
+    existing: dict[str, PlatformPostComment] | None = None,
+) -> dict:
+    """按点赞降序保留 Top limit 条入库；同文本去重（点赞取更高值）。返回 {added, updated}。
+
+    R-222：支持 `existing` 预加载字典（key=text）与 `commit=False` 批量模式。
+    """
     items = sorted(
         (c for c in _norm_comment_items(comments)),
         key=lambda c: (c.likes, c.text),
         reverse=True,
     )[: int(limit or 50)]
+    if existing is None:
+        existing = {
+            row.text: row
+            for row in db.query(PlatformPostComment)
+            .filter(PlatformPostComment.post_id == post.id)
+            .all()
+        }
     added = 0
     updated = 0
     for c in items:
         text = c.text.strip()
-        row = (
-            db.query(PlatformPostComment)
-            .filter(PlatformPostComment.post_id == post.id, PlatformPostComment.text == text)
-            .first()
-        )
+        row = existing.get(text)
         likes = int(c.likes or 0)
         nick = (c.user_nick or "")[:100]
         if row is None:
-            db.add(
-                PlatformPostComment(
-                    post_id=post.id,
-                    platform=post.platform,
-                    text=text,
-                    likes=likes,
-                    user_nick=nick,
-                )
+            row = PlatformPostComment(
+                post_id=post.id,
+                platform=post.platform,
+                text=text,
+                likes=likes,
+                user_nick=nick,
             )
+            db.add(row)
+            existing[text] = row
             added += 1
         else:
             if likes > int(row.likes or 0):
@@ -241,7 +345,8 @@ def _upsert_comments(db: Session, post: PlatformPost, comments: list[CommentData
             if nick and nick != (row.user_nick or ""):
                 row.user_nick = nick
                 updated += 1
-    db.commit()
+    if commit:
+        db.commit()
     return {"added": added, "updated": updated}
 
 
@@ -269,6 +374,8 @@ def pool_ideas_from_comments(
     *,
     account: CreatorAccount | None = None,
     per_post: int | None = None,
+    commit: bool = True,
+    existing_ideas: dict[str, TopicIdea] | None = None,
 ) -> int:
     """把**已入库**的评论按限量写进灵感池（R-140）。
 
@@ -279,6 +386,8 @@ def pool_ideas_from_comments(
     限量：单帖最多 `ECHO_POOL_IDEAS_PER_POST` 条（按点赞降序）、
     单博主每天最多 `ECHO_POOL_IDEAS_PER_DAY` 条；仍保留「标题 ≥4 字」与按天去重。
     返回本次新增条数。
+
+    R-222：支持 `existing_ideas` 预加载字典（key=title）与 `commit=False` 批量模式。
     """
     if account is None and post.account_id:
         account = db.get(CreatorAccount, post.account_id)
@@ -298,39 +407,45 @@ def pool_ideas_from_comments(
     if limit_post > 0:
         usable = usable[:limit_post]
 
+    if existing_ideas is None:
+        existing_ideas = {
+            row.title: row
+            for row in db.query(TopicIdea)
+            .filter(
+                TopicIdea.source == "comment",
+                TopicIdea.snapshot_date == date_key,
+            )
+            .all()
+        }
+
     added = 0
     for c in usable:
         if added >= quota:
             break
         text = (c.text or "").strip()
         likes = int(c.likes or 0)
-        exists = (
-            db.query(TopicIdea)
-            .filter(
-                TopicIdea.source == "comment",
-                TopicIdea.title == text,
-                TopicIdea.snapshot_date == date_key,
-            )
-            .first()
-        )
+        exists = existing_ideas.get(text)
         if exists is None:
-            db.add(
-                TopicIdea(
-                    source="comment",
-                    platform=platform,
-                    title=text,
-                    detail=f"来自{nickname}作品《{(post.title or '')[:40]}》的评论",
-                    post_id=post.id,
-                    post_title=post.title,
-                    creator_id=creator_id,
-                    snapshot_date=date_key,
-                    likes=likes,
-                )
+            idea = TopicIdea(
+                source="comment",
+                platform=platform,
+                title=text,
+                detail=f"来自{nickname}作品《{(post.title or '')[:40]}》的评论",
+                post_id=post.id,
+                post_title=post.title,
+                creator_id=creator_id,
+                snapshot_date=date_key,
+                likes=likes,
             )
+            db.add(idea)
+            existing_ideas[text] = idea
             added += 1
-        elif likes > int(exists.likes or 0):
-            exists.likes = likes
-    db.commit()
+        else:
+            if likes > int(exists.likes or 0):
+                exists.likes = likes
+            existing_ideas[text] = exists
+    if commit:
+        db.commit()
     return added
 
 
@@ -363,28 +478,164 @@ def sync_post_comments(
     return result
 
 
+def _post_concurrency() -> int:
+    """R-222：单账号内作品/评论/B站补全并发数。"""
+    settings = get_settings()
+    return max(1, int(getattr(settings, "sync_post_concurrency", 5) or 5))
+
+
+def _fetch_comments_parallel(
+    account: CreatorAccount,
+    client: DataSource,
+    posts: list[PlatformPost],
+    per_post: int,
+) -> list[tuple[PlatformPost, list[CommentData], Exception | None]]:
+    """R-222：并发抓取多条作品的评论；返回 [(post, comments, error)]。
+
+    预算在请求成功后由独立 Session 逐条扣除（与现有行为一致），失败/异常不扣费。
+    注意：ORM 对象（post/account）不跨线程传递， inner thread 只读 platform/post_id/raw。
+    """
+    if not posts:
+        return []
+    workers = max(1, min(_post_concurrency(), len(posts)))
+    platform = account.platform
+
+    # 在主线程把 ORM 属性抽成 primitive，避免 inner thread 访问主 Session 的 ORM 对象
+    post_keys: list[tuple[PlatformPost, str, dict]] = [
+        (post, post.platform_post_id, _raw_of(post)) for post in posts
+    ]
+
+    def _fetch_one(platform_post_id: str, raw: dict) -> tuple[str, list[CommentData], Exception | None]:
+        # 每条请求独立 Session 扣预算，避免共享 Session 跨线程不安全
+        from ..db import SessionLocal
+
+        s = SessionLocal()
+        try:
+            comments = _norm_comment_items(
+                client.fetch_comments(platform, platform_post_id, per_post, account=None, raw=raw)
+            )
+            _charge(s, 1)
+            s.close()
+            return platform_post_id, comments, None
+        except BudgetExceeded:
+            s.rollback()
+            s.close()
+            raise
+        except Exception as exc:  # noqa: BLE001
+            s.rollback()
+            s.close()
+            return platform_post_id, [], exc
+
+    results: list[tuple[PlatformPost, list[CommentData], Exception | None]] = []
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="echo-comments") as ex:
+        futures = {ex.submit(_fetch_one, platform_post_id, raw): (post, platform_post_id) for post, platform_post_id, raw in post_keys}
+        for fut in as_completed(futures):
+            post, _ = futures[fut]
+            try:
+                _, comments, error = fut.result()
+                results.append((post, comments, error))
+            except BudgetExceeded:
+                # 预算耗尽：取消剩余并向上抛，由外层停止本轮
+                for f in futures:
+                    f.cancel()
+                raise
+    return results
+
+
+def _fetch_post_stats_parallel(
+    account: CreatorAccount | None,
+    client: DataSource,
+    posts: list,
+    *,
+    platform: str | None = None,
+) -> list[tuple]:
+    """R-222：并发抓取多条作品的统计；返回 [(post, stats, error)]。
+
+    接受 PlatformPost 或 PostData（只要有 platform/platform_post_id 属性即可）。
+    预算在请求成功后由独立 Session 逐条扣除。
+    注意：ORM 对象不跨线程传递，inner thread 只读 platform/post_id；fetch_post_stats 不依赖 account。
+    """
+    if not posts:
+        return []
+    workers = max(1, min(_post_concurrency(), len(posts)))
+    default_platform = platform or (account.platform if account else getattr(posts[0], "platform", ""))
+
+    # 主线程抽出 primitive key，避免 inner thread 访问主 Session 的 ORM 对象
+    def _plat_of(post) -> str:
+        return str(getattr(post, "platform", default_platform) or default_platform)
+
+    def _post_id_of(post) -> str:
+        return str(post.platform_post_id)
+
+    post_keys: list[tuple[Any, str, str]] = [
+        (post, _plat_of(post), _post_id_of(post))
+        for post in posts
+    ]
+
+    def _fetch_one(plat: str, platform_post_id: str) -> tuple[str, Any, Exception | None]:
+        from ..db import SessionLocal
+
+        s = SessionLocal()
+        try:
+            stats = client.fetch_post_stats(plat, platform_post_id, account=None)
+            _charge(s, 1)
+            s.close()
+            return platform_post_id, stats, None
+        except BudgetExceeded:
+            s.rollback()
+            s.close()
+            raise
+        except Exception as exc:  # noqa: BLE001
+            s.rollback()
+            s.close()
+            return platform_post_id, None, exc
+
+    results: list[tuple] = []
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="echo-stats") as ex:
+        futures = {ex.submit(_fetch_one, plat, platform_post_id): (post, platform_post_id) for post, plat, platform_post_id in post_keys}
+        for fut in as_completed(futures):
+            post, _ = futures[fut]
+            try:
+                _, stats, error = fut.result()
+                results.append((post, stats, error))
+            except BudgetExceeded:
+                for f in futures:
+                    f.cancel()
+                raise
+    return results
+
+
 def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, posts: list[PlatformPost], per_post: int = 20) -> int:
     """抓取评论区进选题池（R-028）：评论入库（含点赞）+ 选题池去重新增。
 
     R-140：进池逻辑统一走 `pool_ideas_from_comments`（限量），本函数只负责抓取与入库。
+    R-222：对最近 10 条作品的评论抓取改为并发，写入仍由主 Session 批量完成。
     """
+    # 预加载当天已有灵感池，避免循环内 N+1
+    date_key = today_key()
+    existing_ideas = {
+        row.title: row
+        for row in db.query(TopicIdea)
+        .filter(
+            TopicIdea.source == "comment",
+            TopicIdea.snapshot_date == date_key,
+        )
+        .all()
+    }
+
+    fetched = _fetch_comments_parallel(account, client, posts[:], per_post)
     added = 0
-    for post in posts[:]:
-        try:
-            comments = _norm_comment_items(
-                client.fetch_comments(account.platform, post.platform_post_id, per_post, account, raw=_raw_of(post))
-            )
-            _charge(db)
-        except BudgetExceeded:
-            raise
-        except Exception:  # noqa: BLE001 单个作品评论失败不中断
+    for post, comments, error in fetched:
+        if error is not None:
             continue
         try:
-            _upsert_comments(db, post, comments, limit=per_post)
+            _upsert_comments(db, post, comments, limit=per_post, commit=False)
+            added += pool_ideas_from_comments(
+                db, post, comments, account=account, per_post=per_post, commit=False, existing_ideas=existing_ideas
+            )
         except Exception:  # noqa: BLE001 入库失败不中断
             db.rollback()
-            continue
-        added += pool_ideas_from_comments(db, post, comments, account=account, per_post=per_post)
+    db.commit()
     return added
 
 
@@ -420,7 +671,40 @@ def _log_job(db: Session, job_type: str, scope: str, *, creator_id=None, account
     return job
 
 
+def _flush_job_progress(db: Session, job_id: int) -> None:
+    """R-222：任务结束前把挂起的进度强制刷到库，避免最后一段进度丢失。"""
+    if not job_id:
+        return
+    with _JOB_PROGRESS_LOCK:
+        pending = _job_progress_pending.pop(job_id, None)
+        if not pending:
+            return
+        flush_done = pending["done"]
+        flush_total = pending["total"]
+        flush_note = pending["last_note"]
+    if not flush_done and not flush_total and not flush_note:
+        return
+    try:
+        if flush_note:
+            db.execute(
+                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t, progress_note = :n WHERE id = :id"),
+                {"d": flush_done, "t": flush_total, "n": flush_note[:200], "id": job_id},
+            )
+        else:
+            db.execute(
+                text("UPDATE sync_jobs SET progress_done = progress_done + :d, progress_total = progress_total + :t WHERE id = :id"),
+                {"d": flush_done, "t": flush_total, "id": job_id},
+            )
+        db.commit()
+        row = db.query(SyncJob).filter(SyncJob.id == job_id).first()
+        if row is not None:
+            _publish_job(db, row)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
+
 def _finish_job(db: Session, job: SyncJob, message: str = "", stats: dict | None = None, failed: bool = False) -> None:
+    _flush_job_progress(db, job.id)
     job.status = "failed" if failed else "done"
     job.message = (message or "")[:2000]
     job.stats = json.dumps(stats or {}, ensure_ascii=False)
@@ -450,6 +734,12 @@ def sync_account(
 
     job_id（R-070）：传入 run_sync 的 SyncJob id 时，实时累加进度（作品数 + 阶段说明）。
     queue_rows（R-093）：分页发现已存在的作品时，立即注册 card_sync 队列任务（素材库卡片排队/动画）。
+
+    R-222 优化：
+    - 预加载该账号已有 PlatformPost 消除 N+1；
+    - 作品/统计批量写入，按 `sync_commit_batch_size` 分批 commit；
+    - 封面下载从事务中拆出，批量在事务外处理；
+    - card_sync 队列行批量插入，减少逐条 commit。
     """
     if not account.enabled:
         return {"account_id": account.id, "skipped": "disabled"}
@@ -462,51 +752,97 @@ def sync_account(
     db.commit()
     stats: dict = {"posts": 0, "comments": 0}
     queued: list[tuple[int, int]] = []  # (post_id, task_id)
+    settings = get_settings()
+    batch_size = max(1, int(getattr(settings, "sync_commit_batch_size", 20) or 20))
+
     _job_progress(db, job_id, note=f"{label}：拉取主页与作品列表…")
     _upsert_profile_snapshot(db, account, client)
     posts_data = client.fetch_user_posts(account.platform, account.platform_user_id, top_n, account=account)
     _charge(db)
     if posts_data:
         _job_progress(db, job_id, total=len(posts_data), note=f"{label}：拉取到 {len(posts_data)} 条作品")
+
+    # R-222：对列表未带统计的作品，并发抓取单条详情（如 B站），再进入写入循环
+    posts_need_stats = [pd for pd in posts_data if not pd.stats and pd.platform_post_id]
+    if posts_need_stats:
+        _job_progress(db, job_id, note=f"{label}：并发补全 {len(posts_need_stats)} 条作品指标…")
+        stats_results = _fetch_post_stats_parallel(account, client, posts_need_stats, platform=account.platform)
+        for pd, stats, error in stats_results:
+            if stats and error is None:
+                pd.stats = stats
+
+    # R-222：预加载该账号已有作品，消除循环内 N+1
+    post_ids_in_data = [pd.platform_post_id for pd in posts_data if pd.platform_post_id]
+    existing_posts: dict[tuple[str, str], PlatformPost] = {}
+    if post_ids_in_data:
+        existing_posts = {
+            (p.platform, p.platform_post_id): p
+            for p in db.query(PlatformPost)
+            .filter(
+                PlatformPost.platform == account.platform,
+                PlatformPost.platform_post_id.in_(post_ids_in_data),
+            )
+            .all()
+        }
+
     synced: list[PlatformPost] = []
     new_posts: list[PlatformPost] = []
+    post_data_map: dict[int, PostData] = {}
     total = len(posts_data)
+    queue_tasks: list[BackgroundTask] = []
+
     for i, pd in enumerate(posts_data, start=1):
         if not pd.platform_post_id:
             continue
-        existed = (
-            db.query(PlatformPost)
-            .filter(
-                PlatformPost.platform == account.platform,
-                PlatformPost.platform_post_id == pd.platform_post_id,
-            )
-            .first()
-        )
+        existed = existing_posts.get((account.platform, pd.platform_post_id))
         try:
-            post = _ensure_post(db, account, pd, client)
+            post = _ensure_post(db, account, pd, client, commit=False, existing=existing_posts)
             synced.append(post)
             if existed is None:
                 new_posts.append(post)
             stats["posts"] += 1
             _job_progress(db, job_id, done=1, note=f"{label}：已同步 {i}/{total} 条")
+            if post.id:
+                post_data_map[post.id] = pd
             if queue_rows:
                 qrow = BackgroundTask(
                     kind="card_sync",
                     payload=json.dumps({"post_id": post.id, "job_id": job_id}, ensure_ascii=False),
                 )
                 db.add(qrow)
+                queue_tasks.append(qrow)
+            if i % batch_size == 0:
                 db.commit()
-                db.refresh(qrow)
-                qrow.status = "running"
-                qrow.progress = 4
-                qrow.note = "排队中…"
-                db.commit()
-                publish("task.update", {"id": qrow.id, "status": "running", "progress": 4, "note": "排队中…", "payload": {"post_id": post.id}})
-                queued.append((post.id, qrow.id))
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001
             db.rollback()
+
+    # 最终批量提交作品/统计/队列行
+    db.commit()
+
+    # R-222：事务外批量下载封面，不阻塞作品入库
+    _ensure_covers_batch(db, account, synced, post_data_map)
+
+    # R-222：批量刷新并广播 card_sync 队列行
+    if queue_rows and queue_tasks:
+        for qrow in queue_tasks:
+            db.refresh(qrow)
+            qrow.status = "running"
+            qrow.progress = 4
+            qrow.note = "排队中…"
+            db.commit()
+            payload_for_event = json.loads(qrow.payload or "{}") or {}
+            publish(
+                "task.update",
+                {"id": qrow.id, "status": "running", "progress": 4, "note": "排队中…", "payload": {"post_id": payload_for_event.get("post_id")}},
+            )
+            try:
+                payload = json.loads(qrow.payload or "{}")
+                queued.append((int(payload.get("post_id") or 0), qrow.id))
+            except (TypeError, ValueError):
+                pass
+
     if with_comments:
         # R-072：每次同步对最近 10 条作品的评论 Top50 都尝试进池（按天去重）；完整评论照常入库
         targets = synced[:10]
@@ -527,9 +863,10 @@ def sync_account(
 
 
 def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSource, limit: int = 150, job_id: int | None = None) -> int:
-    """B站：给“最新指标里 likes=0”的作品拉单条详情补全赞/藏/评（每轮限量，重复同步会补完）。
+    """B站：给"最新指标里 likes=0"的作品拉单条详情补全赞/藏/评（每轮限量，重复同步会补完）。
 
     job_id（R-070）：补全过程逐条累加进度。
+    R-222：预加载最新指标消除 N+1；150 条详情请求并发执行，写入由主 Session 批量完成。
     """
     from ..models.platform import PlatformPostStat
 
@@ -539,34 +876,60 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
         .order_by(PlatformPost.id.desc())
         .all()
     )
+    # 预加载这些作品的最新指标（一次查询），避免循环内 N+1
+    post_ids = [p.id for p in posts]
+    latest_stats: dict[int, PlatformPostStat] = {}
+    if post_ids:
+        # 子查询：每个 post_id 取最新一天
+        from sqlalchemy import func
+
+        sub = (
+            db.query(
+                PlatformPostStat.post_id,
+                func.max(PlatformPostStat.stat_date).label("max_date"),
+            )
+            .filter(PlatformPostStat.post_id.in_(post_ids))
+            .group_by(PlatformPostStat.post_id)
+            .subquery()
+        )
+        latest_stats = {
+            st.post_id: st
+            for st in db.query(PlatformPostStat)
+            .join(
+                sub,
+                (PlatformPostStat.post_id == sub.c.post_id)
+                & (PlatformPostStat.stat_date == sub.c.max_date),
+            )
+            .all()
+        }
+
     missing = []
     for post in posts:
-        st = (
-            db.query(PlatformPostStat)
-            .filter(PlatformPostStat.post_id == post.id)
-            .order_by(PlatformPostStat.stat_date.desc())
-            .first()
-        )
+        st = latest_stats.get(post.id)
         if st is None or st.likes == 0:
             missing.append(post)
         if len(missing) >= limit:
             break
+
     done = 0
     total = len(missing)
     _job_progress(db, job_id, total=total, note=f"B站：补全 {len(missing)} 条缺失指标…")
-    for i, post in enumerate(missing, start=1):
+    if not missing:
+        return 0
+
+    fetched = _fetch_post_stats_parallel(account, client, missing, platform="bilibili")
+    for i, (post, stats, error) in enumerate(fetched, start=1):
+        if error is not None or stats is None:
+            continue
         try:
-            stats = client.fetch_post_stats("bilibili", post.platform_post_id)
-            _charge(db)
-            _write_stat(db, post, stats)
+            _write_stat(db, post, stats, commit=False)
             done += 1
             _job_progress(db, job_id, done=1, note=f"B站：补全中 {i}/{total}")
-        except BudgetExceeded:
-            raise
         except Exception:  # noqa: BLE001
             db.rollback()
     db.commit()
     return done
+
 
 
 def run_sync(
@@ -665,14 +1028,11 @@ def run_sync(
             finally:
                 s.close()
 
-        # 多线程并发：三个平台同时同步（每个用独立会话），大幅提速
-        from concurrent.futures import ThreadPoolExecutor
-
+        # 多线程并发：账号同时同步（每个用独立会话），并发数可配（R-222）
+        account_workers = max(1, min(int(get_settings().sync_account_concurrency or 3), len(accounts)))
         results = []
-        with ThreadPoolExecutor(max_workers=min(3, max(1, len(accounts)))) as ex:
+        with ThreadPoolExecutor(max_workers=account_workers, thread_name_prefix="echo-account") as ex:
             futures = {ex.submit(_sync_one_acc, acc.id): acc for acc in accounts}
-            from concurrent.futures import as_completed
-
             for fut in as_completed(futures):
                 results.append(fut.result())
         total_posts = sum(int(r.get("posts") or 0) for r in results)

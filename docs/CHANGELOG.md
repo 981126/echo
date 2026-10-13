@@ -1,5 +1,38 @@
 # 变更记录
 
+## [M224 / R-222] 2026-10-10 — 同步再提速：账号内并行 + 批量写库 + 消除 N+1 ✅ 已完成
+
+> 作者：「页面不卡，不过我觉得后台请求有点慢，最慢的其实是同步数据」；当前 12 个账号 daily 前 15 条约 20+ min，要求不引入 Redis/MQ、不砍 B站 150 条历史指标补全。
+
+- **根因**：不是 TikHub 10 req/s 限速不够，而是**请求结构太串行 + 写库太碎**。单账号内作品/评论/B站补全逐个执行；每条作品 `_ensure_post`、每条评论 `_upsert_comments`、每次进度 `_job_progress` 都单独 `commit`；循环内反复查询 `PlatformPost`/`PlatformPostComment`/`TopicIdea` 造成 N+1；账号级并发硬编码 3，与配置不匹配。
+- **做了什么**：
+  - `config.py`：新增 `ECHO_SYNC_ACCOUNT_CONCURRENCY`（默认 3）、`ECHO_SYNC_POST_CONCURRENCY`（默认 5）、`ECHO_SYNC_DOWNLOAD_CONCURRENCY`（默认 4）、`ECHO_SYNC_COMMIT_BATCH_SIZE`（默认 20）、`ECHO_SYNC_PROGRESS_DEBOUNCE_SECONDS`（默认 2.0）。
+  - `services/platform/tikhub.py`：`_TokenBucket.acquire(n)` 支持批量令牌；`TikHubClient` 复用 `httpx.Client` 减少 TCP/TLS 握手；对应测试改为 mock `httpx.Client.get`。
+  - `services/platform_sync.py`：
+    - `sync_account` 预加载该账号已有 `PlatformPost` 字典；列表未带 stats 的作品先走 `_fetch_post_stats_parallel` 并发补全；
+    - `_ensure_post` / `_write_stat` / `_upsert_comments` / `pool_ideas_from_comments` 支持 `commit=False` 批量模式 + `existing` 预加载字典；
+    - 作品/统计按 `sync_commit_batch_size` 分批 `commit`，封面下载拆为 `_ensure_covers_batch` 在事务外批量处理；
+    - `_collect_comments` 对最近 10 条作品走 `_fetch_comments_parallel` 并发抓取，预加载当天 `TopicIdea` 去重；
+    - `_backfill_bili_stats` 预加载最新指标消除 N+1，150 条详情并发抓取后批量写入；
+    - `_job_progress` 同 job_id 进度累计 + 防抖 flush（2s / 阶段关键词 / 完成），降低 SQLite 写锁竞争；
+    - `run_sync` 账号并发数改读 `ECHO_SYNC_ACCOUNT_CONCURRENCY`。
+  - `services/media_downloader.py`：B站 dash 视频/音频流并行下载。
+- **明确不做**：不引入 Redis/MQ/RQ；不迁移 SQLite → PostgreSQL；不减少 B站 150 条历史指标补全；媒体并发 `ECHO_SYNC_MEDIA_CONCURRENCY` 保持 2（N150 CPU 限制）。
+- **自测**：`scripts/verify.sh` 全绿（ruff + mypy + pytest 484 例 + 前端 lint/tsc/build + 文档一致性 31 表/146 路由）；后端 pytest 连续跑 3 轮全绿。
+
+## [M225 / R-223] 2026-10-10 — 同步所有博主 `database is locked` 修复 ✅ 已完成
+
+> 作者：「同步所有博主抱错 `(sqlite3.OperationalError) database is locked [SQL: UPDATE creator_accounts SET sync_status=...]`，内层异常是 `UPDATE app_kv ... tikhub_budget_used:2026-10-09`」
+
+- **根因**：不是锁等待时间不够（WAL 已开、`busy_timeout=30s`），而是 **`_ensure_post()` 与 `_upsert_profile_snapshot()` 在 SQLite 写事务里做同步网络 I/O**（下载封面图/头像，timeout 8s），导致写锁被该 Session 长时间持有。并发同步多个博主/账号时，一个线程持锁下载图片，其他线程的 `_charge()` 要写 `app_kv` 表更新 TikHub 预算计数，等待写锁超过 30s 即报 locked。
+- **做了什么**：
+  - `services/platform_sync.py::_ensure_post()`：先 `commit` 提交作品与统计信息释放写锁；再在事务外调用 `_cover_path_for()` 下载封面、生成缩略图；最后用独立短事务把 `cover_path` 写回 `PlatformPost`。
+  - `services/platform_sync.py::_upsert_profile_snapshot()`：先 `commit` 提交 profile 快照与昵称变更释放写锁；再在事务外调用 `_ensure_account_avatar()` 下载头像；最后用独立短事务把 `avatar_path` 写回 `CreatorAccount`。
+  - `services/platform_assets.py`：`_cover_path_for()` 去掉未使用的 `db` 参数；`_ensure_account_avatar()` 改为纯下载函数、返回 `str | None`，不再接收 `db` 也不再内部 `commit`。
+  - `services/platform_sync.py::_fetch_comments_parallel()` / `_fetch_post_stats_parallel()`：修复 inner thread 直接访问主 Session ORM 对象导致的 `ObjectDeletedError`（flaky，pytest 输出捕获下必现）；主线程预先把 `platform`/`platform_post_id`/`raw` 等 primitive 字段传入，inner thread 只读这些字段，返回后按 `platform_post_id` 映射回原始对象。
+- **明确不做**：不动 WAL / busy_timeout / 连接池配置；不动 TikHub 限速与重试逻辑；不改并发度；不迁移数据库。
+- **自测**：`scripts/verify.sh` 全绿（ruff + mypy + pytest 484 例 + 前端 lint/tsc/build + 文档一致性 31 表/146 路由）；后端重启 `/health` 正常；真实触发「同步所有博主」日志中无 `database is locked`（本轮 12 博主中 8 成功，4 个因启动前服务重启被历史遗留标记为「任务中断」）。
+
 ## [M223 / R-221] 2026-09-30 — 垃圾邮件根因：pytest 在用真实 SMTP 发夹具稿 ✅ 已完成（测试隔离，业务代码零改动）
 
 > 作者：「服务一直在发垃圾邮件，这是bug吧，下面是邮件内容 echo · 今日选题与脚本 / 1. 选题B / 平台：douyin · 匹配度：60 · 【今日最佳 · 热榜】理由 / 封面字：（无） / B 的口播稿正文」

@@ -10,7 +10,6 @@ import uuid
 from pathlib import Path
 
 import httpx
-from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models.platform import CreatorAccount
@@ -73,10 +72,11 @@ def _cdn_headers(platform: str) -> dict:
     }
 
 
-def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: str, cover_url: str) -> str:
+def _cover_path_for(platform: str, platform_post_id: str, title: str, cover_url: str) -> str:
     """返回本地封面文件名（下载真实封面或生成占位 SVG）。
 
     R-058：文件名用「标题-封面」（重名自动 -2/-3），文件夹里一眼可辨。
+    注意：本函数只做文件 I/O，不持有数据库事务/锁。
     """
 
     from .media_naming import media_stem, unique_path
@@ -113,12 +113,15 @@ def _cover_path_for(db: Session, platform: str, platform_post_id: str, title: st
     return dest.name
 
 
-def _ensure_account_avatar(db: Session, account: CreatorAccount, profile) -> None:
-    """自动同步头像：有远端 URL 则下载本地；没有就保持空（前端显示空圆框）。"""
+def _ensure_account_avatar(account: CreatorAccount, profile) -> str | None:
+    """自动同步头像：有远端 URL 则下载本地；没有/失败返回 None。
+
+    注意：本函数只做网络/文件 I/O，不持有数据库事务/锁；调用方自行在短事务里更新 avatar_path。
+    """
     if account.avatar_path:
-        return
+        return None
     if not profile.avatar_url:
-        return
+        return None
     settings = get_settings()
     settings.covers_dir.mkdir(parents=True, exist_ok=True)
     name = f"avatar_{uuid.uuid4().hex[:12]}"
@@ -129,7 +132,7 @@ def _ensure_account_avatar(db: Session, account: CreatorAccount, profile) -> Non
             if img:
                 dest = settings.covers_dir / f"{name}.jpg"
                 dest.write_bytes(img)
-                account.avatar_path = dest.name
-                db.commit()
+                return dest.name
     except Exception:  # noqa: BLE001 下载失败保持空，前端显示空圆框
         pass
+    return None

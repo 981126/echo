@@ -7,6 +7,8 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-223 | 2026-10-10 | 同步所有博主 `database is locked` 修复：`_ensure_post`/`_upsert_profile_snapshot` 把封面/头像下载移出 SQLite 写事务，避免并发同步时网络 I/O 长期占锁导致 `_charge` 更新 `app_kv` 超时 | ✅ 已完成 | M225（已完成） | platform_sync、platform_assets、R-163/R-151/R-222 |
+| R-222 | 2026-10-10 | 同步再提速：账号内请求并行 + 批量写库 + 消除 N+1 + 进度防抖；12 账号 daily 前 15 条目标从 20+ min 降到 10 min 以内；不引入 Redis/MQ、不砍 B站 150 条补全 | 🔨 进行中 | M224（进行中） | platform_sync、platform API、R-163/R-151/R-085/R-086/R-109/R-219 |
 | R-221 | 2026-09-30 | 垃圾邮件根因：**pytest 在真发信**——`test_r208_daily_best.py` 的夹具稿（选题B / B 的口播稿正文）经 `push_daily_best` → `notify._send` 用了仓库根 `.env` 的真实 QQ SMTP，每跑一次 verify 就发一封；`tests/conftest.py` 清空 SMTP 配置（fail-closed）+ `SMTP_SSL` 兜底闸门（`RealMailAttempted` 不继承 Exception，吞不掉）+ R-208 用例改 spy 断言推送内容 + 新增 `test_r221_mail_isolation.py`；业务代码零改动 | ✅ 已完成 | M223（已完成） | notify/pipeline、tests/conftest、R-208/R-140/R-141、verify.sh |
 | R-220 | 2026-09-30 | 素材库切页同步遮罩必现：修「/api/tasks 先回、/api/library 后回」竞速导致恢复扫描静默丢任务——未认领池 + cards 变化（首帧/翻页）自动重映射补挂遮罩；恢复查询纳入 pending；SSE 未知非终态任务入池不再丢弃；后端零改动；不做 SSE 回放 | ✅ 已完成 | M222（已完成） | frontend_v2 videos/use-card-tasks、R-202/R-093/R-091/R-175 |
 | R-219 | 2026-09-30 | 博主管理同步进度可见性：并发 sync-all 下先完成的博主进度条不再瞬间消失——done 停留约 8s「同步完成」绿条、failed 停留约 60s 失败条；跳过者（已在运行/无启用账号）卡片下灰色提示条；「排队中」条保持；skipped 接口返回改结构化 `[{creator_id,name,reason}]`；批次范围不变（仍只当前主博主+对标） | ✅ 已完成 | M221（已完成） | platform_sync、platform API、frontend_v2 creators、R-162/R-163/R-070/R-175 |

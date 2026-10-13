@@ -44,17 +44,24 @@ def no_sleep(monkeypatch):
 
 
 def _patch_get(monkeypatch, outcomes):
-    """按调用顺序返回预设结果：Exception 实例则抛出，Response 则返回。"""
+    """按调用顺序返回预设结果：Exception 实例则抛出，Response 则返回。
+
+    R-222：TikHubClient 内部复用 httpx.Client，因此 mock Client.get 而不是 httpx.get。
+    """
     calls: list[str] = []
 
-    def fake_get(url, params=None, headers=None, timeout=None):
-        calls.append(url)
-        item = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
-        if isinstance(item, Exception):
-            raise item
-        return item
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ARG002
+            pass
 
-    monkeypatch.setattr(tikhub.httpx, "get", fake_get)
+        def get(self, url, params=None, headers=None):  # noqa: ARG002
+            calls.append(url)
+            item = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    monkeypatch.setattr(tikhub.httpx, "Client", FakeClient)
     return calls
 
 
@@ -109,7 +116,10 @@ def test_retry_exhausted_raises_with_attempts(client, no_sleep, monkeypatch):
 
 
 def test_without_api_key_raises_before_any_request(monkeypatch):
-    monkeypatch.setattr(tikhub.httpx, "get", lambda *a, **k: pytest.fail("不应发起请求"))
+    def _fake_client(*args, **kwargs):  # noqa: ARG001
+        pytest.fail("不应发起请求")
+
+    monkeypatch.setattr(tikhub.httpx, "Client", _fake_client)
     client = TikHubClient(mode="real", api_key="k", base_url="http://x")
     client.api_key = ""  # 显式清空：验证「无 key 不发请求」护栏
     with pytest.raises(TikHubError, match="ECHO_TIKHUB_API_KEY"):

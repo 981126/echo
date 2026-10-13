@@ -87,8 +87,14 @@ def download_platform_video(source: dict, platform: str, dest: Path) -> None:
         v_tmp = dest.parent / f"{dest.name}.video.m4s"
         a_tmp = dest.parent / f"{dest.name}.audio.m4s"
         try:
-            _stream_to(vurl, headers, v_tmp)
-            _stream_to(aurl, headers, a_tmp)
+            # R-222：视频/音频流并行下载，减少 B站 dash 整体耗时
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="echo-dash") as ex:
+                v_fut = ex.submit(_stream_to, vurl, headers, v_tmp)
+                a_fut = ex.submit(_stream_to, aurl, headers, a_tmp)
+                v_fut.result()
+                a_fut.result()
             cmd = [
                 _ffmpeg_exe(),
                 "-y",

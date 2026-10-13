@@ -61,13 +61,15 @@ class _TokenBucket:
         self.updated = time.monotonic()
         self._lock = threading.Lock()
 
-    def acquire(self) -> None:
+    def acquire(self, n: int = 1) -> None:
+        """R-222：支持批量获取 n 个令牌，让并行请求能一次性拿足配额。"""
+        n = max(1, int(n))
         with self._lock:
             now = time.monotonic()
             elapsed = max(0.0, now - self.updated)
             self.updated = now
             self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
-            self.tokens -= 1.0
+            self.tokens -= float(n)
             wait = -self.tokens / self.rate if self.tokens < 0 else 0.0
         if wait > 0:
             time.sleep(wait)
@@ -298,6 +300,16 @@ class TikHubClient:
         self.api_key = api_key or settings.tikhub_api_key
         self.base_url = (base_url or settings.tikhub_base_url).rstrip("/")
         self._requests = 0
+        # R-222：复用 httpx.Client 减少 TCP/TLS 握手；Client 是线程安全的，可在并发请求中复用
+        self._client: httpx.Client | None = None
+
+    def _http(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(
+                follow_redirects=True,
+                timeout=httpx.Timeout(connect=20, read=12, write=60, pool=20),
+            )
+        return self._client
 
     @property
     def requests_used(self) -> int:
@@ -320,7 +332,7 @@ class TikHubClient:
             _throttle_route(path)
             self._requests += 1
             try:
-                resp = httpx.get(url, params=params, headers=headers, timeout=12)
+                resp = self._http().get(url, params=params, headers=headers)
             except httpx.TransportError as exc:  # 代理掐断/连接重置/读写超时等瞬时故障
                 last = f"{type(exc).__name__}: {exc}"
                 last_exc = exc
