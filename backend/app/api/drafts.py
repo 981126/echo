@@ -26,6 +26,7 @@ from ..services.draft_versions import (
 from ..services.diff_analysis import diff_task
 from ..services.feedback import add_feedback
 from ..services.generation import generate_draft
+from ..services.draft_meta_suggest import suggest_meta_task
 from ..services.persona import PersonaService
 from ..tasks import find_running_task, start_task
 
@@ -115,6 +116,23 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="选题不能为空")
     task_id, draft_id = draft_flow.start_generation(db, topic, mode=(payload.mode or "").strip())
     return {"task_id": task_id, "draft_id": draft_id}
+
+
+@router.post("/{draft_id}/suggest-meta", response_model=dict)
+def suggest_meta(draft_id: int, db: Session = Depends(get_db)):
+    """基于脚本正文 + 人设生成标题/封面字/素材标签候选（R-224）。"""
+    from ..services.creator_service import current_creator_id
+
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    if draft.creator_id != current_creator_id(db):
+        raise HTTPException(status_code=403, detail="无权访问该草稿")
+    tid = find_running_task("draft_suggest_meta", {"draft_id": draft_id})
+    if tid:
+        return {"task_id": tid}
+    task_id = start_task("draft_suggest_meta", {"draft_id": draft_id}, suggest_meta_task)
+    return {"task_id": task_id}
 
 
 def _compute_angles(db: Session, topic: str, platform: str) -> dict:

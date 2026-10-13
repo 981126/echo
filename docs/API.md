@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 146 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 147 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：`frontend_v2/dist`（R-164/R-208）挂**根路径 `/`**（非 API 路由，不计入下表）。
 
@@ -473,6 +473,18 @@ Generate Async
 字段：
   - `topic` string（必填）
 
+**返回 200**：application/json → object
+
+### POST /api/drafts/{draft_id}/suggest-meta
+
+Suggest Meta
+
+R-224：基于草稿正文 + 作者人设，用 AI 设置中的模型1 生成标题/封面字/素材标签候选。后台任务，返回 `{task_id}`；结果在 `task.result`（JSON：`{titles,cover_texts,tags}`，各 5 条）。若已有同草稿进行中的任务则直接返回其 `task_id`。
+
+**参数**
+
+- `draft_id`（path）integer，必填
+- `x-access-token`（header）string
 **返回 200**：application/json → object
 
 ### GET /api/drafts/publish-links/preview

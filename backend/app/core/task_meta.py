@@ -32,6 +32,7 @@ KIND_LABELS = {
     "opportunity_weekly": "每周灵感包",
     "opportunity_gap": "缺口选题",
     "draft_angles": "生成角度",
+    "draft_suggest_meta": "生成标题封面标签",
     "hot_refresh": "抓取热点",
     "publish_backfill": "回填历史发布",
     "llm_fallback": "模型降级",
@@ -80,6 +81,8 @@ def target(kind: str, payload: dict | None = None, result=None) -> str:
         return "/home"
     if kind == "draft_angles":
         return "/home"
+    if kind == "draft_suggest_meta":
+        return f"/drafts?id={payload.get('draft_id', '')}"
     if kind == "model_selfcheck":
         return "/prompts"
     return "/home"

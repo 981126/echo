@@ -18,6 +18,7 @@ import {
   CloudOff,
   CircleAlert,
   Captions,
+  Sparkles,
 } from 'lucide-react'
 import MarkdownIt from 'markdown-it'
 import { apiJson } from '@/api/client'
@@ -30,6 +31,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectValue, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select'
+import { CreatableSelect } from '@/components/ui/creatable-select'
+import { CreatableMultiSelect } from '@/components/ui/creatable-multi-select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toaster'
@@ -174,6 +177,12 @@ export function DraftEditDrawer({
   const [viewVer, setViewVer] = useState<DraftVersion | null>(null)
   const [rollingBack, setRollingBack] = useState(0)
   const [videos, setVideos] = useState<VideoOpt[]>([])
+  // R-224：AI 生成标题/封面字/素材标签的候选列表与任务态
+  const [titleOptions, setTitleOptions] = useState<string[]>([])
+  const [coverTextOptions, setCoverTextOptions] = useState<string[]>([])
+  const [tagOptions, setTagOptions] = useState<string[]>([])
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestTaskId, setSuggestTaskId] = useState<number | null>(null)
   // R-206：tab 受控——切进「讨论」tab 时才能把最新留痕滚进视野（Radix 切 tab 会重挂 Content）
   const [tab, setTab] = useState('edit')
   const viewportRef = useRef<HTMLDivElement>(null) // 讨论留痕的滚动视口（ScrollArea 的 Viewport）
@@ -181,8 +190,7 @@ export function DraftEditDrawer({
   const lastSeenIdRef = useRef(0) // 已看到的留痕 id 游标
   const [pendingNew, setPendingNew] = useState(0) // 未看到的新留痕条数（浮出「N 条新留痕 ↓」）
 
-  // R-212：只有「本次由【新建草稿】进入」的会话开实时保存（打开已有稿仍走【保存】/【取消】）
-  const autoEnabled = draft === null
+  // R-224：所有草稿会话都开实时保存（新建 + 已有）
   const [autoStatus, setAutoStatus] = useState<AutoSaveStatus>('idle')
   const [autoSavedAt, setAutoSavedAt] = useState<Date | null>(null)
   const [autoAttempt, setAutoAttempt] = useState(0) // R-213：离线重试次数
@@ -240,15 +248,15 @@ export function DraftEditDrawer({
     return () => window.removeEventListener('online', onOnline)
   }, [autoSaver])
   useEffect(() => () => autoSaver.dispose(), [autoSaver])
-  // 任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
+  // R-224：任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
   useEffect(() => {
-    if (!open || !autoEnabled) return
+    if (!open) return
     autoSaver.schedule()
-  }, [open, autoEnabled, state, autoSaver])
+  }, [open, state, autoSaver])
 
-  /** R-212：关抽屉（遮罩 / X / Esc /【关闭】）时立刻补一次保存——防抖窗口里最后几个字也不丢 */
+  /** R-212/R-224：关抽屉（遮罩 / X / Esc /【关闭】）时立刻补一次保存——防抖窗口里最后几个字也不丢 */
   function handleClose() {
-    if (autoEnabled) autoSaver.closeOut()
+    autoSaver.closeOut()
     onCloseRef.current()
   }
 
@@ -427,6 +435,103 @@ export function DraftEditDrawer({
 
   const canDiscuss = !!(state.script.trim() || draft?.original_script?.trim())
 
+  // R-224：初始化/切换草稿时，把当前已有值作为候选列表首项（切换草稿则重置，避免残留上一篇候选）
+  const loadedDraftIdRef = useRef<number>(0)
+  useEffect(() => {
+    if (!open) return
+    const switched = loadedDraftIdRef.current !== state.id
+    loadedDraftIdRef.current = state.id
+    const tags = state.tagsText.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
+    setTitleOptions(switched ? [...new Set([...(state.title ? [state.title] : [])])] : (prev) => [...new Set([...(state.title ? [state.title] : []), ...prev])])
+    setCoverTextOptions(switched ? [...new Set([...(state.cover_text ? [state.cover_text] : [])])] : (prev) => [...new Set([...(state.cover_text ? [state.cover_text] : []), ...prev])])
+    setTagOptions(switched ? [...new Set([...tags])] : (prev) => [...new Set([...tags, ...prev])])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, state.id])
+
+  // R-224：候选列表有值且当前字段为空时，默认选中第一个（用 ref 读最新 state，避免循环依赖）
+  useEffect(() => {
+    if (titleOptions.length && !latestRef.current.title) {
+      setState({ ...latestRef.current, title: titleOptions[0] })
+    }
+  }, [titleOptions, setState])
+  useEffect(() => {
+    if (coverTextOptions.length && !latestRef.current.cover_text) {
+      setState({ ...latestRef.current, cover_text: coverTextOptions[0] })
+    }
+  }, [coverTextOptions, setState])
+  useEffect(() => {
+    if (tagOptions.length && !latestRef.current.tagsText.trim()) {
+      const defaults = tagOptions.slice(0, 5)
+      setState({ ...latestRef.current, tagsText: defaults.join(', ') })
+    }
+  }, [tagOptions, setState])
+
+  // R-224：恢复页面刷新前未完成的生成任务
+  useEffect(() => {
+    if (!open || !id) return
+    const saved = window.localStorage.getItem(`draft_suggest_meta:${id}`)
+    if (saved) {
+      setSuggestTaskId(Number(saved))
+      setSuggesting(true)
+    }
+  }, [open, id])
+
+  // R-224：轮询生成任务
+  useEffect(() => {
+    if (!suggestTaskId || !id) return
+    setSuggesting(true)
+    let stopped = false
+    const timer = setInterval(async () => {
+      try {
+        const task = await apiJson<{ id: number; status: string; result: string; error: string }>(`/api/tasks/${suggestTaskId}`)
+        if (task.status === 'running' || task.status === 'pending') return
+        if (stopped) return
+        clearInterval(timer)
+        if (task.status === 'done') {
+          const data = JSON.parse(task.result || '{}') as {
+            titles?: string[]
+            cover_texts?: string[]
+            tags?: string[]
+          }
+          const newTitles = data.titles || []
+          const newCovers = data.cover_texts || []
+          const newTags = data.tags || []
+          setTitleOptions((prev) => [...new Set([...prev, ...newTitles])])
+          setCoverTextOptions((prev) => [...new Set([...prev, ...newCovers])])
+          setTagOptions((prev) => [...new Set([...prev, ...newTags])])
+          const total = newTitles.length + newCovers.length + newTags.length
+          toast.success(`已生成 ${total} 条候选，请从下拉框选择`)
+        } else {
+          toast.error(task.error || '生成失败')
+        }
+      } catch (e) {
+        clearInterval(timer)
+        toast.error((e as Error).message)
+      } finally {
+        if (!stopped) {
+          stopped = true
+          setSuggesting(false)
+          setSuggestTaskId(null)
+          window.localStorage.removeItem(`draft_suggest_meta:${id}`)
+        }
+      }
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [suggestTaskId, id])
+
+  async function suggestMeta() {
+    if (!id || suggesting) return
+    setSuggesting(true)
+    try {
+      const res = await apiJson<{ task_id: number }>(`/api/drafts/${id}/suggest-meta`, { method: 'POST', body: '{}' })
+      setSuggestTaskId(res.task_id)
+      window.localStorage.setItem(`draft_suggest_meta:${id}`, String(res.task_id))
+    } catch (e) {
+      toast.error((e as Error).message)
+      setSuggesting(false)
+    }
+  }
+
   // R-205：不再 `if (!open) return null` —— 否则父组件先卸载，抽屉的退出动画根本没机会播。
   async function ensureSaved(): Promise<number> {
     const body = {
@@ -455,7 +560,7 @@ export function DraftEditDrawer({
     setPrompterOpening(true)
     try {
       const did = await ensureSaved()
-      if (autoEnabled) autoSaver.markSaved(state)
+      autoSaver.markSaved(state)
       navigate(`/prompter/${did}`)
     } catch (e) {
       toast.error((e as Error).message)
@@ -472,7 +577,7 @@ export function DraftEditDrawer({
     setSaving(true)
     try {
       await ensureSaved()
-      if (autoEnabled) autoSaver.markSaved(state) // R-212：已手动落库，别再补一次自动保存
+      autoSaver.markSaved(state) // R-212/R-224：已手动落库，别再补一次自动保存
       toast.success('已保存')
       onSaved()
       onClose()
@@ -613,11 +718,21 @@ export function DraftEditDrawer({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">标题</label>
-              <Input value={state.title} onChange={(e) => setState({ ...state, title: e.target.value })} placeholder="视频标题" />
+              <CreatableSelect
+                value={state.title}
+                options={titleOptions}
+                onChange={(v) => setState({ ...state, title: v })}
+                placeholder="视频标题"
+              />
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">封面字（3-8 字）</label>
-              <Input value={state.cover_text} onChange={(e) => setState({ ...state, cover_text: e.target.value })} />
+              <CreatableSelect
+                value={state.cover_text}
+                options={coverTextOptions}
+                onChange={(v) => setState({ ...state, cover_text: v })}
+                placeholder="封面字"
+              />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -639,8 +754,13 @@ export function DraftEditDrawer({
               </Select>
             </div>
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">素材标签（逗号分隔）</label>
-              <Input value={state.tagsText} onChange={(e) => setState({ ...state, tagsText: e.target.value })} placeholder="如：求职, 面试, 赚钱" />
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">素材标签</label>
+              <CreatableMultiSelect
+                options={tagOptions}
+                value={state.tagsText.split(/[,，]/).map((x) => x.trim()).filter(Boolean)}
+                onChange={(v) => setState({ ...state, tagsText: v.join(', ') })}
+                placeholder="选择或输入标签"
+              />
             </div>
           </div>
           {/* R-184 发布回填：记录发布链接/平台/时间，关联素材后可看表现 */}
@@ -682,6 +802,18 @@ export function DraftEditDrawer({
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-muted-foreground">口播脚本（Markdown，可插图）</label>
               <span className="flex-1" />
+              {/* R-224：AI 生成标题/封面字/素材标签 */}
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid="draft-suggest-meta"
+                disabled={!id || !state.script.trim() || suggesting}
+                title={!id ? '先保存草稿' : !state.script.trim() ? '正文为空，无法生成' : '基于正文和人设生成候选'}
+                onClick={() => void suggestMeta()}
+              >
+                {suggesting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                AI标题
+              </Button>
               {/* R-214：一键进全屏提词器（先补存当前改动，提词页读到的一定是眼前这版；只读不回写） */}
               <Button
                 variant="ghost"
@@ -1011,50 +1143,48 @@ export function DraftEditDrawer({
           定稿
         </Button>
         <span className="flex-1" />
-        {/* R-212：新建稿改动会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
-        {autoEnabled && (
-          <motion.span
-            key={autoStatus}
-            data-testid="draft-autosave"
-            data-state={autoStatus}
-            initial={{ opacity: 0.85, y: 3 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={softIn}
-            className={cn(
-              'flex items-center gap-1 text-[11px]',
-              autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
-            )}
-          >
-            {autoStatus === 'offline' ? (
-              <>
-                <CloudOff className="h-3 w-3 text-warning" />
-                连不上服务器，已本地暂存{autoAttempt > 1 ? `（重试 ${autoAttempt}）` : ''}
-              </>
-            ) : autoStatus === 'dirty' || autoStatus === 'saving' ? (
-              <>
-                <LoaderCircle className="h-3 w-3 animate-spin" />
-                保存中…
-              </>
-            ) : autoStatus === 'saved' ? (
-              <>
-                <CloudCheck className="h-3 w-3 text-accent" />
-                已自动保存{autoSavedAt ? ` ${fmtTime(autoSavedAt)}` : ''}
-              </>
-            ) : autoStatus === 'error' ? (
-              <>
-                <CircleAlert className="h-3 w-3" />
-                自动保存失败，点【保存】重试
-              </>
-            ) : (
-              <>
-                <CloudUpload className="h-3 w-3" />
-                改动会自动保存
-              </>
-            )}
-          </motion.span>
-        )}
+        {/* R-212/R-224：所有草稿改动都会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
+        <motion.span
+          key={autoStatus}
+          data-testid="draft-autosave"
+          data-state={autoStatus}
+          initial={{ opacity: 0.85, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={softIn}
+          className={cn(
+            'flex items-center gap-1 text-[11px]',
+            autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
+          )}
+        >
+          {autoStatus === 'offline' ? (
+            <>
+              <CloudOff className="h-3 w-3 text-warning" />
+              连不上服务器，已本地暂存{autoAttempt > 1 ? `（重试 ${autoAttempt}）` : ''}
+            </>
+          ) : autoStatus === 'dirty' || autoStatus === 'saving' ? (
+            <>
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              保存中…
+            </>
+          ) : autoStatus === 'saved' ? (
+            <>
+              <CloudCheck className="h-3 w-3 text-accent" />
+              已自动保存{autoSavedAt ? ` ${fmtTime(autoSavedAt)}` : ''}
+            </>
+          ) : autoStatus === 'error' ? (
+            <>
+              <CircleAlert className="h-3 w-3" />
+              自动保存失败，点【保存】重试
+            </>
+          ) : (
+            <>
+              <CloudUpload className="h-3 w-3" />
+              改动会自动保存
+            </>
+          )}
+        </motion.span>
         <Button variant="ghost" size="sm" onClick={handleClose}>
-          <X className="h-3.5 w-3.5" /> {autoEnabled ? '关闭' : '取消'}
+          <X className="h-3.5 w-3.5" /> 关闭
         </Button>
       </DrawerFooter>
 
