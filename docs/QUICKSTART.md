@@ -1,6 +1,6 @@
 # QUICKSTART — 快速上手 / 新设备部署
 
-> 面向「把系统跑起来」的人。完整架构见 ARCHITECTURE.md，配置项见 backend/app/config.py。
+> 面向部署与运维：环境准备、首次启动、常见运维、Docker/NAS 部署。架构总览见 `ARCHITECTURE.md`，新需求流程见 `WORKFLOW.md`，agent 编码纪律见 `AGENTS.md`。
 
 ## 1. 你需要准备
 - Python 3.12+（开发机已建 `backend/.venv`）

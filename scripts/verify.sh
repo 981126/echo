@@ -71,7 +71,7 @@ if $PY -c "import sqlalchemy, fastapi" 2>/dev/null; then
   echo "==> [docs] 表数量/路由与代码一致性"
   $PY scripts/check_doc_consistency.py || FAIL=1
 fi
-for f in AGENTS.md README.md docs/PRD.md docs/ARCHITECTURE.md docs/WORKFLOW.md docs/PARALLEL-DEV.md docs/DECISIONS.md docs/milestones.md docs/CHANGELOG.md requirements/README.md scripts/update.sh; do
+for f in AGENTS.md README.md docs/PRD.md docs/ARCHITECTURE.md docs/WORKFLOW.md docs/OPS-PARALLEL.md docs/DECISIONS.md docs/milestones.md docs/CHANGELOG.md requirements/README.md scripts/update.sh; do
   [ -f "$f" ] || { echo "  缺少必需文件: $f"; FAIL=1; }
 done
 

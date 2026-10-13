@@ -1,6 +1,6 @@
 # DESIGN — 开发设计细节（代码级）
 
-> 本文与代码一一对应，作为实现/排查时的地图。API 与表结构以 `docs/API.md`、`docs/DATABASE.md`（自动生成）为准。
+> 面向开发者：模块实现、数据流、关键逻辑、错误/并发处理、动效规范、编码标准。API 与表结构以 `docs/API.md`、`docs/DATABASE.md` 为准；架构总览见 `ARCHITECTURE.md`。
 
 ## 0. 运行入口与配置
 
@@ -184,26 +184,39 @@
 - mode=mock：确定性种子假数据（离线验收）；mode=real：真实 REST（douyin app v3 / xhs app v2 / bilibili web）。
 - 预算：每次真实/模拟请求后 `_charge(db)` 计数（Kv `tikhub_budget_used:<date>`），超 `tikhub_daily_budget`（默认 2000，可页面调）抛 `BudgetExceeded` → 停止本轮并通知。
 - 列表自带 stats 则不额外请求；B站列表无赞藏评 → `_backfill_bili_stats` 每轮最多 150 条单条详情补全。
-- **限速与重试（R-151 → R-163）**：R-151 曾按「单路由 1 请求/秒」串行排队；R-163 依 TikHub 套餐口径改为**全局合计 ≤ 10 请求/秒**——`_throttle_route(path)` 先过**进程内全局令牌桶**（`_TokenBucket`，速率 `ECHO_TIKHUB_RATE_LIMIT` 默认 10、容量 `ECHO_TIKHUB_RATE_BURST` 默认 10；锁内预留令牌、锁外 sleep），所有接口共享，是并行消费的前提；并保留：
+- **限速与重试（R-151 → R-163 → R-222）**：R-151 曾按「单路由 1 请求/秒」串行排队；R-163 依 TikHub 套餐口径改为**全局合计 ≤ 10 请求/秒**——`_throttle_route(path)` 先过**进程内全局令牌桶**（`_TokenBucket`，速率 `ECHO_TIKHUB_RATE_LIMIT` 默认 10、容量 `ECHO_TIKHUB_RATE_BURST` 默认 10；锁内预留令牌、锁外 sleep），所有接口共享，是并行消费的前提；R-222 令牌桶支持批量 `acquire(n)`。并保留：
   - **按路由 429 退避兜底**：某 path 收到 429 时 `_penalize_route` 临时抬高该路由下次允许时间（`_ROUTE_BACKOFF_SECONDS=2s`），避免持续撞限流；`_ROUTE_MIN_INTERVAL` 默认 0（可配，用于需要时恢复按路由排队）。
   - 有界重试 4 次尝试、退避 `1.5s → 4.0s → 8.0s`，仅对 `httpx.TransportError`（SSL EOF/连接重置/超时）与 HTTP `429/500/502/503/504` 生效；**4xx 永久错误立即抛**；被限流时服务端有时直接掐断 TLS 隧道（本机 httpx 读 macOS 系统代理 `127.0.0.1:7890`）。
   - 重试 `warning` / 最终失败 `error` 写日志（R-133 logger），错误消息保持 `TikHub 请求失败:` 前缀并追加「（已重试 N 次）」。
+  - R-222：`TikHubClient` 复用 `httpx.Client`（线程安全），减少 TCP/TLS 握手；测试用例对应改为 mock `httpx.Client.get`。
 
 ### 幂等与去重
 - 作品：`(platform, platform_post_id)` 唯一约束 + `_ensure_post` 先查后建/更新（含 title/cover/publish_time/raw/tags/cover_path）。
 - 指标：`(post_id, stat_date)` 唯一 upsert（当天多次同步覆盖成最新，历史保留）。
 - 评论：`_upsert_comments` 按 post_id+text 去重、点赞保留更高值、**按点赞降序取 Top50**（R-067）。
-- 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；`GET /api/platform/jobs` 输出进度供前端轮询（R-161：可选 `status` 过滤，前端只拉 `status=running`，避免历史 job 挤占运行中进度）。
+- 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；R-222 新增同 job_id 进度**防抖累计**（每 2s / 阶段关键词 / 完成时 flush），显著降低 SQLite 写锁竞争。`GET /api/platform/jobs` 输出进度供前端轮询（R-161：可选 `status` 过滤，前端只拉 `status=running`，避免历史 job 挤占运行中进度）。
 
 ### 编排（run_sync）
 - 入口：手动（博主页 全量/前15条/对标单账号「同步」/单账号/当前主博主「同步所有博主前15条」）、定时（06:00/17:00 两轮 `run_daily_sync_all`：主博主+全部对标统一 daily 带视频下载转写，R-109）、单条（posts/videos/works 同步）。
 - R-162（替换 R-160）：`enqueue_all_top15_sync(owner)` 为「当前主博主 + 全部对标」各写一条 `platform_sync` 队列任务（pending）并**预置一条 running 的 SyncJob**（progress_note=「排队中…」，前端所有卡片立即显示动画）；已在排队/执行的博主与无启用账号者跳过。接口 `POST /api/platform/sync-all`（无主博主/无可同步博主 400，同批任务在跑 409）。
 - **R-163 并发消费**：`all_top15_worker` → `run_all_top15_sync(owner, entries)` 用 `sync_pool.gather` **线程池并行**消费博主（替代 R-162 的逐个串行）——每个博主一个新 Session、`sync_pool.claim_task` 原子认领其 pending 队列任务（`UPDATE … WHERE status='pending'`），复用预置 job 调 `run_sync(scope=daily, creator_id=…, with_media=True, job=…)`；单个失败不阻断其余，任一 `BudgetExceeded` 触发取消标记、未开始者置 failed；完成后 `maybe_start_benchmark_rerun(refetch=False)`。定时 `run_daily_sync_all` 同样并行（主博主沿用 `creator_id=None`，对标显式 id）。
 - `scope=daily`：每平台 top15（R-085/R-086 最终 15）；`weekly`：对标每账号 top3；`initial`：`count<=0 → _real_posts_all` 翻页全量。daily 且 with_media=True 时同步后对前 N 条跑媒体补齐（下载视频+自动转写）。
-- 并发：账号级 `ThreadPoolExecutor(max_workers=3)` 每账号独立 SQLAlchemy session；**R-163** 博主级 `ECHO_SYNC_CONCURRENCY`（默认 4）、素材级 `ECHO_SYNC_MEDIA_CONCURRENCY`（默认 2，独立小池），`services/sync_pool.py` 提供 `claim_task`/`gather`/`pool_size`/`session_factory`。素材队列 `run_card_sync_queue` 亦并行：每条独立 Session；同一合并作品去重改由主线程按平台优先级**确定性预标记**（避免并发重复下载）；单条失败/预算耗尽只影响自身与未开始条目；评论/灵感池计数即使媒体步骤失败也如实汇总。
+- 并发：R-222 账号级并发数由 `ECHO_SYNC_ACCOUNT_CONCURRENCY`（默认 3）控制，替代硬编码 3；**R-163** 博主级 `ECHO_SYNC_CONCURRENCY`（默认 4）、素材级 `ECHO_SYNC_MEDIA_CONCURRENCY`（默认 2，独立小池），`services/sync_pool.py` 提供 `claim_task`/`gather`/`pool_size`/`session_factory`。素材队列 `run_card_sync_queue` 亦并行：每条独立 Session；同一合并作品去重改由主线程按平台优先级**确定性预标记**（避免并发重复下载）；单条失败/预算耗尽只影响自身与未开始条目；评论/灵感池计数即使媒体步骤失败也如实汇总。
+- **R-222 账号内并行 + 批量写库**：`sync_account` 内：
+  - 预加载该账号已有 `PlatformPost` 字典，消除循环内 N+1；
+  - 列表未带 stats 的作品（如 B站）先走 `_fetch_post_stats_parallel` 并发补全；
+  - `_ensure_post` / `_write_stat` 改为 `commit=False` 批量模式，按 `ECHO_SYNC_COMMIT_BATCH_SIZE`（默认 20）分批 `db.commit()`；
+  - `_collect_comments` 对最近 10 条作品走 `_fetch_comments_parallel` 并发抓取，主 Session 批量入库；预加载当天 `TopicIdea` 字典消除灵感池去重 N+1；
+  - `_backfill_bili_stats` 预加载最新指标消除 N+1，150 条详情走 `_fetch_post_stats_parallel` 并发抓取后批量写入；
+  - 封面下载拆为 `_ensure_covers_batch`，在作品入库后的事务外批量处理，不阻塞主同步；
+  - `card_sync` 队列行批量插入并统一广播，减少逐条 commit。
 - 结束：`auto_merge_creator` 合并同标题跨平台帖 → `works`；写 SyncJob stats/message + 账号 sync_status；通知中心收到完成。
 - 本地素材卡片同步 `sync_local_video_metrics`：遍历 `_bound_platform_posts`（local_video_id + work_id + platform_post_id 三路去重）拉各平台指标 + 评论 Top50，并写 `metrics_snapshots`（当天多平台聚合）；单平台失败不中断，全部失败才报错。
 - 云端合并卡同步 `sync_work_posts`（R-067 新增）：遍历 work 下全部平台帖（原只同步 cloudPosts[0]）。
+
+### 媒体下载（media_downloader.py / media_ensure.py）
+- `download_platform_video`：mp4 直链串行尝试备用地址；B站 dash 视频/音频流 **R-222 并行下载**后再 ffmpeg 合并。
+- `run_card_sync_queue` 素材级并发已在 R-163 实现；R-222 保持媒体并发 `ECHO_SYNC_MEDIA_CONCURRENCY=2`（N150 CPU 限制），下载并发由 `ECHO_SYNC_DOWNLOAD_CONCURRENCY`（默认 4）控制。
 
 ### 卡片同步按钮状态（前端 R-069）
 同步中状态按卡片唯一 `key`（`v<id>` 本地 / `w<id>` 合并 / `p<id>` 单条）判断，避免 work_id 与 post id 数字撞车误高亮。
@@ -396,3 +409,22 @@
 **点检（必须做）**
 - headless：发起 → 切到别的页 → 切回，确认**仍有进行中动效**且顶栏计数正确（中间可刷新一次浏览器）；等任务完成，确认动效落定、结果回填。
 - 断言依据是**后端状态**（`/api/tasks`），不是画面截图；画面只验证「可见/流畅/无闪帧」。
+
+---
+
+## 9. 工程与编码标准
+
+> 本节是 `AGENTS.md` 检查清单的技术展开。agent 日常只需按 `AGENTS.md` 自检，实现细节在这里查。
+
+### 9.1 五维标准
+- **简单**：不过度设计；新增依赖必须说明理由；拒绝重复代码；路由薄、业务厚。
+- **易读**：统一风格（Python: ruff；前端: ESLint/Prettier）+ 类型标注 + 小函数 + 清晰命名。
+- **可靠**：测试覆盖（pytest + mock，离线可跑）+ 统一异常/重试/降级 + 日志 + 失败告警 + 备份。
+- **扩展**：适配器模式；分层依赖方向 `api → services → models`，不反向；接口契约稳定（Pydantic）。
+- **性能**：异步 IO（第三方请求用 httpx）；SQLite 索引；分页；长任务后台线程不阻塞 UI；前端按需加载。
+
+### 9.2 表现力（R-175 起强制）
+动效不是装饰而是必备——新页面/新交互「该有的动画不能省」，且必须美观流畅、不闪、不跳。统一用 `frontend_v2/src/lib/motion.ts` 的动效令牌；切换类动画禁止从 `opacity: 0` 起步，收口必须落到 `opacity 1 / transform none`。详见 §8。
+
+### 9.3 非实时结果必须可见（R-202 起强制）
+凡「非实时返回 / 耗时」的功能（后端异步任务 + 同步慢接口），必须有进行中动效，且切页/刷新回来后只要后端仍在跑就必须仍显示进行中——绝不允许卸载即消失造成「已完成」的错觉。详见 §8.6。

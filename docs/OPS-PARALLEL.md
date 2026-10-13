@@ -1,20 +1,19 @@
-# 多 agent 并行开发约定（PARALLEL-DEV）
+# 多 agent 并行开发操作手册（OPS-PARALLEL）
 
-> 适用：**多个 agent 同时改这个仓库**。单个 agent 顺序开发不需要本文档。
+> 面向作者/收口人：多 agent 同时开发时的 worktree、端口、数据库、依赖、收尾操作。**agent 不必读本文**，编码纪律见 `AGENTS.md`，需求流程见 `docs/WORKFLOW.md`。
 > 一句话原则：**一需求一 worktree 一分支；主干仓库只做调度与合并，不写业务代码。**
-> 需求本身的流程（反问 → 登记 → PRD/里程碑 → 暂停确认 → 实施 → 自测 → 文档同步 → 提交）见 `docs/WORKFLOW.md`；本文档只管**并行时的环境与纪律**。
 
 ## 1. 什么会真正"污染代码"
 
 | 污染源 | 后果 | 解法 |
 |---|---|---|
 | 多个 agent 共享同一个工作树 | 同一批文件互相覆盖；共用 index，`git status` 分不清谁的改动 | `git worktree`（独立工作文件 + index + HEAD） |
-| `git add -A` / `commit -a` | 把别人未提交的半成品当自己的提交进去 | worktree 下 `add -A` 只看得到自己；再加纪律 `git add <具体文件>` |
-| 改写历史 / `gc --prune=now` / 删 ref | 对象库与 `refs/*` 全仓库共享，会打断别人的分支与撤销链 | 只在所有 agent 空闲时做；不删别人的 ref |
+| `git add -A` / `commit -a` | 把别人未提交的半成品当自己的提交进去 | worktree 下 `add -A` 只看得到自己；**并行纪律见 `AGENTS.md`** |
+| 改写历史 / `gc --prune=now` / 删 ref | 对象库与 `refs/*` 全仓库共享，会打断别人的分支与撤销链 | 只在所有 agent 空闲时做；**纪律见 `AGENTS.md`** |
 
 其余情况（多人都改 `PRD.md`/`CHANGELOG.md`/`milestones.md`/`requirements/README.md`）属于**合并冲突**，git 会明确报错、人工合并即可。
 
-> **判据**：①一 agent 一 worktree ②不 `git add -A` ③并行时段不 gc／不改写历史／不删 ref。
+> **环境判据**：①一 agent 一 worktree；②独立数据库；③正确端口。**并行纪律（不 `git add -A`、不 gc、不改写历史等）见 `AGENTS.md`**。
 > **注意**：worktree 只解决"环境互踩"；"两个人改同一个文件/函数"仍然会冲突，靠分工与收口（§5.2）解决。
 
 ---
@@ -23,12 +22,7 @@
 
 ### 2.1 命名与编号
 
-| 东西 | 形式 | 例 |
-|---|---|---|
-| 需求编号 | `R-<数字>`（`requirements/R-xxx-简短名.md`） | `R-221` |
-| 分支 | `feat/r<数字>` | `feat/r221` |
-| worktree 目录 | 与主干同级 `echo-r<数字>` | `/Users/yeah/document/project/echo-r221` |
-| commit | `feat(R-<数字>): ...` | `feat(R-221): ...` |
+分支、需求编号、commit 格式等**纪律见 `AGENTS.md`**。本文只写怎么建 worktree。
 
 **编号靠 git 原子抢占，不要自己读最大号 +1**（两个人同时读会拿到同一个号）：
 
@@ -188,14 +182,9 @@ ln -s ../../echo/backend/.venv "$WT/backend/.venv"
 
 ---
 
-## 5. 共享资源的纪律
+## 5. 并行纪律
 
-1. **提交只加自己的文件**：`git add <具体文件>`，**永不 `git add -A`**；commit 带需求号，一需求一 commit（不夹带别人改动）。
-2. **聚合文档单写者**：并行期间 `docs/PRD.md`、`docs/CHANGELOG.md`、`docs/milestones.md`、`requirements/README.md` **只由收口人改**（默认作者本人）。其它 agent 只写自己的新文件 `requirements/R-xxx.md`（新文件永不冲突），并在文件末尾附「待收口文档改动」，把要加的行草拟好。
-3. **共享 `.git` 的禁令**：并行时段**不做** `git gc --prune=now`、不改写历史、不删别人的分支/ref、不用 `git stash`（`refs/stash` 是全局的，别人 `pop` 可能弹出你的东西）。
-4. **不杀别人的进程**：只能按 `lsof` 查到的 PID 精确 `kill`（§2.2）。
-5. **冲突解完必须重跑门禁**：聚合文档冲突两边都保留；解错不会报错，但 `scripts/verify.sh` 会校验「表数量/表名」与「路由数量/每条路由」，不一致直接红。
-6. **不停别人的服务**：收尾只停自己 worktree 起的进程（§6.2）。
+agent 行为纪律（提交规范、聚合文档单写者、共享 `.git` 禁令、不杀别人进程、冲突后重跑门禁等）见 `AGENTS.md`。本文只列环境层面的收尾顺序与检查点。
 
 ---
 
