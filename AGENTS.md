@@ -5,7 +5,7 @@
 ## 新需求流程
 
 1. **先聊天反问**：与作者确认边界、场景、验收标准、动效、非实时返回等（清单见 `docs/WORKFLOW.md`）。
-2. **确认后再登记**：原文原样写入 `requirements/R-xxx.md`（编号取当前最大 +1）。
+2. **确认后再登记**：原文原样写入 `requirements/R-xxx-<short-description>.md`（编号取当前最大 +1，slug 用英文关键词短横线连接）。
 3. **更新 PRD/里程碑**：同步 `docs/PRD.md` 与 `docs/milestones.md`。
 4. **等作者说「继续」**：不动业务代码；线上明显 bug 可先说明根因并修复，再登记。
 
@@ -21,13 +21,42 @@
 
 ## 并行开发（多 agent 时）
 
+> 简化自 `docs/OPS-PARALLEL.md`，语义不变。详细命令与翻车记录见该文档。
+> **原则：一需求一 worktree 一分支；主干只做调度与合并，不写业务代码。**
+
+### 开工
+
+- [ ] 由作者/收口人在主干仓库建 worktree：`git worktree add /Users/yeah/document/project/echo-r221 -b feat/r221 main`。
+- [ ] 编号靠 git 原子抢占；若分支已存在，换号或找收口人，不要自己读最大号 +1。
+- [ ] 端口按需求编号算：`API=8000+(R mod 100)`，`WEB=3000+(R mod 100)`。开工前 `lsof` 确认空闲。
+- [ ] 数据库独立：先拷主干的 `.env`，再用 `sqlite3 ... .backup` 拷贝库到 worktree，校验表数量，最后改 `ECHO_DB_PATH` 指向自己的拷贝（绝对路径）。`ECHO_DATA_DIR` 保持共享主干。
+- [ ] 依赖共享：前端 `node_modules` 用硬链接（`cp -al`）并删 `.vite`；后端 `.venv` 用软链。worktree 内禁止 `npm install`/`pip install`。
+
+### 运行隔离
+
+- [ ] 每个 worktree 独占一个分支、一份数据库、一组端口。
+- [ ] 素材目录共享；但分支里删/改名文件会真的删掉共享原件，清理"孤儿"时尤其危险。
+- [ ] 浏览器 token 共享，别把副实例页面当主干操作。
+- [ ] 副后端定时任务会真实跑 TikHub/LLM，用完就停，不要长驻。
+- [ ] 副 worktree 前端验收走 `npm run build` + 起自己后端；不要同时跑多个前端 dev server。
+
+### 并行纪律
+
 - [ ] 一需求一 worktree 一分支；每个 worktree 只服务一个需求。
-- [ ] 并行时段不做 `git gc --prune=now`、不改写历史、不删别人的分支/ref、不用 `git stash`。
+- [ ] 不 `git gc --prune=now`、不改写历史、不删别人的分支/ref、不用 `git stash`。
 - [ ] 聚合文档（`docs/PRD.md`、`docs/CHANGELOG.md`、`docs/milestones.md`、`requirements/README.md`）只由收口人改；你只改自己的 `requirements/R-xxx.md`，并在末尾附「待收口文档改动」。
-- [ ] 不杀别人的进程；按 `lsof` 查到的 PID 精确 `kill` 自己的进程。
+- [ ] 只杀自己的进程；按 `lsof` PID 精确 `kill`。禁止 `pkill -f uvicorn`/`vite`。
 - [ ] 冲突解完后必须重跑 `scripts/verify.sh`。
 
-> worktree/端口/拷库/依赖/收尾的具体操作见 `docs/OPS-PARALLEL.md`（作者/收口人操作手册，agent 不必读）。
+### 收尾
+
+- [ ] 顺序：先停服务，再删目录。
+- [ ] 在 worktree 里 `git rebase main` → 解冲突 → 重跑 `verify.sh`。
+- [ ] 主干 `git merge --ff-only feat/rxxx` → 再跑 `verify.sh` → push。
+- [ ] 停掉本 worktree 的后端/前端/后台任务，`lsof` 确认端口释放。
+- [ ] `git worktree remove <目录>` + `git branch -d feat/rxxx` + `git worktree prune`。
+- [ ] 主干 `git pull --ff-only`；lock 文件变了才 `npm ci` / `pip install`。
+- [ ] 主干起服务并 health 通过。
 
 ## 交付前（必须全绿）
 
