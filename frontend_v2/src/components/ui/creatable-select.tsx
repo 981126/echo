@@ -21,12 +21,14 @@ export function CreatableSelect({
 }: CreatableSelectProps) {
   const [open, setOpen] = React.useState(false)
   const [inputValue, setInputValue] = React.useState(value)
+  // 候选过滤用独立的搜索词：打开时从空开始，展示全部候选，不被当前字段值过滤掉
+  const [query, setQuery] = React.useState('')
   React.useEffect(() => setInputValue(value), [value])
 
   const normalized = inputValue.trim()
   const filtered = React.useMemo(
-    () => options.filter((o) => o.toLowerCase().includes(normalized.toLowerCase())),
-    [options, normalized]
+    () => options.filter((o) => o.toLowerCase().includes(query.trim().toLowerCase())),
+    [options, query]
   )
   const canCreate = normalized && !options.some((o) => o === normalized)
 
@@ -34,6 +36,11 @@ export function CreatableSelect({
     onChange(v)
     setInputValue(v)
     setOpen(false)
+  }
+
+  const handleOpenChange = (v: boolean) => {
+    setOpen(v)
+    if (v) setQuery('')
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -46,7 +53,7 @@ export function CreatableSelect({
   }
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root open={open} onOpenChange={handleOpenChange}>
       <Popover.Trigger asChild>
         <button
           type="button"
@@ -59,6 +66,7 @@ export function CreatableSelect({
             value={inputValue}
             onChange={(e) => {
               setInputValue(e.target.value)
+              setQuery(e.target.value)
               if (!open) setOpen(true)
             }}
             onKeyDown={handleKeyDown}
@@ -66,7 +74,7 @@ export function CreatableSelect({
             className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
             onClick={(e) => {
               e.stopPropagation()
-              setOpen(true)
+              handleOpenChange(true)
             }}
           />
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
