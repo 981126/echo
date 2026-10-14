@@ -124,6 +124,28 @@ def test_cloud_work_merges_platforms_and_dedupes_tags(db):
     assert card["date"] == "2026-09-05", "作品卡片日期取排序后的第一篇（按平台名）"
 
 
+def test_cloud_work_shows_bound_local_video_tags_when_posts_have_none(db):
+    """帖子话题为空（部分平台不返回）时，作品绑定本地素材的标签也要展示出来。"""
+    c, acc = _owner(db)
+    w = Work(creator_id=c.id, title="无话题作品")
+    db.add(w)
+    db.commit()
+    bound = _video(
+        db,
+        c.id,
+        title="绑定素材",
+        date="2026-09-05 09:00:00",
+        main_topics=json.dumps(["求职"], ensure_ascii=False),
+        tags=["简历包装", "背调"],
+    )
+    _cloud(db, c.id, acc, title="B站版", date="2026-09-05 09:00:00", platform="bilibili", tags=[], work=w, local_video=bound)
+    _cloud(db, c.id, acc, title="抖音版", date="2026-09-04 09:00:00", platform="douyin", tags=[], work=w, local_video=bound)
+
+    cards = library_service.build_cards(db, c.id)
+    cloud = next(c for c in cards if c["kind"] == "cloud")
+    assert cloud["tags"] == ["求职", "简历包装", "背调"]
+
+
 # ---------- 筛选口径（搬移前 applyFiltersTo 同语义） ----------
 
 

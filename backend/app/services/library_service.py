@@ -172,14 +172,19 @@ def _cloud_cards(db: Session, creator_id: int) -> tuple[list[dict], set[int]]:
 
     out: list[dict] = []
     for kind, gid, members, owner_id, title in groups:
+        any_local = next((m.local_video_id for m in members if m.local_video_id), None)
+        bound = bound_videos.get(any_local) if any_local else None
         tags: list[str] = []
         for m in members:
             for t in _post_tags(m):
                 if t and t not in tags:
                     tags.append(t)
+        # 绑定本地素材的标签也是这份内容的主数据：帖子没带话题（部分平台不返回）时也要能显示
+        if bound is not None:
+            for t in _json_list(bound.main_topics) + _json_list(bound.tags):
+                if t and t not in tags:
+                    tags.append(t)
         prices = [int(m.ad_price) for m in members if m.ad_price is not None]
-        any_local = next((m.local_video_id for m in members if m.local_video_id), None)
-        bound = bound_videos.get(any_local) if any_local else None
         if bound is not None and bound.ad_price is not None:
             prices.append(int(bound.ad_price))
         out.append(
