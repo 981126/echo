@@ -190,8 +190,7 @@ export function DraftEditDrawer({
   const lastSeenIdRef = useRef(0) // 已看到的留痕 id 游标
   const [pendingNew, setPendingNew] = useState(0) // 未看到的新留痕条数（浮出「N 条新留痕 ↓」）
 
-  // R-212：只有「本次由【新建草稿】进入」的会话开实时保存（打开已有稿仍走【保存】/【取消】）
-  const autoEnabled = draft === null
+  // R-212/R-224：新建与已有草稿都在有改动时实时保存
   const [autoStatus, setAutoStatus] = useState<AutoSaveStatus>('idle')
   const [autoSavedAt, setAutoSavedAt] = useState<Date | null>(null)
   const [autoAttempt, setAutoAttempt] = useState(0) // R-213：离线重试次数
@@ -251,15 +250,13 @@ export function DraftEditDrawer({
   useEffect(() => () => autoSaver.dispose(), [autoSaver])
   // 任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
   useEffect(() => {
-    if (!open || !autoEnabled) return
+    if (!open) return
     autoSaver.schedule()
-  }, [open, autoEnabled, state, autoSaver])
+  }, [open, state, autoSaver])
 
   /** R-212：关抽屉（遮罩 / X / Esc /【关闭】）时立刻补一次保存——防抖窗口里最后几个字也不丢 */
   function handleClose() {
-    // eslint-disable-next-line no-alert
-    alert(`DEBUG close: draft=${draft?.id ?? 'null'}, autoEnabled=${autoEnabled}, id=${state.id}`)
-    if (autoEnabled) autoSaver.closeOut()
+    autoSaver.closeOut()
     onCloseRef.current()
   }
 
@@ -438,36 +435,16 @@ export function DraftEditDrawer({
 
   const canDiscuss = !!(state.script.trim() || draft?.original_script?.trim())
 
-  // R-224：初始化/切换草稿时，把当前已有值作为候选列表首项（切换草稿则重置，避免残留上一篇候选）
-  const loadedDraftIdRef = useRef<number>(0)
+  // R-224：打开/切换草稿时，用当前已有值作为候选列表首项。
+  // 只填候选、**不写编辑态**——否则「打开抽屉」本身就算一次改动，会被实时保存当成新内容造出空稿。
   useEffect(() => {
     if (!open) return
-    const switched = loadedDraftIdRef.current !== state.id
-    loadedDraftIdRef.current = state.id
     const tags = state.tagsText.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
-    setTitleOptions(switched ? [...new Set([...(state.title ? [state.title] : [])])] : (prev) => [...new Set([...(state.title ? [state.title] : []), ...prev])])
-    setCoverTextOptions(switched ? [...new Set([...(state.cover_text ? [state.cover_text] : [])])] : (prev) => [...new Set([...(state.cover_text ? [state.cover_text] : []), ...prev])])
-    setTagOptions(switched ? [...new Set([...tags])] : (prev) => [...new Set([...tags, ...prev])])
+    setTitleOptions(state.title ? [state.title] : [])
+    setCoverTextOptions(state.cover_text ? [state.cover_text] : [])
+    setTagOptions(tags)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, state.id])
-
-  // R-224：候选列表有值且当前字段为空时，默认选中第一个（用 ref 读最新 state，避免循环依赖）
-  useEffect(() => {
-    if (titleOptions.length && !latestRef.current.title) {
-      setState({ ...latestRef.current, title: titleOptions[0] })
-    }
-  }, [titleOptions, setState])
-  useEffect(() => {
-    if (coverTextOptions.length && !latestRef.current.cover_text) {
-      setState({ ...latestRef.current, cover_text: coverTextOptions[0] })
-    }
-  }, [coverTextOptions, setState])
-  useEffect(() => {
-    if (tagOptions.length && !latestRef.current.tagsText.trim()) {
-      const defaults = tagOptions.slice(0, 5)
-      setState({ ...latestRef.current, tagsText: defaults.join(', ') })
-    }
-  }, [tagOptions, setState])
 
   // R-224：恢复页面刷新前未完成的生成任务
   useEffect(() => {
@@ -499,7 +476,6 @@ export function DraftEditDrawer({
           const newTitles = data.titles || []
           const newCovers = data.cover_texts || []
           const newTags = data.tags || []
-          toast.success(`raw result: ${task.result.slice(0, 120)}`)
           setTitleOptions((prev) => [...new Set([...prev, ...newTitles])])
           setCoverTextOptions((prev) => [...new Set([...prev, ...newCovers])])
           setTagOptions((prev) => [...new Set([...prev, ...newTags])])
@@ -564,7 +540,7 @@ export function DraftEditDrawer({
     setPrompterOpening(true)
     try {
       const did = await ensureSaved()
-      if (autoEnabled) autoSaver.markSaved(state)
+      autoSaver.markSaved(state)
       navigate(`/prompter/${did}`)
     } catch (e) {
       toast.error((e as Error).message)
@@ -581,7 +557,7 @@ export function DraftEditDrawer({
     setSaving(true)
     try {
       await ensureSaved()
-      if (autoEnabled) autoSaver.markSaved(state) // R-212：已手动落库，别再补一次自动保存
+      autoSaver.markSaved(state) // R-212：已手动落库，别再补一次自动保存
       toast.success('已保存')
       onSaved()
       onClose()
@@ -807,9 +783,6 @@ export function DraftEditDrawer({
               <label className="text-xs font-medium text-muted-foreground">口播脚本（Markdown，可插图）</label>
               <span className="flex-1" />
               {/* R-224：AI 生成标题/封面字/素材标签 */}
-              <span className="text-[10px] text-muted-foreground">
-                {suggestTaskId ? `task ${suggestTaskId}` : suggesting ? 'suggesting' : `候选${titleOptions.length}/${coverTextOptions.length}/${tagOptions.length}`}
-              </span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -1150,50 +1123,48 @@ export function DraftEditDrawer({
           定稿
         </Button>
         <span className="flex-1" />
-        {/* R-212：新建稿改动会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
-        {autoEnabled && (
-          <motion.span
-            key={autoStatus}
-            data-testid="draft-autosave"
-            data-state={autoStatus}
-            initial={{ opacity: 0.85, y: 3 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={softIn}
-            className={cn(
-              'flex items-center gap-1 text-[11px]',
-              autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
-            )}
-          >
-            {autoStatus === 'offline' ? (
-              <>
-                <CloudOff className="h-3 w-3 text-warning" />
-                连不上服务器，已本地暂存{autoAttempt > 1 ? `（重试 ${autoAttempt}）` : ''}
-              </>
-            ) : autoStatus === 'dirty' || autoStatus === 'saving' ? (
-              <>
-                <LoaderCircle className="h-3 w-3 animate-spin" />
-                保存中…
-              </>
-            ) : autoStatus === 'saved' ? (
-              <>
-                <CloudCheck className="h-3 w-3 text-accent" />
-                已自动保存{autoSavedAt ? ` ${fmtTime(autoSavedAt)}` : ''}
-              </>
-            ) : autoStatus === 'error' ? (
-              <>
-                <CircleAlert className="h-3 w-3" />
-                自动保存失败，点【保存】重试
-              </>
-            ) : (
-              <>
-                <CloudUpload className="h-3 w-3" />
-                改动会自动保存
-              </>
-            )}
-          </motion.span>
-        )}
+        {/* R-212/R-224：新建与已有草稿的改动都会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
+        <motion.span
+          key={autoStatus}
+          data-testid="draft-autosave"
+          data-state={autoStatus}
+          initial={{ opacity: 0.85, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={softIn}
+          className={cn(
+            'flex items-center gap-1 text-[11px]',
+            autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
+          )}
+        >
+          {autoStatus === 'offline' ? (
+            <>
+              <CloudOff className="h-3 w-3 text-warning" />
+              连不上服务器，已本地暂存{autoAttempt > 1 ? `（重试 ${autoAttempt}）` : ''}
+            </>
+          ) : autoStatus === 'dirty' || autoStatus === 'saving' ? (
+            <>
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              保存中…
+            </>
+          ) : autoStatus === 'saved' ? (
+            <>
+              <CloudCheck className="h-3 w-3 text-accent" />
+              已自动保存{autoSavedAt ? ` ${fmtTime(autoSavedAt)}` : ''}
+            </>
+          ) : autoStatus === 'error' ? (
+            <>
+              <CircleAlert className="h-3 w-3" />
+              自动保存失败，点【保存】重试
+            </>
+          ) : (
+            <>
+              <CloudUpload className="h-3 w-3" />
+              改动会自动保存
+            </>
+          )}
+        </motion.span>
         <Button variant="ghost" size="sm" onClick={handleClose}>
-          <X className="h-3.5 w-3.5" /> {autoEnabled ? '关闭' : '取消'}
+          <X className="h-3.5 w-3.5" /> 关闭
         </Button>
       </DrawerFooter>
 
