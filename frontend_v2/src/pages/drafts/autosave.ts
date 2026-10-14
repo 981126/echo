@@ -87,6 +87,8 @@ export interface AutoSaver {
   retryNow: () => void
   /** 手动【保存】/服务端已写（讨论完成回填）后调用：记下已落库内容，避免重复写 */
   markSaved: (s: DraftEditState) => void
+  /** 打开草稿时调用：把服务端内容记为「已保存基线」——打开本身不算改动，不写库、不留本地副本 */
+  baseline: (s: DraftEditState) => void
   /** 组件卸载：清定时器与队列（在飞的请求与本地副本都保留） */
   dispose: () => void
 }
@@ -271,6 +273,13 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
     env.onStatus('saved', new Date())
   }
 
+  /** 打开草稿：把当前内容当作「服务器已保存」的基线（不清本地副本，留给 R-213 兜底判断） */
+  function baseline(s: DraftEditState) {
+    clearTimer()
+    pending = null
+    savedFp = draftFingerprint(s)
+  }
+
   function dispose() {
     clearTimer()
     clearRetry()
@@ -289,5 +298,5 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
     discardOnCreate = false
   }
 
-  return { reset, schedule, flush, closeOut, retryNow, markSaved, dispose }
+  return { reset, schedule, flush, closeOut, retryNow, markSaved, baseline, dispose }
 }

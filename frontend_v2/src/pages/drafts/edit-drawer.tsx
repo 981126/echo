@@ -39,7 +39,7 @@ import { toast } from '@/components/ui/toaster'
 import { ScriptEditor } from './script-editor'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { DraftAiStatus } from './draft-ai-status'
-import { createAutoSaver, type AutoSaveStatus } from './autosave'
+import { createAutoSaver, draftFingerprint, type AutoSaveStatus } from './autosave'
 import { clearLocalCopy, readLocalCopy, type LocalDraftCopy } from './local-copy'
 import { countNewRows, isNearBottom, maxRowId } from './discuss-follow'
 import { buildDiff } from './diff'
@@ -200,6 +200,7 @@ export function DraftEditDrawer({
   const onCreatedRef = useRef(onCreated)
   const onDiscardEmptyRef = useRef(onDiscardEmpty)
   const onCloseRef = useRef(onClose)
+  const skipOpenScheduleRef = useRef(false) // R-213：本轮打开若确有未同步副本，别被打开动作覆盖
   useEffect(() => {
     latestRef.current = state
     onCreatedRef.current = onCreated
@@ -226,20 +227,32 @@ export function DraftEditDrawer({
       }),
     []
   )
-  // 新一轮新建：清掉上一轮的 id/指纹（组件跨会话常驻）；这层必须排在下面 schedule 之前
+  // 新一轮打开：清掉上一轮的 id/指纹（组件跨会话常驻）；这层必须排在下面 schedule 之前
   useEffect(() => {
     if (!open) return
     autoSaver.reset()
     setAutoStatus('idle')
     setAutoSavedAt(null)
     setAutoAttempt(0)
+    // 打开本身不算改动：把服务端内容设为自动保存基线，避免「一打开就写库 / 留本地副本」。
+    // 例外：浏览器里确有一份「属于本篇且内容不同」的未同步副本——不能覆盖它，也不能被打开动作清掉。
+    const cur = latestRef.current
+    const copy = readLocalCopy()
+    const mine = !!copy && (copy.id ? copy.id === cur.id : draft === null)
+    const genuine = mine && draftFingerprint(copy.state) !== draftFingerprint(cur)
+    skipOpenScheduleRef.current = genuine
+    if (!genuine) autoSaver.baseline(cur)
   }, [open, draft, autoSaver])
-  // R-213：打开抽屉时读一次本地副本——只认「属于当前这篇」的那份（副本 id=0 ↔ 新建草稿会话）
+  // R-213：打开抽屉时读一次本地副本——只认「属于当前这篇」的那份（副本 id=0 ↔ 新建草稿会话）；
+  // 与服务器内容一致的是「无用副本」（上次自动保存没跑完留下的），直接丢弃，别每次都弹提示。
   useEffect(() => {
     if (!open) return
     const copy = readLocalCopy()
     const mine = !!copy && (copy.id ? copy.id === state.id : draft === null)
-    setLocalCopy(mine ? copy : null)
+    const stale = mine && draftFingerprint(copy.state) === draftFingerprint(state)
+    if (stale) clearLocalCopy()
+    setLocalCopy(mine && !stale ? copy : null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, draft, state.id])
   // R-213：浏览器恢复联网 → 立刻重试还没落库的内容（不用干等退避）
   useEffect(() => {
@@ -251,6 +264,11 @@ export function DraftEditDrawer({
   // 任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
   useEffect(() => {
     if (!open) return
+    // 本轮打开若存在未同步副本，跳过这次「打开触发」的保存，别把它覆盖掉（下一次真实改动再保存）
+    if (skipOpenScheduleRef.current) {
+      skipOpenScheduleRef.current = false
+      return
+    }
     autoSaver.schedule()
   }, [open, state, autoSaver])
 

@@ -228,6 +228,28 @@ describe('createAutoSaver（R-212）', () => {
     expect(h.updated).toHaveLength(0)
   })
 
+  it('baseline：打开已有稿后未改动 → 不写库、不留本地副本（打开本身不算改动）', async () => {
+    const h = harness()
+    h.set({ id: 5, title: '服务器内容' })
+    h.saver.baseline(h.read())
+    h.saver.schedule()
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY)
+    expect(h.created).toHaveLength(0)
+    expect(h.updated).toHaveLength(0)
+    expect(h.stored).toBeNull()
+  })
+
+  it('baseline 之后真实改动仍会落库', async () => {
+    const h = harness()
+    h.set({ id: 5, title: '服务器内容' })
+    h.saver.baseline(h.read())
+    h.set({ title: '改过的' })
+    h.saver.schedule()
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY)
+    expect(h.updated).toHaveLength(1)
+    expect(h.updated[0]).toMatchObject({ id: 5, body: { title: '改过的' } })
+  })
+
   it('markSaved（手动保存 / 服务端回填）后不再重复写', async () => {
     const h = harness()
     h.set({ title: 'a' })
