@@ -456,16 +456,19 @@ export function DraftEditDrawer({
     }
   }, [open, id])
 
-  // R-224：轮询生成任务
+  // R-224：轮询生成任务（只有任务到达终态才收尾；running/pending 必须继续轮询）
   useEffect(() => {
     if (!suggestTaskId || !id) return
     setSuggesting(true)
-    let stopped = false
+    function finish() {
+      setSuggesting(false)
+      setSuggestTaskId(null)
+      window.localStorage.removeItem(`draft_suggest_meta:${id}`)
+    }
     const timer = setInterval(async () => {
       try {
         const task = await apiJson<{ id: number; status: string; result: string; error: string }>(`/api/tasks/${suggestTaskId}`)
         if (task.status === 'running' || task.status === 'pending') return
-        if (stopped) return
         clearInterval(timer)
         if (task.status === 'done') {
           const data = JSON.parse(task.result || '{}') as {
@@ -484,16 +487,11 @@ export function DraftEditDrawer({
         } else {
           toast.error(task.error || '生成失败')
         }
+        finish()
       } catch (e) {
         clearInterval(timer)
         toast.error((e as Error).message)
-      } finally {
-        if (!stopped) {
-          stopped = true
-          setSuggesting(false)
-          setSuggestTaskId(null)
-          window.localStorage.removeItem(`draft_suggest_meta:${id}`)
-        }
+        finish()
       }
     }, 2000)
     return () => clearInterval(timer)

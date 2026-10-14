@@ -65,13 +65,31 @@ export function CreatableMultiSelect({
         <button
           type="button"
           className={cn(
-            'flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm outline-none transition-shadow focus-within:ring-2 focus-within:ring-[var(--ring)] cursor-pointer',
+            'flex min-h-9 min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-3 py-1.5 text-sm outline-none transition-shadow focus-within:ring-2 focus-within:ring-[var(--ring)] cursor-pointer',
             className
           )}
         >
-          <span className={cn('truncate', !value.length && 'text-muted-foreground')}>
-            {value.length ? `${placeholder} · ${value.length}` : placeholder}
-          </span>
+          {value.length === 0 ? (
+            <span className="truncate text-muted-foreground">{placeholder}</span>
+          ) : (
+            <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              {value.map((v) => (
+                <span
+                  key={v}
+                  className="inline-flex max-w-full items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-xs"
+                >
+                  <span className="truncate">{v}</span>
+                  <X
+                    className="h-3 w-3 shrink-0 opacity-60 hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onChange(value.filter((x) => x !== v))
+                    }}
+                  />
+                </span>
+              ))}
+            </span>
+          )}
           <span className="flex shrink-0 items-center gap-1">
             {value.length > 0 && (
               <X
