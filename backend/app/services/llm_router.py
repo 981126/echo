@@ -43,6 +43,7 @@ FEATURE_LABELS: dict[str, str] = {
     "prompt_eval": "金样本评测",
     "benchmark": "对标分析",
     "ideas": "选题灵感",
+    "draft_meta": "标题封面标签生成",
     "misc": "AI 调用",
 }
 
