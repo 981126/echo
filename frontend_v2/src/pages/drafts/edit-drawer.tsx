@@ -190,7 +190,8 @@ export function DraftEditDrawer({
   const lastSeenIdRef = useRef(0) // 已看到的留痕 id 游标
   const [pendingNew, setPendingNew] = useState(0) // 未看到的新留痕条数（浮出「N 条新留痕 ↓」）
 
-  // R-224：所有草稿会话都开实时保存（新建 + 已有）
+  // R-212：只有「本次由【新建草稿】进入」的会话开实时保存（打开已有稿仍走【保存】/【取消】）
+  const autoEnabled = draft === null
   const [autoStatus, setAutoStatus] = useState<AutoSaveStatus>('idle')
   const [autoSavedAt, setAutoSavedAt] = useState<Date | null>(null)
   const [autoAttempt, setAutoAttempt] = useState(0) // R-213：离线重试次数
@@ -248,15 +249,17 @@ export function DraftEditDrawer({
     return () => window.removeEventListener('online', onOnline)
   }, [autoSaver])
   useEffect(() => () => autoSaver.dispose(), [autoSaver])
-  // R-224：任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
+  // 任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
   useEffect(() => {
-    if (!open) return
+    if (!open || !autoEnabled) return
     autoSaver.schedule()
-  }, [open, state, autoSaver])
+  }, [open, autoEnabled, state, autoSaver])
 
-  /** R-212/R-224：关抽屉（遮罩 / X / Esc /【关闭】）时立刻补一次保存——防抖窗口里最后几个字也不丢 */
+  /** R-212：关抽屉（遮罩 / X / Esc /【关闭】）时立刻补一次保存——防抖窗口里最后几个字也不丢 */
   function handleClose() {
-    autoSaver.closeOut()
+    // eslint-disable-next-line no-alert
+    alert(`DEBUG close: draft=${draft?.id ?? 'null'}, autoEnabled=${autoEnabled}, id=${state.id}`)
+    if (autoEnabled) autoSaver.closeOut()
     onCloseRef.current()
   }
 
@@ -496,6 +499,7 @@ export function DraftEditDrawer({
           const newTitles = data.titles || []
           const newCovers = data.cover_texts || []
           const newTags = data.tags || []
+          toast.success(`raw result: ${task.result.slice(0, 120)}`)
           setTitleOptions((prev) => [...new Set([...prev, ...newTitles])])
           setCoverTextOptions((prev) => [...new Set([...prev, ...newCovers])])
           setTagOptions((prev) => [...new Set([...prev, ...newTags])])
@@ -560,7 +564,7 @@ export function DraftEditDrawer({
     setPrompterOpening(true)
     try {
       const did = await ensureSaved()
-      autoSaver.markSaved(state)
+      if (autoEnabled) autoSaver.markSaved(state)
       navigate(`/prompter/${did}`)
     } catch (e) {
       toast.error((e as Error).message)
@@ -577,7 +581,7 @@ export function DraftEditDrawer({
     setSaving(true)
     try {
       await ensureSaved()
-      autoSaver.markSaved(state) // R-212/R-224：已手动落库，别再补一次自动保存
+      if (autoEnabled) autoSaver.markSaved(state) // R-212：已手动落库，别再补一次自动保存
       toast.success('已保存')
       onSaved()
       onClose()
@@ -803,6 +807,9 @@ export function DraftEditDrawer({
               <label className="text-xs font-medium text-muted-foreground">口播脚本（Markdown，可插图）</label>
               <span className="flex-1" />
               {/* R-224：AI 生成标题/封面字/素材标签 */}
+              <span className="text-[10px] text-muted-foreground">
+                {suggestTaskId ? `task ${suggestTaskId}` : suggesting ? 'suggesting' : `候选${titleOptions.length}/${coverTextOptions.length}/${tagOptions.length}`}
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -1143,48 +1150,50 @@ export function DraftEditDrawer({
           定稿
         </Button>
         <span className="flex-1" />
-        {/* R-212/R-224：所有草稿改动都会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
-        <motion.span
-          key={autoStatus}
-          data-testid="draft-autosave"
-          data-state={autoStatus}
-          initial={{ opacity: 0.85, y: 3 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={softIn}
-          className={cn(
-            'flex items-center gap-1 text-[11px]',
-            autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
-          )}
-        >
-          {autoStatus === 'offline' ? (
-            <>
-              <CloudOff className="h-3 w-3 text-warning" />
-              连不上服务器，已本地暂存{autoAttempt > 1 ? `（重试 ${autoAttempt}）` : ''}
-            </>
-          ) : autoStatus === 'dirty' || autoStatus === 'saving' ? (
-            <>
-              <LoaderCircle className="h-3 w-3 animate-spin" />
-              保存中…
-            </>
-          ) : autoStatus === 'saved' ? (
-            <>
-              <CloudCheck className="h-3 w-3 text-accent" />
-              已自动保存{autoSavedAt ? ` ${fmtTime(autoSavedAt)}` : ''}
-            </>
-          ) : autoStatus === 'error' ? (
-            <>
-              <CircleAlert className="h-3 w-3" />
-              自动保存失败，点【保存】重试
-            </>
-          ) : (
-            <>
-              <CloudUpload className="h-3 w-3" />
-              改动会自动保存
-            </>
-          )}
-        </motion.span>
+        {/* R-212：新建稿改动会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
+        {autoEnabled && (
+          <motion.span
+            key={autoStatus}
+            data-testid="draft-autosave"
+            data-state={autoStatus}
+            initial={{ opacity: 0.85, y: 3 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={softIn}
+            className={cn(
+              'flex items-center gap-1 text-[11px]',
+              autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
+            )}
+          >
+            {autoStatus === 'offline' ? (
+              <>
+                <CloudOff className="h-3 w-3 text-warning" />
+                连不上服务器，已本地暂存{autoAttempt > 1 ? `（重试 ${autoAttempt}）` : ''}
+              </>
+            ) : autoStatus === 'dirty' || autoStatus === 'saving' ? (
+              <>
+                <LoaderCircle className="h-3 w-3 animate-spin" />
+                保存中…
+              </>
+            ) : autoStatus === 'saved' ? (
+              <>
+                <CloudCheck className="h-3 w-3 text-accent" />
+                已自动保存{autoSavedAt ? ` ${fmtTime(autoSavedAt)}` : ''}
+              </>
+            ) : autoStatus === 'error' ? (
+              <>
+                <CircleAlert className="h-3 w-3" />
+                自动保存失败，点【保存】重试
+              </>
+            ) : (
+              <>
+                <CloudUpload className="h-3 w-3" />
+                改动会自动保存
+              </>
+            )}
+          </motion.span>
+        )}
         <Button variant="ghost" size="sm" onClick={handleClose}>
-          <X className="h-3.5 w-3.5" /> 关闭
+          <X className="h-3.5 w-3.5" /> {autoEnabled ? '关闭' : '取消'}
         </Button>
       </DrawerFooter>
 
