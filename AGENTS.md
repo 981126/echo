@@ -7,7 +7,7 @@
 1. **先聊天反问**：与作者确认边界、场景、验收标准、动效、非实时返回等（清单见 `docs/WORKFLOW.md`）。
 2. **确认后再登记**：原文原样写入 `requirements/R-xxx-<short-description>.md`（编号取当前最大 +1，slug 用英文关键词短横线连接）。
 3. **更新 PRD/里程碑**：同步 `docs/PRD.md` 与 `docs/milestones.md`。
-4. **等作者说「继续」**：不动业务代码；线上明显 bug 可先说明根因并修复，再登记。
+4. **等作者说「继续」后开工**；开发完成且 `scripts/verify.sh` 全绿后，agent 主动将 `feat/rxxx` 合并到 `main` 并 push。
 
 ## 编码纪律
 
@@ -18,6 +18,7 @@
 - [ ] 分层方向 `api → services → models`，不反向；拒绝重复代码，路由薄、业务厚。
 - [ ] 改接口同步 `docs/API.md`，改表同步 `docs/DATABASE.md`。
 - [ ] API key / 密钥只放 `.env`（已被 gitignore），不进代码/文档/commit。
+- [ ] 开发完成且 `scripts/verify.sh` 全绿后，agent 自行合并：单 agent / 多 agent 各自负责自己的 `feat/rxxx`。合并命令 `git checkout main && git pull --ff-only && git merge --ff-only feat/rxxx && git push`；合并后删除本地分支 `git branch -d feat/rxxx`，**保留远程分支**。
 
 ## 并行开发（多 agent 时）
 
@@ -52,11 +53,11 @@
 
 - [ ] 顺序：先停服务，再删目录。
 - [ ] 在 worktree 里 `git rebase main` → 解冲突 → 重跑 `verify.sh`。
-- [ ] 主干 `git merge --ff-only feat/rxxx` → 再跑 `verify.sh` → push。
+- [ ] 每个 agent 自己执行合并：`git checkout main && git pull --ff-only && git merge --ff-only feat/rxxx && git push`。
+- [ ] 合并后再跑 `verify.sh` 兜底，主干起服务并 health 通过。
 - [ ] 停掉本 worktree 的后端/前端/后台任务，`lsof` 确认端口释放。
-- [ ] `git worktree remove <目录>` + `git branch -d feat/rxxx` + `git worktree prune`。
+- [ ] `git worktree remove <目录>` + `git branch -d feat/rxxx`（**保留远程分支**）+ `git worktree prune`。
 - [ ] 主干 `git pull --ff-only`；lock 文件变了才 `npm ci` / `pip install`。
-- [ ] 主干起服务并 health 通过。
 
 ## 交付前（必须全绿）
 

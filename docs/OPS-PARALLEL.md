@@ -1,7 +1,7 @@
 # 多 agent 并行开发操作手册（OPS-PARALLEL）
 
 > 面向作者/收口人：多 agent 同时开发时的 worktree、端口、数据库、依赖、收尾操作。**agent 不必读本文**，编码纪律见 `AGENTS.md`，需求流程见 `docs/WORKFLOW.md`。
-> 一句话原则：**一需求一 worktree 一分支；主干仓库只做调度与合并，不写业务代码。**
+> 一句话原则：**一需求一 worktree 一分支；开发完成后每个 agent 自行将自己的 `feat/rxxx` 合并到 `main`，主干不写业务代码。**
 
 ## 1. 什么会真正"污染代码"
 
@@ -34,7 +34,7 @@ git worktree add /Users/yeah/document/project/echo-r221 -b feat/r221 main
 ```
 
 **谁建**：作者本人（或收口人）在主干仓库建。agent 会话的工作区被沙箱限制在自己目录内，通常无权在上级目录建目录。
-**一个 worktree 只服务一个需求**：做完合并后收尾（§6）再开下一个；不要在一个 worktree 里轮着做两个需求。
+**一个 worktree 只服务一个需求**：该 agent 完成开发、verify 全绿、自行合并到 `main` 并收尾（§6）后再开下一个；不要在一个 worktree 里轮着做两个需求。
 
 ### 2.2 端口算号
 
@@ -192,7 +192,7 @@ agent 行为纪律（提交规范、聚合文档单写者、共享 `.git` 禁令
 
 **顺序不可颠倒：先停服务，再删目录。** 进程的 CWD 就在目录里，删了目录而进程还在跑会出现：① SQLite 写到已被 unlink 的 inode；② 定时任务继续烧 TikHub/LLM；③ 端口不释放挡住主干启动。
 
-### 6.1 合并（在主干仓库做；分支上应只有一个 commit）
+### 6.1 合并（每个 agent 自行完成；分支上应只有一个 commit）
 
 ```bash
 R=r221; N=21; WT=/Users/yeah/document/project/echo-$R
@@ -201,9 +201,10 @@ API=$((8000 + N)); WEB=$((3000 + N))
 cd /Users/yeah/document/project/echo
 git switch main && git status --short          # 必须干净
 # 推荐：先在 worktree 里 git rebase main → 解冲突 → 重跑 verify → 回主干快进（历史线性）
+git pull --ff-only
 git merge --ff-only feat/$R                    # ff 不了时用 git merge --no-ff feat/$R
 PYTHON="$PWD/backend/.venv/bin/python" scripts/verify.sh   # 合并结果必须再绿一次
-git push origin main                           # 走远端协作时
+git push origin main
 ```
 
 ### 6.2 停服务
@@ -222,7 +223,7 @@ lsof -nP -iTCP:$WEB -sTCP:LISTEN || echo "前端端口已释放"
 sqlite3 "$WT/echo_resource/echo.db" ".backup /Users/yeah/document/echo_resource/verify_$R.db"   # 可选：留档验证库
 git worktree remove "$WT"                      # 被拒时先看 git -C "$WT" status --short 再决定 --force
 git worktree list                              # 应只剩主干
-git branch -d feat/$R                          # 已合入才删得掉（-d 会校验）；-D 强制
+git branch -d feat/$R                          # 只删本地分支；远程分支保留
 git worktree prune                             # 手工删过目录时清残留登记
 ```
 
