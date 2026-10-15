@@ -196,7 +196,10 @@ export default function BenchmarkPage() {
             original_script: res.original_script || '',
             draft_id: res.draft_id || 0,
             source_title: res.source_ref?.source_title || res.title || '',
-            benchmark_name: res.benchmark_name || b.name
+            benchmark_name: res.benchmark_name || b.name,
+            outline: res.outline || '',
+            sources: res.sources || [],
+            online_sources: res.online_sources || []
           })
         }
         toast.success(`洗稿完成${res.draft_id ? `，已存草稿 #${res.draft_id}` : ''}`)

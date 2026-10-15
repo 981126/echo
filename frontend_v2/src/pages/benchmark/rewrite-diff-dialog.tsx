@@ -1,11 +1,18 @@
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowRight, Copy, FileText } from 'lucide-react'
+import { ArrowRight, Copy, FileText, Link2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from '@/components/ui/toaster'
+
+export interface EvidenceSource {
+  title?: string
+  url?: string
+  summary?: string
+  site?: string
+}
 
 export interface RewriteResult {
   script: string
@@ -13,6 +20,12 @@ export interface RewriteResult {
   draft_id: number
   source_title: string
   benchmark_name: string
+  /** R-227：本篇主张/事例 */
+  outline?: string
+  /** R-227：实际引用的联网来源 */
+  sources?: EvidenceSource[]
+  /** R-227：本次检索到的全部来源（留痕） */
+  online_sources?: EvidenceSource[]
 }
 
 export function RewriteDiffDialog({
@@ -75,6 +88,37 @@ export function RewriteDiffDialog({
             </ScrollArea>
           </motion.div>
         </div>
+
+        {(!!result.outline || !!result.sources?.length || !!result.online_sources?.length) && (
+          <div className="mt-3 rounded-lg border border-border p-3">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
+              <span className="font-medium">论点 / 引用来源</span>
+              {!!result.online_sources?.length && (
+                <Badge variant="secondary" className="text-[10px]">联网检索 {result.online_sources.length} 条</Badge>
+              )}
+            </div>
+            {result.outline && <p className="mt-1 text-xs text-muted-foreground">{result.outline}</p>}
+            {result.sources?.length ? (
+              <ul className="mt-1.5 space-y-1">
+                {result.sources.map((s, i) => (
+                  <li key={i} className="text-xs">
+                    {s.url ? (
+                      <a href={s.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">{s.title || s.url}</a>
+                    ) : (
+                      <span>{s.title || '—'}</span>
+                    )}
+                    {!!s.site && <span className="text-muted-foreground/70"> · {s.site}</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              !!result.online_sources?.length && (
+                <p className="mt-1 text-xs text-muted-foreground">本次联网检索到的内容未直接引用。</p>
+              )
+            )}
+          </div>
+        )}
 
         <div className="mt-2 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>关闭</Button>

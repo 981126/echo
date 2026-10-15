@@ -595,6 +595,11 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     db.refresh(draft)
     # R-173：把草稿 id 回写进 payload，供调用方（rewrite_worker）在**异常时**也能标记中断状态
     payload["draft_id"] = draft.id
+    # R-227：联网事实证据（无 key/失败静默返回空），并写留痕
+    from .evidence import gather_online, resolve_used
+
+    ev = gather_online(db, source_title, draft_id=draft.id, creator_id=owner.id)
+    evidence_block = ev.get("block") or ""
     # R-178：洗稿同样留运行头 + 每次调用记实际模型
     rewrite_rounds = debate_rounds(db, settings)
     run_header_id = _run_header(db, draft.id, gen_slot, critic_slot, rewrite_rounds)
@@ -616,12 +621,14 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         },
     )
 
-    # R-194：初稿走统一「参考改写」契约 + 完整作者上下文（只借选题与信息线索）
+    # R-194：初稿走统一「参考改写」契约 + 完整作者上下文（只借选题与信息线索）；R-227 注入联网证据
     rewrite_system = REWRITE_SYSTEM
-    rewrite_user = _rewrite_user(db, source_title, source_text)
+    rewrite_user = _rewrite_user(db, source_title, source_text, evidence_block)
 
     latest = None
     draft_llm = None
+    initial_outline = ""
+    initial_sources_raw: list = []
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
         _status(
             db,
@@ -642,6 +649,9 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             draft_llm = llm
             draft.title = str(data.get("title", "")).strip() or ""
             draft.cover_text = str(data.get("cover_text", "")).strip()
+            initial_outline = str(data.get("outline") or "").strip()
+            raw_sources = data.get("sources")
+            initial_sources_raw = raw_sources if isinstance(raw_sources, list) else []
             break
         except Exception as exc:  # noqa: BLE001
             _note(db, draft.id, 0, f"{name} 初稿失败：{str(exc)[:200]}；切换下一位")
@@ -660,13 +670,19 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "你是脚本评审专家。对照**作者完整上下文**（人设/风格范本/语言习惯/禁用词/结构偏好）指出当前脚本"
         "哪些地方不像作者、哪些有 AI 腔、哪些与原文结构或句子雷同照搬"
         "（参考改写要求：只借选题与信息线索，不借结构/比喻/句群，必须补作者自己的经历与判断）；"
-        "给出具体可执行的修改建议（简短直给）。\n"
+        "**并重点检查内容质量**：有没有一个明确的主张、有没有至少一个具体事例或数据、"
+        "引用的联网事实是否与提供的素材一致（有没有编造数字/人名/机构/经历）、"
+        "有没有「要努力/要相信自己」这类正确但没用的空话；给出具体可执行的修改建议（简短直给）。\n"
         f"作者上下文：\n{author_ctx}"
+        + (f"\n\n可引用的联网事实素材：\n{evidence_block}" if evidence_block else "")
     )
     revise_system = (
         "你是撰稿模型。根据评审意见，用作者口吻重写整篇口播脚本，只输出脚本正文，"
-        "不要解释、不要加标题，保持 1-2 分钟口播长度。\n"
+        "不要解释、不要加标题，保持 1-2 分钟口播长度。"
+        "**优先满足内容质量**：确保有一个明确主张 + 至少一个具体事例/数据；"
+        "有可引用的联网事实就口语化引用；严禁编造数字/人名/机构/经历；删掉空话。\n"
         f"作者上下文（必须贴合）：\n{author_ctx}"
+        + (f"\n\n可引用的联网事实素材：\n{evidence_block}" if evidence_block else "")
     )
 
     rounds = rewrite_rounds
@@ -738,6 +754,30 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     )
     # R-157：洗稿完成后记第二版
     finalize_version(db, draft, source="ai_rewrite", note="洗稿后")
+    # R-227：论点 + 引用来源落库（引用编号越界=疑似编造来源，剔除）；并回写留痕的 used
+    used_sources = resolve_used(ev.get("sources") or [], initial_sources_raw)
+    draft.quality = json.dumps(
+        {
+            "outline": initial_outline,
+            "sources": used_sources,
+            "online_sources": ev.get("sources") or [],
+            "search_queries": ev.get("queries") or [],
+        },
+        ensure_ascii=False,
+    )
+    db.commit()
+    if ev.get("sources"):
+        from ..models.web_search import WebSearchLog
+
+        logrow = (
+            db.query(WebSearchLog)
+            .filter(WebSearchLog.draft_id == draft.id)
+            .order_by(WebSearchLog.id.desc())
+            .first()
+        )
+        if logrow is not None:
+            logrow.used = json.dumps(used_sources, ensure_ascii=False)
+            db.commit()
     return {
         "draft_id": draft.id,
         "title": draft.title,
@@ -747,5 +787,8 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "source_ref": source_ref,
         "benchmark_name": payload.get("benchmark_name") or "",
         "tags": source_tags,
+        "outline": initial_outline,
+        "sources": used_sources,
+        "online_sources": ev.get("sources") or [],
     }
 

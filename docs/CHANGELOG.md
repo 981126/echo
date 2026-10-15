@@ -1,5 +1,22 @@
 # 变更记录
 
+## [M228 / R-227] 2026-10-15 — 洗稿先行「证据支撑」内容质量（联网事实 + 论点/事例 + 来源留痕）✅ 已完成（第 1 步）
+
+> 作者：「在灵感池生成、灵感随手记、洗稿这几个功能生成文案，生成的内容质量都不高，因为没有论点，没有真实的事例，所以观众像是听了整篇废话，没有有用的东西」「有没有可能联网去搜索一些事实事例」
+
+- **根因**：生成/洗稿管线以「像作者」为唯一目标——提示词只有一句软要求、评审词只查风格/AI 腔、没有真实事实检索层、契约也没有论点/事例字段，模型只能凭空编或复述素材。
+- **做了什么**：
+  - 新增 `backend/app/services/web_search.py`：豆包搜索薄客户端（读 `ECHO_WEB_SEARCH_API_KEY`，1h 缓存、15s 超时、失败静默）。
+  - 新增 `backend/app/services/evidence.py`：按选题联网检索 → 证据清单注入 prompt；写 `web_search_logs` 留痕；`resolve_used()` 校验引用编号（越界=编造来源，剔除）。
+  - 新增表 `web_search_logs`（`backend/app/models/web_search.py`，`create_all` 自动建）；同步 `docs/DATABASE.md`（32 张表）。
+  - `benchmark.REWRITE_SYSTEM`：硬要求「1 主张 + ≥1 具体事例/数据、有证据必须引用、禁编造」+ JSON 契约 `outline/sources`；`_rewrite_user` 注入证据并补传 topic（`author_style_context(db, title)`）。
+  - `debate.run_rewrite_debate`：注入证据清单；评审词加内容维度「有没有主张/具体事例/是否与证据一致/有无空话」；`outline/sources/online_sources/search_queries` 落 `Draft.quality`；回写留痕 `used`。
+  - 前端：草稿抽屉 + 洗稿对照弹窗展示「论点 / 引用来源（含链接）」，可核对留痕；正文不插 URL/编号（来源区按顺序对应）。
+  - `tests/conftest.py` 关闭联网（fail-closed，避免测试打真实外部世界）。
+- **作者确认的边界**：对标素材只参与创作参考、不进入人设学习/提示词优化（守 D-028）；站内事例层（第 2 步）用作者 ASR + 作者侧定稿；排除广告/空转写；按选题相关度取。
+- **明确不做（本次）**：不动 DeepSeek/Kimi 调用链、不引向量库；站内素材检索与灵感池/随手记推广排第 2/3 步。
+- **自测**：`scripts/verify.sh` 全绿；新增 `test_r227_evidence_rewrite.py`。
+
 ## [M227 / R-226] 2026-10-15 — 素材卡片标题去话题 + 三平台标签合并去重 ✅ 已完成
 
 > 作者：「1.标题去掉标签 2.卡片点赞下方的标签，需要将三个平台的话题合并去重」

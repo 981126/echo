@@ -127,6 +127,15 @@ class Settings(BaseSettings):
     sync_commit_batch_size: int = 20  # 批量写库提交阈值，ECHO_SYNC_COMMIT_BATCH_SIZE（R-222）
     sync_progress_debounce_seconds: float = 2.0  # 同步进度更新防抖秒数，ECHO_SYNC_PROGRESS_DEBOUNCE_SECONDS（R-222）
 
+    # 联网搜索（R-227）：火山引擎豆包搜索（融合信息搜索），为生成/洗稿补充真实事实/数据。
+    # 未配 key 时联网能力静默关闭（不影响生成）；结果缓存 + 单次请求超时。
+    web_search_api_key: str = ""
+    web_search_base_url: str = "https://open.feedcoopapi.com/search_api/web_search"
+    web_search_timeout_seconds: int = 15
+    web_search_count: int = 5  # 单次搜索返回条数（web ≤ 50）
+    web_search_cache_seconds: int = 3600  # 同 query 结果缓存时长，省额度
+    web_search_traffic_tag: str = "skill_web_search_common"  # 渠道标识（豆包搜索要求）
+
     # 路径：未显式配置时由 data_dir 统一派生（env 可用 ECHO_DB_PATH / ECHO_*_DIR 覆盖）
     _UNSET = Path("@unset@")
     data_dir: Path = Path("./data")

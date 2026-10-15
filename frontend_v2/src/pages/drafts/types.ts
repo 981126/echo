@@ -57,6 +57,13 @@ export interface Draft {
       style_missing?: string[]
       ai_cliche?: string[]
     }
+    /** R-227：本篇论点/事例一句话 */
+    outline?: string
+    /** R-227：模型实际引用的联网来源 */
+    sources?: EvidenceSource[]
+    /** R-227：本次联网检索到的全部来源（留痕） */
+    online_sources?: EvidenceSource[]
+    search_queries?: { query: string; count?: number; time_range?: string }[]
     [k: string]: unknown
   }
   version: number
@@ -224,4 +231,12 @@ export const AI_KIND_LABELS: Record<string, string> = {
 
 export function aiKindLabel(kind?: string): string {
   return AI_KIND_LABELS[kind || ''] || 'AI 处理'
+}
+
+/** R-227：联网事实来源（豆包搜索） */
+export interface EvidenceSource {
+  title?: string
+  url?: string
+  summary?: string
+  site?: string
 }

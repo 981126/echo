@@ -19,6 +19,7 @@ import {
   CircleAlert,
   Captions,
   Sparkles,
+  Link2,
 } from 'lucide-react'
 import MarkdownIt from 'markdown-it'
 import { apiJson } from '@/api/client'
@@ -969,6 +970,41 @@ export function DraftEditDrawer({
                       <p className="mt-1 text-[11px] text-warning">
                         AI 腔词：{draft.quality.diagnostics.ai_cliche.join('、')}
                       </p>
+                    )}
+                  </div>
+                )}
+                {/* R-227：本篇论点/事例 + 联网引用来源（留痕可核对） */}
+                {(!!draft?.quality?.outline || !!draft?.quality?.sources?.length || !!draft?.quality?.online_sources?.length) && (
+                  <div className="rounded-lg border border-border p-2.5">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
+                      <span className="font-medium">论点 / 引用来源</span>
+                      {!!draft?.quality?.online_sources?.length && (
+                        <Badge variant="secondary" className="text-[10px]">联网检索 {draft.quality.online_sources.length} 条</Badge>
+                      )}
+                    </div>
+                    {draft?.quality?.outline && (
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{draft.quality.outline}</p>
+                    )}
+                    {draft?.quality?.sources?.length ? (
+                      <ul className="mt-1 space-y-1">
+                        {draft.quality.sources.map((s, i) => (
+                          <li key={i} className="text-[11px] leading-relaxed">
+                            {s.url ? (
+                              <a href={s.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                                {s.title || s.url}
+                              </a>
+                            ) : (
+                              <span>{s.title || '—'}</span>
+                            )}
+                            {!!s.site && <span className="text-muted-foreground/70"> · {s.site}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      !!draft?.quality?.online_sources?.length && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">本次联网检索到的内容未直接引用。</p>
+                      )
                     )}
                   </div>
                 )}

@@ -28,6 +28,9 @@ os.environ["ECHO_KIMI_API_KEY"] = ""
 os.environ["ECHO_SMTP_USER"] = ""
 os.environ["ECHO_SMTP_AUTH_CODE"] = ""
 os.environ["ECHO_MAIL_TO"] = ""
+# R-227：联网搜索同样会打到真实外部世界（豆包搜索 API），测试环境 fail-closed 关闭；
+# 需要验证联网逻辑的用例自行 monkeypatch web_search。
+os.environ["ECHO_WEB_SEARCH_API_KEY"] = ""
 
 # 预建表 + seed 默认提示词，保证 get_prompt 等 DB 依赖离线可用
 from app.db import init_db  # noqa: E402

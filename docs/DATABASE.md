@@ -4,7 +4,7 @@
 > 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（31 张）
+## 表总览（32 张）
 
 | 表 | 说明 |
 |---|---|
@@ -772,6 +772,22 @@ AI 对话写操作的提案与审计（R-147 P2）。
 | `error` | TEXT | 失败原因 |
 | `task_id` | INTEGER | 若入队了后台任务，记录任务 id |
 | `created_at` / `decided_at` | DATETIME | 登记时间 / 作者决定时间 |
+
+## `web_search_logs`
+
+联网搜索留痕（R-227）：每次生成/洗稿调用豆包搜索时落一行，保留 query 与**完整原始结果**，便于核对与额度对账。
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `draft_id` | INTEGER | 关联草稿（可空） |
+| `creator_id` | INTEGER | 归属主博主（可空） |
+| `query` | VARCHAR(500) | 实际搜索词 |
+| `source` | VARCHAR(20) | 来源，默认 `doubao`（豆包搜索） |
+| `time_range` | VARCHAR(40) | 时间范围过滤（空=不限） |
+| `results` | TEXT | 完整结果 JSON（标题/URL/摘要/站点，原样留痕） |
+| `used` | TEXT | 模型实际引用到的来源 JSON |
+| `created_at` | DATETIME | 创建时间（北京时间） |
 
 ## 只读分析视图（不是表，供 AI 对话的 `sql_query` 使用）
 
