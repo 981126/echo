@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..core.platform_links import build_platform_page_url_from_data, parse_raw
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
+from ..models.video import Video
 from ..models.work import Work
 
 _SPACE_RE = re.compile(r"\\s+")
@@ -140,9 +141,14 @@ def auto_merge_creator(db: Session, creator_id: int) -> int:
             db.add(work)
             db.flush()
             created += 1
+        assert work is not None  # 上面已查询到或新建
         for m in members:
             if m.work_id != work.id:
                 m.work_id = work.id
+            if m.local_video_id:
+                v = db.get(Video, m.local_video_id)
+                if v is not None and v.work_id != work.id:
+                    v.work_id = work.id
     db.commit()
     return created
 
@@ -170,8 +176,13 @@ def merge_manual(db: Session, platform_post_ids: list[int], creator_id: int | No
         work = Work(creator_id=creator_id, title=first.title or "", cover_path=first.cover_path)
         db.add(work)
         db.flush()
+    assert work is not None  # 上面已查询到或新建
     for p in posts:
         p.work_id = work.id
+        if p.local_video_id:
+            v = db.get(Video, p.local_video_id)
+            if v is not None and v.work_id != work.id:
+                v.work_id = work.id
     if not work.title and posts:
         work.title = posts[0].title or ""
     db.commit()

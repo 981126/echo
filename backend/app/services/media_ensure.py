@@ -38,6 +38,10 @@ log = get_logger("media_ensure")
 
 # 下载源平台优先级：抖音单文件最简单，其次小红书，B站最重（需合并）放最后
 _PLATFORM_PRIORITY = ["douyin", "xiaohongshu", "bilibili"]
+
+# R-094 fix：work 级「下载/转写」进程内互斥声明（进程内单 uvicorn 有效；多进程部署需换 DB 锁）
+_active_work_media: set[int] = set()
+_active_work_media_lock = threading.Lock()
 _PLACEHOLDER_PREFIX = "__cloud__"  # 与 /to-local、/to-material 的占位命名保持一致
 
 
@@ -73,7 +77,11 @@ def _posts_of(
         return db.query(PlatformPost).filter(PlatformPost.work_id == work_id).all()
     if post_id is not None:
         post = db.get(PlatformPost, post_id)
-        return [post] if post else []
+        if post is None:
+            return []
+        if post.work_id:
+            return db.query(PlatformPost).filter(PlatformPost.work_id == post.work_id).all()
+        return [post]
     if video_id is not None:
         video = db.get(Video, video_id)
         return _bound_platform_posts(db, video) if video else []
@@ -90,8 +98,9 @@ def _find_video(
     for p in posts:
         if p.local_video_id:
             ids.append(p.local_video_id)
-    if posts and posts[0].work_id:
-        for wv in db.query(Video).filter(Video.work_id == posts[0].work_id).all():
+    work_ids = {p.work_id for p in posts if p.work_id}
+    for wid in work_ids:
+        for wv in db.query(Video).filter(Video.work_id == wid).all():
             ids.append(wv.id)
     rows: list[Video] = []
     for vid in dict.fromkeys(ids):
@@ -124,6 +133,14 @@ def _video_owner_id(db: Session, posts: list[PlatformPost]) -> int | None:
     if account is not None and account.creator_id:
         return account.creator_id
     return current_creator_id(db)
+
+
+def _work_id_of(posts: list[PlatformPost]) -> int | None:
+    """从 posts 中取出所属 work_id（用于 work 级媒体互斥）。"""
+    for p in posts:
+        if p.work_id:
+            return p.work_id
+    return None
 
 
 def _create_video(db: Session, posts: list[PlatformPost], *, filename: str) -> Video | None:
@@ -322,55 +339,81 @@ def platform_media_task(db: Session, payload: dict, update=None) -> dict:
     posts = _posts_of(db, video_id=video_id, work_id=work_id, post_id=post_id)
     video = _find_video(db, posts, video_id=video_id)
 
-    downloaded = False
-    file_name = ""
-    hit_post: PlatformPost | None = None
-    if not has_real_file(video):
-        _up(35, "准备下载视频…")
-
-        def _on_try(platform: str) -> None:
-            label = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}.get(platform, platform)
-            _up(40, f"正在下载视频（{label}）…")
-
-        file_name, hit_post = _download_pick(db, posts, on_try=_on_try)
-        if video is None:
-            video = _create_video(db, posts, filename=file_name)
-            if video is None:  # 无主博主：不留死文件，明确失败
-                (_videos_dir() / file_name).unlink(missing_ok=True)
-                return {"status": "no_creator", "reason": "未找到主博主，未创建本地素材", "video_id": None}
-        else:
-            video.filename = file_name
-            video.cover_path = video.cover_path or hit_post.cover_path or ""
-            if not video.platform_post_id:
-                video.platform_post_id = f"{hit_post.platform}:{hit_post.platform_post_id}"
-            db.commit()
-        downloaded = True
-
-    # 有真实文件但缺转写 => 自动触发转写（复用完整流水线：ASR→校对→预打标签）
-    transcribed = False
-    if video is not None and has_real_file(video) and not has_transcript(video):
-        _up(88, "语音转写中（可能需要几分钟）…")
-        from .ingest import import_video_task  # 延迟导入避免循环
-
-        import_video_task(db, {"video_id": video.id})
-        transcribed = True
-        _up(96, "转写完成，整理中…")
-
-    if not downloaded and not transcribed:
+    # 已经有文件+转写，直接跳过（同 work 的另一平台已完成）
+    if has_real_file(video) and has_transcript(video):
         return {"status": "skip", "reason": "已有本地视频与转写", "video_id": video.id if video else None}
-    msg = []
-    if downloaded and hit_post is not None:
-        msg.append(f"已下载视频（{hit_post.platform}）")
-    if transcribed:
-        msg.append("已自动转写")
-    return {
-        "status": "done",
-        "message": "；".join(msg) or "完成",
-        "video_id": video.id if video else None,
-        "downloaded": downloaded,
-        "transcribed": transcribed,
-        "file": video.filename if video else "",
-    }
+
+    # R-094：work 级互斥，同合并作品的视频下载/转写只由一个平台执行
+    work_id_for_lock = _work_id_of(posts)
+    claimed = False
+    if work_id_for_lock is not None:
+        with _active_work_media_lock:
+            if work_id_for_lock in _active_work_media:
+                return {
+                    "status": "skip",
+                    "reason": "同合并作品：其它平台正在处理该视频",
+                    "video_id": video.id if video else None,
+                }
+            _active_work_media.add(work_id_for_lock)
+            claimed = True
+
+    try:
+        # 加锁后再检查一次，防止另一线程刚完成
+        video = _find_video(db, posts, video_id=video_id)
+        if has_real_file(video) and has_transcript(video):
+            return {"status": "skip", "reason": "已有本地视频与转写", "video_id": video.id if video else None}
+
+        downloaded = False
+        file_name = ""
+        hit_post: PlatformPost | None = None
+        if not has_real_file(video):
+            _up(35, "准备下载视频…")
+
+            def _on_try(platform: str) -> None:
+                label = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}.get(platform, platform)
+                _up(40, f"正在下载视频（{label}）…")
+
+            file_name, hit_post = _download_pick(db, posts, on_try=_on_try)
+            if video is None:
+                video = _create_video(db, posts, filename=file_name)
+                if video is None:  # 无主博主：不留死文件，明确失败
+                    (_videos_dir() / file_name).unlink(missing_ok=True)
+                    return {"status": "no_creator", "reason": "未找到主博主，未创建本地素材", "video_id": None}
+            else:
+                video.filename = file_name
+                video.cover_path = video.cover_path or hit_post.cover_path or ""
+                if not video.platform_post_id:
+                    video.platform_post_id = f"{hit_post.platform}:{hit_post.platform_post_id}"
+                db.commit()
+            downloaded = True
+
+        # 有真实文件但缺转写 => 自动触发转写（复用完整流水线：ASR→校对→预打标签）
+        transcribed = False
+        if video is not None and has_real_file(video) and not has_transcript(video):
+            _up(88, "语音转写中（可能需要几分钟）…")
+            from .ingest import import_video_task  # 延迟导入避免循环
+
+            import_video_task(db, {"video_id": video.id})
+            transcribed = True
+            _up(96, "转写完成，整理中…")
+
+        msg = []
+        if downloaded and hit_post is not None:
+            msg.append(f"已下载视频（{hit_post.platform}）")
+        if transcribed:
+            msg.append("已自动转写")
+        return {
+            "status": "done",
+            "message": "；".join(msg) or "完成",
+            "video_id": video.id if video else None,
+            "downloaded": downloaded,
+            "transcribed": transcribed,
+            "file": video.filename if video else "",
+        }
+    finally:
+        if claimed:
+            with _active_work_media_lock:
+                _active_work_media.discard(work_id_for_lock)
 
 
 
@@ -397,8 +440,8 @@ def _fail_remaining(db, remaining: list[tuple[int, int]], reason: str) -> int:
 def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: bool = True) -> dict:
     """R-093/R-094/R-163：逐素材异步队列（**并行消费者**，独立 Session）。
 
-    - 先按平台优先级（抖音→小红书→B站）排序，同一合并作品的多个平台帖只处理一次（避免重复下载/评论费用）；
-    - 每条：采集评论/素材数据 →（daily 带媒体）缺视频下载/自动转写 → 完成/失败；
+    - 先按平台优先级（抖音→小红书→B站）排序，同一合并作品的多个平台帖只下载/转写一次；
+    - 每条：采集评论/素材数据（各平台独立） →（daily 带媒体）缺视频下载/自动转写 → 完成/失败；
     - 任一条 `BudgetExceeded` 触发取消标记，未开始的条目标记失败；
     - 任何非正常结束（失败/超时/无有效语音）都会 push 通知。
     """
@@ -499,12 +542,6 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
             try:
                 if post is None:
                     raise MediaDownloadError("作品不存在")
-                if pitem["skip"]:
-                    # R-094：同一合并作品已由前一个平台帖下载，跳过重复下载/评论
-                    _up(max(row.progress if row else 0, 8), "同合并作品已处理，跳过…")
-                    _done("跳过（同合并作品的视频已下载）")
-                    local["skipped"] += 1
-                    return local
                 _up(max(row.progress if row else 0, 12), f"正在同步素材数据/评论（{idx}/{total}）…")
                 ensure_budget(s)  # R-135：预算预检，不足直接抛 → 取消剩余队列
                 from .platform_sync import sync_post_comments  # 延迟导入避免循环
@@ -513,7 +550,12 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
                 local["comments"] += int(cres.get("added") or 0) + int(cres.get("updated") or 0)
                 local["pool"] += int(cres.get("pool_added") or 0)  # R-140：评论按限量进灵感池
                 if with_media:
-                    res = platform_media_task(s, {"post_id": post_id}, _up)
+                    if pitem["skip"]:
+                        # R-094：同合并作品的视频由平台优先级最高的帖子下载/转写，本条只同步本平台数据
+                        res = {"status": "skip", "reason": "同合并作品：视频由其它平台处理，本平台数据已同步", "video_id": None}
+                        _up(max(row.progress if row else 0, 40), "同合并作品：视频由其它平台处理，本平台数据已同步…")
+                    else:
+                        res = platform_media_task(s, {"post_id": post_id}, _up)
                     if res.get("status") == "done":
                         if res.get("downloaded"):
                             local["downloaded"] += 1
@@ -521,7 +563,7 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
                             local["transcribed"] += 1
                     else:
                         local["skipped"] += 1
-                _done()
+                _done(res.get("message") or res.get("reason") or "完成")
                 return local
             except BudgetExceeded:
                 s.rollback()
