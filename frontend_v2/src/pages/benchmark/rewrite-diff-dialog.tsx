@@ -1,23 +1,12 @@
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowRight, Copy, FileText, Link2 } from 'lucide-react'
+import { ArrowRight, Copy, FileText } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { EvidencePanel, type EvidenceOutline, type EvidenceSource } from '@/components/evidence-panel'
 import { toast } from '@/components/ui/toaster'
-
-export interface EvidenceSource {
-  title?: string
-  url?: string
-  summary?: string
-  site?: string
-}
-
-export interface EvidenceOutline {
-  claim?: string
-  support?: string
-}
 
 export interface RewriteResult {
   script: string
@@ -96,52 +85,13 @@ export function RewriteDiffDialog({
           </motion.div>
         </div>
 
-        {(!!result.outlines?.length || !!result.outline || !!result.sources?.length || !!result.online_sources?.length) && (
-          <details open className="group mt-3 rounded-lg border border-border p-3">
-            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1.5 text-xs [&::-webkit-details-marker]:hidden">
-              <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
-              <span className="font-medium">论点 / 引用来源</span>
-              {!!result.outlines?.length && (
-                <Badge variant="secondary" className="text-[10px]">{result.outlines.length} 条论点</Badge>
-              )}
-              {!!result.online_sources?.length && (
-                <Badge variant="secondary" className="text-[10px]">联网检索 {result.online_sources.length} 条</Badge>
-              )}
-              <span className="ml-auto text-muted-foreground/70 group-open:hidden">展开</span>
-              <span className="ml-auto hidden text-muted-foreground/70 group-open:inline">收起</span>
-            </summary>
-            {result.outlines?.length ? (
-              <ol className="mt-1.5 list-inside list-decimal space-y-1.5">
-                {result.outlines.map((o, i) => (
-                  <li key={i} className="text-xs leading-relaxed">
-                    <span className="font-medium text-foreground">{o.claim}</span>
-                    {o.support && <span className="text-muted-foreground">：{o.support}</span>}
-                  </li>
-                ))}
-              </ol>
-            ) : result.outline ? (
-              <p className="mt-1.5 text-xs text-muted-foreground">{result.outline}</p>
-            ) : null}
-            {result.sources?.length ? (
-              <ul className="mt-1.5 space-y-1">
-                {result.sources.map((s, i) => (
-                  <li key={i} className="text-xs">
-                    {s.url ? (
-                      <a href={s.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">{s.title || s.url}</a>
-                    ) : (
-                      <span>{s.title || '—'}</span>
-                    )}
-                    {!!s.site && <span className="text-muted-foreground/70"> · {s.site}</span>}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              !!result.online_sources?.length && (
-                <p className="mt-1 text-xs text-muted-foreground">本次联网检索到的内容未直接引用。</p>
-              )
-            )}
-          </details>
-        )}
+        <EvidencePanel
+          className="mt-3"
+          outlines={result.outlines}
+          outline={result.outline}
+          sources={result.sources}
+          onlineSources={result.online_sources}
+        />
 
         <div className="mt-2 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>关闭</Button>
