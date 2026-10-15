@@ -334,6 +334,16 @@ def run_debate(
     )
     station = retrieve_station(db, topic, creator_id=draft.creator_id)  # R-227 第 2 步：站内素材
     evidence_block = "\n\n".join(x for x in (ev.get("block") or "", station.get("block") or "") if x)
+    # R-227：证据先落库——讨论进行中前端「论点/引用来源」即时可见（不必等跑完）
+    _merge_quality(
+        db,
+        draft,
+        {
+            "search_queries": ev.get("queries") or [],
+            "online_sources": ev.get("sources") or [],
+            "station": _station_meta(station),
+        },
+    )
 
     ctx = _context(db, topic)
     persona_text = "\n".join(f"- {t}" for t in ctx["tags"] or ["（暂无）"]) or "（暂无）"
@@ -406,6 +416,16 @@ def run_debate(
         draft.original_script = source_text  # R-155：原文对照展示「原文 vs 讨论后」
         draft.tags = merge_tags(draft.tags, initial["tags"])  # R-155：标签合并去重
     db.commit()
+    # R-227：初稿一出来就把论点/引用来源落库（讨论中即可核对）
+    _merge_quality(
+        db,
+        draft,
+        {
+            "outline": initial["outlines"][0]["claim"] if initial.get("outlines") else "",
+            "outlines": initial.get("outlines") or [],
+            "sources": resolve_used(ev.get("sources") or [], initial.get("sources_raw") or []),
+        },
+    )
     _add(db, draft.id, 0, initial["model"], "draft", draft.script, llm=initial.get("llm"))
 
     # 2) N 轮讨论：评审方挑刺 → 生成方修订
@@ -581,6 +601,19 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
     return run_debate(db, draft, topic, mode=mode, query_source=query_source)
 
 
+def _merge_quality(db: Session, draft: Draft, patch: dict) -> None:
+    """R-227：把证据/论点**增量**写进 `Draft.quality` 并提交，让讨论进行中前端就能看到。"""
+    try:
+        cur = json.loads(draft.quality or "{}")
+        if not isinstance(cur, dict):
+            cur = {}
+    except (TypeError, ValueError):
+        cur = {}
+    cur.update(patch)
+    draft.quality = json.dumps(cur, ensure_ascii=False)
+    db.commit()
+
+
 def _parse_outlines(data: dict) -> list[dict]:
     """R-227：解析模型输出的多条论点 `outlines`（兼容旧的单条 `outline`）。"""
     out: list[dict] = []
@@ -675,6 +708,16 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         db, source_title, creator_id=owner.id, author_k=4, bench_k=3
     )
     evidence_block = "\n\n".join(x for x in (ev.get("block") or "", station.get("block") or "") if x)
+    # R-227：证据先落库——讨论进行中前端「论点/引用来源」即时可见
+    _merge_quality(
+        db,
+        draft,
+        {
+            "search_queries": ev.get("queries") or [],
+            "online_sources": ev.get("sources") or [],
+            "station": _station_meta(station),
+        },
+    )
     # R-178：洗稿同样留运行头 + 每次调用记实际模型
     rewrite_rounds = debate_rounds(db, settings)
     run_header_id = _run_header(db, draft.id, gen_slot, critic_slot, rewrite_rounds)
@@ -739,6 +782,16 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         draft.title = (source_title[:30] + "·口播稿") if source_title else "对标洗稿"
     draft.script = latest
     db.commit()
+    # R-227：初稿的论点/引用来源先落库（讨论中即可核对）
+    _merge_quality(
+        db,
+        draft,
+        {
+            "outline": initial_outlines[0]["claim"] if initial_outlines else "",
+            "outlines": initial_outlines,
+            "sources": resolve_used(ev.get("sources") or [], initial_sources_raw),
+        },
+    )
     _add(db, draft.id, 0, gen, "draft", latest, llm=draft_llm)
 
     critic_system = (

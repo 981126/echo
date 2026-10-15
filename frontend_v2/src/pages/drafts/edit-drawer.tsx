@@ -172,6 +172,8 @@ export function DraftEditDrawer({
   const [debate, setDebate] = useState<DebateState | null>(null)
   const sawRunningRef = useRef(false) // 轮询里确认过 running（用于收尾判定，避免启动瞬间的空状态误判完成）
   const startedAtRef = useRef(0) // 自己点【讨论】的时间（乐观 running 的兜底）
+  // R-227：讨论进行中实时刷新的草稿 quality（证据/论点先落库，不必等跑完）
+  const [liveQuality, setLiveQuality] = useState<Draft['quality'] | null>(null)
   const [versions, setVersions] = useState<DraftVersion[]>([])
   const [cmpLeft, setCmpLeft] = useState('')
   const [cmpRight, setCmpRight] = useState('')
@@ -248,13 +250,22 @@ export function DraftEditDrawer({
   // 与服务器内容一致的是「无用副本」（上次自动保存没跑完留下的），直接丢弃，别每次都弹提示。
   useEffect(() => {
     if (!open) return
+    // R-227：AI（讨论/生成/洗稿）正在写这篇草稿时，服务端内容为准——本地副本一律不提示，避免误报
+    if (debate?.state === 'running') {
+      clearLocalCopy()
+      setLocalCopy(null)
+      return
+    }
     const copy = readLocalCopy()
     const mine = !!copy && (copy.id ? copy.id === state.id : draft === null)
-    const stale = mine && draftFingerprint(copy.state) === draftFingerprint(state)
-    if (stale) clearLocalCopy()
-    setLocalCopy(mine && !stale ? copy : null)
+    const same = mine && draftFingerprint(copy.state) === draftFingerprint(state)
+    // 服务端在这份副本之后又更新过（如 AI 讨论完成回填）→ 副本已过期，静默丢弃，不弹提示
+    const superseded =
+      mine && !!draft?.updated_at && !!copy.at && Date.parse(draft.updated_at) > Date.parse(copy.at)
+    if (same || superseded) clearLocalCopy()
+    setLocalCopy(mine && !same && !superseded ? copy : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, draft, state.id])
+  }, [open, draft, state.id, debate?.state])
   // R-213：浏览器恢复联网 → 立刻重试还没落库的内容（不用干等退避）
   useEffect(() => {
     const onOnline = () => autoSaver.retryNow()
@@ -265,13 +276,16 @@ export function DraftEditDrawer({
   // 任何一处变动（标题/封面字/正文/关联素材/标签/发布信息）都排一次自动保存
   useEffect(() => {
     if (!open) return
+    // R-227：AI（讨论/生成/洗稿）正在写这篇草稿时不自动保存——否则会把后端正在生成的内容 PATCH 回去，
+    // 保存失败还会在该草稿上留下误报的「本地未同步内容」。等讨论完成后由轮询回填 + markSaved 落库。
+    if (debate?.state === 'running') return
     // 本轮打开若存在未同步副本，跳过这次「打开触发」的保存，别把它覆盖掉（下一次真实改动再保存）
     if (skipOpenScheduleRef.current) {
       skipOpenScheduleRef.current = false
       return
     }
     autoSaver.schedule()
-  }, [open, state, autoSaver])
+  }, [open, state, autoSaver, debate?.state])
 
   /** R-212：关抽屉（遮罩 / X / Esc /【关闭】）时立刻补一次保存——防抖窗口里最后几个字也不丢 */
   function handleClose() {
@@ -336,6 +350,7 @@ export function DraftEditDrawer({
     lastSeenIdRef.current = 0
     atBottomRef.current = true
     setPendingNew(0)
+    setLiveQuality(null)
     if (!open || !id) {
       setDiscussions([])
       setVersions([])
@@ -368,6 +383,13 @@ export function DraftEditDrawer({
         if (row.state === 'running') {
           sawRunningRef.current = true
           setDebate(toDebateState(row))
+          // R-227：讨论进行中就把「豆包搜索词 / 论点 / 引用来源」拉出来展示
+          try {
+            const dq = await apiJson<Draft>(`/api/drafts/${id}`)
+            setLiveQuality(dq.quality ?? null)
+          } catch {
+            /* 抖动继续 */
+          }
           return
         }
         // 状态已消失/失败：还没确认「跑起来过」时容忍刚入队的空窗，避免误判完成
@@ -379,6 +401,7 @@ export function DraftEditDrawer({
         else toast.success('讨论完成，正文已更新')
         onSaved()
         const d = await apiJson<Draft>(`/api/drafts/${id}`)
+        setLiveQuality(d.quality ?? null)
         const synced: DraftEditState = {
           id: d.id,
           title: d.title,
@@ -669,6 +692,8 @@ export function DraftEditDrawer({
   // R-178：本篇生成模型优先用「最近一次讨论的运行头」（切模型后仍显示当时那次），quality 兜底
   const info = draft ? discussionModelInfo(discussions, draft) : ''
   const q = draft?.quality || {}
+  // R-227：优先用讨论中实时拉到的 quality（证据先落库），否则用打开时的草稿
+  const evi = liveQuality ?? draft?.quality
 
   return (
     <Drawer open={open} onOpenChange={(v) => !v && handleClose()} width="min(860px, 96vw)">
@@ -975,12 +1000,12 @@ export function DraftEditDrawer({
                 )}
                 {/* R-227：本篇论点 + 联网引用来源（可切换标签、右侧可收起） */}
                 <EvidencePanel
-                  outlines={draft?.quality?.outlines}
-                  outline={draft?.quality?.outline}
-                  sources={draft?.quality?.sources}
-                  onlineSources={draft?.quality?.online_sources}
-                  queries={draft?.quality?.search_queries}
-                  station={draft?.quality?.station}
+                  outlines={evi?.outlines}
+                  outline={evi?.outline}
+                  sources={evi?.sources}
+                  onlineSources={evi?.online_sources}
+                  queries={evi?.search_queries}
+                  station={evi?.station}
                 />
                 <div className="relative">
                   <ScrollArea className="max-h-[52vh]" viewportRef={attachViewport}>
