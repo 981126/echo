@@ -47,6 +47,7 @@ import { buildDiff } from './diff'
 import { itemVariants, listVariants, softIn } from '@/lib/motion'
 import {
   VERSION_SOURCE,
+  aiKindLabel,
   discussionModelInfo,
   discussModelLabel,
   discussRoleLabel,
@@ -57,6 +58,7 @@ import {
   type DraftVersion,
   type Discussion
 } from './types'
+import { ThinkingDots } from '@/components/ui/thinking-dots'
 
 const md = new MarkdownIt({ html: false, linkify: true })
 
@@ -853,27 +855,66 @@ export function DraftEditDrawer({
                 {preview ? '返回编辑' : '预览'}
               </Button>
             </div>
-            {preview ? (
-              <div
-                className="prose-echo min-h-72 rounded-lg border border-border px-4 py-3 text-sm"
-                dangerouslySetInnerHTML={{ __html: md.render(state.script || '') }}
-              />
-            ) : (
-              <ErrorBoundary
-                fallback={
-                  <div className="space-y-2">
-                    <p className="text-xs text-warning">块编辑器加载失败，已切换为纯文本编辑（内容不会丢）</p>
-                    <Textarea
-                      rows={14}
-                      value={state.script}
-                      onChange={(e) => setState({ ...state, script: e.target.value })}
-                    />
-                  </div>
-                }
-              >
-                <ScriptEditor value={state.script} onChange={(v) => setState({ ...state, script: v })} />
-              </ErrorBoundary>
-            )}
+            {/* R-173/R-227：AI 讨论/生成进行中，正文置灰只读，中间浮出「哪个模型在干嘛」动画 */}
+            <div className="relative">
+              <div className={cn(discussing && 'pointer-events-none select-none opacity-50')}>
+                {preview ? (
+                  <div
+                    className="prose-echo min-h-72 rounded-lg border border-border px-4 py-3 text-sm"
+                    dangerouslySetInnerHTML={{ __html: md.render(state.script || '') }}
+                  />
+                ) : (
+                  <ErrorBoundary
+                    fallback={
+                      <div className="space-y-2">
+                        <p className="text-xs text-warning">块编辑器加载失败，已切换为纯文本编辑（内容不会丢）</p>
+                        <Textarea
+                          rows={14}
+                          value={state.script}
+                          disabled={discussing}
+                          onChange={(e) => setState({ ...state, script: e.target.value })}
+                        />
+                      </div>
+                    }
+                  >
+                    <ScriptEditor value={state.script} onChange={(v) => setState({ ...state, script: v })} />
+                  </ErrorBoundary>
+                )}
+              </div>
+              <AnimatePresence>
+                {discussing && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/60 backdrop-blur-[2px]"
+                  >
+                    <motion.div
+                      initial={{ opacity: 0.9, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={softIn}
+                      className="mx-4 rounded-xl border border-accent/30 bg-card/95 px-6 py-5 text-center shadow-sm"
+                    >
+                      <div className="mx-auto mb-2 flex justify-center">
+                        <ThinkingDots />
+                      </div>
+                      <div className="text-sm font-medium text-accent">
+                        {aiKindLabel(debate?.kind)}进行中
+                      </div>
+                      <div className="mt-1 max-w-[16rem] text-xs leading-relaxed text-muted-foreground">
+                        {debate?.note || 'AI 处理中…'}
+                      </div>
+                      {!!(debate?.round && debate?.rounds) && (
+                        <div className="tnum mt-1 text-[11px] text-muted-foreground/80">
+                          第 {debate.round}/{debate.rounds} 轮
+                        </div>
+                      )}
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {!!id && checkInfo && (
               <motion.div
