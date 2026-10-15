@@ -767,9 +767,9 @@ def sync_account(
     if posts_need_stats:
         _job_progress(db, job_id, note=f"{label}：并发补全 {len(posts_need_stats)} 条作品指标…")
         stats_results = _fetch_post_stats_parallel(account, client, posts_need_stats, platform=account.platform)
-        for pd, stats, error in stats_results:
-            if stats and error is None:
-                pd.stats = stats
+        for pd, fetched_stats, error in stats_results:
+            if fetched_stats and error is None:
+                pd.stats = fetched_stats
 
     # R-222：预加载该账号已有作品，消除循环内 N+1
     post_ids_in_data = [pd.platform_post_id for pd in posts_data if pd.platform_post_id]
