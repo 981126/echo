@@ -973,21 +973,35 @@ export function DraftEditDrawer({
                     )}
                   </div>
                 )}
-                {/* R-227：本篇论点/事例 + 联网引用来源（留痕可核对） */}
-                {(!!draft?.quality?.outline || !!draft?.quality?.sources?.length || !!draft?.quality?.online_sources?.length) && (
-                  <div className="rounded-lg border border-border p-2.5">
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                {/* R-227：本篇论点/事例 + 联网引用来源（留痕可核对，可展开/收起） */}
+                {(!!draft?.quality?.outlines?.length || !!draft?.quality?.outline || !!draft?.quality?.sources?.length || !!draft?.quality?.online_sources?.length) && (
+                  <details open className="group rounded-lg border border-border p-2.5">
+                    <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1.5 text-[11px] [&::-webkit-details-marker]:hidden">
                       <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
                       <span className="font-medium">论点 / 引用来源</span>
+                      {!!draft?.quality?.outlines?.length && (
+                        <Badge variant="secondary" className="text-[10px]">{draft.quality.outlines.length} 条论点</Badge>
+                      )}
                       {!!draft?.quality?.online_sources?.length && (
                         <Badge variant="secondary" className="text-[10px]">联网检索 {draft.quality.online_sources.length} 条</Badge>
                       )}
-                    </div>
-                    {draft?.quality?.outline && (
-                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{draft.quality.outline}</p>
-                    )}
+                      <span className="ml-auto text-muted-foreground/70 group-open:hidden">展开</span>
+                      <span className="ml-auto hidden text-muted-foreground/70 group-open:inline">收起</span>
+                    </summary>
+                    {draft?.quality?.outlines?.length ? (
+                      <ol className="mt-1.5 list-inside list-decimal space-y-1.5">
+                        {draft.quality.outlines.map((o, i) => (
+                          <li key={i} className="text-[11px] leading-relaxed">
+                            <span className="font-medium text-foreground">{o.claim}</span>
+                            {o.support && <span className="text-muted-foreground">：{o.support}</span>}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : draft?.quality?.outline ? (
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{draft.quality.outline}</p>
+                    ) : null}
                     {draft?.quality?.sources?.length ? (
-                      <ul className="mt-1 space-y-1">
+                      <ul className="mt-1.5 space-y-1">
                         {draft.quality.sources.map((s, i) => (
                           <li key={i} className="text-[11px] leading-relaxed">
                             {s.url ? (
@@ -1003,10 +1017,10 @@ export function DraftEditDrawer({
                       </ul>
                     ) : (
                       !!draft?.quality?.online_sources?.length && (
-                        <p className="mt-1 text-[11px] text-muted-foreground">本次联网检索到的内容未直接引用。</p>
+                        <p className="mt-1.5 text-[11px] text-muted-foreground">本次联网检索到的内容未直接引用。</p>
                       )
                     )}
-                  </div>
+                  </details>
                 )}
                 <div className="relative">
                   <ScrollArea className="max-h-[52vh]" viewportRef={attachViewport}>

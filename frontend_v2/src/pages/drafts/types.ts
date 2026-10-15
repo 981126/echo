@@ -57,8 +57,10 @@ export interface Draft {
       style_missing?: string[]
       ai_cliche?: string[]
     }
-    /** R-227：本篇论点/事例一句话 */
+    /** R-227：本篇论点/事例一句话（兼容旧数据） */
     outline?: string
+    /** R-227：本篇多条论点（每条带支撑） */
+    outlines?: EvidenceOutline[]
     /** R-227：模型实际引用的联网来源 */
     sources?: EvidenceSource[]
     /** R-227：本次联网检索到的全部来源（留痕） */
@@ -239,4 +241,10 @@ export interface EvidenceSource {
   url?: string
   summary?: string
   site?: string
+}
+
+/** R-227：一条论点 + 其支撑（事例/数据/经历） */
+export interface EvidenceOutline {
+  claim?: string
+  support?: string
 }

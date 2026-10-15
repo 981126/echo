@@ -57,8 +57,23 @@ def test_resolve_used_filters_out_of_range():
 def test_rewrite_system_requires_claim_example_and_contract():
     from app.services.benchmark import REWRITE_SYSTEM
 
-    assert "主张" in REWRITE_SYSTEM and "具体事例" in REWRITE_SYSTEM
-    assert '"outline"' in REWRITE_SYSTEM and '"sources"' in REWRITE_SYSTEM
+    assert "论点" in REWRITE_SYSTEM and "具体" in REWRITE_SYSTEM
+    assert '"outlines"' in REWRITE_SYSTEM and '"sources"' in REWRITE_SYSTEM
+
+
+def test_parse_outlines_multi_and_legacy():
+    from app.services.debate import _parse_outlines
+
+    got = _parse_outlines(
+        {"outlines": [{"claim": "论点一", "support": "事例A"}, {"claim": " 论点二 "}, "纯字符串论点", {"x": 1}]}
+    )
+    assert got == [
+        {"claim": "论点一", "support": "事例A"},
+        {"claim": "论点二", "support": ""},
+        {"claim": "纯字符串论点", "support": ""},
+    ]
+    # 旧数据只有单个 outline 字符串 → 包成一条
+    assert _parse_outlines({"outline": "唯一论点"}) == [{"claim": "唯一论点", "support": ""}]
 
 
 def test_rewrite_user_injects_topic_and_evidence(db, monkeypatch):

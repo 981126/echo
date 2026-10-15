@@ -14,14 +14,21 @@ export interface EvidenceSource {
   site?: string
 }
 
+export interface EvidenceOutline {
+  claim?: string
+  support?: string
+}
+
 export interface RewriteResult {
   script: string
   original_script: string
   draft_id: number
   source_title: string
   benchmark_name: string
-  /** R-227：本篇主张/事例 */
+  /** R-227：本篇主张/事例（兼容旧数据） */
   outline?: string
+  /** R-227：本篇多条论点（每条带支撑） */
+  outlines?: EvidenceOutline[]
   /** R-227：实际引用的联网来源 */
   sources?: EvidenceSource[]
   /** R-227：本次检索到的全部来源（留痕） */
@@ -89,16 +96,32 @@ export function RewriteDiffDialog({
           </motion.div>
         </div>
 
-        {(!!result.outline || !!result.sources?.length || !!result.online_sources?.length) && (
-          <div className="mt-3 rounded-lg border border-border p-3">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        {(!!result.outlines?.length || !!result.outline || !!result.sources?.length || !!result.online_sources?.length) && (
+          <details open className="group mt-3 rounded-lg border border-border p-3">
+            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1.5 text-xs [&::-webkit-details-marker]:hidden">
               <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
               <span className="font-medium">论点 / 引用来源</span>
+              {!!result.outlines?.length && (
+                <Badge variant="secondary" className="text-[10px]">{result.outlines.length} 条论点</Badge>
+              )}
               {!!result.online_sources?.length && (
                 <Badge variant="secondary" className="text-[10px]">联网检索 {result.online_sources.length} 条</Badge>
               )}
-            </div>
-            {result.outline && <p className="mt-1 text-xs text-muted-foreground">{result.outline}</p>}
+              <span className="ml-auto text-muted-foreground/70 group-open:hidden">展开</span>
+              <span className="ml-auto hidden text-muted-foreground/70 group-open:inline">收起</span>
+            </summary>
+            {result.outlines?.length ? (
+              <ol className="mt-1.5 list-inside list-decimal space-y-1.5">
+                {result.outlines.map((o, i) => (
+                  <li key={i} className="text-xs leading-relaxed">
+                    <span className="font-medium text-foreground">{o.claim}</span>
+                    {o.support && <span className="text-muted-foreground">：{o.support}</span>}
+                  </li>
+                ))}
+              </ol>
+            ) : result.outline ? (
+              <p className="mt-1.5 text-xs text-muted-foreground">{result.outline}</p>
+            ) : null}
             {result.sources?.length ? (
               <ul className="mt-1.5 space-y-1">
                 {result.sources.map((s, i) => (
@@ -117,7 +140,7 @@ export function RewriteDiffDialog({
                 <p className="mt-1 text-xs text-muted-foreground">本次联网检索到的内容未直接引用。</p>
               )
             )}
-          </div>
+          </details>
         )}
 
         <div className="mt-2 flex justify-end gap-2">

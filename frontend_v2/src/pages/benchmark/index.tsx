@@ -198,6 +198,7 @@ export default function BenchmarkPage() {
             source_title: res.source_ref?.source_title || res.title || '',
             benchmark_name: res.benchmark_name || b.name,
             outline: res.outline || '',
+            outlines: res.outlines || [],
             sources: res.sources || [],
             online_sources: res.online_sources || []
           })
