@@ -294,6 +294,7 @@ def run_debate(
     source_text: str = "",
     source_title: str = "",
     mode: str = "",
+    query_source: str = "",
 ) -> dict:
     """在已有草稿上跑一次完整双模型讨论（所有脚本生成的唯一路径，R-139）。
 
@@ -319,6 +320,18 @@ def run_debate(
     gen_label = _slot_meta(gen_slot)["label"]
     critic_label = _slot_meta(critic_slot)["label"]
 
+    # R-227：联网事实证据（query = 选题 + 该入口能拿到的最具体文本；无 key/失败静默）
+    from .evidence import gather_online, resolve_used
+
+    ev = gather_online(
+        db,
+        topic,
+        material=source_text or query_source,
+        draft_id=draft.id,
+        creator_id=draft.creator_id,
+    )
+    evidence_block = ev.get("block") or ""
+
     ctx = _context(db, topic)
     persona_text = "\n".join(f"- {t}" for t in ctx["tags"] or ["（暂无）"]) or "（暂无）"
     red_text = "\n".join(f"- {r}" for r in ctx["redlines"] or ["（无）"]) or "（无）"
@@ -336,11 +349,13 @@ def run_debate(
             f"{author_style_context(db)}\n\n"
             f"【参考素材·只借选题与信息线索，不借结构与措辞】\n"
             f"素材标题：{source_title or topic}\n素材原文：\n{source_text[:4000]}"
+            + (f"\n\n{evidence_block}" if evidence_block else "")
         )
         initial_budget = budget_settings.budget_for(db, "rewrite")
     else:
         initial_system = get_prompt("generation", db)
-        initial_user = generation_user_message(db, topic, mode)  # R-129：与金样本回放评分同一份输入；R-183 创作模式
+        # R-129：与金样本回放评分同一份输入；R-183 创作模式；R-227 注入联网证据
+        initial_user = generation_user_message(db, topic, mode, evidence_block)
         initial_budget = budget_settings.budget_for(db, "debate_initial")
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
         _status(
@@ -370,6 +385,8 @@ def run_debate(
                 "script": str(data.get("script", "")).strip(),
                 "shells": data.get("shells") if isinstance(data.get("shells"), dict) else {},
                 "tags": [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()] if source_text else [],
+                "outlines": _parse_outlines(data),
+                "sources_raw": data.get("sources") if isinstance(data.get("sources"), list) else [],
             }
             break
         except Exception as exc:  # noqa: BLE001
@@ -391,14 +408,18 @@ def run_debate(
     # 2) N 轮讨论：评审方挑刺 → 生成方修订
     critic_system = (
         "你是脚本评审专家。请对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、"
-        "哪些有 AI 感，并给出具体可执行的修改建议（每轮简短、直给）。\n"
+        "哪些有 AI 感，并给出具体可执行的修改建议（每轮简短、直给）。"
+        "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
+        "有没有正确但没用的空话、有没有编造数字/人名/机构。\n"
         f"作者人设：\n{persona_text}\n红线（不得违反）：\n{red_text}\n作者语言习惯：\n{ctx['profile']}"
     )
     if source_text:
         critic_system += f"\n参考原文（检查是否照搬/重复）：\n{source_text[:1500]}"
     revise_system = (
         "你是撰稿模型。根据评审意见，用作者的口吻重写整篇口播脚本，"
-        "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。\n"
+        "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。"
+        "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
+        "有可引用的联网事实就口语化引用；严禁编造数字/人名/机构。\n"
         f"作者语言习惯（自然贴近即可，不要硬塞口头禅/标志词）：\n{style_note}"
     )
 
@@ -486,6 +507,9 @@ def run_debate(
 
     diagnostics = style_diagnostics(db, draft.script)
     degraded = bool(gen_llm.degraded or critic_llm.degraded or initial["model"] != gen)
+    # R-227：论点 / 引用来源 / 联网留痕 落库（引用编号越界=疑似编造来源，剔除）
+    outlines = initial.get("outlines") or []
+    used_sources = resolve_used(ev.get("sources") or [], initial.get("sources_raw") or [])
     draft.quality = json.dumps(
         {
             "models": {"gen": f"{gen}({gen_slot['vendor']}/{gen_slot['model']})", "critic": f"{critic}({critic_slot['vendor']}/{critic_slot['model']})"},
@@ -498,11 +522,28 @@ def run_debate(
             "style_coverage": diagnostics["style_coverage"],
             "diagnostics": diagnostics,
             "sole_model": gen == critic,
+            "outline": outlines[0]["claim"] if outlines else "",
+            "outlines": outlines,
+            "sources": used_sources,
+            "online_sources": ev.get("sources") or [],
+            "search_queries": ev.get("queries") or [],
         },
         ensure_ascii=False,
     )
     draft.script = latest
     db.commit()
+    if ev.get("sources"):
+        from ..models.web_search import WebSearchLog
+
+        logrow = (
+            db.query(WebSearchLog)
+            .filter(WebSearchLog.draft_id == draft.id)
+            .order_by(WebSearchLog.id.desc())
+            .first()
+        )
+        if logrow is not None:
+            logrow.used = json.dumps(used_sources, ensure_ascii=False)
+            db.commit()
     # R-173：跑满才清状态；中途某轮失败（R-118 允许以当前稿定稿）留下「中断」标记，
     # 让作者看到「讨论 x/y 轮后中断」而不是以为讨论正常结束。
     if break_reason:
@@ -532,7 +573,8 @@ def run_debate_draft(db: Session, payload: dict) -> dict:
         draft.prompt_version = get_prompt_version("generation", db)  # R-129：按提示词版本归因
     topic = str(payload.get("topic", "")).strip() or draft.title or "今日话题"
     mode = str(payload.get("mode") or "").strip()
-    return run_debate(db, draft, topic, mode=mode)
+    query_source = str(payload.get("query_source") or "").strip()
+    return run_debate(db, draft, topic, mode=mode, query_source=query_source)
 
 
 def _parse_outlines(data: dict) -> list[dict]:
@@ -618,7 +660,9 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     # R-227：联网事实证据（无 key/失败静默返回空），并写留痕
     from .evidence import gather_online, resolve_used
 
-    ev = gather_online(db, source_title, draft_id=draft.id, creator_id=owner.id)
+    ev = gather_online(
+        db, source_title, material=source_text, draft_id=draft.id, creator_id=owner.id
+    )
     evidence_block = ev.get("block") or ""
     # R-178：洗稿同样留运行头 + 每次调用记实际模型
     rewrite_rounds = debate_rounds(db, settings)
@@ -812,5 +856,6 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "outlines": initial_outlines,
         "sources": used_sources,
         "online_sources": ev.get("sources") or [],
+        "search_queries": ev.get("queries") or [],
     }
 

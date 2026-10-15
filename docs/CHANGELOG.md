@@ -1,5 +1,20 @@
 # 变更记录
 
+## [M228 / R-227] 2026-10-15 — 联网检索 Query 智能构造 + 全入口接入 + 来源展示 ✅ 已完成
+
+> 作者：「豆包引用来源会搜出毫不相关的东西」「提交给豆包搜索的原文问题也需要展示出来，放到论点、引用来源同一个框顶部」
+
+- **根因**：洗稿直接用**对标源视频标题**当 query（如「最烦这类人」），口语化无实体、且未开 QueryRewrite、无相关性过滤 → 搜出泛文；且没有一个入口把「更具体的文本」带进来。
+- **做了什么**：
+  - `web_search`：开豆包 `QueryControl.QueryRewrite`（口语→搜索式）、可配 `time_range`。
+  - `evidence`：`build_search_query(topic, material)`＝选题 + 该入口最具体文本（截断 100 字）；`filter_relevant()` 按关键词（含中文 bigram）重叠度过滤，全不相关则返回空；**只发起了搜索就写留痕并回传 query（即使 0 结果）**。
+  - **各入口 query 源**：洗稿=对标源正文；灵感随手记=随手记原文；灵感池评论=评论原文+作品标题；热点=标题；灵感机会（观众提问/每周包/缺口）=样本/理由；纯标题回退「标题+QueryRewrite」。
+  - `run_debate(..., query_source=)` 统一接证据：`draft_flow.start_generation` / `api/drafts.generate-async` / `api/inspiration.develop_note` 透传；`home.tsx` 各卡片带上上下文。
+  - 生成契约（`GENERATION_SYSTEM`）与洗稿对齐：2-4 条论点 + 具体支撑 + 有证据必须引用 + 禁编造；评审/修订加内容维度；`outlines/sources/online_sources/search_queries` 落 `Draft.quality`。
+  - 前端 `EvidencePanel`：**顶部显示「豆包搜索词：…」**（留痕）；「引用来源」**默认只显示已引用**，可「查看全部检索到的 N 条」展开。
+- **明确不做（本次）**：站内真实素材检索（作者 ASR/定稿 + 对标参考）仍排下一步；不引向量库。
+- **自测**：`scripts/verify.sh` 全绿；新增 `build_search_query`/`filter_relevant` 用例与 `EvidencePanel`（搜索词/只看已引用）用例；真实冒烟：query＝「面试别当老实人… + 源正文」，返回「面试反问话术 / 无薪试岗违法 / 社保」等相关结果。
+
 ## [M228 / R-227] 2026-10-15 — 洗稿先行「证据支撑」内容质量（联网事实 + 论点/事例 + 来源留痕）✅ 已完成（第 1 步）
 
 > 作者：「在灵感池生成、灵感随手记、洗稿这几个功能生成文案，生成的内容质量都不高，因为没有论点，没有真实的事例，所以观众像是听了整篇废话，没有有用的东西」「有没有可能联网去搜索一些事实事例」

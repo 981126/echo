@@ -43,6 +43,7 @@ def _persona_version(db: Session) -> int:
 class GenerateIn(BaseModel):
     topic: str
     mode: str = ""  # R-183 创作模式：sharp/monologue/commentary/experiment，空=不指定
+    query_source: str = ""  # R-227：该入口能拿到的具体文本（评论原文/热点摘要/簇样本等），用于联网检索
 
 
 class AnglesIn(BaseModel):
@@ -114,7 +115,9 @@ def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
     topic = (payload.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="选题不能为空")
-    task_id, draft_id = draft_flow.start_generation(db, topic, mode=(payload.mode or "").strip())
+    task_id, draft_id = draft_flow.start_generation(
+        db, topic, mode=(payload.mode or "").strip(), query_source=(payload.query_source or "").strip()
+    )
     return {"task_id": task_id, "draft_id": draft_id}
 
 

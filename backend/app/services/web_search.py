@@ -50,15 +50,23 @@ def _normalize(item: dict) -> dict:
     }
 
 
-def search(query: str, count: int | None = None, time_range: str = "") -> list[dict]:
-    """联网搜索：返回 [{title,url,summary,site}]；不可用/失败返回 []。"""
+def search(
+    query: str,
+    count: int | None = None,
+    time_range: str = "",
+    query_rewrite: bool = True,
+) -> list[dict]:
+    """联网搜索：返回 [{title,url,summary,site}]；不可用/失败返回 []。
+
+    query_rewrite=True（默认）时开豆包 QueryRewrite，把口语/长句改写成搜索式（R-227）。
+    """
     query = (query or "").strip()
     if not query or not enabled():
         return []
     settings = get_settings()
     n = int(count or settings.web_search_count or 5)
     n = max(1, min(50, n))
-    cache_key = f"{query}|{n}|{time_range}"
+    cache_key = f"{query}|{n}|{time_range}|{int(query_rewrite)}"
     ttl = max(0, int(settings.web_search_cache_seconds or 0))
     now = time.monotonic()
     if ttl:
@@ -70,6 +78,8 @@ def search(query: str, count: int | None = None, time_range: str = "") -> list[d
     body: dict = {"Query": query, "SearchType": "web", "Count": n, "NeedSummary": True}
     if time_range:
         body["TimeRange"] = time_range
+    if query_rewrite:
+        body["QueryControl"] = {"QueryRewrite": True}
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.web_search_api_key.strip()}",

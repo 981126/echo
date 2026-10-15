@@ -33,15 +33,33 @@ def test_gather_online_disabled_returns_empty(db):
     assert db.query(WebSearchLog).count() == 0
 
 
+def test_build_search_query_combines_topic_and_material():
+    assert evidence.build_search_query("面试反问", "") == "面试反问"
+    q = evidence.build_search_query("面试反问", "面试官让我跑三四趟刷KPI，我反问一句就安排完了")
+    assert q.startswith("面试反问 ")
+    assert len(q) <= 100
+
+
+def test_filter_relevant_drops_unrelated():
+    query = "面试反问薪资社保"
+    sources = [
+        {"title": "面试时如何反问薪资与社保", "summary": "面试反问的正确姿势"},
+        {"title": "今天天气真好", "summary": "适合出去走走"},
+    ]
+    kept = evidence.filter_relevant(query, sources)
+    assert kept == [sources[0]]
+
+
 def test_gather_online_writes_log_and_block(db, monkeypatch):
-    fake = [{"title": "毕业生平均月薪", "url": "https://x.com/a", "summary": "本科8698元", "site": "x.com"}]
+    fake = [{"title": "2025应届生起薪数据", "url": "https://x.com/a", "summary": "本科8698元", "site": "x.com"}]
     monkeypatch.setattr(web_search, "enabled", lambda: True)
-    monkeypatch.setattr(web_search, "search", lambda q, count=None, time_range="": fake)
+    monkeypatch.setattr(web_search, "search", lambda q, count=None, time_range="", query_rewrite=True: fake)
 
     res = evidence.gather_online(db, "应届生起薪", draft_id=None, creator_id=None)
 
     assert res["sources"] == fake
     assert "[1]" in res["block"] and "8698" in res["block"]
+    assert res["queries"][0]["query"] == "应届生起薪"
     logs = db.query(WebSearchLog).all()
     assert len(logs) == 1
     assert logs[0].query == "应届生起薪"

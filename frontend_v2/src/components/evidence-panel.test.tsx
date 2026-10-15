@@ -14,17 +14,20 @@ const onlineSources = [
 const used = [{ title: '来源A', url: 'https://a.example/x', site: 'a.example' }]
 
 describe('EvidencePanel（R-227）', () => {
-  it('两个标签可切换：默认论点，点「引用来源」看来源并标「已引用」', async () => {
+  it('顶部显示提交给豆包的搜索词', () => {
+    render(<EvidencePanel outlines={outlines} queries={[{ query: '面试反问 薪资社保' }]} />)
+    expect(screen.getByText(/豆包搜索词/)).toBeInTheDocument()
+    expect(screen.getByText(/面试反问 薪资社保/)).toBeInTheDocument()
+  })
+
+  it('引用来源默认只看已引用，可展开全部检索', async () => {
     render(<EvidencePanel outlines={outlines} sources={used} onlineSources={onlineSources} />)
-
-    expect(screen.getByRole('tab', { name: /论点 2/ })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /引用来源 2/ })).toBeInTheDocument()
-    expect(screen.getByText('论点一')).toBeInTheDocument()
-
     await userEvent.click(screen.getByRole('tab', { name: /引用来源 2/ }))
     expect(screen.getByText('来源A')).toBeInTheDocument()
-    expect(screen.getByText('来源B')).toBeInTheDocument()
     expect(screen.getByText('已引用')).toBeInTheDocument()
+    expect(screen.queryByText('来源B')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText(/查看全部检索到的 2 条/))
+    expect(screen.getByText('来源B')).toBeInTheDocument()
   })
 
   it('右侧箭头可收起/展开', async () => {
@@ -36,10 +39,10 @@ describe('EvidencePanel（R-227）', () => {
     expect(screen.getByText('论点一')).toBeInTheDocument()
   })
 
-  it('只有来源时直接展示来源（无标签切换）', () => {
-    render(<EvidencePanel sources={[]} onlineSources={onlineSources} />)
-    expect(screen.getByText(/引用来源 2/)).toBeInTheDocument()
-    expect(screen.getByText('来源A')).toBeInTheDocument()
+  it('只有搜索词也可渲染', () => {
+    const { container } = render(<EvidencePanel queries={[{ query: '某搜索词' }]} />)
+    expect(container).not.toBeEmptyDOMElement()
+    expect(screen.getByText(/某搜索词/)).toBeInTheDocument()
   })
 
   it('全空不渲染', () => {

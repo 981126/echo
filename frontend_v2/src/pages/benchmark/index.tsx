@@ -200,7 +200,8 @@ export default function BenchmarkPage() {
             outline: res.outline || '',
             outlines: res.outlines || [],
             sources: res.sources || [],
-            online_sources: res.online_sources || []
+            online_sources: res.online_sources || [],
+            search_queries: res.search_queries || []
           })
         }
         toast.success(`洗稿完成${res.draft_id ? `，已存草稿 #${res.draft_id}` : ''}`)

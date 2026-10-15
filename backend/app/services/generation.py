@@ -27,11 +27,20 @@ from .llm import LLMError
 GENERATION_SYSTEM = (
     "你是这位作者的代笔，写出来要像他本人对着镜头说话：真实、具体、口语，"
     "不要 AI 腔、不要书面套话、不要正确但没用的空话。\n"
-    "怎么写由「作者人设 + 本次创作模式 + 风格样本」决定，不要套固定模板；"
-    "观点必须用作者自己的，例子优先用作者真实经历；给方向也可以，但别喂到嘴里。\n"
+    "内容硬要求（评审会按这条挑）：\n"
+    "1) 全篇要有 2-4 条明确、可辩驳的论点，并在 outlines 里逐条列出；\n"
+    "2) 每条论点都要配一个具体事例/数据/经历（写进该条 support），不要只喊口号；\n"
+    "3) 若提供了【联网事实素材】，必须至少引用其中 1 条（口语化转述，不要念 URL），"
+    "并在 sources 里标出编号；\n"
+    "4) 严禁编造具体数字/人名/机构/经历；没有可靠事实就只讲作者的判断，宁可不要数字；\n"
+    "5) 删掉「要努力/要相信自己/坚持就会成功」这类正确但没用的空话。\n"
+    "怎么写由「作者人设 + 本次创作模式 + 风格样本」决定，不要套固定模板；观点必须用作者自己的。\n"
     "严格按末尾的输出契约返回，不输出额外文字。\n"
     "输出契约（系统固定，不得改动字段名与结构）：\n"
-    '只输出 JSON：{"title":"视频标题","cover_text":"封面字","script":"完整口播脚本（1-2 分钟，约200-400字，口语化，有钩子有收尾）",'
+    '只输出 JSON：{"title":"视频标题","cover_text":"封面字",'
+    '"script":"完整口播脚本（1-2 分钟，约200-400字，口语化，有钩子有收尾）",'
+    '"outlines":[{"claim":"本条论点(一句话)","support":"支撑它的具体事例/数据/经历"}],'
+    '"sources":[引用到的联网事实编号，如[1,3]；没有则[]],'
     '"shells":{"douyin":"抖音发布文案+话题标签","bilibili":"B站简介","xiaohongshu":"小红书笔记正文（含emoji与话题）"}}'
 )
 
@@ -484,9 +493,12 @@ def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
     )
 
 
-def generation_user_message(db: Session, topic: str, mode: str = "") -> str:
-    """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）。"""
-    return "\n".join([f"选题：{topic}", "", author_style_context(db, topic, mode)])
+def generation_user_message(db: Session, topic: str, mode: str = "", evidence_block: str = "") -> str:
+    """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）；R-227 注入联网证据。"""
+    parts = [f"选题：{topic}", "", author_style_context(db, topic, mode)]
+    if evidence_block:
+        parts += ["", evidence_block]
+    return "\n".join(parts)
 
 
 

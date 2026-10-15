@@ -30,6 +30,8 @@ interface IdeaItem {
   source: 'hot' | 'comment'
   platform?: string
   title: string
+  detail?: string
+  post_title?: string
   likes?: number
   matched?: boolean
   score?: number | null
@@ -98,6 +100,7 @@ export default function HomePage() {
   const [attr, setAttr] = useState<Attribution | null>(null)
   const [attrLoading, setAttrLoading] = useState(false)
   const [pendingTopic, setPendingTopic] = useState('')
+  const [pendingSource, setPendingSource] = useState('')
   const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
 
@@ -180,8 +183,9 @@ export default function HomePage() {
     return [...filtered.slice(off), ...filtered.slice(0, off)].slice(0, n)
   }, [ideas, sourceTab, batch])
 
-  async function pickAngle(topic: string) {
+  async function pickAngle(topic: string, source = '') {
     setPendingTopic(topic)
+    setPendingSource(source)
     setAngleOpen(true)
     setAngleLoading(true)
     setAngles([])
@@ -229,10 +233,13 @@ export default function HomePage() {
     })
   }
 
-  async function generate(topic: string) {
+  async function generate(topic: string, querySource = '') {
     setGenerating(topic)
     try {
-      await apiJson('/api/drafts/generate-async', { method: 'POST', body: JSON.stringify({ topic, mode }) })
+      await apiJson('/api/drafts/generate-async', {
+        method: 'POST',
+        body: JSON.stringify({ topic, mode, query_source: querySource }),
+      })
       toast.success('已开始生成，去脚本工作台查看')
       setAngleOpen(false)
       navigate('/drafts')
@@ -287,7 +294,7 @@ export default function HomePage() {
                         </span>
                       </span>
                       {c.matched && <Badge variant="secondary" className="shrink-0">贴合人设</Badge>}
-                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(c.title)} disabled={generating !== null}>生成</Button>
+                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(c.title, [c.title, ...(c.samples || [])].join(' '))} disabled={generating !== null}>生成</Button>
                     </li>
                   ))}
                 </ul>
@@ -304,7 +311,7 @@ export default function HomePage() {
                         <span className="block text-[13px]">{p.title}</span>
                         <span className="mt-0.5 block text-[11px] text-muted-foreground">{p.reason} · 分 {p.score}</span>
                       </span>
-                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title)} disabled={generating !== null}>生成</Button>
+                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title, [p.reason, ...(p.samples || [])].filter(Boolean).join(' '))} disabled={generating !== null}>生成</Button>
                     </li>
                   ))}
                 </ul>
@@ -321,7 +328,7 @@ export default function HomePage() {
                         <span className="block text-[13px]">{p.title}</span>
                         {p.reason && <span className="mt-0.5 block text-[11px] text-muted-foreground">{p.reason}</span>}
                       </span>
-                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title)} disabled={generating !== null}>生成</Button>
+                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title, p.reason || '')} disabled={generating !== null}>生成</Button>
                     </li>
                   ))}
                 </ul>
@@ -425,7 +432,7 @@ export default function HomePage() {
                       variant="ghost"
                       className="text-accent"
                       disabled={generating !== null}
-                      onClick={() => pickAngle(it.title)}
+                      onClick={() => pickAngle(it.title, [it.detail, it.post_title].filter(Boolean).join(' '))}
                     >
                       {generating === it.title ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                       生成文案
@@ -477,7 +484,7 @@ export default function HomePage() {
                   transition={{ delay: i * 0.07, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                 >
                   <button
-                    onClick={() => generate(a.title)}
+                    onClick={() => generate(a.title, [pendingSource, a.hook, a.reason].filter(Boolean).join(' '))}
                     disabled={generating !== null}
                     className="flex w-full items-start gap-3 rounded-lg border border-border p-3 text-left transition-all hover:border-accent/50 hover:bg-accent-soft cursor-pointer"
                   >
@@ -497,7 +504,7 @@ export default function HomePage() {
           )}
           {!angleLoading && (
             <div className="mt-2 flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => generate(pendingTopic)} disabled={generating !== null}>
+              <Button variant="secondary" size="sm" onClick={() => generate(pendingTopic, pendingSource)} disabled={generating !== null}>
                 不选角度，直接生成
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setAngleOpen(false)}>

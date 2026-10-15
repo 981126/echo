@@ -472,6 +472,8 @@ Generate Async
 
 字段：
   - `topic` string（必填）
+  - `mode` string（可选，R-183 创作模式：sharp/monologue/commentary/experiment）
+  - `query_source` string（可选，R-227：该入口能拿到的具体文本，用于联网检索构造搜索词）
 
 **返回 200**：application/json → object
 

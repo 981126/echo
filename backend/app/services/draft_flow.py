@@ -59,11 +59,19 @@ def create_placeholder_draft(db: Session, topic: str) -> Draft:
     return draft
 
 
-def start_generation(db: Session, topic: str, mode: str = "") -> tuple[int, int]:
-    """建占位稿 + 入队双模型讨论；返回 (task_id, draft_id)。R-183：可指定创作模式。"""
+def start_generation(db: Session, topic: str, mode: str = "", query_source: str = "") -> tuple[int, int]:
+    """建占位稿 + 入队双模型讨论；返回 (task_id, draft_id)。
+
+    R-183：可指定创作模式；R-227：`query_source` 为该入口能拿到的具体文本（随手记原文/评论原文等），
+    用于联网检索时构造搜索词。
+    """
     draft = create_placeholder_draft(db, topic)
     draft_status.set_running(db, draft.id, f"正在生成《{topic[:20]}》…", kind="generate", phase="queued")
-    task_id = start_task("generate_draft", {"draft_id": draft.id, "topic": topic, "mode": mode}, debate_task)
+    task_id = start_task(
+        "generate_draft",
+        {"draft_id": draft.id, "topic": topic, "mode": mode, "query_source": query_source},
+        debate_task,
+    )
     return task_id, draft.id
 
 
