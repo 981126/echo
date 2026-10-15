@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..services.creator_service import current_creator_id
+from ..services.text_tags import extract_hashtags, strip_hashtags
 from ..services.works_service import list_works, merge_manual, split_work
 
 router = APIRouter()
@@ -72,17 +73,26 @@ def cloud_to_local(
 
     platforms = []
     tag_cloud: list[str] = []
+    seen_tags: set[str] = set()
+
+    def _add_tags(items) -> None:
+        for t in items:
+            t = str(t).strip()
+            if t and t.lower() not in seen_tags:
+                seen_tags.add(t.lower())
+                tag_cloud.append(t)
+
     for post in posts:
         if post.platform not in platforms:
             platforms.append(post.platform)
         try:
             ptags = json.loads(post.tags or "[]")
             if isinstance(ptags, list):
-                for t in ptags:
-                    if t not in tag_cloud:
-                        tag_cloud.append(t)
+                _add_tags(ptags)
         except json.JSONDecodeError:
             pass
+        # R-226：帖子无话题标签时，从标题/简介补提 #话题
+        _add_tags(extract_hashtags(post.title or "", post.desc or ""))
     known5 = ["求职", "面试", "赚钱", "知识", "其他"]
     main_topics = [t for t in tag_cloud if t in known5]
     video_tags = [t for t in tag_cloud if t not in known5]
@@ -90,7 +100,7 @@ def cloud_to_local(
         filename = f"__cloud__{first.id}"
     video = Video(
         filename=filename,
-        title=first.title or "",
+        title=strip_hashtags(first.title or ""),
         creator_id=cid,
         platforms=json.dumps(platforms, ensure_ascii=False),
         main_topics=json.dumps(main_topics, ensure_ascii=False),

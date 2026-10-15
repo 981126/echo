@@ -16,6 +16,7 @@ from ..core.platform_links import build_platform_page_url_from_data, parse_raw
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video import Video
 from ..models.work import Work
+from .text_tags import strip_hashtags
 
 _SPACE_RE = re.compile(r"\\s+")
 _TAG_RE = re.compile(r"[#＃][^\\s#＃，,。！？!?]*")
@@ -155,8 +156,8 @@ def auto_merge_creator(db: Session, creator_id: int) -> int:
         existing = next((m.work_id for m in members if m.work_id), None)
         work = db.get(Work, existing) if existing else None
         if work is None:
-            title = max(members, key=lambda m: len(m.title)).title or members[0].title
-            work = Work(creator_id=creator_id, title=title)
+            longest = max(members, key=lambda m: len(m.title)).title or members[0].title
+            work = Work(creator_id=creator_id, title=strip_hashtags(longest))
             db.add(work)
             db.flush()
             created += 1
@@ -199,7 +200,11 @@ def merge_manual(db: Session, platform_post_ids: list[int], creator_id: int | No
     work = db.get(Work, existing) if existing else None
     if work is None:
         first = posts[0]
-        work = Work(creator_id=creator_id, title=first.title or "", cover_path=first.cover_path)
+        work = Work(
+            creator_id=creator_id,
+            title=strip_hashtags(first.title or ""),
+            cover_path=first.cover_path,
+        )
         db.add(work)
         db.flush()
     assert work is not None  # 上面已查询到或新建
@@ -218,7 +223,7 @@ def merge_manual(db: Session, platform_post_ids: list[int], creator_id: int | No
         if v is not None:
             recompute_video_platforms(db, v)
     if not work.title and posts:
-        work.title = posts[0].title or ""
+        work.title = strip_hashtags(posts[0].title or "")
     db.commit()
     return {"ok": True, "work_id": work.id, "members": len(posts)}
 

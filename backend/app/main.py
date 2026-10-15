@@ -40,6 +40,10 @@ async def lifespan(app: FastAPI):
     from .services.ingest import maybe_auto_confirm_backlog_on_startup
 
     maybe_auto_confirm_backlog_on_startup()
+    # R-226：一次性清洗历史标题里的 #话题（Kv 标记幂等，后台线程）
+    from .services.title_cleanup import maybe_clean_hashtag_titles_on_startup
+
+    maybe_clean_hashtag_titles_on_startup()
     from .services.pipeline import mark_stale_pipeline_runs_on_startup
 
     mark_stale_pipeline_runs_on_startup()  # R-133：流水线 running 卡死自愈

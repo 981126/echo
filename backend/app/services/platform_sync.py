@@ -31,6 +31,7 @@ from ..models.platform import (
     SyncJob,
 )
 from .platform_assets import _cover_path_for, _ensure_account_avatar
+from .text_tags import strip_hashtags
 from .platform.budget import BudgetExceeded, _charge, ensure_budget, get_budget, set_budget  # noqa: F401
 from .events import publish
 from .creator_service import get_current_creator
@@ -166,7 +167,7 @@ def _ensure_post(
             account_id=account.id,
             platform=account.platform,
             platform_post_id=post.platform_post_id,
-            title=post.title,
+            title=strip_hashtags(post.title),
             desc=post.desc,
             cover_url=post.cover_url,
             video_url=post.video_url,
@@ -178,7 +179,7 @@ def _ensure_post(
         if existing is not None:
             existing[key] = row
     else:
-        row.title = post.title or row.title
+        row.title = strip_hashtags(post.title) or row.title
         row.desc = post.desc or row.desc
         row.cover_url = post.cover_url or row.cover_url
         row.publish_time = post.publish_time or row.publish_time

@@ -120,7 +120,8 @@ def test_cloud_work_merges_platforms_and_dedupes_tags(db):
     card = cards[0]
     assert card["type"] == "work" and card["merged"] == 2
     assert card["platforms"] == ["bilibili", "douyin"]
-    assert card["tags"] == ["A", "B", "C"], "标签合并去重且保序"
+    # R-226：标签按 抖音→小红书→B站 顺序合并去重（抖音 B/C 在前，B站 A/B 去重后补 A）
+    assert card["tags"] == ["B", "C", "A"], "标签按平台顺序合并去重且保序"
     assert card["date"] == "2026-09-05", "作品卡片日期取排序后的第一篇（按平台名）"
 
 

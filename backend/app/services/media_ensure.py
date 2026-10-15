@@ -29,6 +29,7 @@ from .media_downloader import (
 from .media_naming import media_stem, unique_path
 from .platform.budget import BudgetExceeded, _charge, ensure_budget
 from .platform_sync import _bound_platform_posts
+from .text_tags import extract_hashtags, strip_hashtags
 from ..tasks import push_notification, start_task
 from ..models.task import BackgroundTask
 from .events import publish
@@ -160,7 +161,9 @@ def _create_video(db: Session, posts: list[PlatformPost], *, filename: str) -> V
             arr = json.loads(p.tags or "[]")
         except json.JSONDecodeError:
             arr = []
-        for t in arr or []:
+        # R-226：帖子无话题标签时，从标题/简介补提 #话题
+        candidates = list(arr or []) + extract_hashtags(p.title or "", p.desc or "")
+        for t in candidates:
             if t in known5:
                 if t not in main_topics:
                     main_topics.append(t)
@@ -168,7 +171,7 @@ def _create_video(db: Session, posts: list[PlatformPost], *, filename: str) -> V
                 tags.append(t)
     video = Video(
         filename=filename,
-        title=first.title or "",
+        title=strip_hashtags(first.title or ""),
         creator_id=cid,
         platform_post_id=f"{first.platform}:{first.platform_post_id}",
         platforms=json.dumps(platforms, ensure_ascii=False),

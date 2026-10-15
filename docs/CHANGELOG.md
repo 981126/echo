@@ -1,5 +1,26 @@
 # 变更记录
 
+## [M227 / R-226] 2026-10-15 — 素材卡片标题去话题 + 三平台标签合并去重 ✅ 已完成
+
+> 作者：「1.标题去掉标签 2.卡片点赞下方的标签，需要将三个平台的话题合并去重」
+
+- **根因**：抖音同步把含 `#话题` 的整条文案当标题存入（`platform/tikhub.py`），跨平台合并时又取「最长成员标题」，于是卡片名带着 `#找工作 #求职…`；而抖音 top15 同步口径不写 `tags` 字段，话题只留在标题里，卡片下方标签因此常为空。
+- **做了什么**：
+  - 新增 `backend/app/services/text_tags.py`：`extract_hashtags`（提取并过滤纯平台词）+ `strip_hashtags`（去 `#话题`、含全角 ＃、规整空格），`platform/tikhub.py:_tags_of` 改为复用。
+  - 标题清洗：`platform_sync._ensure_post` 写入时、`works_service` 自动/手动合并、`api/works.py`/`api/platform.py`/`media_ensure`/`benchmark` 建素材时统一去话题；`library_service` 卡片标题再兜底去一次（去完为空回落文件名/简介）。
+  - 标签合并：`library_service._cloud_cards` 聚合三平台已存 `tags` + 从标题/简介补提 `#话题` + 绑定本地素材标签，忽略大小写去重，成员按 抖音→小红书→B站 排序（卡片仍显示前 3 + “+N”）。
+  - `backend/app/services/title_cleanup.py` + `main.py` 启动钩子：Kv 幂等一次性清洗历史 `platform_posts.title`/`works.title`/`videos.title`（去完为空则保留原值；平台原文仍在 `desc`/`raw`）。
+- **明确不做**：不新增表、不改 API 契约；不删平台原始文案。
+- **自测**：`scripts/verify.sh` 全绿；新增 `test_r226_title_tags.py`。
+
+## [M224 / R-222] 2026-10-15 — B站账号同步整账号回滚修复 ✅ 已完成
+
+> 现象：B站账号 `sync_status=failed`，报 `'NoneType' object does not support item assignment`，0 条作品入库，B站帖不参与自动合并。
+
+- **根因**：并发补全作品指标时循环变量 `for pd, stats, error in ...` 与外层累计字典 `stats` 重名；末条补全为 `None` 时覆盖外层 `stats`，随后 `stats["posts"] += 1` 抛异常 → 整个账号 rollback。B站列表常缺 like 字段，必然进入该分支。
+- **做了什么**：`platform_sync.sync_account` 循环变量改名 `fetched_stats`；新增 `test_r222_sync_stats_shadow.py` 回归。
+- **自测**：真实重同步 B站账号后导入 15 条、`sync_status=done`，目标帖绑定回 work。
+
 ## [M226 / R-225] 2026-10-15 — 素材库抽屉平台勾选由绑定作品决定 ✅ 已完成
 
 > 作者：「素材库里面明明一个视频发了多个平台，而且卡片也展示了多个平台，但抽屉里面平台却没有勾上，是为什么」

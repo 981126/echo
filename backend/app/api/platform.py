@@ -32,6 +32,7 @@ from ..services.platform_sync import (
     sync_single_post,
     sync_work_posts,
 )
+from ..services.text_tags import strip_hashtags
 from ..tasks import start_task
 
 router = APIRouter()
@@ -222,7 +223,7 @@ def post_to_material(post_id: int, db: Session = Depends(get_db)):
         work_platforms = [post.platform]
     video = Video(
         filename=f"__cloud__{post.id}",  # 无真实文件：占位名保证唯一（前端据此不显示转写）
-        title=post.title,
+        title=strip_hashtags(post.title or ""),
         creator_id=cid,
         platform_post_id=f"{post.platform}:{post.platform_post_id}",
         platforms=json.dumps(work_platforms, ensure_ascii=False),

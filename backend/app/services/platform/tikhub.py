@@ -24,6 +24,7 @@ import httpx
 from ...config import get_settings
 from ...core.log import get_logger
 from ...core.timeutil import now as _app_now
+from ..text_tags import extract_hashtags
 from .base import CommentData, PostData, ProfileData  # noqa: E402,F401
 from .link_utils import parse_link, parse_post_id  # noqa: F401  re-export：保持旧导入路径
 
@@ -208,20 +209,8 @@ _COMMENT_POOL = [
 
 
 def _tags_of(*texts: str) -> list[str]:
-    """解析 #话题 标签（去重、去纯平台词）。"""
-    import re
-
-    out: list[str] = []
-    skip = {"抖音", "douyin", "小红书", "xiaohongshu", "bilibili", "B站", "b站", "哔哩哔哩", "视频", "vlog", "话题", "tag"}
-    _norm = {x.lower() for x in skip}
-    for text in texts:
-        for m in re.findall(r"[#＃]([^\s#＃，。！？!?、]+)", text or ""):
-            tag = m.strip().replace('[话题]', '').replace(']', '').strip()
-            if tag and tag.lower() not in _norm and tag not in out:
-                out.append(tag)
-            if len(out) >= 20:
-                return out
-    return out
+    """解析 #话题 标签（去重、去纯平台词）。R-226：统一走 text_tags.extract_hashtags。"""
+    return extract_hashtags(*texts)
 
 
 def _seed_id(user_id: str, salt: str = "") -> int:

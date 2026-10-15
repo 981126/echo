@@ -7,6 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-226 | 2026-10-15 | 素材卡片标题去话题标签（含全角＃，去完为空回落文件名/简介）+ 卡片点赞下方标签合并三平台话题去重（来源=已存 tags + 标题/简介补提 #话题 + 绑定本地素材标签；忽略大小写；顺序 抖音→小红书→B站；仍显示前 3 + “+N”）；标题去标签显示层统一（素材库+作品页/抽屉）且清洗库内已存标题 | ✅ 已完成 | M227 | library_service、platform_sync、platform/tikhub、works_service、frontend_v2/material-card、R-179/R-094/R-222 |
 | R-225 | 2026-10-15 | 素材库抽屉平台勾选由绑定作品决定：卡片与抽屉的「平台」数据源统一为 `PlatformPost` 成员；已绑定作品的素材抽屉勾选只读 | ✅ 已完成 | M226 | backend/app/api/videos.py、works_service、platform.py、frontend_v2/edit-drawer.tsx、R-036/R-179/R-094 |
 | R-223 | 2026-10-10 | 同步所有博主 `database is locked` 修复：`_ensure_post`/`_upsert_profile_snapshot` 把封面/头像下载移出 SQLite 写事务，避免并发同步时网络 I/O 长期占锁导致 `_charge` 更新 `app_kv` 超时 | ✅ 已完成 | M225（已完成） | platform_sync、platform_assets、R-163/R-151/R-222 |
 | R-222 | 2026-10-10 | 同步再提速：账号内请求并行 + 批量写库 + 消除 N+1 + 进度防抖；12 账号 daily 前 15 条目标从 20+ min 降到 10 min 以内；不引入 Redis/MQ、不砍 B站 150 条补全 | 🔨 进行中 | M224（进行中） | platform_sync、platform API、R-163/R-151/R-085/R-086/R-109/R-219 |

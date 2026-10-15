@@ -15,6 +15,7 @@ from ..models.kv import Kv
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video import Video
 from . import budget_settings
+from .text_tags import strip_hashtags
 
 # 互动权重：点赞1 + 收藏2 + 评论5（播放量只做参考不做主排序）
 W_LIKE, W_FAV, W_COMMENT = 1, 2, 5
@@ -504,7 +505,7 @@ def resolve_rewrite_source(
         return _source_payload(
             owner,
             creator,
-            title=video.title or (first.title if first else "") or "",
+            title=strip_hashtags(video.title or (first.title if first else "") or ""),
             text=_video_asr_text(video),
             key=f"v{video.id}",
             post_id=first.id if first else None,
@@ -531,7 +532,7 @@ def resolve_rewrite_source(
     return _source_payload(
         owner,
         _creator_of_posts(db, posts),
-        title=posts[0].title or "",
+        title=strip_hashtags(posts[0].title or ""),
         text=_unit_text(db, unit),
         key=key,
         post_id=posts[0].id,

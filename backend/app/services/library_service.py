@@ -22,8 +22,26 @@ from ..models.platform import CreatorAccount, PlatformPost
 from ..models.video import Video
 from ..models.work import Work
 from .creator_service import current_creator_id
+from .text_tags import extract_hashtags, strip_hashtags
 from .video_query import visible_videos_query
 from .works_service import latest_stats_map
+
+# R-226：卡片标签与标题的固定顺序（抖音→小红书→B站，其余排最后）
+_PLATFORM_ORDER = {"douyin": 0, "xiaohongshu": 1, "bilibili": 2}
+
+
+def _platform_rank(platform: str) -> int:
+    return _PLATFORM_ORDER.get(platform, 9)
+
+
+def _merge_tags(tags: list[str], seen: set[str], items) -> None:
+    """把 items 里的标签并入 tags：忽略大小写去重、保留首次出现的写法。"""
+    for raw in items:
+        t = str(raw).strip()
+        key = t.lower()
+        if t and key not in seen:
+            seen.add(key)
+            tags.append(t)
 
 
 @dataclass
@@ -68,9 +86,7 @@ def _local_cards(videos: list[Video], linked: set[int]) -> list[dict]:
         if v.id in linked:
             continue
         tags: list[str] = []
-        for t in _json_list(v.main_topics) + _json_list(v.tags):
-            if t and t not in tags:
-                tags.append(t)
+        _merge_tags(tags, set(), _json_list(v.main_topics) + _json_list(v.tags))
         out.append(
             {
                 "key": f"v{v.id}",
@@ -78,7 +94,7 @@ def _local_cards(videos: list[Video], linked: set[int]) -> list[dict]:
                 "id": v.id,
                 "type": None,
                 "creator_id": v.creator_id,
-                "title": v.title or v.filename or "",
+                "title": strip_hashtags(v.title or "") or v.filename or "",
                 "cover_url": v.cover_url or "",
                 "platforms": sorted(set(_json_list(v.platforms))),
                 "tags": tags,
@@ -174,16 +190,15 @@ def _cloud_cards(db: Session, creator_id: int) -> tuple[list[dict], set[int]]:
     for kind, gid, members, owner_id, title in groups:
         any_local = next((m.local_video_id for m in members if m.local_video_id), None)
         bound = bound_videos.get(any_local) if any_local else None
+        # R-226：标签=三平台已存 tags + 标题/简介补提 #话题（覆盖抖音 top15 帖 tags 为空），
+        # 再并入绑定本地素材标签；忽略大小写去重，按平台顺序（成员已排序）。
         tags: list[str] = []
-        for m in members:
-            for t in _post_tags(m):
-                if t and t not in tags:
-                    tags.append(t)
-        # 绑定本地素材的标签也是这份内容的主数据：帖子没带话题（部分平台不返回）时也要能显示
+        seen_tags: set[str] = set()
+        for m in sorted(members, key=lambda x: (_platform_rank(x.platform), x.platform)):
+            _merge_tags(tags, seen_tags, _post_tags(m))
+            _merge_tags(tags, seen_tags, extract_hashtags(m.title or "", m.desc or ""))
         if bound is not None:
-            for t in _json_list(bound.main_topics) + _json_list(bound.tags):
-                if t and t not in tags:
-                    tags.append(t)
+            _merge_tags(tags, seen_tags, _json_list(bound.main_topics) + _json_list(bound.tags))
         prices = [int(m.ad_price) for m in members if m.ad_price is not None]
         if bound is not None and bound.ad_price is not None:
             prices.append(int(bound.ad_price))
@@ -194,7 +209,9 @@ def _cloud_cards(db: Session, creator_id: int) -> tuple[list[dict], set[int]]:
                 "id": gid,
                 "type": kind,
                 "creator_id": owner_id,
-                "title": title or "（无标题）",
+                "title": strip_hashtags(title or "")
+                or strip_hashtags((members[0].desc or "") if members else "")
+                or "（无标题）",
                 "cover_url": next((m.cover_url_local for m in members if m.cover_url_local), "") or "",
                 "platforms": sorted({m.platform for m in members if m.platform}),
                 "tags": tags,
