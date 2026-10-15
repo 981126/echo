@@ -516,8 +516,8 @@ export function EditDrawer({
                   <Input type="datetime-local" className="h-8 text-xs" value={state.publishedTs} onChange={(e) => setState({ ...state, publishedTs: e.target.value })} />
                 </div>
                 <div className="flex items-end gap-2 pb-1">
-                  <label className="flex cursor-pointer items-center gap-2 text-xs">
-                    <Checkbox checked={state.is_ad} onCheckedChange={(v) => setState({ ...state, is_ad: !!v })} />
+                  <label htmlFor="ad-flag" className="flex cursor-pointer items-center gap-2 text-xs">
+                    <Checkbox id="ad-flag" checked={state.is_ad} onCheckedChange={(v) => setState({ ...state, is_ad: !!v })} />
                     商务广告（不参与人设学习）
                   </label>
                 </div>

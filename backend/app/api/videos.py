@@ -423,22 +423,15 @@ def _bound_platform_posts(db: Session, video: Video) -> list[PlatformPost]:
 
 
 def _sync_local_to_posts(db: Session, video: Video) -> None:
-    """把本地素材的修改同步到绑定的全部平台帖子（合并卡各条一致）。"""
+    """把本地素材的修改同步到绑定的全部平台帖子（合并卡各条一致）。
+
+    只做「本地 → 平台帖」单向推送，**不再从平台帖反向回填** video 字段：
+    回填会让用户的「取消商务广告 / 清空广告价格 / 清空实际发布」保存后被旧值覆盖
+    （R-227 修复）。展示所需的空值兜底由 `get_video` 在字段为空时处理。
+    """
     posts = _bound_platform_posts(db, video)
     if not posts:
         return
-    # 本地缺字段时先用平台数据回填（点开即一致）
-    if video.published_at is None:
-        with_time = [p.publish_time for p in posts if p.publish_time]
-        if with_time:
-            video.published_at = max(with_time)
-    if not video.is_ad and any(p.is_ad for p in posts):
-        video.is_ad = True
-    if video.ad_price is None:
-        priced = [p.ad_price for p in posts if p.ad_price is not None]
-        if priced:
-            video.ad_price = max(priced)
-    # 用户编辑回写各平台帖子
     for p in posts:
         if video.title:
             p.title = video.title
