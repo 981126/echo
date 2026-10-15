@@ -7,6 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-225 | 2026-10-15 | 素材库抽屉平台勾选由绑定作品决定：卡片与抽屉的「平台」数据源统一为 `PlatformPost` 成员；已绑定作品的素材抽屉勾选只读 | ✅ 已完成 | M226 | backend/app/api/videos.py、works_service、platform.py、frontend_v2/edit-drawer.tsx、R-036/R-179/R-094 |
 | R-223 | 2026-10-10 | 同步所有博主 `database is locked` 修复：`_ensure_post`/`_upsert_profile_snapshot` 把封面/头像下载移出 SQLite 写事务，避免并发同步时网络 I/O 长期占锁导致 `_charge` 更新 `app_kv` 超时 | ✅ 已完成 | M225（已完成） | platform_sync、platform_assets、R-163/R-151/R-222 |
 | R-222 | 2026-10-10 | 同步再提速：账号内请求并行 + 批量写库 + 消除 N+1 + 进度防抖；12 账号 daily 前 15 条目标从 20+ min 降到 10 min 以内；不引入 Redis/MQ、不砍 B站 150 条补全 | 🔨 进行中 | M224（进行中） | platform_sync、platform API、R-163/R-151/R-085/R-086/R-109/R-219 |
 | R-221 | 2026-09-30 | 垃圾邮件根因：**pytest 在真发信**——`test_r208_daily_best.py` 的夹具稿（选题B / B 的口播稿正文）经 `push_daily_best` → `notify._send` 用了仓库根 `.env` 的真实 QQ SMTP，每跑一次 verify 就发一封；`tests/conftest.py` 清空 SMTP 配置（fail-closed）+ `SMTP_SSL` 兜底闸门（`RealMailAttempted` 不继承 Exception，吞不掉）+ R-208 用例改 spy 断言推送内容 + 新增 `test_r221_mail_isolation.py`；业务代码零改动 | ✅ 已完成 | M223（已完成） | notify/pipeline、tests/conftest、R-208/R-140/R-141、verify.sh |

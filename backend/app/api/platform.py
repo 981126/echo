@@ -213,12 +213,19 @@ def post_to_material(post_id: int, db: Session = Depends(get_db)):
     cid = current_creator_id(db)
     if cid is None:
         raise HTTPException(status_code=400, detail="请先创建并切换到一个主博主")
+    # R-225：若该帖已属于合并 work，素材的平台应包含全部成员平台
+    if post.work_id:
+        work_platforms = sorted(
+            {p.platform for p in db.query(PlatformPost).filter(PlatformPost.work_id == post.work_id).all() if p.platform}
+        )
+    else:
+        work_platforms = [post.platform]
     video = Video(
         filename=f"__cloud__{post.id}",  # 无真实文件：占位名保证唯一（前端据此不显示转写）
         title=post.title,
         creator_id=cid,
         platform_post_id=f"{post.platform}:{post.platform_post_id}",
-        platforms=json.dumps([post.platform], ensure_ascii=False),
+        platforms=json.dumps(work_platforms, ensure_ascii=False),
         status="planned",
         cover_path=post.cover_path,
         work_id=post.work_id,

@@ -30,6 +30,24 @@ def normalize_work_title(title: str) -> str:
     return t.strip().lower()
 
 
+def recompute_video_platforms(db: Session, video: Video) -> None:
+    """R-225：按素材绑定的平台帖（local_video_id 或 work 聚合）刷新 video.platforms。"""
+    posts: list[PlatformPost] = []
+    seen_ids: set[int] = set()
+    for p in db.query(PlatformPost).filter(PlatformPost.local_video_id == video.id).all():
+        if p.id not in seen_ids:
+            posts.append(p)
+            seen_ids.add(p.id)
+    if video.work_id:
+        for p in db.query(PlatformPost).filter(PlatformPost.work_id == video.work_id).all():
+            if p.id not in seen_ids:
+                posts.append(p)
+                seen_ids.add(p.id)
+    plats = sorted({p.platform for p in posts if p.platform})
+    if plats:
+        video.platforms = json.dumps(plats, ensure_ascii=False)
+
+
 def latest_stats_map(db: Session, post_ids: list[int]) -> dict[int, PlatformPostStat]:
     """批量取每条作品的最新统计（stat_date 升序覆盖 → 保留最新），消除 N+1。"""
     out: dict[int, PlatformPostStat] = {}
@@ -129,6 +147,7 @@ def auto_merge_creator(db: Session, creator_id: int) -> int:
         groups.setdefault(key, []).append(p)
 
     created = 0
+    touched_videos: set[int] = set()
     for key, members in groups.items():
         if len(members) < 2:
             continue
@@ -146,9 +165,16 @@ def auto_merge_creator(db: Session, creator_id: int) -> int:
             if m.work_id != work.id:
                 m.work_id = work.id
             if m.local_video_id:
+                touched_videos.add(m.local_video_id)
                 v = db.get(Video, m.local_video_id)
                 if v is not None and v.work_id != work.id:
                     v.work_id = work.id
+    if touched_videos:
+        db.flush()
+    for vid in touched_videos:
+        v = db.get(Video, vid)
+        if v is not None:
+            recompute_video_platforms(db, v)
     db.commit()
     return created
 
@@ -177,12 +203,20 @@ def merge_manual(db: Session, platform_post_ids: list[int], creator_id: int | No
         db.add(work)
         db.flush()
     assert work is not None  # 上面已查询到或新建
+    touched_videos: set[int] = set()
     for p in posts:
         p.work_id = work.id
         if p.local_video_id:
+            touched_videos.add(p.local_video_id)
             v = db.get(Video, p.local_video_id)
             if v is not None and v.work_id != work.id:
                 v.work_id = work.id
+    if touched_videos:
+        db.flush()
+    for vid in touched_videos:
+        v = db.get(Video, vid)
+        if v is not None:
+            recompute_video_platforms(db, v)
     if not work.title and posts:
         work.title = posts[0].title or ""
     db.commit()
@@ -196,12 +230,19 @@ def split_work(db: Session, work_id: int, keep_ids: list[int] | None = None) -> 
         raise HTTPException(status_code=404, detail="作品不存在")
     keep = set(int(x) for x in (keep_ids or []))
     members = db.query(PlatformPost).filter(PlatformPost.work_id == work_id).all()
+    touched_videos: set[int] = {p.local_video_id for p in members if p.local_video_id}
     for p in members:
         if p.id not in keep:
             p.work_id = None
     if not keep:
         db.delete(work)
     db.commit()
+    for vid in touched_videos:
+        v = db.get(Video, vid)
+        if v is not None:
+            recompute_video_platforms(db, v)
+    if touched_videos:
+        db.commit()
     return {"ok": True}
 
 

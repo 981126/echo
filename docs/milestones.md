@@ -1,11 +1,12 @@
 # 里程碑与进度
 
 > 状态图例：✅ 已完成 / 🔨 进行中 / 🔲 待排期
-> 最后更新：2026-10-10（R-223 同步所有博主 database is locked 已修复；R-222 同步再提速仍在进行中）。
+> 最后更新：2026-10-15（R-225 素材库抽屉平台勾选由绑定作品决定 进行中；R-223 同步所有博主 database is locked 已修复；R-222 同步再提速仍在进行中）。
 
 ## 总览
 | 阶段 | 主题 | 状态 |
 |---|---|---|
+| M226 | R-225 素材库抽屉平台勾选由绑定作品决定：统一卡片与抽屉的「平台」数据源；已绑定作品的素材抽屉勾选只读 | ✅ |
 | M225 | R-223 同步所有博主 `database is locked` 修复：`_ensure_post`/`_upsert_profile_snapshot` 把封面/头像下载移出 SQLite 写事务，避免并发同步时网络 I/O 长期占锁导致 `_charge` 更新 `app_kv` 超时 | ✅ |
 | M224 | R-222 同步再提速：账号内请求并行 + 批量写库 + 消除 N+1 + 进度防抖；12 账号 daily 前 15 条目标从 20+ min 降到 10 min 以内；不引入 Redis/MQ、不砍 B站 150 条补全 | 🔨 进行中 |
 | M223 | R-221 垃圾邮件根因：测试环境禁止真实发信——conftest 清空 SMTP 配置（fail-closed）+ `SMTP_SSL` 兜底闸门（`RealMailAttempted`）+ R-208 用例改 spy + 新增隔离回归；业务代码零改动 | ✅ |
@@ -106,6 +107,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
+| M226 / R-225 | 素材库抽屉平台勾选由绑定作品决定（已完成）：根因=卡片平台从 `PlatformPost` 成员实时推导，抽屉平台勾选却读 `Video.platforms` 列，合并/同步时该列不重算导致割裂。修复：① `GET /api/videos/{id}` 存在绑定帖子时覆盖 `platforms` 为成员平台集合，与卡片同源；② 合并/绑定/拆分时持久化刷新 `Video.platforms`；③ `post_to_material` 取所属 work 全部成员平台；④ 前端已绑定作品的素材抽屉里平台勾选框只读，并提示“平台由已绑定的平台作品决定”。**明确不做**：不重新设计平台多选交互；不影响未绑定作品的本地素材可编辑性；不删除 `Video.platforms` 列 | 合并卡打开抽屉后平台勾选与卡片一致且只读；未绑定本地素材仍可手改；`scripts/verify.sh` 全绿；新增后端/前端单测 | ✅ |
 | M224 / R-222 | 同步再提速（实施中）：12 个账号 daily 前 15 条当前需 20+ min，作者要求不引入 Redis/MQ、不减少 B站 150 条历史指标补全，NAS 为 N150 4 核 12G。**方案**：纯后端内部优化——账号内作品/评论/B站补全并行化；批量写库替代逐行 commit；预加载消除 N+1；进度更新防抖；TikHub 连接复用 + 令牌桶批量；并发参数对齐（修复账号级硬编码 3）；封面下载不阻塞作品入库；媒体并发保持 2、下载并发可提到 4 | 12 账号同步耗时降到 10 min 以内（目标 6–8 min）；`scripts/verify.sh` 全绿；同步接口冒烟通过；服务保持运行 | 🔨 |
 | M222 / R-220 | 素材库切页同步遮罩必现（实施中）：根因=恢复扫描（`GET /api/tasks?status=running&kind=…`，mount 一次）与 `/api/library` 竞速——冷缓存时卡片为空，card_sync 按 `post_id` 匹配不到卡片被静默丢弃且永不重试（`use-card-tasks.ts:170-171`），热缓存才有动画；叠加跨页 SSE 丢失（无回放）与只筛 running。**修复**：未认领池（taskId→TaskRow）——refreshActive 与 SSE 未知非终态任务统一入池，cards 变化（首帧到位/翻页）时重新 `cardKeyForPayload` 命中即挂遮罩+5s 轮询并出池；终态/已认领出池；恢复查询改 `status=pending,running`（后端已支持，零改动）；池匹配抽纯函数供 vitest | 冷缓存切页遮罩必现；翻页补挂；pending 恢复；无幽灵转圈；vitest + headless r220（mock 竞速）全绿；`scripts/verify.sh` 全绿；动效点检 | ✅ |
 | M221 / R-219 | 博主管理同步进度可见性（实施中）：并发 sync-all 下先完成博主的进度条**不再瞬间消失**——done 停留约 8s 绿条「同步完成」+ 进度 100%、failed 停留约 60s 红条含原因摘要，超阈值自动淡出且历史旧记录不误显示；**排队条保持**（R-163 入队预置「排队中…」running job，前端不回退）；**跳过者可见**（已在运行/无启用账号）卡片下灰色虚线提示条（AnimatePresence 软入场，该博主开跑或下次 sync-all 覆盖时移除）；后端 `enqueue_all_top15_sync` 的 `skipped` 改结构化 `[{creator_id,name,reason}]`（sync-all 400 detail 与响应同步适配）；前端 jobsQ 改拉 `/api/platform/jobs?limit=50` 全状态、`runningCreators` 只统计 running；**范围不变**：批次仍只当前主博主+对标（R-162）、单博主懒建 job 不动、jobs 接口契约不变 | done/failed 条延迟淡出、排队条不回退、跳过者有灰条、历史旧记录不误显示；`test_r162_sync_all_queue.py` 更新全绿；`scripts/verify.sh` 全绿；API.md 同步 skipped 结构；动效点检（收口 `opacity 1`、无闪帧） | ✅ |

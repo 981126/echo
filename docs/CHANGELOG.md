@@ -1,5 +1,18 @@
 # 变更记录
 
+## [M226 / R-225] 2026-10-15 — 素材库抽屉平台勾选由绑定作品决定 ✅ 已完成
+
+> 作者：「素材库里面明明一个视频发了多个平台，而且卡片也展示了多个平台，但抽屉里面平台却没有勾上，是为什么」
+
+- **根因**：卡片平台（云端合并卡）实时从绑定的 `PlatformPost` 成员推导，抽屉平台勾选却读取 `Video.platforms` 数据库列；该列只在创建/绑定/手动保存时写，合并/同步时不会重算，导致抽屉勾不上或与卡片不一致。
+- **做了什么**：
+  - `backend/app/api/videos.py:get_video`：存在 `_bound_platform_posts` 时，用成员平台集合覆盖 `out.platforms`，与卡片同源。
+  - `backend/app/services/works_service.py`：新增 `recompute_video_platforms()`，在 `auto_merge_creator` / `merge_manual` / `split_work` 时持久化刷新 `Video.platforms`。
+  - `backend/app/api/platform.py:post_to_material`：取帖子所属 work 的全部成员平台，而非仅单平台。
+  - `frontend_v2/src/pages/videos/edit-drawer.tsx`：已绑定平台作品（`platform_links.length > 0`）时，平台勾选框 `disabled` 并显示提示；未绑定本地素材保持可编辑。
+- **明确不做**：不删 `Video.platforms` 列；不改变未绑定本地素材的平台可编辑性；不做平台自动解绑。
+- **自测**：`scripts/verify.sh` 全绿；新增 `test_r225_video_platforms_from_bound_works.py`。
+
 ## [M224 / R-222] 2026-10-10 — 同步再提速：账号内并行 + 批量写库 + 消除 N+1 ✅ 已完成
 
 > 作者：「页面不卡，不过我觉得后台请求有点慢，最慢的其实是同步数据」；当前 12 个账号 daily 前 15 条约 20+ min，要求不引入 Redis/MQ、不砍 B站 150 条历史指标补全。

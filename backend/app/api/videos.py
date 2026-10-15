@@ -160,6 +160,8 @@ def get_video(video_id: int, db: Session = Depends(get_db)):
     out.platform_links = _platform_links(db, video)
     posts = _bound_platform_posts(db, video)
     if posts:
+        # R-225：抽屉平台勾选与卡片同源——从绑定的 PlatformPost 成员推导
+        out.platforms = sorted({p.platform for p in posts if p.platform})
         if out.published_at is None:
             with_time = [p.publish_time for p in posts if p.publish_time]
             if with_time:

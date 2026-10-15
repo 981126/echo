@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { apiJson, uploadFile } from '@/api/client'
 import { platformName } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { Drawer, DrawerHeader, DrawerTitle, DrawerBody, DrawerFooter } from '@/components/ui/drawer'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -220,7 +221,9 @@ export function EditDrawer({
     try {
       const body: Record<string, unknown> = {}
       if (state.title !== orig.title) body.title = state.title
-      if (state.platforms.join() !== orig.platforms.join()) body.platforms = state.platforms
+      // R-225：已绑定平台作品的素材，平台由后端从绑定作品推导，前端不再提交
+      const bound = detail && detail.platform_links.length > 0
+      if (!bound && state.platforms.join() !== orig.platforms.join()) body.platforms = state.platforms
       if (state.status !== orig.status) body.status = state.status
       if (state.is_ad !== orig.is_ad) body.is_ad = state.is_ad
       if (state.plannedTs !== orig.plannedTs) body.planned_publish_at = fromLocalTs(state.plannedTs)
@@ -464,21 +467,34 @@ export function EditDrawer({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-muted-foreground">平台</label>
+                  {detail && detail.platform_links.length > 0 && (
+                    <p className="mb-1 text-[10px] text-muted-foreground">由已绑定的平台作品决定</p>
+                  )}
                   <div className="flex gap-3 pt-1.5">
-                    {PLATFORMS.map((p) => (
-                      <label key={p} className="flex cursor-pointer items-center gap-1.5 text-xs">
-                        <Checkbox
-                          checked={state.platforms.includes(p)}
-                          onCheckedChange={(v) =>
-                            setState({
-                              ...state,
-                              platforms: v ? [...state.platforms, p] : state.platforms.filter((x) => x !== p)
-                            })
-                          }
-                        />
-                        {platformName(p)}
-                      </label>
-                    ))}
+                    {PLATFORMS.map((p) => {
+                      const bound = detail && detail.platform_links.length > 0
+                      return (
+                        <label
+                          key={p}
+                          className={cn(
+                            'flex items-center gap-1.5 text-xs',
+                            bound ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                          )}
+                        >
+                          <Checkbox
+                            disabled={bound}
+                            checked={state.platforms.includes(p)}
+                            onCheckedChange={(v) =>
+                              setState({
+                                ...state,
+                                platforms: v ? [...state.platforms, p] : state.platforms.filter((x) => x !== p)
+                              })
+                            }
+                          />
+                          {platformName(p)}
+                        </label>
+                      )
+                    })}
                   </div>
                 </div>
                 <div>
