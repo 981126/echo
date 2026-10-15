@@ -322,6 +322,8 @@ def run_debate(
 
     # R-227：联网事实证据（query = 选题 + 该入口能拿到的最具体文本；无 key/失败静默）
     from .evidence import gather_online, resolve_used
+    from .station_evidence import meta as _station_meta
+    from .station_evidence import retrieve_station
 
     ev = gather_online(
         db,
@@ -330,7 +332,8 @@ def run_debate(
         draft_id=draft.id,
         creator_id=draft.creator_id,
     )
-    evidence_block = ev.get("block") or ""
+    station = retrieve_station(db, topic, creator_id=draft.creator_id)  # R-227 第 2 步：站内素材
+    evidence_block = "\n\n".join(x for x in (ev.get("block") or "", station.get("block") or "") if x)
 
     ctx = _context(db, topic)
     persona_text = "\n".join(f"- {t}" for t in ctx["tags"] or ["（暂无）"]) or "（暂无）"
@@ -527,6 +530,7 @@ def run_debate(
             "sources": used_sources,
             "online_sources": ev.get("sources") or [],
             "search_queries": ev.get("queries") or [],
+            "station": _station_meta(station),
         },
         ensure_ascii=False,
     )
@@ -663,7 +667,14 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     ev = gather_online(
         db, source_title, material=source_text, draft_id=draft.id, creator_id=owner.id
     )
-    evidence_block = ev.get("block") or ""
+    # R-227 第 2 步：站内真实素材（作者 ASR + 作者侧定稿；对标=参考）
+    from .station_evidence import meta as _station_meta
+    from .station_evidence import retrieve_station
+
+    station = retrieve_station(
+        db, source_title, creator_id=owner.id, author_k=4, bench_k=3
+    )
+    evidence_block = "\n\n".join(x for x in (ev.get("block") or "", station.get("block") or "") if x)
     # R-178：洗稿同样留运行头 + 每次调用记实际模型
     rewrite_rounds = debate_rounds(db, settings)
     run_header_id = _run_header(db, draft.id, gen_slot, critic_slot, rewrite_rounds)
@@ -827,6 +838,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             "sources": used_sources,
             "online_sources": ev.get("sources") or [],
             "search_queries": ev.get("queries") or [],
+            "station": _station_meta(station),
         },
         ensure_ascii=False,
     )
@@ -857,5 +869,6 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "sources": used_sources,
         "online_sources": ev.get("sources") or [],
         "search_queries": ev.get("queries") or [],
+        "station": _station_meta(station),
     }
 

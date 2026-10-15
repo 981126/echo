@@ -980,6 +980,7 @@ export function DraftEditDrawer({
                   sources={draft?.quality?.sources}
                   onlineSources={draft?.quality?.online_sources}
                   queries={draft?.quality?.search_queries}
+                  station={draft?.quality?.station}
                 />
                 <div className="relative">
                   <ScrollArea className="max-h-[52vh]" viewportRef={attachViewport}>

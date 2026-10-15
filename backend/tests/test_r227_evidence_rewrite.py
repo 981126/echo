@@ -12,6 +12,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
+from app.models.platform import Creator
+from app.models.video import Transcript, Video
 from app.models.web_search import WebSearchLog
 from app.services import evidence, web_search
 
@@ -105,3 +107,30 @@ def test_rewrite_user_injects_topic_and_evidence(db, monkeypatch):
     assert "STYLE:我的选题" in text  # R-227：风格样本检索传了 topic（原先为空）
     assert "EVIDENCE-BLOCK" in text
     assert "素材正文" in text
+
+
+def test_retrieve_station_author_and_benchmark(db):
+    owner = Creator(kind="owner", name="我", is_current=True)
+    bm = Creator(kind="benchmark", parent_id=1, name="对标A")
+    db.add(owner)
+    db.flush()
+    bm.parent_id = owner.id
+    db.add(bm)
+    db.flush()
+
+    v = Video(filename="a.mp4", title="面试反问", creator_id=owner.id, is_ad=False)
+    bv = Video(filename="b.mp4", title="面试技巧", creator_id=bm.id, is_ad=False)
+    db.add_all([v, bv])
+    db.flush()
+    db.add(Transcript(video_id=v.id, transcript_text="面试时你先反问一句，主动权就回到你手里。"))
+    db.add(Transcript(video_id=bv.id, transcript_text="面试官问你还有什么问题，你可以反问薪资结构。"))
+    db.commit()
+
+    from app.services.station_evidence import meta, retrieve_station
+
+    res = retrieve_station(db, "面试反问薪资", creator_id=owner.id)
+    assert any(a["kind"] == "asr" for a in res["author"])
+    assert any(b["title"] == "面试技巧" for b in res["benchmark"])
+    assert "你的" in res["block"] and "对标" in res["block"]
+    m = meta(res)
+    assert m["author"] and m["benchmark"]

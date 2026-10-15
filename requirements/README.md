@@ -7,7 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
-| R-227 | 2026-10-15 | 洗稿先行「证据支撑」内容质量：联网豆包搜索真实事实（带来源）+ 提示词硬要求「1 主张 + ≥1 具体事例/数据、有证据必须引用、禁编造」+ 评审加内容维度 + 来源留痕（新增 `web_search_logs` 表 + `Draft.quality`）；作者确认对标素材只作创作参考（守 D-028）、站内事例层用作者 ASR + 作者侧完成稿 | ✅ 已完成（第 1 步） | M228 | web_search、evidence、benchmark、debate、models/web_search、DATABASE |
+| R-227 | 2026-10-15 | 洗稿先行「证据支撑」内容质量：联网豆包搜索真实事实（带来源）+ 提示词硬要求「1 主张 + ≥1 具体事例/数据、有证据必须引用、禁编造」+ 评审加内容维度 + 来源留痕（新增 `web_search_logs` 表 + `Draft.quality`）；作者确认对标素材只作创作参考（守 D-028）、站内事例层用作者 ASR + 作者侧完成稿 | ✅ 已完成（1+2 步） | M228 | web_search、evidence、benchmark、debate、models/web_search、DATABASE |
 | R-226 | 2026-10-15 | 素材卡片标题去话题标签（含全角＃，去完为空回落文件名/简介）+ 卡片点赞下方标签合并三平台话题去重（来源=已存 tags + 标题/简介补提 #话题 + 绑定本地素材标签；忽略大小写；顺序 抖音→小红书→B站；仍显示前 3 + “+N”）；标题去标签显示层统一（素材库+作品页/抽屉）且清洗库内已存标题 | ✅ 已完成 | M227 | library_service、platform_sync、platform/tikhub、works_service、frontend_v2/material-card、R-179/R-094/R-222 |
 | R-225 | 2026-10-15 | 素材库抽屉平台勾选由绑定作品决定：卡片与抽屉的「平台」数据源统一为 `PlatformPost` 成员；已绑定作品的素材抽屉勾选只读 | ✅ 已完成 | M226 | backend/app/api/videos.py、works_service、platform.py、frontend_v2/edit-drawer.tsx、R-036/R-179/R-094 |
 | R-223 | 2026-10-10 | 同步所有博主 `database is locked` 修复：`_ensure_post`/`_upsert_profile_snapshot` 把封面/头像下载移出 SQLite 写事务，避免并发同步时网络 I/O 长期占锁导致 `_charge` 更新 `app_kv` 超时 | ✅ 已完成 | M225（已完成） | platform_sync、platform_assets、R-163/R-151/R-222 |

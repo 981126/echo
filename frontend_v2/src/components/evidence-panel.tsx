@@ -26,6 +26,12 @@ export interface EvidenceQuery {
   raw_count?: number
 }
 
+/** R-227：站内真实素材元数据（作者事例 + 对标参考） */
+export interface StationMeta {
+  author?: { kind?: string; title?: string; platform?: string }[]
+  benchmark?: { title?: string; blogger?: string }[]
+}
+
 const _norm = (v?: string) => (v || '').trim()
 
 /**
@@ -38,6 +44,7 @@ export function EvidencePanel({
   sources = [],
   onlineSources = [],
   queries = [],
+  station,
   className,
 }: {
   outlines?: EvidenceOutline[]
@@ -49,6 +56,8 @@ export function EvidencePanel({
   onlineSources?: EvidenceSource[]
   /** 提交给豆包的搜索词（留痕） */
   queries?: EvidenceQuery[]
+  /** R-227 第 2 步：站内真实素材（作者事例 + 对标参考） */
+  station?: StationMeta
   className?: string
 }) {
   const [collapsed, setCollapsed] = useState(false)
@@ -71,10 +80,16 @@ export function EvidencePanel({
   const usedCount = orderedSources.filter(isUsed).length
   const displayedSources = usedCount > 0 && !showAll ? orderedSources.filter(isUsed) : orderedSources
 
+  const stationAuthor = station?.author || []
+  const stationBench = station?.benchmark || []
+  const stationTotal = stationAuthor.length + stationBench.length
+  const sourceCount = orderedSources.length + stationTotal
+
   const hasOutlines = outlineItems.length > 0
   const hasSources = orderedSources.length > 0
+  const hasEvidenceSources = hasSources || stationTotal > 0
   const hasQueries = queryTexts.length > 0
-  if (!hasOutlines && !hasSources && !hasQueries) return null
+  if (!hasOutlines && !hasEvidenceSources && !hasQueries) return null
 
   const queryLine = hasQueries ? (
     <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
@@ -91,11 +106,11 @@ export function EvidencePanel({
   ) : null
 
   // 只有搜索词（没有论点/来源）：只显示来源区顶部那一行
-  if (!hasOutlines && !hasSources) {
+  if (!hasOutlines && !hasEvidenceSources) {
     return <div className={cn('rounded-lg border border-border p-2.5', className)}>{queryLine}</div>
   }
 
-  const both = hasOutlines && hasSources
+  const both = hasOutlines && hasEvidenceSources
 
   const outlinesBody = (
     <ol className="mt-1.5 list-inside list-decimal space-y-1.5">
@@ -108,8 +123,39 @@ export function EvidencePanel({
     </ol>
   )
 
+  const stationBody =
+    stationTotal > 0 ? (
+      <div className="mt-1.5 space-y-1">
+        {stationAuthor.length > 0 && (
+          <div className="text-[11px] leading-relaxed">
+            <span className="text-muted-foreground/80">你的素材：</span>
+            {stationAuthor.map((s, i) => (
+              <span key={i} className="text-foreground/80">
+                {i > 0 ? ' · ' : ''}
+                {s.title || '（无标题）'}
+                {s.platform ? `（${s.platform}）` : ''}
+              </span>
+            ))}
+          </div>
+        )}
+        {stationBench.length > 0 && (
+          <div className="text-[11px] leading-relaxed">
+            <span className="text-muted-foreground/80">对标参考（他人，非你经历）：</span>
+            {stationBench.map((s, i) => (
+              <span key={i} className="text-foreground/80">
+                {i > 0 ? ' · ' : ''}
+                {s.title || '（无标题）'}
+                {s.blogger ? `（${s.blogger}）` : ''}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    ) : null
+
   const sourcesBody = (
     <div>
+      {stationBody}
       <ul className="mt-1.5 space-y-1.5">
         {displayedSources.map((s, i) => {
           const used = isUsed(s)
@@ -161,7 +207,7 @@ export function EvidencePanel({
             论点 {outlineItems.length}
           </TabsTrigger>
           <TabsTrigger value="sources" className="h-7 px-2 text-[11px]">
-            引用来源 {orderedSources.length}
+            引用来源 {sourceCount}
           </TabsTrigger>
         </TabsList>
         <CollapseButton collapsed={collapsed} onClick={() => setCollapsed((v) => !v)} />
@@ -182,7 +228,7 @@ export function EvidencePanel({
       <div className="flex items-center gap-1.5">
         <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
         <span className="text-[11px] font-medium">
-          {hasOutlines ? `论点 ${outlineItems.length}` : `引用来源 ${orderedSources.length}`}
+          {hasOutlines ? `论点 ${outlineItems.length}` : `引用来源 ${sourceCount}`}
         </span>
         <CollapseButton collapsed={collapsed} onClick={() => setCollapsed((v) => !v)} className="ml-auto" />
       </div>

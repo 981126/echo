@@ -66,6 +66,11 @@ export interface Draft {
     /** R-227：本次联网检索到的全部来源（留痕） */
     online_sources?: EvidenceSource[]
     search_queries?: { query: string; count?: number; time_range?: string }[]
+    /** R-227 第 2 步：站内真实素材（作者事例 + 对标参考） */
+    station?: {
+      author?: { kind?: string; title?: string; platform?: string }[]
+      benchmark?: { title?: string; blogger?: string }[]
+    }
     [k: string]: unknown
   }
   version: number

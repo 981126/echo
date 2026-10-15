@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { EvidencePanel, type EvidenceOutline, type EvidenceSource, type EvidenceQuery } from '@/components/evidence-panel'
+import { EvidencePanel, type EvidenceOutline, type EvidenceSource, type EvidenceQuery, type StationMeta } from '@/components/evidence-panel'
 import { toast } from '@/components/ui/toaster'
 
 export interface RewriteResult {
@@ -24,6 +24,8 @@ export interface RewriteResult {
   online_sources?: EvidenceSource[]
   /** R-227：提交给豆包的搜索词（留痕） */
   search_queries?: EvidenceQuery[]
+  /** R-227 第 2 步：站内真实素材 */
+  station?: StationMeta
 }
 
 export function RewriteDiffDialog({
@@ -94,6 +96,7 @@ export function RewriteDiffDialog({
           sources={result.sources}
           onlineSources={result.online_sources}
           queries={result.search_queries}
+          station={result.station}
         />
 
         <div className="mt-2 flex justify-end gap-2">
