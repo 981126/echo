@@ -1047,6 +1047,7 @@ export function DraftEditDrawer({
                   onlineSources={evi?.online_sources}
                   queries={evi?.search_queries}
                   station={evi?.station}
+                  outlineDrift={!!evi?.outline_drift}
                 />
                 <div className="relative">
                   <ScrollArea className="max-h-[52vh]" viewportRef={attachViewport}>

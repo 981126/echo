@@ -26,6 +26,8 @@ export interface RewriteResult {
   search_queries?: EvidenceQuery[]
   /** R-227 第 2 步：站内真实素材 */
   station?: StationMeta
+  /** R-230：论点/引用为讨论前初稿口径，讨论后正文可能已调整 */
+  outline_drift?: boolean
 }
 
 export function RewriteDiffDialog({
@@ -97,6 +99,7 @@ export function RewriteDiffDialog({
           onlineSources={result.online_sources}
           queries={result.search_queries}
           station={result.station}
+          outlineDrift={!!result.outline_drift}
         />
 
         <div className="mt-2 flex justify-end gap-2">

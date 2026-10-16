@@ -50,3 +50,26 @@ describe('EvidencePanel（R-227）', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+describe('EvidencePanel（R-230 论点漂移提示）', () => {
+  it('outlineDrift 时论点区与来源区各提示「以正文为准」口径', async () => {
+    render(
+      <EvidencePanel
+        outlines={outlines}
+        sources={used}
+        onlineSources={onlineSources}
+        outlineDrift
+      />,
+    )
+    // 论点 tab 默认激活：论点区提示可见
+    expect(screen.getByText(/论点为讨论前初稿口径/)).toBeInTheDocument()
+    // 来源区提示要先切到来源 tab
+    await userEvent.click(screen.getByRole('tab', { name: /引用来源 2/ }))
+    expect(screen.getByText(/引用为讨论前初稿口径/)).toBeInTheDocument()
+  })
+
+  it('outlineDrift 为 false/缺省时无提示', () => {
+    render(<EvidencePanel outlines={outlines} sources={used} onlineSources={onlineSources} />)
+    expect(screen.queryByText(/论点为讨论前初稿口径/)).not.toBeInTheDocument()
+  })
+})

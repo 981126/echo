@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from sqlalchemy.orm import Session
 
@@ -578,6 +579,8 @@ def run_debate(
             "online_sources": ev.get("sources") or [],
             "search_queries": ev.get("queries") or [],
             "station": _station_meta(station),
+            # R-230：outlines/sources 是初稿口径；讨论后正文若已偏离论点，标记供前端提示
+            "outline_drift": detect_outline_drift(outlines, draft.script),
         },
         ensure_ascii=False,
     )
@@ -659,6 +662,41 @@ def _parse_outlines(data: dict) -> list[dict]:
         if legacy:
             out.append({"claim": legacy, "support": ""})
     return out
+
+
+# R-230：claim 关键词的纯文本提取——连续中英数串整串，长串再滑 4 字窗；
+# 用于检测「初稿论点是否仍出现在终稿正文」，不额外调 LLM（省调用也省编造风险）。
+_CLAIM_TOKEN = re.compile(r"[0-9A-Za-z一-鿿]+")
+
+
+def _claim_grams(claim: str) -> list[str]:
+    grams: list[str] = []
+    for tok in _CLAIM_TOKEN.findall(claim or ""):
+        if len(tok) <= 4:
+            grams.append(tok)
+        else:
+            grams.extend(tok[i : i + 4] for i in range(len(tok) - 3))
+    return [g for g in grams if len(g) >= 2]
+
+
+def detect_outline_drift(outlines: list[dict], script: str) -> bool:
+    """初稿论点 vs 终稿正文的漂移检测：任一 claim 的关键词在终稿中完全消失即 drift。
+
+    quality 里落库的 outlines/sources 取的是**初稿**的，N 轮讨论后正文可能整体改写
+    （draft 128：初稿谈自由职业、终稿谈求职）——标记漂移，前端提示「以正文为准」。
+    """
+    claims = [
+        str((o or {}).get("claim") or "").strip()
+        for o in (outlines or [])
+        if isinstance(o, dict) and str((o or {}).get("claim") or "").strip()
+    ]
+    text = (script or "").strip()
+    if not claims or not text:
+        return False
+    for claim in claims:
+        if not any(g in text for g in _claim_grams(claim)):
+            return True
+    return False
 
 
 def run_rewrite_debate(db: Session, payload: dict) -> dict:
@@ -921,6 +959,8 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             "online_sources": ev.get("sources") or [],
             "search_queries": ev.get("queries") or [],
             "station": _station_meta(station),
+            # R-230：outlines/sources 是洗稿初稿口径；讨论后正文若已偏离论点，标记供前端提示
+            "outline_drift": detect_outline_drift(initial_outlines, latest),
         },
         ensure_ascii=False,
     )

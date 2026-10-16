@@ -3,7 +3,7 @@
 - **日期**: 2026-10-16
 - **提出渠道**: 对话（生成质量诊断后的修复项 3/4）
 - **原文摘要**: ①作者处理不满意稿的习惯是**删除**，而反馈回流只把 `status='archived'` 当负例——deleted 的稿不进"避免这种腔调"学习，负例库实际是空的；②`Draft.quality` 里的论点（outlines）/引用来源取的是**初稿**的，双模型讨论 N 轮后正文已完全漂移（draft 128：初稿谈自由职业、终稿谈求职），前端"依据/引用来源"卡片展示与正文对不上的旧论点。
-- **状态**: 🔲 已登记，待实施
+- **状态**: ✅ 已完成（`feat(R-230)`：feedback_context 负例扩为 archived+deleted（纯手写排除沿用，`pure_manual_map` 改为整批一次查询）；`detect_outline_drift` 纯文本检测（claim 4 字滑窗命中终稿）落 quality.outline_drift（普通+洗稿两链路）；EvidencePanel 加 outlineDrift 提示（论点区/来源区各一行），edit-drawer 与洗稿弹窗接入；`test_r230_feedback_outline_alignment.py` 8 用例 + panel vitest 2 用例）
 - **排期**: M231
 - **关联**: `backend/app/services/prompt_service.py`、`debate.py`、前端草稿抽屉/洗稿弹窗依据展示、R-129/R-209/R-210/R-211/R-227
 

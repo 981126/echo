@@ -61,6 +61,8 @@ export interface Draft {
     outline?: string
     /** R-227：本篇多条论点（每条带支撑） */
     outlines?: EvidenceOutline[]
+    /** R-230：论点/引用为讨论前初稿口径，讨论后正文已偏离（依据面板提示「以正文为准」） */
+    outline_drift?: boolean
     /** R-227：模型实际引用的联网来源 */
     sources?: EvidenceSource[]
     /** R-227：本次联网检索到的全部来源（留痕） */

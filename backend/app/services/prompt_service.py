@@ -265,7 +265,11 @@ def feedback_context(db: Session) -> str:
         return q.order_by(Draft.updated_at.desc()).limit(limit).all()
 
     highs = _drafts_by_status("done")
-    lows = [d for d in _drafts_by_status("archived", limit=20) if not pure_manual_map(db, [d]).get(d.id, False)][:5]
+    # R-230：负例 = 不采用（archived）+ **删除（deleted）**的 AI 稿——作者真实行为习惯是
+    # 直接删稿，原 archived 口径下负反馈几乎为零；纯手写稿仍排除（R-210：放弃手写≠写得差）。
+    lows_candidates = _drafts_by_status("archived", limit=20) + _drafts_by_status("deleted", limit=20)
+    manual_map = pure_manual_map(db, lows_candidates)
+    lows = [d for d in lows_candidates if not manual_map.get(d.id, False)][:5]
 
     # 每稿最新一条非空 comment / insight（两次小查询，避免逐稿 N+1）
     ids = [d.id for d in highs + lows]

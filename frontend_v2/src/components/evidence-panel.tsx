@@ -37,6 +37,8 @@ const _norm = (v?: string) => (v || '').trim()
 /**
  * R-227：生成/洗稿「依据」面板——顶部显示提交给豆包的搜索词；可切换查看「论点」与
  * 「引用来源」（默认只显示已引用，可展开全部检索）；右上角可收起。
+ * R-230：`outlineDrift` 为 true 时（outlines/sources 是讨论前初稿口径，讨论后正文已
+ * 偏离论点），论点/来源区各加一行「以正文为准」提示。
  */
 export function EvidencePanel({
   outlines = [],
@@ -45,6 +47,7 @@ export function EvidencePanel({
   onlineSources = [],
   queries = [],
   station,
+  outlineDrift = false,
   className,
 }: {
   outlines?: EvidenceOutline[]
@@ -58,6 +61,8 @@ export function EvidencePanel({
   queries?: EvidenceQuery[]
   /** R-227 第 2 步：站内真实素材（作者事例 + 对标参考） */
   station?: StationMeta
+  /** R-230：论点/引用为讨论前初稿口径，讨论后正文可能已调整 */
+  outlineDrift?: boolean
   className?: string
 }) {
   const [collapsed, setCollapsed] = useState(false)
@@ -113,14 +118,21 @@ export function EvidencePanel({
   const both = hasOutlines && hasEvidenceSources
 
   const outlinesBody = (
-    <ol className="mt-1.5 list-inside list-decimal space-y-1.5">
-      {outlineItems.map((o, i) => (
-        <li key={i} className="text-[11px] leading-relaxed">
-          <span className="font-medium text-foreground">{o.claim}</span>
-          {_norm(o.support) && <span className="text-muted-foreground">：{o.support}</span>}
-        </li>
-      ))}
-    </ol>
+    <div className="mt-1.5">
+      {outlineDrift && (
+        <p className="mb-1.5 text-[11px] text-warning">
+          论点为讨论前初稿口径，讨论后已调整，以正文为准
+        </p>
+      )}
+      <ol className="list-inside list-decimal space-y-1.5">
+        {outlineItems.map((o, i) => (
+          <li key={i} className="text-[11px] leading-relaxed">
+            <span className="font-medium text-foreground">{o.claim}</span>
+            {_norm(o.support) && <span className="text-muted-foreground">：{o.support}</span>}
+          </li>
+        ))}
+      </ol>
+    </div>
   )
 
   const stationBody =
@@ -185,6 +197,9 @@ export function EvidencePanel({
       </ul>
       {hasSources && usedCount === 0 && (
         <p className="mt-1.5 text-[11px] text-muted-foreground">本次联网检索到的内容未直接引用。</p>
+      )}
+      {outlineDrift && hasSources && (
+        <p className="mt-1.5 text-[11px] text-warning">引用为讨论前初稿口径，讨论后正文可能已调整</p>
       )}
       {hasSources && usedCount > 0 && (
         <button
