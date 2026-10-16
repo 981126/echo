@@ -3,7 +3,7 @@
 - **日期**: 2026-10-16
 - **提出渠道**: 对话（生成质量诊断后的修复项 2/4）
 - **原文摘要**: 当前生成方 = deepseek-flash（廉价快模型）、评审方 = kimi-k2.6（强模型）——强模型只挑刺、弱模型在写字，成稿质量上限被生成方锁死；更糟的是提示词自动优化（R-208 到量自动跑）也是 deepseek-flash 自己做的，v3~v10 候选全是它调的（v10 把"严禁编造/每条论点配事例/证据引用"等硬要求全丢了）。
-- **状态**: 🔲 已登记，待实施
+- **状态**: ✅ 已完成（`feat(R-229)`：`llm_router.primary_llm` 加 `primary` 参数（主用非模型1 时自动换另一槽位兜底）；`prompt_service._optimize_llm` 主用生成方槽位；主库 `app_kv` 已交付对调 gen_role=model2 / referee_role=model1；`test_r229_strong_model_generation.py` 5 用例）
 - **排期**: M230
 - **关联**: `backend/app/services/model_settings.py`、`llm_router.py`、`prompt_service.py`、R-021/R-129/R-139/R-142/R-208
 

@@ -345,9 +345,22 @@ def primary_llm(
     *,
     notifier: Callable[[str, str, str], None] | None = None,
     target: str = "/prompts",
+    primary: str = "model1",
 ) -> RoutedLLM:
-    """非脚本生成的 AI 功能统一入口：模型1 主用 → 模型2 降级。"""
-    return RoutedLLM(feature, _snapshot_any(db), notifier=notifier, target=target)
+    """非脚本生成的 AI 功能统一入口：模型1 主用 → 模型2 降级。
+
+    R-229：`primary` 可指定主用槽位（如提示词优化跟随「生成方」槽位——生成方
+    配置的通常是最强模型）；主用非模型1 时自动以另一槽位兜底。
+    """
+    fallback = "model2" if primary == "model1" else "model1"
+    return RoutedLLM(
+        feature,
+        _snapshot_any(db),
+        primary=primary,
+        fallback=fallback,
+        notifier=notifier,
+        target=target,
+    )
 
 
 def llm_from_snapshot(
