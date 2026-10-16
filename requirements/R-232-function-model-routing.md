@@ -3,7 +3,7 @@
 - **日期**: 2026-10-16
 - **提出渠道**: 对话
 - **原文摘要**: 在 AI 设置里分不清楚「AI 对话」「生成脚本」「视频预打标」「人设」等等各功能用的什么模型，需要在旁边放一个下拉框让自己可以选模型。
-- **状态**: 🔲 已登记，待作者说「继续」后开工
+- **状态**: ✅ 已完成（`feat(R-232)`：`model_settings.FEATURE_GROUPS/feature_route/save_feature_routes`（app_kv `feature_route_<组>`，默认全 model1、prompt_opt 默认 gen=跟随生成方）；`llm_router.primary_llm` 缺省按功能路由解析；`persona.llm_for` 接入（4 引擎同组）；`prompt_service._optimize_llm` 改走路由（R-229 语义保持）；GET/PUT /api/settings/models 带 feature_routes（选项标签内嵌槽位实际模型名）；设置页「模型槽位」卡内新增「功能路由」区 10 组下拉；`test_r232_function_model_routing.py` 10 用例；API.md 同步）
 - **排期**: M233
 - **关联**: `backend/app/services/llm_router.py`、`model_settings.py`、`api/settings.py`、前端 AI 设置页、R-023/R-138/R-139/R-178/R-229
 

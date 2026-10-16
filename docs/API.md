@@ -1900,7 +1900,7 @@ Get Models
 
 AI 设置 → 模型设置：当前模型1/2（厂家/模型/Key）、生成方/评审方、ASR 服务商与模型、讨论轮次、每日篇数（R-138）。
 
-返回还包含：`vendors`（厂家目录：可选模型 / 默认模型 / 是否已有 .env Key）、`asr`（`mode/model/options/siliconflow_models/tencent_models`，R-200 增腾讯引擎列表 `16k_zh_en_2.0|16k_zh_en|16k_zh`）、`warnings`（含双模型兼容性自检告警）、`selfcheck`（最近一次自检结果，R-139）、`budgets`（各功能推理预算，R-143：每项含 `label/desc/default/requested/value/floor/ceiling/custom`，`value` 是实际生效值）、`migrated_from_legacy`。
+返回还包含：`vendors`（厂家目录：可选模型 / 默认模型 / 是否已有 .env Key）、`asr`（`mode/model/options/siliconflow_models/tencent_models`，R-200 增腾讯引擎列表 `16k_zh_en_2.0|16k_zh_en|16k_zh`）、`warnings`（含双模型兼容性自检告警）、`selfcheck`（最近一次自检结果，R-139）、`budgets`（各功能推理预算，R-143：每项含 `label/desc/default/requested/value/floor/ceiling/custom`，`value` 是实际生效值）、`feature_routes`（R-232 功能级模型路由：组键见 `model_settings.FEATURE_GROUPS`——`chat/persona/video_tags/correct/diff/prompt_opt/benchmark/feedback/draft_meta/misc`，每组含 `label/value/resolved/options`；`value` 为原始值 `model1|model2`（`prompt_opt` 组可 `gen`=跟随生成方），`resolved` 是展开后的实际槽位模型名，`options` 选项标签内嵌各槽位当前模型名）、`migrated_from_legacy`。
 
 **参数**
 
@@ -1913,6 +1913,7 @@ Put Models
 
 保存模型设置（厂家非法 / 缺少 Key / 生成方评审方非法 / ASR 配置非法 → 400 且带可读原因）；保存即生效、无需重启（R-138）。
 ASR：`siliconflow` 需模型非空且 `.env` 有 `ECHO_SILICONFLOW_API_KEY`；`aliyun` 需 `.env` 有 `ECHO_ALIYUN_ASR_ACCESS_KEY_ID/APP_KEY`；`tencent`（R-200）需模型命中 `16k_zh_en_2.0|16k_zh_en|16k_zh` 且 `.env` 有 `ECHO_TENCENT_ASR_SECRET_ID/SECRET_KEY`。
+R-232：`feature_routes`（可选，`{组: model1|model2}`，`prompt_opt` 组可 `gen`）保存各功能主用槽位；组名非法 / 值非法 → 400。选中槽位调用失败时自动兜底另一槽位（RoutedLLM 既有降级 + 通知）。
 保存后会异步入队一次「双模型兼容性自检」（线程任务 kind=`model_selfcheck`），结果由 `GET /api/settings/models` 的 `selfcheck` 带回（R-139）。
 
 **参数**

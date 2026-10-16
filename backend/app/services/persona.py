@@ -382,10 +382,16 @@ class PersonaService:
         return self._snapshot
 
     def llm_for(self, feature: str) -> Any:
-        """按功能取模型1 主用 + 模型2 降级的客户端（注入的 llm 优先）。"""
+        """按功能取主用槽位 + 另一槽位兜底的客户端（注入的 llm 优先）。
+
+        R-232：主用槽位走功能路由（app_kv 可选模型1/模型2；人设 4 引擎同属
+        persona 组，一处下拉全部生效），默认 model1。
+        """
         if self._injected is not None:
             return self._injected
-        client = llm_router.RoutedLLM(feature, self._route())
+        primary = llm_router.model_settings.feature_route(self._db, feature)
+        fallback = "model2" if primary == "model1" else "model1"
+        client = llm_router.RoutedLLM(feature, self._route(), primary=primary, fallback=fallback)
         self._active = client
         return client
 

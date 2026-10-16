@@ -245,6 +245,63 @@ def generation_roles(db: Session) -> tuple[str, str]:
     return config["gen_role"], config["referee_role"]
 
 
+# ---------- R-232：功能级模型路由（AI 设置里每个非生成功能选主用槽位） ----------
+
+# 组 = 界面展示粒度：人设 4 引擎合一、提示词优化+金样本评测合一、灵感与其他合一。
+# feature 名字与 llm_router.primary_llm(feature) / persona.llm_for(feature) 的调用一致。
+FEATURE_GROUPS: dict[str, dict] = {
+    "chat": {"label": "AI 对话", "features": ("chat",)},
+    "persona": {
+        "label": "人设引擎",
+        "features": ("persona_init", "persona_merge", "persona_updates", "persona_compare"),
+    },
+    "video_tags": {"label": "视频预打标", "features": ("video_tags",)},
+    "correct": {"label": "转写校对", "features": ("correct",)},
+    "diff": {"label": "差异分析", "features": ("diff",)},
+    "prompt_opt": {"label": "提示词优化与评测", "features": ("prompt_optimize", "prompt_eval")},
+    "benchmark": {"label": "对标分析", "features": ("benchmark",)},
+    "feedback": {"label": "反馈学习", "features": ("feedback_analysis",)},
+    "draft_meta": {"label": "标题封面标签", "features": ("draft_meta",)},
+    "misc": {"label": "灵感与其他", "features": ("ideas", "misc")},
+}
+_FEATURE_GROUP: dict[str, str] = {f: g for g, meta in FEATURE_GROUPS.items() for f in meta["features"]}
+# 默认值：全 model1（= R-232 前的现状）；提示词优化组默认跟随生成方（R-229 语义）。
+FEATURE_ROUTE_DEFAULTS: dict[str, str] = {g: ("gen" if g == "prompt_opt" else "model1") for g in FEATURE_GROUPS}
+
+
+def feature_route(db: Session | None, feature: str) -> str:
+    """功能主用槽位（app_kv `feature_route_<组>`；缺省按 FEATURE_ROUTE_DEFAULTS）。
+
+    prompt_opt 组特殊值 `gen` = 跟随生成方（R-229；生成方对调后优化自动跟着换）。
+    返回值恒为 model1/model2——`gen` 在解析时展开，调用方拿到的永远是具体槽位。
+    """
+    group = _FEATURE_GROUP.get(feature or "", "misc")
+    raw = _kv_get(db, f"feature_route_{group}") if db is not None else ""
+    if not raw:
+        raw = FEATURE_ROUTE_DEFAULTS[group]
+    if raw == "gen":
+        if db is not None and group == "prompt_opt":
+            gen_role, _critic = generation_roles(db)
+            return gen_role
+        return "model1"
+    return raw if raw in ROLES else "model1"
+
+
+def save_feature_routes(db: Session, routes: dict[str, str]) -> None:
+    """保存功能路由；值限 model1/model2（prompt_opt 组额外允许 gen），非法抛 ModelConfigError。"""
+    for group, val in routes.items():
+        if group not in FEATURE_GROUPS:
+            raise ModelConfigError(f"未知的功能路由：{group}")
+        allowed = {"model1", "model2"} | ({"gen"} if group == "prompt_opt" else set())
+        val = (val or "").strip()
+        if val not in allowed:
+            raise ModelConfigError(
+                f"「{FEATURE_GROUPS[group]['label']}」的路由必须是 {' / '.join(sorted(allowed))}，收到：{val!r}"
+            )
+        _kv_set(db, f"feature_route_{group}", val)
+    db.commit()
+
+
 def asr_config(db: Session) -> dict:
     """ASR 运行时配置（Kv 优先，回退 .env）→ 保证界面保存后立即生效。"""
     config = get_model_config(db)
@@ -284,6 +341,10 @@ __all__ = [
     "save_model_config",
     "resolve_slots",
     "generation_roles",
+    "FEATURE_GROUPS",
+    "FEATURE_ROUTE_DEFAULTS",
+    "feature_route",
+    "save_feature_routes",
     "asr_config",
     "default_asr_model",
     "topics_count",

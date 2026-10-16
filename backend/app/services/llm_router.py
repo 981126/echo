@@ -345,13 +345,16 @@ def primary_llm(
     *,
     notifier: Callable[[str, str, str], None] | None = None,
     target: str = "/prompts",
-    primary: str = "model1",
+    primary: str | None = None,
 ) -> RoutedLLM:
-    """非脚本生成的 AI 功能统一入口：模型1 主用 → 模型2 降级。
+    """非脚本生成的 AI 功能统一入口：主用槽位 → 另一槽位兜底。
 
-    R-229：`primary` 可指定主用槽位（如提示词优化跟随「生成方」槽位——生成方
-    配置的通常是最强模型）；主用非模型1 时自动以另一槽位兜底。
+    R-229：`primary` 可显式指定主用槽位（如生成方）。
+    R-232：`primary` 缺省时按**功能路由**解析（AI 设置里每功能选模型1/模型2，
+    存 app_kv，默认 model1；prompt_opt 组默认跟随生成方）。
     """
+    if primary is None:
+        primary = model_settings.feature_route(db, feature)
     fallback = "model2" if primary == "model1" else "model1"
     return RoutedLLM(
         feature,

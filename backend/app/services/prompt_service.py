@@ -408,13 +408,11 @@ def learning_material(db: Session, max_items: int = 16) -> str:
 
 
 def _optimize_llm(db: Session):
-    """优化所用模型（R-139）+ R-229：主用**生成方槽位**（生成方配置的通常是最强模型，
-    提示词优化交给弱模型会把候选越调越歪——v3~v10 全是 deepseek-flash 自调的）；
-    生成方失败自动降级另一槽位。"""
-    from . import llm_router, model_settings
+    """优化所用模型（R-139/R-232）：主用槽位走「提示词优化与评测」功能路由——
+    默认「跟随生成方」（R-229），可在 AI 设置改选模型1/模型2；失败自动兜底另一槽位。"""
+    from . import llm_router
 
-    gen_slot, _critic = model_settings.generation_roles(db)
-    client = llm_router.primary_llm(db, "prompt_optimize", primary=gen_slot)
+    client = llm_router.primary_llm(db, "prompt_optimize")
     return client, client.used_model
 
 

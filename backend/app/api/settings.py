@@ -49,6 +49,9 @@ class ModelsIn(BaseModel):
     # 与「未知键 / 越界」统一返回 400 + 中文可读原因（而不是 FastAPI 的 422 英文结构）。
     budgets: dict[str, object] | None = None
     reset_budgets: bool = False
+    # R-232：功能级模型路由（组键见 model_settings.FEATURE_GROUPS；值 model1/model2，
+    # prompt_opt 组可 gen=跟随生成方）；缺省不传则不动现有路由。
+    feature_routes: dict[str, str] | None = None
 
 
 def _effective_key(config_slot: dict, vendor: str) -> tuple[bool, bool]:
@@ -56,6 +59,33 @@ def _effective_key(config_slot: dict, vendor: str) -> tuple[bool, bool]:
     if config_slot.get("key"):
         return True, False
     return bool(model_settings.env_key_for(vendor)), True
+
+
+def _feature_routes_payload(db: Session, slots: dict[str, dict]) -> dict:
+    """R-232：各功能组的当前路由（原始值 + 解析后的实际模型名 + 可选项）。
+
+    选项标签内嵌槽位当前模型名（`模型1（DeepSeek · deepseek-flash）`），下拉展开
+    即可看到每个槽位实际是什么模型；`resolved` 供行内静态展示（gen 展开成具体槽位）。
+    """
+    out: dict[str, dict] = {}
+    for group, meta in model_settings.FEATURE_GROUPS.items():
+        row = db.get(Kv, f"feature_route_{group}")
+        raw = ((row.value or "").strip() if row is not None else "")
+        value = raw or model_settings.FEATURE_ROUTE_DEFAULTS[group]
+        options = [
+            {"v": slot, "label": f"{slot.replace('model', '模型')}（{slots[slot]['vendor_label']} · {slots[slot]['model']}）"}
+            for slot in ("model1", "model2")
+        ]
+        if group == "prompt_opt":
+            options.insert(0, {"v": "gen", "label": "跟随生成方"})
+        resolved_slot = model_settings.feature_route(db, meta["features"][0])
+        out[group] = {
+            "label": meta["label"],
+            "value": value,
+            "resolved": f"{resolved_slot.replace('model', '模型')}（{slots[resolved_slot]['vendor_label']} · {slots[resolved_slot]['model']}）",
+            "options": options,
+        }
+    return out
 
 
 def _models_payload(db: Session) -> dict:
@@ -102,6 +132,7 @@ def _models_payload(db: Session) -> dict:
         ],
         "selfcheck": model_health.last_result(db),
         "budgets": budget_settings.budget_map(db),  # R-143：各功能推理预算
+        "feature_routes": _feature_routes_payload(db, model_settings.resolve_slots(db)),  # R-232
         "migrated_from_legacy": bool(config.get("migrated_from_legacy")),
     }
 
@@ -139,6 +170,12 @@ def put_models(payload: ModelsIn, db: Session = Depends(get_db)):
             budget_settings.save_budgets(db, payload.budgets)
     except budget_settings.BudgetConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # R-232：功能级模型路由（非法组/非法值 400）
+    if payload.feature_routes:
+        try:
+            model_settings.save_feature_routes(db, payload.feature_routes)
+        except model_settings.ModelConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     # R-139：保存后异步跑一次双模型兼容性自检（不阻塞界面；结果回到 GET /models 的 selfcheck）
     try:
         from ..tasks import start_task

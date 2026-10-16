@@ -81,6 +81,16 @@ interface ModelsPayload {
   warnings: string[]
   selfcheck?: SelfCheck | null
   budgets: Record<string, BudgetItem>
+  /** R-232：功能级模型路由（组键见后端 FEATURE_GROUPS） */
+  feature_routes: Record<string, FeatureRouteInfo>
+}
+
+/** R-232：一组功能的主用槽位路由（value=原始值 gen/model1/model2，resolved=展开后的实际模型） */
+interface FeatureRouteInfo {
+  label: string
+  value: string
+  resolved: string
+  options: { v: string; label: string }[]
 }
 
 interface PromptVersion {
@@ -140,6 +150,8 @@ export default function PromptsPage() {
   const [topicsCount, setTopicsCount] = useState(3)
   const [debateRounds, setDebateRounds] = useState(5)
   const [budgetEdits, setBudgetEdits] = useState<Record<string, number>>({})
+  /** R-232：功能路由表单态（组 → 选择的槽位值） */
+  const [featureRoutes, setFeatureRoutes] = useState<Record<string, string>>({})
   const [editing, setEditing] = useState<Record<string, string>>({})
 
   const modelsQ = useQuery({ queryKey: ['settings', 'models'], queryFn: () => apiJson<ModelsPayload>('/api/settings/models') })
@@ -181,6 +193,9 @@ export default function PromptsPage() {
     const edits: Record<string, number> = {}
     for (const [k, b] of Object.entries(models.budgets || {})) edits[k] = b.value
     setBudgetEdits(edits)
+    const routes: Record<string, string> = {}
+    for (const [g, fr] of Object.entries(models.feature_routes || {})) routes[g] = fr.value
+    setFeatureRoutes(routes)
   }, [models])
 
   useEffect(() => {
@@ -221,7 +236,8 @@ export default function PromptsPage() {
         asr_model: asrModel,
         topics_count: Number(topicsCount),
         debate_rounds: Number(debateRounds),
-        budgets: budgetEdits
+        budgets: budgetEdits,
+        feature_routes: featureRoutes
       }
       await apiJson('/api/settings/models', { method: 'PUT', body: JSON.stringify(body) })
       toast.success('已保存并生效，双模型兼容性自检已入队')
@@ -393,6 +409,31 @@ export default function PromptsPage() {
                         </SelectContent>
                       </Select>
                       <span className="text-xs text-muted-foreground">两方可以选同一个模型</span>
+                    </div>
+
+                    {/* R-232：功能路由——各功能主用槽位；选项内嵌各槽位当前实际模型名 */}
+                    <div className="rounded-lg border border-border p-3">
+                      <p className="mb-2 text-xs text-muted-foreground">
+                        功能路由——各功能主用哪个槽位（选中槽位失败时自动兜底另一槽位并通知）
+                      </p>
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                        {Object.entries(models.feature_routes || {}).map(([group, fr]) => (
+                          <div key={group} className="flex items-center gap-2">
+                            <span className="w-28 shrink-0 text-xs text-muted-foreground">{fr.label}</span>
+                            <Select
+                              value={featureRoutes[group] ?? fr.value}
+                              onValueChange={(v) => setFeatureRoutes((s) => ({ ...s, [group]: v }))}
+                            >
+                              <SelectTrigger className="h-8 w-64 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {fr.options.map((o) => (
+                                  <SelectItem key={o.v} value={o.v}>{o.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
