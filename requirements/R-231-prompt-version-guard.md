@@ -3,7 +3,7 @@
 - **日期**: 2026-10-16
 - **提出渠道**: 对话（生成质量诊断后的修复项 4/4）
 - **原文摘要**: `ai_prompts` 里 generation 提示词 10 个版本（v1~v10）**全部 archived、当前无 enabled 版**——实际跑的是代码默认（`prompt_version=0`）；今天 00:37~00:38 作者在提示词页操作过（v9 手动编辑 → v10 候选，随后都被归档），状态是被操作/自动链路搅乱还是有意清空无法区分。需要：启动兜底（无启用版时自动启用代码默认）+ 把当前生成提示词落到一个明确状态。
-- **状态**: 🔲 已登记，待实施
+- **状态**: ✅ 已完成（`feat(R-231)`：`prompt_service.ensure_enabled_fallback`（无 enabled 的 key 另存启用代码默认，note 留痕，幂等）挂入 `db.py` ensure 链；主库 generation 的兜底在下次后端启动时生效；`test_r231_prompt_version_guard.py` 4 用例）
 - **排期**: M232
 - **关联**: `backend/app/services/prompt_service.py`、`db.py`（ensure 链）、R-021/R-129/R-183/R-208
 

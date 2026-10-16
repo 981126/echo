@@ -124,6 +124,22 @@ def ensure_generation_steering_prompt(db: Session) -> None:
         save_new_version(db, "generation", default_content("generation"), note="R-183 生成提示词退回方向盘")
 
 
+def ensure_enabled_fallback(db: Session) -> None:
+    """R-231：任一提示词 key 无 enabled 版时，兜底另存启用**代码默认**（留痕可回溯）。
+
+    背景：generation v1~v10 曾被操作/自动链路搅成全 archived，运行时静默回退代码默认、
+    界面却显示「无启用版本」，作者无法判断当前生效的是哪一版。幂等：已有 enabled 不动。
+    """
+    for key in PROMPT_META:
+        row = (
+            db.query(AiPrompt)
+            .filter(AiPrompt.key == key, AiPrompt.status == "enabled")
+            .first()
+        )
+        if row is None:
+            save_new_version(db, key, default_content(key), note="无启用版本，兜底启用代码默认")
+
+
 def save_new_version(db: Session, key: str, content: str, note: str = "") -> AiPrompt:
     """手动编辑保存 = 另存为新版本并启用（旧 enabled 转 archived）。"""
     content = (content or "").strip()
