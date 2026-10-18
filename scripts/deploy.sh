@@ -250,7 +250,12 @@ fi
 step "② 拉取最新代码"
 OLD_HEAD=""
 NEW_HEAD=""
-if [ "$IS_GIT" = 1 ] && [ "$DO_PULL" = 1 ]; then
+if [ "$IS_GIT" = 1 ] && [ "$DO_PULL" = 1 ] && [ "$DRY_RUN" = 1 ]; then
+  OLD_HEAD="$(git_run rev-parse HEAD)"
+  NEW_HEAD="$OLD_HEAD"
+  info "[dry-run] 将执行 git fetch + merge --ff-only origin/$BRANCH"
+  info "当前版本：$(git_run log -1 --pretty='%h %s')"
+elif [ "$IS_GIT" = 1 ] && [ "$DO_PULL" = 1 ]; then
   OLD_HEAD="$(git_run rev-parse HEAD)"
   git_run fetch --prune origin || die "git fetch 失败：检查网络/仓库权限（也可 --no-pull 用本地代码部署）"
   git_run rev-parse --verify --quiet "origin/$BRANCH" >/dev/null || die "远程没有分支 origin/$BRANCH"

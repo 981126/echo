@@ -8,7 +8,7 @@
 - **首次/失败策略**：首次没有 `echo.db` 自动跳过备份；构建失败保留旧容器；健康检查失败打印日志并非零退出，上一版镜像保留为 `echo:previous`（不自动回滚数据库，迁移只向前）。
 - **`scripts/update.sh`**：降为兼容入口，`exec` 到 `deploy.sh`；`SKIP_PULL=1` 继续有效。解包/非 git 部署用 `--no-pull`。
 - **`docker-compose.yml`**：加 `image: echo:local` 稳定 tag；容器内固定 `ECHO_DATA_DIR=/app/data`、`ECHO_DB_PATH=/app/data/echo.db`（避免搬 `.env` 时把 macOS 路径带进来）；宿主卷改 `${ECHO_HOST_DATA_DIR:-./data}:/app/data`。
-- **修正**：`.env` 默认的 `./data` / `./data/echo.db` 在容器 `WORKDIR=/app` 下等价 `/app/data`，不再误报路径告警；只有真正像宿主机路径（如 `/Users/...`）才提示改用 `ECHO_HOST_DATA_DIR`。
+- **修正**：`.env` 默认的 `./data` / `./data/echo.db` 在容器 `WORKDIR=/app` 下等价 `/app/data`，不再误报路径告警；只有真正像宿主机路径（如 `/Users/...`）才提示改用 `ECHO_HOST_DATA_DIR`。`--dry-run` 现在只预检/打印，不会 fetch/merge、构建或重启。
 - **文档**：`QUICKSTART.md` NAS 段改为一键部署 + 参数/回滚说明；`.env.example` 增加 `ECHO_HOST_DATA_DIR`；PRD/里程碑同步 M235。
 - **验证**：`bash -n` + `--help` + 临时仓库/假 Docker 干跑（首次、脏工作区、缺 `.env`、构建失败、unhealthy、非 git 解包）；`scripts/verify.sh` 全绿；**NAS 实机首次构建/启动待作者执行**（本机 Docker daemon 未运行）。
 
