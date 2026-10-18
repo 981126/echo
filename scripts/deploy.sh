@@ -208,15 +208,15 @@ fi
 
 DATA_DIR_ENV="$(env_get ECHO_DATA_DIR)"
 DB_PATH_ENV="$(env_get ECHO_DB_PATH)"
-if [ -n "$DATA_DIR_ENV" ] && [ "$DATA_DIR_ENV" != "/app/data" ]; then
-  warn ".env 里 ECHO_DATA_DIR=${DATA_DIR_ENV}；compose 会强制为 /app/data，宿主机目录请用 ECHO_HOST_DATA_DIR"
-fi
-if [ -n "$DB_PATH_ENV" ]; then
-  case "$DB_PATH_ENV" in
-    /app/data/*) ;;
-    *) warn ".env 里 ECHO_DB_PATH=${DB_PATH_ENV}；compose 会强制为 /app/data/echo.db" ;;
-  esac
-fi
+# 容器 WORKDIR=/app，所以 ./data 也等价于 /app/data；只对真正像宿主机路径的值告警
+case "$DATA_DIR_ENV" in
+  ""|"/app/data"|"/app/data/"|"./data"|"./data/"|"data"|"data/") ;;
+  *) warn ".env 里 ECHO_DATA_DIR=${DATA_DIR_ENV}；compose 会强制为 /app/data，宿主机目录请用 ECHO_HOST_DATA_DIR" ;;
+esac
+case "$DB_PATH_ENV" in
+  ""|"/app/data/"*|"./data/"*|"data/"*) ;;
+  *) warn ".env 里 ECHO_DB_PATH=${DB_PATH_ENV}；compose 会强制为 /app/data/echo.db" ;;
+esac
 TOKEN="$(env_get ECHO_ACCESS_TOKEN)"
 if [ -z "$TOKEN" ] || [ "$TOKEN" = "change-me" ]; then
   warn "ECHO_ACCESS_TOKEN 仍是空值/change-me，强烈建议改成强口令"
