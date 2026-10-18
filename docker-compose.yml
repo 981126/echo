@@ -1,7 +1,11 @@
 # echo — NAS 部署（M3 完善）
+# name 固定项目名：deploy.sh 的 -p echo 与之一致，换目录名也不会认错旧容器
+name: echo
 services:
   echo:
     build: .
+    # R-234：固定镜像 tag，部署脚本可保留 echo:previous 做人工回滚
+    image: echo:local
     container_name: echo
     restart: unless-stopped
     ports:
@@ -10,8 +14,12 @@ services:
       - .env
     environment:
       - TZ=Asia/Shanghai
+      # R-234：容器内路径固定，避免把宿主机路径（如 /Users/...）搬进 .env 后数据落进容器层
+      - ECHO_DATA_DIR=/app/data
+      - ECHO_DB_PATH=/app/data/echo.db
     volumes:
-      - ./data:/app/data      # 持久化：数据库/视频/转写/备份（核心资产）
+      # 宿主机数据目录：NAS 在 .env 配绝对路径，如 /vol1/1000/docker/echo/data
+      - "${ECHO_HOST_DATA_DIR:-./data}:/app/data"
       - ./requirements:/app/requirements
       - ./docs:/app/docs:ro
     healthcheck:

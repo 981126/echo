@@ -1,5 +1,16 @@
 # 变更记录
 
+## [R-234] 2026-10-18 — NAS 一键部署脚本：git 快进 → 备份 → 构建 → 上线 → 健康/结构自检 ✅
+
+> 作者：我需要一个脚本，在 nas 执行后会自动拉取本项目 git 最新代码，然后前后端打包成 docker 部署。
+
+- **`scripts/deploy.sh`（新）**：预检 `.env`/Docker → `git fetch` + `merge --ff-only origin/main`（已跟踪工作区脏则中止，不 stash/reset）→ 容器内 `scripts/backup.sh` → `docker compose build`（前端 Node 多阶段 + 后端 Python 单镜像）→ `up -d` → 容器 healthcheck 轮询（默认 180s）→ 库结构自检；日志写 `data/logs/deploy-*.log` 并保留 30 份。
+- **首次/失败策略**：首次没有 `echo.db` 自动跳过备份；构建失败保留旧容器；健康检查失败打印日志并非零退出，上一版镜像保留为 `echo:previous`（不自动回滚数据库，迁移只向前）。
+- **`scripts/update.sh`**：降为兼容入口，`exec` 到 `deploy.sh`；`SKIP_PULL=1` 继续有效。解包/非 git 部署用 `--no-pull`。
+- **`docker-compose.yml`**：加 `image: echo:local` 稳定 tag；容器内固定 `ECHO_DATA_DIR=/app/data`、`ECHO_DB_PATH=/app/data/echo.db`（避免搬 `.env` 时把 macOS 路径带进来）；宿主卷改 `${ECHO_HOST_DATA_DIR:-./data}:/app/data`。
+- **文档**：`QUICKSTART.md` NAS 段改为一键部署 + 参数/回滚说明；`.env.example` 增加 `ECHO_HOST_DATA_DIR`；PRD/里程碑同步 M235。
+- **验证**：`bash -n` + `--help` + 临时仓库/假 Docker 干跑（首次、脏工作区、缺 `.env`、构建失败、unhealthy、非 git 解包）；`scripts/verify.sh` 全绿；**NAS 实机首次构建/启动待作者执行**（本机 Docker daemon 未运行）。
+
 ## [R-233] 2026-10-18 — 脚本生成联网参考双源化：豆包 + DeepSeek 搜索 / 正文 / 去营销 / 生成方按人设选文 ✅
 
 > 作者：脚本生成网上抓取素材新增 deepseek 搜索，豆包和 deepseek 同时 search，Fetch 正文，排除营销内容，由脚本生成方根据当前主博主人设选定某几篇作为参考参与生成。

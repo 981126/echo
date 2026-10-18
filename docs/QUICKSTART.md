@@ -72,25 +72,50 @@ PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh
 
 ## 8. NAS 部署（Docker Compose）
 
+### 一键部署（R-234，推荐）
+
 ```bash
-# 首次
-cp .env.example .env        # ⚠ 不要直接拷笔记本的 .env（路径是 macOS 的）
-# 生产 .env 必须改：
-#   ECHO_DATA_DIR=/app/data
-#   ECHO_DB_PATH=/app/data/echo.db
-#   ECHO_ACCESS_TOKEN=<强口令>   ECHO_WEB_BASE_URL=http://<NAS地址>:8000
-docker compose build && docker compose up -d
+cd /vol1/1000/docker/echo        # 你的仓库目录（以 fnOS 文件管理器实际路径为准）
+cp .env.example .env             # ⚠ 不要直接拷笔记本的 .env（路径是 macOS 的）
+vi .env                          # 至少改下面几项
+#   ECHO_HOST_DATA_DIR=/vol1/1000/docker/echo/data   # 宿主机数据目录（绝对路径）
+#   ECHO_ACCESS_TOKEN=<强口令>
+#   ECHO_WEB_BASE_URL=http://192.168.50.214:8000
+#   其余 DeepSeek / TikHub / ASR key 照抄
+sudo bash scripts/deploy.sh
+```
+
+脚本依次做：**预检 `.env`/Docker → `git fetch` + 快进 `origin/main` → 容器内备份 → `docker compose build`（前端多阶段 + 后端）→ `up -d` → 健康检查 → 结构自检**。
+首次没有 `echo.db` 会自动跳过备份；之后每次升级前都会先备份。日志在 `data/logs/deploy-*.log`（保留最近 30 份）。
+
+常用参数：
+
+```bash
+sudo bash scripts/deploy.sh --branch main      # 指定分支
+sudo bash scripts/deploy.sh --no-pull          # 不拉代码，用当前工作区重建/重启
+sudo bash scripts/deploy.sh --force            # 代码没变也强制重建
+sudo bash scripts/deploy.sh --dry-run          # 只检查、打印将执行的命令
+sudo bash scripts/deploy.sh --help
+```
+
+失败时非零退出并打印容器日志；上一版镜像保留为 `echo:previous`，可人工 `docker tag echo:previous echo:local && docker compose up -d --no-build` 回退（**数据库迁移不会自动回滚**）。
+
+手动等价命令（首次或脚本不可用时）：
+
+```bash
+docker compose build
+docker compose up -d
 docker compose logs -f echo     # 看「结构自检通过」与定时任务注册
 ```
 
-- 数据卷是 `./data:/app/data`（**唯一持久化位置**：库/素材/封面/上传/备份）；
-  若 `.env` 仍写本机绝对路径，数据会落进容器可写层，重建即丢。
+- 数据卷是 `${ECHO_HOST_DATA_DIR:-./data}:/app/data`（**唯一持久化位置**：库/素材/封面/上传/备份）；
+  容器内 `ECHO_DATA_DIR`/`ECHO_DB_PATH` 已由 compose 固定为 `/app/data`，不要在这两项写宿主机路径；宿主机目录用 `ECHO_HOST_DATA_DIR`。
 - 镜像内置 `scripts/`（每日 02:30 备份依赖它）；健康检查用 python urllib（slim 镜像没有 curl）。
 - `.dockerignore` 排除了 `node_modules/.venv/data`：**必须**，否则宿主机的 `node_modules`
   会覆盖镜像内的 Linux 版前端依赖，`npm run build` 直接失败。
 - **单进程**：不要加 `uvicorn --workers`（APScheduler 会重复触发、SQLite 单写会锁）。
 
-### 一键打包 / 一键部署（R-145）
+### 一键打包 / 一键部署（R-145 / R-234）
 
 ```bash
 # ── 本地：打包（只含被 git 跟踪的文件，天然排除 .env / data / node_modules）
@@ -101,7 +126,8 @@ bash scripts/release.sh            # → dist_release/echo_v0.3.0_<时间戳>.ta
 # ── NAS：部署（备份 → 拉码 → 构建 → 启动 → 健康检查 → 打印库结构版本）
 #   包部署：tar -xzf echo_v0.3.0_*.tar.gz --strip-components=1 -C /volume1/echo && cd /volume1/echo
 #   git 部署：cd /volume1/echo
-bash scripts/update.sh             # 解包部署可加 SKIP_PULL=1；任一步失败即非零退出
+sudo bash scripts/deploy.sh        # 推荐；update.sh 已保留为兼容入口
+# 解包部署（非 git 仓库）：sudo bash scripts/deploy.sh --no-pull
 ```
 
 **启动时会自动增量升级**（这就是「打包上去、启动就好」的原理）：
@@ -133,10 +159,9 @@ git commit -am "feat(R-xxx): ..." && git tag vX.Y.Z && git push --follow-tags
 
 # ── NAS
 cd /volume1/echo
-bash scripts/backup.sh              # ① 先备份（回滚预案的前提）
-git pull --ff-only                  # ② 或 bash scripts/update.sh（含 build + up + 健康检查）
-docker compose build && docker compose up -d
-curl -fsS localhost:8000/health     # ③ 验证
+sudo bash scripts/deploy.sh         # ① 备份 → 拉码 → build → up → 健康检查（推荐）
+# 或手动：bash scripts/backup.sh && git pull --ff-only && docker compose build && docker compose up -d
+curl -fsS localhost:8000/health     # ② 验证
 # 回滚：git checkout <上个 tag> → build → up -d → 用升级前的备份换回 echo.db
 ```
 

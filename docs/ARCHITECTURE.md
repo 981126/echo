@@ -45,7 +45,7 @@ echo/
 │   └── .venv/
 ├── frontend_v2/src/       # 唯一前端（R-164/R-208）：React 19+TS+Vite，Tailwind v4/shadcn/ui/Framer Motion/TanStack Query；api 由 /openapi.json 生成；生产挂根路径 /
 │                          #   pages/prompter/ = R-214 提词器 + R-215 内置网页录像（顶层路由，后端零改动；纯逻辑 prompter-text.ts / recorder.ts + 40 例单测）
-└── scripts/               # verify.sh / backup.sh / update.sh
+└── scripts/               # verify.sh / backup.sh / deploy.sh / update.sh（兼容入口）
 ```
 
 ## 3. 外部服务与适配器（全部真实）

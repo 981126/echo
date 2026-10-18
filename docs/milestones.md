@@ -1,11 +1,12 @@
 # 里程碑与进度
 
 > 状态图例：✅ 已完成 / 🔨 进行中 / 🔲 待排期
-> 最后更新：2026-10-18（R-233 双源联网参考 ✅）
+> 最后更新：2026-10-18（R-234 NAS 一键部署脚本 ✅）
 
 ## 总览
 | 阶段 | 主题 | 状态 |
 |---|---|---|
+| M235 | R-234 NAS 一键部署：`scripts/deploy.sh` 预检 → git 快进 `origin/main`（脏工作区中止）→ 容器内备份 → `docker compose build`（前端多阶段 + 后端）→ `up -d` → 健康检查 → 结构自检；首次无库跳过备份、失败保留 `echo:previous`；`update.sh` 兼容入口；compose 固定容器内 `/app/data` + `ECHO_HOST_DATA_DIR` 宿主机目录；日志 30 份 | ✅ |
 | M234 | R-233 双源联网参考：豆包 + DeepSeek 并行 search（DeepSeek `need_content` 正文）+ 合并去重/文章类型/营销规则过滤 + Fetch 补齐（反爬站点退回摘要）+ 生成方按人设选 2–3 篇（含理由，45s 超时兜底）+ 只注入选中正文 + 双路 `web_search_logs` / `Draft.quality.references` / 前端「已选参考」；无 key 自动退回单豆包 | ✅ |
 | M233 | R-232 AI 设置按功能选模型：非生成功能每功能下拉选槽位（模型1/模型2，失败自动兜底）+ 展示当前实际模型名；默认全模型1=现状不变，提示词优化组默认「跟随生成方」；人设 4 引擎/优化+评测各合一 | ✅ |
 | M232 | R-231 提示词无启用版兜底：任一 key 无 enabled 时启动自动另存启用代码默认（留痕可回溯）+ generation 落位代码默认（不恢复 v3~v10） | ✅ |
@@ -115,6 +116,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
+| M235 / R-234 | NAS 一键部署（代码完成）：`scripts/deploy.sh` 预检 `.env`/Docker → `git fetch` + `merge --ff-only origin/main`（已跟踪工作区脏则中止，不 stash/reset）→ 容器内 `scripts/backup.sh` → `docker compose build`（前端 Node 多阶段 + 后端 Python 单镜像）→ `up -d` → 容器 healthcheck 轮询（180s）→ 结构自检；首次无 `echo.db` 跳过备份；失败保留旧容器 + `echo:previous` 镜像，不自动回滚数据库；日志 `data/logs/deploy-*.log` 保留 30 份；`update.sh` 降为兼容入口；compose 固定容器内 `/app/data` 并用 `ECHO_HOST_DATA_DIR` 配宿主机目录 | 首次/更新/脏工作区/缺 `.env`/健康失败路径均有明确中文错误；`bash -n` + 假 Docker 干跑通过；`scripts/verify.sh` 全绿；**NAS 实机首次 `sudo bash scripts/deploy.sh` 待作者执行验证** | ✅ |
 | M226 / R-225 | 素材库抽屉平台勾选由绑定作品决定（已完成）：根因=卡片平台从 `PlatformPost` 成员实时推导，抽屉平台勾选却读 `Video.platforms` 列，合并/同步时该列不重算导致割裂。修复：① `GET /api/videos/{id}` 存在绑定帖子时覆盖 `platforms` 为成员平台集合，与卡片同源；② 合并/绑定/拆分时持久化刷新 `Video.platforms`；③ `post_to_material` 取所属 work 全部成员平台；④ 前端已绑定作品的素材抽屉里平台勾选框只读，并提示“平台由已绑定的平台作品决定”。**明确不做**：不重新设计平台多选交互；不影响未绑定作品的本地素材可编辑性；不删除 `Video.platforms` 列 | 合并卡打开抽屉后平台勾选与卡片一致且只读；未绑定本地素材仍可手改；`scripts/verify.sh` 全绿；新增后端/前端单测 | ✅ |
 | M224 / R-222 | 同步再提速（实施中）：12 个账号 daily 前 15 条当前需 20+ min，作者要求不引入 Redis/MQ、不减少 B站 150 条历史指标补全，NAS 为 N150 4 核 12G。**方案**：纯后端内部优化——账号内作品/评论/B站补全并行化；批量写库替代逐行 commit；预加载消除 N+1；进度更新防抖；TikHub 连接复用 + 令牌桶批量；并发参数对齐（修复账号级硬编码 3）；封面下载不阻塞作品入库；媒体并发保持 2、下载并发可提到 4 | 12 账号同步耗时降到 10 min 以内（目标 6–8 min）；`scripts/verify.sh` 全绿；同步接口冒烟通过；服务保持运行 | 🔨 |
 | M222 / R-220 | 素材库切页同步遮罩必现（实施中）：根因=恢复扫描（`GET /api/tasks?status=running&kind=…`，mount 一次）与 `/api/library` 竞速——冷缓存时卡片为空，card_sync 按 `post_id` 匹配不到卡片被静默丢弃且永不重试（`use-card-tasks.ts:170-171`），热缓存才有动画；叠加跨页 SSE 丢失（无回放）与只筛 running。**修复**：未认领池（taskId→TaskRow）——refreshActive 与 SSE 未知非终态任务统一入池，cards 变化（首帧到位/翻页）时重新 `cardKeyForPayload` 命中即挂遮罩+5s 轮询并出池；终态/已认领出池；恢复查询改 `status=pending,running`（后端已支持，零改动）；池匹配抽纯函数供 vitest | 冷缓存切页遮罩必现；翻页补挂；pending 恢复；无幽灵转圈；vitest + headless r220（mock 竞速）全绿；`scripts/verify.sh` 全绿；动效点检 | ✅ |

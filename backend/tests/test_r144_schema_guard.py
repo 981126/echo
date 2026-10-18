@@ -320,10 +320,15 @@ def test_release_script_packages_without_secrets(tmp_path):
 
 
 def test_update_script_has_backup_health_and_version_steps():
-    """update.sh 必须是「先备份 → 构建 → 启动 → 健康检查 → 结构版本」且任一步失败即退出。"""
-    script = (REPO_ROOT / "scripts" / "update.sh").read_text(encoding="utf-8")
-    assert "set -euo pipefail" in script
+    """R-234：update.sh 是兼容入口，deploy.sh 才是「先备份 → 构建 → 启动 → 健康检查 → 结构自检」主流程。"""
+    wrapper = (REPO_ROOT / "scripts" / "update.sh").read_text(encoding="utf-8")
+    assert "set -euo pipefail" in wrapper
+    assert "scripts/deploy.sh" in wrapper
+    assert "exec bash" in wrapper
+
+    script = (REPO_ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
+    assert "set -Eeuo pipefail" in script
     assert "scripts/backup.sh" in script
-    assert "docker compose build" in script and "docker compose up -d" in script
-    assert "健康检查" in script and "结构自检与库结构版本" in script
-    assert script.index("scripts/backup.sh") < script.index("docker compose build"), "备份必须在构建/启动之前"
+    assert "build" in script and "up -d" in script
+    assert "健康检查" in script and "结构自检" in script
+    assert script.index("scripts/backup.sh") < script.index('step "④ 构建镜像'), "备份必须在构建/启动之前"
