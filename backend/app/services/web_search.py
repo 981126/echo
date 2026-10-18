@@ -22,7 +22,8 @@ _CACHE_LOCK = threading.Lock()
 
 
 def enabled() -> bool:
-    return bool(get_settings().web_search_api_key.strip())
+    settings = get_settings()
+    return bool(settings.online_search_enabled and settings.web_search_api_key.strip())
 
 
 def _pick(item: dict, *keys: str) -> str:
@@ -40,13 +41,35 @@ def _site_of(url: str) -> str:
         return ""
 
 
+def _float(value: object) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _int(value: object) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return -1
+
+
 def _normalize(item: dict) -> dict:
     url = _pick(item, "Url", "url", "URL")
     return {
+        "provider": "doubao",
         "title": _pick(item, "Title", "title"),
         "url": url,
+        "snippet": _pick(item, "Snippet", "snippet"),
         "summary": _pick(item, "Summary", "summary", "Snippet", "snippet", "Content"),
+        # R-233：豆包 Content 通常与 Summary 等长（600~900 字），仍作为正文候补；
+        # `date/rank/authority` 供双源合并排序与界面展示。
+        "content": _pick(item, "Content", "content"),
         "site": _pick(item, "SiteName", "site", "Source") or _site_of(url),
+        "date": _pick(item, "PublishTime", "date") or "",
+        "rank": _float(item.get("RankScore")),
+        "authority": _int(item.get("AuthInfoLevel")),
     }
 
 

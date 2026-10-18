@@ -10,20 +10,27 @@ export interface EvidenceOutline {
   support?: string
 }
 
-/** R-227：联网事实来源（豆包搜索） */
+/** R-227：联网事实来源（豆包搜索）；R-233：双源 + 生成方选文理由 */
 export interface EvidenceSource {
   title?: string
   url?: string
   summary?: string
   site?: string
+  provider?: string
+  reason?: string
+  date?: string
+  content_chars?: number
 }
 
-/** R-227：提交给豆包搜索的 query（留痕） */
+/** R-227：提交给联网搜索的 query（留痕）；R-233：按 provider 区分 */
 export interface EvidenceQuery {
+  provider?: string
   query?: string
   count?: number
   time_range?: string
   raw_count?: number
+  kept_count?: number
+  elapsed_ms?: number
 }
 
 /** R-227：站内真实素材元数据（作者事例 + 对标参考） */
@@ -34,17 +41,26 @@ export interface StationMeta {
 
 const _norm = (v?: string) => (v || '').trim()
 
+const PROVIDER_LABELS: Record<string, string> = { doubao: '豆包', deepseek: 'DeepSeek' }
+
+function providerLabel(provider?: string): string {
+  return (provider && PROVIDER_LABELS[provider]) || ''
+}
+
 /**
- * R-227：生成/洗稿「依据」面板——顶部显示提交给豆包的搜索词；可切换查看「论点」与
+ * R-227：生成/洗稿「依据」面板——顶部显示联网搜索词；可切换查看「论点」与
  * 「引用来源」（默认只显示已引用，可展开全部检索）；右上角可收起。
  * R-230：`outlineDrift` 为 true 时（outlines/sources 是讨论前初稿口径，讨论后正文已
  * 偏离论点），论点/来源区各加一行「以正文为准」提示。
+ * R-233：顶部搜索词按 provider 标注（豆包/DeepSeek）；来源默认只显示「生成方按人设选中的
+ * 2–3 篇 + 选文理由」，可展开全部候选；被正文引用的仍标「已引用」。
  */
 export function EvidencePanel({
   outlines = [],
   outline = '',
   sources = [],
   onlineSources = [],
+  references = [],
   queries = [],
   station,
   outlineDrift = false,
@@ -57,7 +73,9 @@ export function EvidencePanel({
   sources?: EvidenceSource[]
   /** 本次联网检索到的全部来源（留痕） */
   onlineSources?: EvidenceSource[]
-  /** 提交给豆包的搜索词（留痕） */
+  /** R-233：生成方按人设选中的 2–3 篇（带 reason），默认优先展示 */
+  references?: EvidenceSource[]
+  /** 提交给联网搜索的 query（留痕） */
   queries?: EvidenceQuery[]
   /** R-227 第 2 步：站内真实素材（作者事例 + 对标参考） */
   station?: StationMeta
@@ -72,7 +90,14 @@ export function EvidencePanel({
   const items = (outlines || []).filter((o) => _norm(o.claim))
   const outlineItems: EvidenceOutline[] = items.length ? items : _norm(outline) ? [{ claim: outline }] : []
 
-  const queryTexts = (queries || []).map((q) => _norm(q.query)).filter(Boolean)
+  const queryTexts = (queries || []).filter((q) => _norm(q.query))
+
+  const refs = (references || []).filter((s) => _norm(s.title) || _norm(s.url))
+  const refUrls = new Set(refs.map((s) => _norm(s.url)).filter(Boolean))
+  const refTitles = new Set(refs.map((s) => _norm(s.title)).filter(Boolean))
+  const isRef = (s: EvidenceSource) =>
+    (!!_norm(s.url) && refUrls.has(_norm(s.url))) ||
+    (!!_norm(s.title) && refTitles.has(_norm(s.title)))
 
   const usedUrls = new Set(sources.map((s) => _norm(s.url)).filter(Boolean))
   const usedTitles = new Set(sources.map((s) => _norm(s.title)).filter(Boolean))
@@ -81,18 +106,26 @@ export function EvidencePanel({
     (!!_norm(s.title) && usedTitles.has(_norm(s.title)))
 
   const pool = onlineSources.length ? onlineSources : sources
-  const orderedSources = [...pool].sort((a, b) => Number(isUsed(b)) - Number(isUsed(a)))
+  const orderedSources = [...pool].sort(
+    (a, b) =>
+      Number(isRef(b)) - Number(isRef(a)) || Number(isUsed(b)) - Number(isUsed(a)),
+  )
   const usedCount = orderedSources.filter(isUsed).length
-  const displayedSources = usedCount > 0 && !showAll ? orderedSources.filter(isUsed) : orderedSources
+  const refsMode = refs.length > 0 && !showAll
+  const displayedSources = refsMode
+    ? refs
+    : usedCount > 0 && !showAll && refs.length === 0
+      ? orderedSources.filter(isUsed)
+      : orderedSources
 
   const stationAuthor = station?.author || []
   const stationBench = station?.benchmark || []
   const stationTotal = stationAuthor.length + stationBench.length
   const sourceCount = orderedSources.length + stationTotal
-
   const hasOutlines = outlineItems.length > 0
-  const hasSources = orderedSources.length > 0
+  const hasSources = orderedSources.length > 0 || refs.length > 0
   const hasEvidenceSources = hasSources || stationTotal > 0
+
   const hasQueries = queryTexts.length > 0
   if (!hasOutlines && !hasEvidenceSources && !hasQueries) return null
 
@@ -100,10 +133,14 @@ export function EvidencePanel({
     <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
       <Search className="mt-0.5 h-3 w-3 shrink-0" />
       <span>
-        <span className="text-muted-foreground/80">豆包搜索词：</span>
+        <span className="text-muted-foreground/80">联网搜索词：</span>
         {queryTexts.map((q, i) => (
           <span key={i} className="text-foreground/80">
-            {i > 0 ? ' · ' : ''}「{q}」
+            {i > 0 ? ' · ' : ''}
+            {providerLabel(q.provider) && (
+              <span className="text-muted-foreground/70">{providerLabel(q.provider)} </span>
+            )}
+            「{_norm(q.query)}」
           </span>
         ))}
       </span>
@@ -168,14 +205,35 @@ export function EvidencePanel({
   const sourcesBody = (
     <div>
       {stationBody}
+      {refs.length > 0 && (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          {refsMode
+            ? `生成方按人设选了 ${refs.length} 篇作为参考`
+            : `生成方选文 ${refs.length} 篇 · 当前展开全部候选`}
+        </p>
+      )}
       <ul className="mt-1.5 space-y-1.5">
         {displayedSources.map((s, i) => {
           const used = isUsed(s)
+          const picked = isRef(s)
           return (
-            <li key={i} className={cn('text-[11px] leading-relaxed', !used && 'opacity-60')}>
+            <li
+              key={i}
+              className={cn('text-[11px] leading-relaxed', !used && !picked && 'opacity-60')}
+            >
+              {providerLabel(s.provider) && (
+                <Badge variant="secondary" className="mr-1 align-middle text-[9px]">
+                  {providerLabel(s.provider)}
+                </Badge>
+              )}
               {used && (
                 <Badge variant="success" className="mr-1 align-middle text-[9px]">
                   已引用
+                </Badge>
+              )}
+              {!used && picked && (
+                <Badge variant="outline" className="mr-1 align-middle text-[9px]">
+                  参考
                 </Badge>
               )}
               {s.url ? (
@@ -191,23 +249,35 @@ export function EvidencePanel({
                 <span className="align-middle">{s.title || '—'}</span>
               )}
               {_norm(s.site) && <span className="text-muted-foreground/70"> · {s.site}</span>}
+              {_norm(s.date) && (
+                <span className="text-muted-foreground/60"> · {_norm(s.date).slice(0, 10)}</span>
+              )}
+              {_norm(s.reason) && (
+                <p className="mt-0.5 text-[10px] text-muted-foreground">选文理由：{s.reason}</p>
+              )}
             </li>
           )
         })}
       </ul>
-      {hasSources && usedCount === 0 && (
+      {hasSources && usedCount === 0 && refs.length === 0 && (
         <p className="mt-1.5 text-[11px] text-muted-foreground">本次联网检索到的内容未直接引用。</p>
       )}
       {outlineDrift && hasSources && (
         <p className="mt-1.5 text-[11px] text-warning">引用为讨论前初稿口径，讨论后正文可能已调整</p>
       )}
-      {hasSources && usedCount > 0 && (
+      {hasSources && (usedCount > 0 || refs.length > 0) && (
         <button
           type="button"
           onClick={() => setShowAll((v) => !v)}
           className="mt-1 cursor-pointer text-[11px] text-muted-foreground/80 hover:text-foreground"
         >
-          {showAll ? '只看已引用' : `查看全部检索到的 ${orderedSources.length} 条 ▸`}
+          {refs.length > 0
+            ? showAll
+              ? '只看生成方选文'
+              : `查看全部候选 ${orderedSources.length} 条 ▸`
+            : showAll
+              ? '只看已引用'
+              : `查看全部检索到的 ${orderedSources.length} 条 ▸`}
         </button>
       )}
     </div>

@@ -22,7 +22,9 @@ export interface RewriteResult {
   sources?: EvidenceSource[]
   /** R-227：本次检索到的全部来源（留痕） */
   online_sources?: EvidenceSource[]
-  /** R-227：提交给豆包的搜索词（留痕） */
+  /** R-233：生成方按人设选中的参考（带理由） */
+  references?: EvidenceSource[]
+  /** R-227：提交给联网搜索的搜索词（留痕） */
   search_queries?: EvidenceQuery[]
   /** R-227 第 2 步：站内真实素材 */
   station?: StationMeta
@@ -97,6 +99,7 @@ export function RewriteDiffDialog({
           outline={result.outline}
           sources={result.sources}
           onlineSources={result.online_sources}
+          references={result.references}
           queries={result.search_queries}
           station={result.station}
           outlineDrift={!!result.outline_drift}

@@ -3,7 +3,7 @@
 - **日期**: 2026-10-18
 - **提出渠道**: 对话
 - **原文摘要**: 脚本生成的「网上抓取素材」新增 DeepSeek 搜索；豆包与 DeepSeek 同时 search、Fetch 正文；排除营销内容；由脚本生成方根据当前主博主人设选定某几篇作为参考参与生成。
-- **状态**: ✅ 已确认（待实施）
+- **状态**: ✅ 已完成
 - **排期**: M234
 - **关联**: `backend/app/services/web_search.py`、`deepseek_search.py`（新）、`evidence.py`、`debate.py`、`models/web_search.py`、`frontend_v2/src/components/evidence-panel.tsx`、`docs/DATABASE.md`、R-227 / R-228 / R-229 / R-230
 
@@ -119,6 +119,17 @@ R-233 把这一层升级为：**双源并行搜索 → 正文补齐 → 去营�
 - 豆包 `Content` 与 `Summary` 等长（600–900 字），没有更长正文；
 - DeepSeek 结果会混入 GitHub skill/代码文件，必须做文章类型过滤；
 - 计费：Search / Fetch 各 5 元/1000 次成功请求；账号级各 5 QPS；单次生成成本 < 1 分钱。
+
+## 实施记录（2026-10-18）
+
+- **新增** `backend/app/services/deepseek_search.py`：Search（`need_content=true`）/ Fetch 薄客户端；`deepseek_base_url` 兼容带不带 `/v1`；进程内 4 QPS 限速 + 429/5xx 重试一次 + 1h 搜索缓存；失败/未配 key 静默返回空。
+- **改造** `backend/app/services/evidence.py`：`gather_online` 双源并行（线程池，单路失败不影响另一路）→ URL 去追踪参数去重 + 标题 bigram 近重去重 → 文章类型过滤（GitHub blob/skill、文件下载页）→ 营销规则（站点黑名单/转化话术/课程招生/电商域，记 `rejected.reason`）→ 相关度过滤 → 正文补齐（Search 自带正文优先；豆包 `Content == Summary` 或 <800 字再 Fetch；最多 4 篇、并发 3、15s 超时、25s 总预算）→ 按相关度抽段截到 2000 字 → 生成方选文。
+- **选文**：`select_references()` 用生成方槽位模型，输入「人设标签/红线/语言风格 + 选题 + 候选摘要」，输出 2–3 篇 + 理由；编号越界剔除、不足下限补足、解析失败/超时（默认 45s）/无 picker 均按相关度自动兜底。**实测真实选文约 24s**，故加墙钟上限避免拖死整条生成。
+- **排序**：豆包 `RankScore≈1`、DeepSeek `rerank_score 0–3`、权威度量纲不同 → 统一用「该路内部名次 + 正文长度（轻）」排序，避免系统性偏袒某一路。
+- **接线**：`debate.run_debate` / `run_rewrite_debate` 先亮「正在联网检索参考…」状态；`Draft.quality.references` / `online_sources` 只存轻量元数据（不含正文），正文与过滤原因留在 `web_search_logs.results`；`sources` 只对已选清单解析；`mark_logs_used` 双行回写。
+- **前端**：`EvidencePanel` 顶部「联网搜索词」按 provider 标注；来源区默认展示「生成方按人设选了 N 篇 + 选文理由 + provider」，可展开全部候选；草稿抽屉/洗稿对照弹窗/对标页三处接线。
+- **测试**：新增 `backend/tests/test_r233_deepseek_refs.py`（双源合并去重/营销规则/正文补齐/选文补足/超时兜底/双行留痕/单路降级）；`test_r227` 适配 provider/auto-select 新口径；前端 evidence-panel 用例补双源与选文展示。
+- **验证**：`scripts/verify.sh` 全绿（32 表 / 147 路由）；真实冒烟：双源各 5 条，过滤 GitHub/新浪自媒体/搜狐/文档站，真实选文选中 2 篇知乎并给出具体理由；1 轮全链路生成成功，`quality.references` 3 篇、`online_sources` 10 篇、两行留痕 `used` 均回写。
 
 ## 验收标准
 

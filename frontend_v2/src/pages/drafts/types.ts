@@ -67,7 +67,17 @@ export interface Draft {
     sources?: EvidenceSource[]
     /** R-227：本次联网检索到的全部来源（留痕） */
     online_sources?: EvidenceSource[]
-    search_queries?: { query: string; count?: number; time_range?: string }[]
+    /** R-233：生成方按人设选中的 2–3 篇参考（带 reason） */
+    references?: EvidenceSource[]
+    search_queries?: {
+      provider?: string
+      query: string
+      count?: number
+      time_range?: string
+      raw_count?: number
+      kept_count?: number
+      elapsed_ms?: number
+    }[]
     /** R-227 第 2 步：站内真实素材（作者事例 + 对标参考） */
     station?: {
       author?: { kind?: string; title?: string; platform?: string }[]
@@ -242,12 +252,20 @@ export function aiKindLabel(kind?: string): string {
   return AI_KIND_LABELS[kind || ''] || 'AI 处理'
 }
 
-/** R-227：联网事实来源（豆包搜索） */
+/** R-227：联网事实来源（豆包搜索）；R-233：双源 + 生成方选文理由 */
 export interface EvidenceSource {
   title?: string
   url?: string
   summary?: string
   site?: string
+  /** R-233：来源 provider（doubao / deepseek） */
+  provider?: string
+  /** R-233：生成方选这篇的理由（只对被选中的参考有） */
+  reason?: string
+  /** R-233：发布时间（RFC3339，可能为空） */
+  date?: string
+  /** R-233：正文长度（截断前） */
+  content_chars?: number
 }
 
 /** R-227：一条论点 + 其支撑（事例/数据/经历） */

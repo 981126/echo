@@ -53,6 +53,14 @@ def _context(db: Session, topic: str) -> dict:
     }
 
 
+def _persona_brief(ctx: dict, profile: str = "") -> str:
+    """R-233：给「生成方选文」的紧凑人设（标签 + 红线 + 语言风格），不塞全文上下文。"""
+    tags = "\n".join(f"- {t}" for t in (ctx.get("tags") or [])[:16]) or "（暂无）"
+    redlines = "\n".join(f"- {r}" for r in (ctx.get("redlines") or [])[:8]) or "（无）"
+    style = (profile or ctx.get("profile") or "")[:800]
+    return f"标签：\n{tags}\n红线：\n{redlines}\n语言风格：{style or '（暂无）'}"
+
+
 def model_label(vendor: str, model_id: str) -> str:
     """「厂家标签 · 模型 ID」——全站展示实际模型的唯一口径（R-178）。
 
@@ -339,16 +347,34 @@ def run_debate(
     critic_label = _slot_meta(critic_slot)["label"]
 
     # R-227：联网事实证据（query = 选题 + 该入口能拿到的最具体文本；无 key/失败静默）
-    from .evidence import gather_online, resolve_used
+    # R-233：豆包 + DeepSeek 双源检索/正文补齐/去营销，并由生成方按当前主博主人设选文
+    from .evidence import gather_online, mark_logs_used, public_items, resolve_used
     from .station_evidence import meta as _station_meta
     from .station_evidence import retrieve_station
 
+    ctx = _context(db, topic)  # R-233：选文要先拿到人设（原在证据之后）
+    persona_text = "\n".join(f"- {t}" for t in ctx["tags"] or ["（暂无）"]) or "（暂无）"
+    red_text = "\n".join(f"- {r}" for r in ctx["redlines"] or ["（无）"]) or "（无）"
+    samples_text = "\n\n".join(f"--- 样本{i+1} ---\n{s[:300]}" for i, s in enumerate(ctx["samples"]))
+    style_note = f"{ctx['profile']}\n\n风格样本：\n{samples_text or '（暂无样本）'}"
+
+    # R-233：双源检索 + 抓正文 + 选文可能耗时 10~30s，先把状态亮出来（前端轮询可见）
+    _status(
+        db,
+        draft.id,
+        "正在联网检索参考（豆包 + DeepSeek），随后由生成方按人设选文…",
+        actor=gen,
+        phase="evidence",
+        rounds=rounds_total,
+    )
     ev = gather_online(
         db,
         topic,
         material=source_text or query_source,
         draft_id=draft.id,
         creator_id=draft.creator_id,
+        persona=_persona_brief(ctx),
+        picker=gen_llm,
     )
     station = retrieve_station(db, topic, creator_id=draft.creator_id)  # R-227 第 2 步：站内素材
     evidence_block = "\n\n".join(x for x in (ev.get("block") or "", station.get("block") or "") if x)
@@ -358,16 +384,11 @@ def run_debate(
         draft,
         {
             "search_queries": ev.get("queries") or [],
-            "online_sources": ev.get("sources") or [],
+            "online_sources": public_items(ev.get("sources") or []),
+            "references": public_items(ev.get("selected") or [], 5),
             "station": _station_meta(station),
         },
     )
-
-    ctx = _context(db, topic)
-    persona_text = "\n".join(f"- {t}" for t in ctx["tags"] or ["（暂无）"]) or "（暂无）"
-    red_text = "\n".join(f"- {r}" for r in ctx["redlines"] or ["（无）"]) or "（无）"
-    samples_text = "\n\n".join(f"--- 样本{i+1} ---\n{s[:300]}" for i, s in enumerate(ctx["samples"]))
-    style_note = f"{ctx['profile']}\n\n风格样本：\n{samples_text or '（暂无样本）'}"
 
     # 1) 初稿：优先生成方，失败自动换评审方（降级留痕）
     initial = None
@@ -441,7 +462,7 @@ def run_debate(
         {
             "outline": initial["outlines"][0]["claim"] if initial.get("outlines") else "",
             "outlines": initial.get("outlines") or [],
-            "sources": resolve_used(ev.get("sources") or [], initial.get("sources_raw") or []),
+            "sources": public_items(resolve_used(ev.get("selected") or [], initial.get("sources_raw") or [])),
         },
     )
     _add(db, draft.id, 0, initial["model"], "draft", draft.script, llm=initial.get("llm"))
@@ -560,7 +581,7 @@ def run_debate(
     degraded = bool(gen_llm.degraded or critic_llm.degraded or initial["model"] != gen)
     # R-227：论点 / 引用来源 / 联网留痕 落库（引用编号越界=疑似编造来源，剔除）
     outlines = initial.get("outlines") or []
-    used_sources = resolve_used(ev.get("sources") or [], initial.get("sources_raw") or [])
+    used_sources = resolve_used(ev.get("selected") or [], initial.get("sources_raw") or [])
     draft.quality = json.dumps(
         {
             "models": {"gen": f"{gen}({gen_slot['vendor']}/{gen_slot['model']})", "critic": f"{critic}({critic_slot['vendor']}/{critic_slot['model']})"},
@@ -575,8 +596,9 @@ def run_debate(
             "sole_model": gen == critic,
             "outline": outlines[0]["claim"] if outlines else "",
             "outlines": outlines,
-            "sources": used_sources,
-            "online_sources": ev.get("sources") or [],
+            "sources": public_items(used_sources, 10),
+            "online_sources": public_items(ev.get("sources") or []),
+            "references": public_items(ev.get("selected") or [], 5),
             "search_queries": ev.get("queries") or [],
             "station": _station_meta(station),
             # R-230：outlines/sources 是初稿口径；讨论后正文若已偏离论点，标记供前端提示
@@ -586,18 +608,7 @@ def run_debate(
     )
     draft.script = latest
     db.commit()
-    if ev.get("sources"):
-        from ..models.web_search import WebSearchLog
-
-        logrow = (
-            db.query(WebSearchLog)
-            .filter(WebSearchLog.draft_id == draft.id)
-            .order_by(WebSearchLog.id.desc())
-            .first()
-        )
-        if logrow is not None:
-            logrow.used = json.dumps(used_sources, ensure_ascii=False)
-            db.commit()
+    mark_logs_used(db, ev.get("log_ids") or [], public_items(used_sources, 10))
     # R-173：跑满才清状态；中途某轮失败（R-118 允许以当前稿定稿）留下「中断」标记，
     # 让作者看到「讨论 x/y 轮后中断」而不是以为讨论正常结束。
     if break_reason:
@@ -613,6 +624,7 @@ def run_debate(
         "fallback": degraded,
         "rounds": rounds_total,
         "tags": json.loads(draft.tags or "[]") if source_text else [],
+        "references": public_items(ev.get("selected") or [], 5),
     }
 
 
@@ -760,10 +772,27 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     # R-173：把草稿 id 回写进 payload，供调用方（rewrite_worker）在**异常时**也能标记中断状态
     payload["draft_id"] = draft.id
     # R-227：联网事实证据（无 key/失败静默返回空），并写留痕
-    from .evidence import gather_online, resolve_used
+    # R-233：双源检索/正文补齐/去营销 + 生成方按当前主博主人设选文
+    from .evidence import gather_online, mark_logs_used, public_items, resolve_used
 
+    rewrite_rounds = debate_rounds(db, settings)
+    _status(
+        db,
+        draft.id,
+        "正在联网检索参考（豆包 + DeepSeek），随后由生成方按人设选文…",
+        kind="rewrite",
+        actor=gen,
+        phase="evidence",
+        rounds=rewrite_rounds,
+    )
     ev = gather_online(
-        db, source_title, material=source_text, draft_id=draft.id, creator_id=owner.id
+        db,
+        source_title,
+        material=source_text,
+        draft_id=draft.id,
+        creator_id=owner.id,
+        persona=_persona_brief(_persona_context(db), profile=author_ctx),
+        picker=gen_llm,
     )
     # R-227 第 2 步：站内真实素材（作者 ASR + 作者侧定稿；对标=参考）
     from .station_evidence import meta as _station_meta
@@ -779,12 +808,12 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         draft,
         {
             "search_queries": ev.get("queries") or [],
-            "online_sources": ev.get("sources") or [],
+            "online_sources": public_items(ev.get("sources") or []),
+            "references": public_items(ev.get("selected") or [], 5),
             "station": _station_meta(station),
         },
     )
     # R-178：洗稿同样留运行头 + 每次调用记实际模型
-    rewrite_rounds = debate_rounds(db, settings)
     run_header_id = _run_header(db, draft.id, gen_slot, critic_slot, rewrite_rounds)
     gen_label = _slot_meta(gen_slot)["label"]
     critic_label = _slot_meta(critic_slot)["label"]
@@ -854,7 +883,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         {
             "outline": initial_outlines[0]["claim"] if initial_outlines else "",
             "outlines": initial_outlines,
-            "sources": resolve_used(ev.get("sources") or [], initial_sources_raw),
+            "sources": public_items(resolve_used(ev.get("selected") or [], initial_sources_raw)),
         },
     )
     _add(db, draft.id, 0, gen, "draft", latest, llm=draft_llm)
@@ -950,13 +979,14 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     # R-157：洗稿完成后记第二版
     finalize_version(db, draft, source="ai_rewrite", note="洗稿后")
     # R-227：论点 + 引用来源落库（引用编号越界=疑似编造来源，剔除）；并回写留痕的 used
-    used_sources = resolve_used(ev.get("sources") or [], initial_sources_raw)
+    used_sources = resolve_used(ev.get("selected") or [], initial_sources_raw)
     draft.quality = json.dumps(
         {
             "outline": initial_outlines[0]["claim"] if initial_outlines else "",
             "outlines": initial_outlines,
-            "sources": used_sources,
-            "online_sources": ev.get("sources") or [],
+            "sources": public_items(used_sources, 10),
+            "online_sources": public_items(ev.get("sources") or []),
+            "references": public_items(ev.get("selected") or [], 5),
             "search_queries": ev.get("queries") or [],
             "station": _station_meta(station),
             # R-230：outlines/sources 是洗稿初稿口径；讨论后正文若已偏离论点，标记供前端提示
@@ -965,18 +995,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         ensure_ascii=False,
     )
     db.commit()
-    if ev.get("sources"):
-        from ..models.web_search import WebSearchLog
-
-        logrow = (
-            db.query(WebSearchLog)
-            .filter(WebSearchLog.draft_id == draft.id)
-            .order_by(WebSearchLog.id.desc())
-            .first()
-        )
-        if logrow is not None:
-            logrow.used = json.dumps(used_sources, ensure_ascii=False)
-            db.commit()
+    mark_logs_used(db, ev.get("log_ids") or [], public_items(used_sources, 10))
     return {
         "draft_id": draft.id,
         "title": draft.title,
@@ -988,8 +1007,9 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "tags": source_tags,
         "outline": initial_outlines[0]["claim"] if initial_outlines else "",
         "outlines": initial_outlines,
-        "sources": used_sources,
-        "online_sources": ev.get("sources") or [],
+        "sources": public_items(used_sources, 10),
+        "online_sources": public_items(ev.get("sources") or []),
+        "references": public_items(ev.get("selected") or [], 5),
         "search_queries": ev.get("queries") or [],
         "station": _station_meta(station),
     }

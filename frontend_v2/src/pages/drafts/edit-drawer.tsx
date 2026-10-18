@@ -1045,6 +1045,7 @@ export function DraftEditDrawer({
                   outline={evi?.outline}
                   sources={evi?.sources}
                   onlineSources={evi?.online_sources}
+                  references={evi?.references}
                   queries={evi?.search_queries}
                   station={evi?.station}
                   outlineDrift={!!evi?.outline_drift}

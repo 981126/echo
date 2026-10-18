@@ -59,7 +59,9 @@ def test_gather_online_writes_log_and_block(db, monkeypatch):
 
     res = evidence.gather_online(db, "应届生起薪", draft_id=None, creator_id=None)
 
-    assert res["sources"] == fake
+    assert [s["url"] for s in res["sources"]] == ["https://x.com/a"]
+    assert res["sources"][0]["provider"] == "doubao"  # R-233：双源归一化带 provider
+    assert [s["url"] for s in res["selected"]] == ["https://x.com/a"]  # R-233：无 picker 时自动兜底
     assert "[1]" in res["block"] and "8698" in res["block"]
     assert res["queries"][0]["query"] == "应届生起薪"
     logs = db.query(WebSearchLog).all()

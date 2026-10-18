@@ -775,18 +775,18 @@ AI 对话写操作的提案与审计（R-147 P2）。
 
 ## `web_search_logs`
 
-联网搜索留痕（R-227）：每次生成/洗稿调用豆包搜索时落一行，保留 query 与**完整原始结果**，便于核对与额度对账。
+联网搜索留痕（R-227 / R-233）：每次生成/洗稿调用联网搜索时**每个来源各落一行**（豆包、DeepSeek），保留 query 与该路候选（含正文与过滤原因），便于核对与额度对账。
 
 | 列 | 类型 | 说明 |
 |---|---|---|
 | `id` | INTEGER | 主键 |
 | `draft_id` | INTEGER | 关联草稿（可空） |
 | `creator_id` | INTEGER | 归属主博主（可空） |
-| `query` | VARCHAR(500) | 实际搜索词 |
-| `source` | VARCHAR(20) | 来源，默认 `doubao`（豆包搜索） |
+| `query` | VARCHAR(500) | 实际搜索词（双源共用） |
+| `source` | VARCHAR(20) | 来源：`doubao`（豆包）/ `deepseek`（R-233） |
 | `time_range` | VARCHAR(40) | 时间范围过滤（空=不限） |
-| `results` | TEXT | 完整结果 JSON（标题/URL/摘要/站点，原样留痕） |
-| `used` | TEXT | 模型实际引用到的来源 JSON |
+| `results` | TEXT | 该路候选中 JSON：`{"kept":[...],"rejected":[{"title","url","reason"}]}`（含正文/摘要/站点，原样留痕） |
+| `used` | TEXT | 生成方选文后，正文实际引用到的来源 JSON（双行写同一份） |
 | `created_at` | DATETIME | 创建时间（北京时间） |
 
 ## 只读分析视图（不是表，供 AI 对话的 `sql_query` 使用）

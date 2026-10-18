@@ -14,10 +14,50 @@ const onlineSources = [
 const used = [{ title: '来源A', url: 'https://a.example/x', site: 'a.example' }]
 
 describe('EvidencePanel（R-227）', () => {
-  it('顶部显示提交给豆包的搜索词', () => {
+  it('顶部显示联网搜索词', () => {
     render(<EvidencePanel outlines={outlines} queries={[{ query: '面试反问 薪资社保' }]} />)
-    expect(screen.getByText(/豆包搜索词/)).toBeInTheDocument()
+    expect(screen.getByText(/联网搜索词/)).toBeInTheDocument()
     expect(screen.getByText(/面试反问 薪资社保/)).toBeInTheDocument()
+  })
+
+  it('R-233：双源搜索词显示 provider', () => {
+    render(
+      <EvidencePanel
+        queries={[
+          { provider: 'doubao', query: '面试反问' },
+          { provider: 'deepseek', query: '面试反问' },
+        ]}
+      />,
+    )
+    expect(screen.getByText(/豆包/)).toBeInTheDocument()
+    expect(screen.getByText(/DeepSeek/)).toBeInTheDocument()
+  })
+
+  it('R-233：默认只展示生成方选中的参考与理由，可展开全部候选', async () => {
+    const refs = [
+      {
+        title: '来源A',
+        url: 'https://a.example/x',
+        site: 'a.example',
+        provider: 'deepseek',
+        reason: '提供薪资数据',
+      },
+    ]
+    render(
+      <EvidencePanel
+        outlines={outlines}
+        sources={used}
+        onlineSources={onlineSources}
+        references={refs}
+      />,
+    )
+    await userEvent.click(screen.getByRole('tab', { name: /引用来源 2/ }))
+    expect(screen.getByText(/生成方按人设选了 1 篇/)).toBeInTheDocument()
+    expect(screen.getByText(/提供薪资数据/)).toBeInTheDocument()
+    expect(screen.getByText('来源A')).toBeInTheDocument()
+    expect(screen.queryByText('来源B')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText(/查看全部候选 2 条/))
+    expect(screen.getByText('来源B')).toBeInTheDocument()
   })
 
   it('引用来源默认只看已引用，可展开全部检索', async () => {

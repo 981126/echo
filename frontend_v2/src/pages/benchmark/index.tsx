@@ -201,6 +201,7 @@ export default function BenchmarkPage() {
             outlines: res.outlines || [],
             sources: res.sources || [],
             online_sources: res.online_sources || [],
+            references: res.references || [],
             search_queries: res.search_queries || [],
             station: res.station || {}
           })

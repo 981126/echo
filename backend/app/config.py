@@ -136,6 +136,29 @@ class Settings(BaseSettings):
     web_search_cache_seconds: int = 3600  # 同 query 结果缓存时长，省额度
     web_search_traffic_tag: str = "skill_web_search_common"  # 渠道标识（豆包搜索要求）
 
+    # 联网参考（R-233）：DeepSeek Search/Fetch + 豆包双源并行 + 正文补齐 + 去营销 + 生成方选文。
+    # DeepSeek 复用 deepseek_api_key / deepseek_base_url；未配 key 或关开关时自动只跑豆包。
+    online_search_enabled: bool = True  # 联网总开关（测试/临时关闭双源）
+    deepseek_search_enabled: bool = True
+    deepseek_search_count: int = 5  # 单次搜索条数（1~50）
+    online_search_timeout_seconds: int = 20  # 单次搜索请求超时
+    online_fetch_enabled: bool = True  # 缺正文时是否调 DeepSeek Fetch 补齐
+    online_fetch_max: int = 4  # 单次最多补抓篇数
+    online_fetch_timeout_seconds: int = 15  # 单次 Fetch 超时
+    online_fetch_chars: int = 2000  # 单篇正文注入上限（按相关度抽段）
+    online_min_content_chars: int = 800  # 低于此长度视为「缺正文」，触发 Fetch
+    online_budget_seconds: int = 25  # 搜索 + 抓取总预算（超时用已有内容继续）
+    online_ref_pick: bool = True  # 是否由生成方模型按人设选文（关=按相关度自动取）
+    online_ref_pick_min: int = 2
+    online_ref_pick_max: int = 3
+    online_pick_timeout_seconds: int = 45  # 选文调用墙钟上限（超时自动兜底，避免拖死整条生成）
+    # 营销/内容农场站点（逗号分隔，按 URL 子串匹配）；可留空关闭站点过滤
+    online_site_blacklist: str = (
+        "k.sina.com.cn,baijiahao.baidu.com,sohu.com/a/,163.com/dy/,qq.com/omn/,"
+        "book118.com,docin.com,renrendoc.com,"
+        "taobao.com,tmall.com,jd.com,pinduoduo.com,1688.com"
+    )
+
     # 路径：未显式配置时由 data_dir 统一派生（env 可用 ECHO_DB_PATH / ECHO_*_DIR 覆盖）
     _UNSET = Path("@unset@")
     data_dir: Path = Path("./data")
