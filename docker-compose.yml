@@ -1,6 +1,5 @@
 # echo — NAS 部署（M3 完善）
-# name 固定项目名：deploy.sh 的 -p echo 与之一致，换目录名也不会认错旧容器
-name: echo
+# 项目名由 deploy.sh 的 `-p echo` / 仓库目录名固定；不写顶层 name，兼容 fnOS 上的 Compose v1
 services:
   echo:
     build: .
