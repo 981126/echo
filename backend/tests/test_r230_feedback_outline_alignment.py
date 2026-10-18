@@ -20,7 +20,6 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.models.draft import Draft
-from app.models.kv import Kv
 from app.services.debate import detect_outline_drift
 from app.services.prompt_service import feedback_context
 
