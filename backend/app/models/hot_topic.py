@@ -17,7 +17,7 @@ class HotTopic(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     platform: Mapped[str] = mapped_column(String(20), index=True)
-    title: Mapped[str] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(1000))  # R-235：评论灵感原文可超 255（实测最长 631）
     heat: Mapped[str] = mapped_column(String(50), default="")
     url: Mapped[str] = mapped_column(String(500), default="")
     raw: Mapped[str] = mapped_column(Text, default="{}")
@@ -48,7 +48,7 @@ class TopicIdea(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source: Mapped[str] = mapped_column(String(20), default="hot")  # hot | comment
     platform: Mapped[str] = mapped_column(String(20), index=True, default="")
-    title: Mapped[str] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(1000))  # R-235：评论灵感原文可超 255（实测最长 631）
     detail: Mapped[str] = mapped_column(Text, default="")  # 评论原文/热度说明
     post_id: Mapped[int | None] = mapped_column(ForeignKey("platform_posts.id"), nullable=True)
     post_title: Mapped[str] = mapped_column(String(500), default="")

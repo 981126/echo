@@ -11,5 +11,5 @@ from ..db import Base
 class Kv(Base):
     __tablename__ = "app_kv"
 
-    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")

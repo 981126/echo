@@ -75,7 +75,7 @@ AI 提示词版本库（R-021）：key 标识用途，version 递增，status=en
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
-| `key` | VARCHAR(60) | ✔ | 否 |  |
+| `key` | VARCHAR(120) | ✔ | 否 |  |
 | `value` | TEXT |  | 否 |  |
 
 ---
@@ -330,7 +330,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 |---|---|---|---|---|
 | `id` | INTEGER | ✔ | 否 |  |
 | `platform` | VARCHAR(20) |  | 否 |  |
-| `title` | VARCHAR(255) |  | 否 |  |
+| `title` | VARCHAR(1000) |  | 否 |  |
 | `heat` | VARCHAR(50) |  | 否 |  |
 | `url` | VARCHAR(500) |  | 否 |  |
 | `raw` | TEXT |  | 否 | {} |
@@ -649,7 +649,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `id` | INTEGER | ✔ | 否 |  |
 | `source` | VARCHAR(20) |  | 否 | hot |
 | `platform` | VARCHAR(20) |  | 否 |  |
-| `title` | VARCHAR(255) |  | 否 |  |
+| `title` | VARCHAR(1000) |  | 否 |  |
 | `detail` | TEXT |  | 否 |  |
 | `post_id` | INTEGER |  | 是 |  |
 | `post_title` | VARCHAR(500) |  | 否 |  |
