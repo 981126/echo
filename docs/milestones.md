@@ -1,11 +1,12 @@
 # 里程碑与进度
 
 > 状态图例：✅ 已完成 / 🔨 进行中 / 🔲 待排期
-> 最后更新：2026-10-18（R-234 NAS 一键部署脚本 ✅）
+> 最后更新：2026-10-21（R-235 SQLite→PostgreSQL 迁移 ✅）
 
 ## 总览
 | 阶段 | 主题 | 状态 |
 |---|---|---|
+| M236 | R-235 SQLite 全面迁移 PostgreSQL：`ECHO_DATABASE_URL` 只从 .env 读（无默认、缺失报错）；历史迁移全删只留 create_all+索引+视图+seed；schema_guard 下线；方言 SQL 改写 PG；JSON 保持 TEXT；测试库 echo_test（每测试清表 + 库名闸门）；compose/backup/deploy/release 去 SQLite 化（pg_dump 备份 + `scripts/init_test_db.sh`） | ✅ |
 | M235 | R-234 NAS 一键部署：`scripts/deploy.sh` 预检 → git 快进 `origin/main`（脏工作区中止）→ 容器内备份 → `docker compose build`（前端多阶段 + 后端）→ `up -d` → 健康检查 → 结构自检；首次无库跳过备份、失败保留 `echo:previous`；`update.sh` 兼容入口；compose 固定容器内 `/app/data` + `ECHO_HOST_DATA_DIR` 宿主机目录；日志 30 份 | ✅ |
 | M234 | R-233 双源联网参考：豆包 + DeepSeek 并行 search（DeepSeek `need_content` 正文）+ 合并去重/文章类型/营销规则过滤 + Fetch 补齐（反爬站点退回摘要）+ 生成方按人设选 2–3 篇（含理由，45s 超时兜底）+ 只注入选中正文 + 双路 `web_search_logs` / `Draft.quality.references` / 前端「已选参考」；无 key 自动退回单豆包 | ✅ |
 | M233 | R-232 AI 设置按功能选模型：非生成功能每功能下拉选槽位（模型1/模型2，失败自动兜底）+ 展示当前实际模型名；默认全模型1=现状不变，提示词优化组默认「跟随生成方」；人设 4 引擎/优化+评测各合一 | ✅ |

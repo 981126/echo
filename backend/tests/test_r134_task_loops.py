@@ -8,10 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db import Base
 from app.models.draft import Draft
 from app.models.kv import Kv
 from app.models.notification import Notification
@@ -26,12 +25,11 @@ from app.tasks import _cleanup_stale_sync_state, mark_interrupted_tasks_on_start
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _set_kv(db, key, value):
@@ -49,8 +47,8 @@ def _set_kv(db, key, value):
 def test_interrupted_tasks_are_notified(tmp_path, monkeypatch):
     from app import tasks as tasks_mod
 
-    eng = create_engine(f"sqlite:///{tmp_path}/n.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     factory = sessionmaker(bind=eng, autoflush=False, autocommit=False)
     monkeypatch.setattr(tasks_mod, "SessionLocal", factory)
     s = factory()
@@ -71,8 +69,8 @@ def test_interrupted_tasks_are_notified(tmp_path, monkeypatch):
 def test_persona_pending_flag_is_consumed(tmp_path, monkeypatch):
     from app import tasks as tasks_mod
 
-    eng = create_engine(f"sqlite:///{tmp_path}/p.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     factory = sessionmaker(bind=eng, autoflush=False, autocommit=False)
     monkeypatch.setattr(tasks_mod, "SessionLocal", factory)
     s = factory()
@@ -180,8 +178,8 @@ def test_inbox_registers_before_moving_file(tmp_path, monkeypatch):
 
     settings = _fake_settings(tmp_path)
     (settings.inbox_dir / "clip.mp4").write_bytes(b"fake")
-    db = sessionmaker(bind=create_engine(f"sqlite:///{tmp_path}/w.db"), autoflush=False)()
-    Base.metadata.create_all(bind=db.get_bind())
+    db = sessionmaker(bind=fresh_engine(), autoflush=False)()
+    ensure_schema(db.get_bind())
     monkeypatch.setattr(watcher, "SessionLocal", lambda: db)
 
     watcher._scan_once(settings)
@@ -197,8 +195,8 @@ def test_inbox_keeps_file_when_move_fails(tmp_path, monkeypatch):
     settings = _fake_settings(tmp_path)
     src = settings.inbox_dir / "clip.mp4"
     src.write_bytes(b"fake")
-    db = sessionmaker(bind=create_engine(f"sqlite:///{tmp_path}/w2.db"), autoflush=False)()
-    Base.metadata.create_all(bind=db.get_bind())
+    db = sessionmaker(bind=fresh_engine(), autoflush=False)()
+    ensure_schema(db.get_bind())
     monkeypatch.setattr(watcher, "SessionLocal", lambda: db)
 
     def _boom(self, _dest):  # noqa: ANN001

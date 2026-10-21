@@ -9,10 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db import Base
 from app.models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from app.models.video import Transcript, Video
 from app.services.benchmark import ensure_top_with_text, resolve_rewrite_source, target_units
@@ -22,12 +21,11 @@ BASE = datetime(2026, 9, 1, 12, 0, 0)
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _seed(db, *, owner=True):

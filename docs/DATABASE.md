@@ -1,17 +1,16 @@
 # 数据库表结构（人工维护 + 注释）
 
 > 表结构来源：`backend/app/models/*.py`（SQLAlchemy 2.x 声明式），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验表数量与表名和代码一致。
-> 数据库：SQLite 单文件。路径由 `.env` 的 `ECHO_DB_PATH` 决定（未配置时由 `ECHO_DATA_DIR` 派生为 `data/echo.db`；本项目 .env 当前指向 `echo_resource/echo.db`），运行时数据目录见 QUICKSTART。
+> 数据库：PostgreSQL（R-235 起，SQLAlchemy 2.x + psycopg v3）。连接串由 `.env` 的 `ECHO_DATABASE_URL` 决定（无默认、缺失启动报错；驱动写法 `postgresql+psycopg://…`），运行时数据目录见 QUICKSTART。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（32 张）
+## 表总览（31 张）
 
 | 表 | 说明 |
 |---|---|
 | `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版；R-129 起候选正文=可优化段+程序固定的输出契约段，支持候选拒绝(rejected)与历史回滚。 |
-| `schema_migrations` | 结构变更记账（R-144）：`name` 唯一 + `applied_at` + `note`。轻量替代 Alembic，用来回答「这个库升到哪一版」；首次运行写入基线 `baseline_pre_r144`。启动自检（`core/schema_guard`）会把状态写进日志并校验「模型声明的列 vs 实际库」。 |
 | `agent_actions` | AI 对话的写操作提案与审计（R-147 P2）：模型只**提议**（`status=pending`，含 `preview` 影响范围说明），作者在对话里点「确认执行」后才真正落库（`confirmed→done`），取消则 `cancelled`。`task_id` 记录入队的后台任务。 |
-| `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、一次性迁移标记、R-022 优化节流计数等。 |
+| `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、R-022 优化节流计数等。 |
 | `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。 |
 | `chat_conversations` | AI 对话会话（R-017）：标题 + 创建/更新时间，单用户多会话。 |
 | `chat_messages` | AI 对话消息：角色（user/assistant/system）、内容、会话归属 conversation_id、是否流式完成等。 |
@@ -46,7 +45,7 @@
 - 云端作品：`creator_accounts` → `platform_posts` → `platform_post_stats`（按天指标）/ `platform_post_comments`（评论 Top50）；`platform_posts.work_id` → `works`（跨平台同作品合并）；`local_video_id` → `videos`（转本地素材）
 - 本地素材：`videos` → `transcripts`（转写稿）/ `metrics_snapshots`（按天聚合指标）；`videos.work_id` 与 `platform_post_id` 关联云端
 - 内容生产：`hot_topics` → `topic_candidates` → `drafts` → `feedback` / `draft_discussions`
-- 任务/通知：`background_tasks` + `sync_jobs` 记录后台工作，结束写 `notifications`；`app_kv` 存预算/迁移标记
+- 任务/通知：`background_tasks` + `sync_jobs` 记录后台工作，结束写 `notifications`；`app_kv` 存预算等标记
 
 ---
 
@@ -72,7 +71,7 @@ AI 提示词版本库（R-021）：key 标识用途，version 递增，status=en
 
 ## `app_kv`
 
-轻量键值表：预算计数(tikhub_budget_used:日期)、一次性迁移标记、R-022 优化节流计数等。
+轻量键值表：预算计数(tikhub_budget_used:日期)、R-022 优化节流计数等。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -740,20 +739,6 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 **外键**：`creator_id` → `creators.id`
 
 ---
-
-## `schema_migrations`
-
-库结构变更记账（R-144）。
-
-| 列 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER | 主键 |
-| `name` | VARCHAR(120) | 迁移名，唯一（如 `baseline_pre_r144`、`r145_draft_share_count`） |
-| `note` | VARCHAR(255) | 备注 |
-| `applied_at` | DATETIME | 应用时间（北京时间） |
-
-用法：新迁移在 `app/db.py` 的 `_migrate_*` 里干完活后调用 `schema_guard.record_migration(engine, "<名字>")`；
-`migration_status(engine)` 返回已应用条数与最新迁移名，启动日志会打印。R-144 之前的所有变更记为基线一行。
 
 ## `agent_actions`
 

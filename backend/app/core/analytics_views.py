@@ -2,10 +2,10 @@
 
 设计原则
 - **只暴露视图，不暴露原始表**：`app_kv`（含明文模型 Key）、`ai_prompts`（提示词正文）、
-  `chat_*`、`schema_migrations`、`background_tasks` 等敏感/内部表一律不进视图，也不在允许名单里。
+  `chat_*`、`agent_actions`、`background_tasks` 等敏感/内部表一律不进视图，也不在允许名单里。
 - **视图即白名单**：`sql_query` 校验「表引用必须全部来自这些视图名」，从根上挡住越权查询。
-- **幂等**：每次启动 `DROP VIEW IF EXISTS` + `CREATE VIEW`，改定义即生效（SQLite 无 CREATE OR REPLACE VIEW）。
-- **列名 + 中文说明**：SQLite 没有列注释，所以这里维护 `SCHEMA_NOTES` 作为给模型的 schema 卡片。
+- **幂等**：每次启动 `DROP VIEW IF EXISTS` + `CREATE VIEW`（PG 用 DROP+CREATE，无 CREATE OR REPLACE VIEW 的列变更兼容问题）。
+- **列名 + 中文说明**：PG 视图没有列注释入口，所以这里维护 `SCHEMA_NOTES` 作为给模型的 schema 卡片。
 """
 
 from __future__ import annotations
@@ -155,7 +155,7 @@ _CARD_CACHE: str | None = None
 def schema_card(bind: Engine | None = None) -> str:
     """给模型的 schema 卡片（视图名 + 真实列名 + 中文说明）。
 
-    列名从 SQLite 实际视图读（`inspect`），不是解析 SQL 文本 —— 保证和线上一致。
+    列名从数据库实际视图读（`inspect`），不是解析 SQL 文本 —— 保证和线上一致。
     视图定义只在部署时变，故缓存一份。
     """
     global _CARD_CACHE

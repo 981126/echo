@@ -9,12 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.platform import post_to_material
 from app.api.videos import get_video
-from app.db import Base
 from app.models.platform import Creator, CreatorAccount, PlatformPost
 from app.models.video import Video
 from app.models.work import Work
@@ -23,12 +22,11 @@ from app.services.works_service import auto_merge_creator, merge_manual, split_w
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _make_owner_with_accounts(db):

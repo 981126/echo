@@ -12,12 +12,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
+from conftest import ensure_schema, fresh_engine
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db import Base, get_db
+from app.db import get_db
 from app.models.discussion import DraftDiscussion
 from app.models.draft import Draft
 from app.models.kv import Kv
@@ -27,12 +27,11 @@ from app.services import llm_router
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _set_kv(db, key, value):
@@ -211,26 +210,3 @@ def test_api_returns_model_fields_and_legacy_rows(db):
     assert fresh["model_label"] == "DeepSeek · deepseek-flash"
     assert fresh["used_slot"] == "model1"
     assert fresh["model_id"] == "deepseek-flash"
-
-
-# ---------- 迁移 ----------
-
-
-def test_migration_adds_columns_and_is_idempotent(tmp_path, monkeypatch):
-    from app import db as db_module
-
-    eng = create_engine(f"sqlite:///{tmp_path}/legacy.db")
-    with eng.begin() as conn:
-        conn.exec_driver_sql(
-            "CREATE TABLE draft_discussions ("
-            "id INTEGER PRIMARY KEY, draft_id INTEGER, round INTEGER, actor VARCHAR(20), "
-            "kind VARCHAR(20), content TEXT, created_at DATETIME)"
-        )
-    monkeypatch.setattr(db_module, "engine", eng)
-
-    db_module._migrate_discussion_model_fields()
-    db_module._migrate_discussion_model_fields()  # 幂等：再跑一次不报错
-
-    with eng.begin() as conn:
-        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(draft_discussions)").fetchall()}
-    assert {"used_slot", "vendor", "model_id"} <= cols

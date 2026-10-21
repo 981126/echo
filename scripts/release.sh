@@ -33,7 +33,7 @@ git archive --format=tar.gz --prefix="echo/" -o "$OUT" HEAD
 
 echo "==> 校验包内容"
 fail=0
-for must in backend/app/main.py backend/app/db.py backend/app/core/schema_guard.py scripts/backup.sh scripts/update.sh scripts/verify.sh Dockerfile docker-compose.yml; do
+for must in backend/app/main.py backend/app/db.py scripts/backup.sh scripts/update.sh scripts/verify.sh Dockerfile docker-compose.yml; do
   if tar -tzf "$OUT" | grep -qx "echo/${must}"; then
     echo "  ✓ ${must}"
   else
@@ -42,7 +42,7 @@ for must in backend/app/main.py backend/app/db.py backend/app/core/schema_guard.
   fi
 done
 # 绝不允许把密钥/数据打进发布包
-for forbidden in "echo/.env" "echo/data/echo.db"; do
+for forbidden in "echo/.env"; do
   if tar -tzf "$OUT" | grep -q "^${forbidden}$"; then
     echo "  ✗ 包里出现了不该有的文件：${forbidden}" >&2
     fail=1

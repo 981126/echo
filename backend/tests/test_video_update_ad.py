@@ -9,11 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.videos import update_video
-from app.db import Base
 from app.models.platform import Creator, CreatorAccount, PlatformPost
 from app.models.video import Video
 from app.schemas.video import VideoUpdate
@@ -21,12 +20,11 @@ from app.schemas.video import VideoUpdate
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _seed_bound_ad(db):

@@ -14,8 +14,8 @@ services:
     environment:
       - TZ=Asia/Shanghai
       # R-234：容器内路径固定，避免把宿主机路径（如 /Users/...）搬进 .env 后数据落进容器层
+      # R-235：数据库改为 PostgreSQL，连接串走 .env 的 ECHO_DATABASE_URL（不再单文件入库）
       - ECHO_DATA_DIR=/app/data
-      - ECHO_DB_PATH=/app/data/echo.db
     volumes:
       # 宿主机数据目录：NAS 在 .env 配绝对路径，如 /vol1/1000/docker/echo/data
       - "${ECHO_HOST_DATA_DIR:-./data}:/app/data"

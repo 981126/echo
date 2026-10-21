@@ -16,11 +16,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core import analytics_views
-from app.db import Base
 from app.models.agent_action import AgentAction
 from app.models.draft import Draft
 from app.models.prompt import AiPrompt
@@ -31,8 +30,8 @@ from app.services.chat_service import ChatService
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/agent.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     analytics_views.ensure_views(eng)  # sql_query 要查视图
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     for key in ps.PROMPT_META:
@@ -40,7 +39,6 @@ def db(tmp_path):
     session.commit()
     yield session
     session.close()
-    eng.dispose()
 
 
 # ---------- P1：只读 SQL 安全边界 ----------

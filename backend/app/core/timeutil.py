@@ -1,6 +1,6 @@
 """应用统一时间（默认北京时间 Asia/Shanghai，可用 ECHO_TIMEZONE 覆盖）。
 
-SQLite DateTime 一律存“无时区的应用本地时间”（北京时间），展示即对；
+数据库 DateTime 一律存“无时区的应用本地时间”（北京时间），展示即对；
 避免用 datetime.utcnow 存 UTC 导致界面差 8 小时。
 """
 

@@ -1,11 +1,12 @@
 """`sql_query` 工具（R-147 P1）：让 AI 对话能安全地自己查数据。
 
 **安全边界（四层，缺一不可）**
-1. **只读连接**：`file:…?mode=ro` + `PRAGMA query_only=1` —— 物理上写不了；
-2. **只允许单条 SELECT/WITH**：拒绝 `;` 多语句与全部写/管理关键字（ATTACH/PRAGMA/DROP…）；
+1. **只读连接**：PG 连接加 `default_transaction_read_only=on` + `statement_timeout`
+   —— 服务端物理上拒绝写/长查询；
+2. **只允许单条 SELECT/WITH**：拒绝 `;` 多语句与全部写/管理关键字（ATTACH/DROP…）；
 3. **表引用白名单**：正则抽出 `FROM`/`JOIN` 后的标识符，**必须全部是 `analytics_views` 里的视图**
    —— 所以 `app_kv`（含明文模型 Key）、`ai_prompts` 等原始表根本查不到；
-4. **资源上限**：自动补 `LIMIT`（≤200）、单元格截断、语句超时（progress handler 中断）。
+4. **资源上限**：自动补 `LIMIT`（≤200）、单元格截断、语句超时（R-235：服务端 statement_timeout）。
 
 返回 `{columns, rows, row_count, truncated, sql}`（延续 R-146：必须让模型知道"是不是被截断"）。
 """
@@ -13,9 +14,11 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 import time
-from pathlib import Path
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.pool import NullPool
 
 from ..core import analytics_views
 from ..core.log import get_logger
@@ -72,7 +75,25 @@ def validate(sql: str) -> str:
     return text
 
 
-def run(db_path: str | Path, sql: str) -> dict:
+_RO_ENGINES: dict[str, Engine] = {}
+
+
+def _ro_engine(url: str) -> Engine:
+    """按连接串缓存只读引擎：服务端强制只读事务 + 语句超时（毫秒）。"""
+    eng = _RO_ENGINES.get(url)
+    if eng is None:
+        eng = create_engine(
+            url,
+            poolclass=NullPool,
+            connect_args={
+                "options": f"-c default_transaction_read_only=on -c statement_timeout={int(TIMEOUT_SECONDS * 1000)}"
+            },
+        )
+        _RO_ENGINES[url] = eng
+    return eng
+
+
+def run(db_url: str, sql: str) -> dict:
     """执行只读查询；任何失败都返回可读 error（不抛，避免打断对话）。"""
     try:
         text = validate(sql)
@@ -82,22 +103,25 @@ def run(db_path: str | Path, sql: str) -> dict:
     if not re.search(r"\blimit\b", text, re.IGNORECASE):
         text = f"{text} LIMIT {MAX_ROWS}"
 
-    path = Path(db_path)
-    conn: sqlite3.Connection | None = None
-    deadline = time.monotonic() + TIMEOUT_SECONDS
+    deadline = time.monotonic() + TIMEOUT_SECONDS + 2.0  # 服务端 statement_timeout 之外的客户端兜底
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        conn.execute("PRAGMA query_only=1")
-        # 每 1000 条 VM 指令检查一次是否超时 → 超时中断（SQLite 会抛 OperationalError）
-        conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 1000)
-        cur = conn.execute(text)
-        columns = [d[0] for d in (cur.description or [])]
-        fetched = cur.fetchmany(MAX_ROWS + 1)
-        truncated = len(fetched) > MAX_ROWS
-        rows = [
-            [(str(v)[:MAX_CELL_CHARS] if v is not None else None) for v in row]
-            for row in fetched[:MAX_ROWS]
-        ]
+        with _ro_engine(str(db_url)).connect() as conn:
+            cur = conn.exec_driver_sql(text)
+            columns = list(cur.keys())
+            fetched = cur.fetchmany(MAX_ROWS + 1)
+            truncated = len(fetched) > MAX_ROWS
+            rows = [
+                [(str(v)[:MAX_CELL_CHARS] if v is not None else None) for v in row]
+                for row in fetched[:MAX_ROWS]
+            ]
+        if time.monotonic() > deadline:
+            return {
+                "error": f"查询超时（>{TIMEOUT_SECONDS}s），请缩小范围或加更严格的筛选条件",
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "truncated": False,
+            }
         return {
             "columns": columns,
             "rows": rows,
@@ -106,17 +130,12 @@ def run(db_path: str | Path, sql: str) -> dict:
             "sql": text,
             "note": "rows 只含本次取回的行；row_count 是取回条数，truncated=true 表示还有更多",
         }
-    except sqlite3.OperationalError as exc:
-        msg = str(exc)
-        if "interrupted" in msg.lower():
-            msg = f"查询超时（>{TIMEOUT_SECONDS}s），请缩小范围或加更严格的筛选条件"
-        return {"error": msg, "columns": [], "rows": [], "row_count": 0, "truncated": False}
     except Exception as exc:  # noqa: BLE001 工具失败不能打断对话
         log.exception("sql_query 执行失败")
-        return {"error": f"{type(exc).__name__}: {exc}", "columns": [], "rows": [], "row_count": 0, "truncated": False}
-    finally:
-        if conn is not None:
-            conn.close()
+        msg = str(exc).strip()
+        if "statement timeout" in msg.lower() or "canceling statement" in msg.lower():
+            msg = f"查询超时（>{TIMEOUT_SECONDS}s），请缩小范围或加更严格的筛选条件"
+        return {"error": msg, "columns": [], "rows": [], "row_count": 0, "truncated": False}
 
 
 __all__ = ["MAX_ROWS", "SqlGuardError", "run", "validate"]

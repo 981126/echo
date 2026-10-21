@@ -8,10 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db import Base
 from app.models.platform import Creator, CreatorAccount, PlatformPost
 from app.models.task import BackgroundTask
 from app.models.video import Transcript, Video
@@ -23,12 +22,11 @@ from app.services.works_service import auto_merge_creator
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _make_owner_with_accounts(db):
@@ -161,16 +159,11 @@ def test_in_progress_claim_skips_second_download(db, tmp_path, monkeypatch):
 
 def test_skipped_sibling_still_syncs_comments(db, monkeypatch):
     """同 work 内被标记 skip 的平台帖，评论/灵感池仍应同步，只有视频下载被跳过。"""
-    from sqlalchemy import create_engine as _create_engine
     from sqlalchemy.orm import sessionmaker as _sessionmaker
 
-    # run_card_sync_queue 的消费者各自用独立 Session，需要独立的 engine
-    tmp_path = Path(__file__).resolve().parent / "_r094_tmp"
-    tmp_path.mkdir(exist_ok=True)
-    db_path = tmp_path / "queue.db"
-    db_path.unlink(missing_ok=True)
-    eng = _create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    # run_card_sync_queue 的消费者各自用独立 Session，用共享测试引擎（fresh_engine 已清库）
+    eng = fresh_engine()
+    ensure_schema(eng)
     session_factory = _sessionmaker(bind=eng, autoflush=False, autocommit=False)
     s = session_factory()
 
@@ -213,5 +206,3 @@ def test_skipped_sibling_still_syncs_comments(db, monkeypatch):
         assert stats["skipped"] == 1
     finally:
         s.close()
-        eng.dispose()
-        db_path.unlink(missing_ok=True)

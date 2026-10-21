@@ -39,7 +39,7 @@ from .platform.base import CommentData, DataSource, PostData, make_source
 
 _PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
 
-# R-222：同步进度更新防抖——跨账号/线程共享同一 job_id 时减少 SQLite 写压力
+# R-222：同步进度更新防抖——跨账号/线程共享同一 job_id 时减少数据库写压力
 _JOB_PROGRESS_LOCK = threading.Lock()
 _job_progress_pending: dict[int, dict] = {}
 _JOB_PROGRESS_FORCE_KEYWORDS = ("完成", "失败", "拉取到", "补全", "排队中", "同步中")
@@ -49,7 +49,7 @@ def _job_progress(db: Session, job_id: int | None, *, done: int = 0, total: int 
     """R-070/R-222：累加写同步任务进度（done/total 原子累加），进度更新失败不影响同步主体。
 
     新增防抖：同 job_id 的多次小进度会先累计，每 2s（可配）或遇到阶段关键词/完成时统一 flush，
-    显著降低 SQLite 写锁竞争。
+    显著降低数据库写竞争。
     """
     if not job_id:
         return

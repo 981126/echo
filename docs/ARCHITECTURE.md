@@ -9,8 +9,8 @@
 | 后端 | Python 3.12+ / FastAPI / Uvicorn | 单进程单体；路由薄、业务厚；同步阻塞业务跑在后台线程 |
 | 前端（R-164） | React 19 + TS + Vite + Tailwind v4 + shadcn/ui + Framer Motion + TanStack Query | **唯一前端**（R-208 起）：dev(3000) 代理 8000；build 后由 FastAPI 挂**根路径 `/`**；API 类型由 `/openapi.json` 生成（`npm run gen:api`） |
 | ~~老前端（已废弃 R-168）~~ | Vue 3 + Vite + Naive UI | 只读保留，禁止修改；build 产物仍挂根路径兜底，后续下线另立需求 |
-| 数据库 | SQLite + SQLAlchemy 2.x（R-163 起 WAL + busy_timeout） | 单用户零运维；engine `check_same_thread=False, timeout=30` 支持多线程；WAL 支持并发读写 |
-| schema 演进 | 幂等轻量迁移（`db.py` 内函数） | 每次启动 `init_db()` 检查补列/建索引；**未用 Alembic**（tech-debt） |
+| 数据库 | PostgreSQL + SQLAlchemy 2.x + psycopg v3（R-235） | 连接串 `.env` 的 `ECHO_DATABASE_URL`（无默认、缺失启动报错）；连接池 `pool_pre_ping + recycle`，多线程共享单引擎 |
+| schema 演进 | `create_all` 幂等建全量结构（R-235 起） | 历史轻量迁移已随 SQLite 下线删除；**未用 Alembic**（tech-debt） |
 | 定时任务 | APScheduler BackgroundScheduler（进程内） | 每日流水线/平台同步两轮/指标留存/备份/清理/每周风格重建 |
 | 后台任务 | `background_tasks` 表 + daemon 线程（tasks.py）+ 同步并发消费者池（sync_pool.py，R-163） | 长任务入库、结束自动写通知；同步类任务经队列线程池并行消费；无外部消息队列。**R-202**：任务为「进行中」唯一事实源，`GET /api/tasks` 多状态 + SSE `task.update`（带 label/target）驱动前端顶栏「进行中 N」指示器（挂载回扫 + 10s 轮询兜底），慢的同步接口已转任务 |
 | 文件监听 | watcher.py 线程轮询 `inbox`（10s） | 拖入视频移入 videos 并建行（**不自动转写**） |
@@ -78,15 +78,15 @@ echo/
 | 每日 `daily_push_time`（默认 07:00） | 每日流水线 | 热点→选题匹配→生成≥3→入库→（可选邮件） |
 | 每日 `daily_push_time` +1h（默认 08:00） | 指标与留存 | cookie 通道未启用 → 仅 `apply_retention`（热点 30 天清理） |
 | 每日 `platform_sync_times`（默认 06:00 / 17:00） | 平台同步 | 后台任务 `run_daily_sync_all`（R-109；R-163 起主博主+对标**并发**同步）：每账号三平台 top15 + 前15条视频下载/转写（R-085/R-109）+ 评论采集；同步完成后自动触发一次「重新对标」（refetch=False，不重复拉取） |
-| 每日 02:30 | 备份 | `scripts/backup.sh`（SQLite 热备 + requirements/docs 快照，留 10 份） |
+| 每日 02:30 | 备份 | `scripts/backup.sh`（pg_dump 逻辑备份 + requirements/docs 快照，留 10 份） |
 | 每日 04:00 | 清理 | 通知>90 天、后台任务>30 天、sync_jobs>60 天、platform_post_stats>400 天 |
 | 每周日 03:20 | 风格重建 | 基于全量素材画像+加权样本产出生成提示词候选（不启用）+ 通知 |
 
 ## 5. 数据存储（.env 决定，当前非仓库 data/）
 | 配置 | 当前值示例 | 内容 |
 |---|---|---|
-| `ECHO_DATA_DIR` | `/Users/yeah/document/echo_resource` | 数据根 |
-| `ECHO_DB_PATH` | `…/echo.db` | SQLite 库 |
+| `ECHO_DATA_DIR` | `/Users/yeah/document/echo_resource` | 数据根（视频/封面/上传等文件） |
+| `ECHO_DATABASE_URL` | `postgresql+psycopg://…/echo_dev` | PostgreSQL 连接串（驱动必须 `+psycopg`；测试固定连 `echo_test` 库，见 QUICKSTART） |
 | videos / covers / uploads / inbox | `…/videos|covers|uploads|inbox` | 视频文件 / 封面（+ `covers/thumbs/` 缩略图缓存，R-179）/ 编辑器插图 / 待入库 |
 仓库 `data/` 为空壳，不是运行时目录。
 

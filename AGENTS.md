@@ -30,7 +30,7 @@
 - [ ] 由作者/收口人在主干仓库建 worktree：`git worktree add /Users/yeah/document/project/echo-r221 -b feat/r221 main`。
 - [ ] 编号靠 git 原子抢占；若分支已存在，换号或找收口人，不要自己读最大号 +1。
 - [ ] 端口按需求编号算：`API=8000+(R mod 100)`，`WEB=3000+(R mod 100)`。开工前 `lsof` 确认空闲。
-- [ ] 数据库独立：先拷主干的 `.env`，再用 `sqlite3 ... .backup` 拷贝库到 worktree，校验表数量，最后改 `ECHO_DB_PATH` 指向自己的拷贝（绝对路径）。`ECHO_DATA_DIR` 保持共享主干。
+- [ ] 数据库独立（R-235 起为 PostgreSQL）：先拷主干的 `.env`，再把 worktree 的 `ECHO_DATABASE_URL` 指向自己的库——推荐在 PG 上为每个 worktree 建独立库（如 `echo_r221`，用 `scripts/init_test_db.sh SOURCE_URL=… TARGET_URL=postgresql+psycopg://…/echo_r221` 从 echo_dev 复制结构+数据），`.env` 里改库名即可；端口不变。`ECHO_DATA_DIR` 保持共享主干。
 - [ ] 依赖共享：前端 `node_modules` 用硬链接（`cp -al`）并删 `.vite`；后端 `.venv` 用软链。worktree 内禁止 `npm install`/`pip install`。
 
 ### 运行隔离

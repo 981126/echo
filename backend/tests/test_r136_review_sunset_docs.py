@@ -24,22 +24,14 @@ def test_review_fully_sunset():
     assert "get_radar" in names  # 赛道雷达能力保留
 
 
-def test_sunset_review_migration_drops_table_and_prompt():
-    from app.db import _migrate_sunset_review, engine
+def test_sunset_review_table_stays_dropped():
+    """R-136 复盘表已随 R-235 迁移下线（历史迁移全部删除）；若有人重新引入 review_reports 表则失败。"""
+    from sqlalchemy import inspect
 
-    with engine.begin() as conn:
-        conn.exec_driver_sql("CREATE TABLE IF NOT EXISTS review_reports (id INTEGER PRIMARY KEY)")
-        conn.exec_driver_sql(
-            "INSERT INTO ai_prompts (key, version, content, status, note, created_at)"
-            " VALUES ('review', 1, '旧复盘提示词', 'enabled', '', datetime('now'))"
-        )
-    _migrate_sunset_review()
-    _migrate_sunset_review()  # 幂等
-    with engine.begin() as conn:
-        tables = {r[0] for r in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert "review_reports" not in tables
-        left = conn.exec_driver_sql("SELECT count(*) FROM ai_prompts WHERE key='review'").fetchone()[0]
-        assert left == 0
+    from app.db import engine
+
+    inspector = inspect(engine)
+    assert "review_reports" not in set(inspector.get_table_names())
 
 
 def test_metrics_radar_available():

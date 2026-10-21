@@ -8,25 +8,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
+from conftest import ensure_schema, fresh_engine
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api import settings as settings_api
-from app.db import Base, get_db
+from app.db import get_db
 from app.models.kv import Kv
 from app.services import model_settings as ms
 
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _set_kv(db, key, value):
@@ -124,8 +123,8 @@ def test_asr_and_topics_runtime_override(db):
 
 @pytest.fixture()
 def client(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/api.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
 
     def override_db():
@@ -140,7 +139,6 @@ def client(tmp_path):
     with TestClient(app) as c:
         yield c, session
     session.close()
-    eng.dispose()
 
 
 def test_api_models_get_put(client):

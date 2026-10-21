@@ -58,9 +58,13 @@ WEB=$((3000 + N))                             # → 3021
 3. 换端口：后端 `--port 8022`。**副 worktree 换前端端口没有意义**（`vite.config.ts` 的 proxy 写死 `http://localhost:8000`），副实例一律走 §4 的「build + 自己的后端」。
 4. 端口跟编号一起在主干发放，不要现场随机挑。
 
-### 2.3 库：拷库文件 + 指向拷贝（**素材目录不拷**）
+### 2.3 库：worktree 各自独立 PG 库（**素材目录不拷**）
 
-顺序固定：**拷 `.env` → 拷库 → 校验 → 改 `ECHO_DB_PATH`**。
+> **R-235 起数据库是 PostgreSQL**，下文 SQLite 时代的「拷库文件」流程已被替代：
+> 每个 worktree 在 PG 上建自己的库（如 `echo_r221`），`.env` 只改 `ECHO_DATABASE_URL` 的库名。
+> 测试同理：pytest 固定连 `echo_test`（conftest 库名闸门）。
+
+顺序固定：**拷 `.env` → 建库并复制 → 校验 → 改 `ECHO_DATABASE_URL` 库名**。
 
 ```bash
 WT=/Users/yeah/document/project/echo-$R
@@ -68,27 +72,42 @@ WT=/Users/yeah/document/project/echo-$R
 # ① 拷主干的 .env（这一轮先别改）
 cp /Users/yeah/document/project/echo/.env "$WT/.env"
 
-# ② 拷贝库文件（~86MB）。主干 ECHO_DATA_DIR 有 21GB 素材（videos 19G + covers 387M），不拷
-mkdir -p "$WT/echo_resource"
-sqlite3 /Users/yeah/document/project/echo/echo_resource/echo.db ".backup '$WT/echo_resource/echo.db'"
+# ② 建自己的库并从 echo_dev 复制结构+数据（脚本内部用 pg_dump|psql，需要本机有 PG 客户端工具）
+SOURCE_URL="postgresql+psycopg://<同 .env 的账号密码>@yeah981.cn:15981/echo_dev" \
+TARGET_URL="postgresql+psycopg://<同 .env 的账号密码>@yeah981.cn:15981/echo_r$R" \
+  bash "$WT/scripts/init_test_db.sh"
 
-# ③ 校验拷贝是真的（防"拷到空库"：R-133 里 backup.sh 曾"成功"备份出一个 4KB 空库）
-sqlite3 "$WT/echo_resource/echo.db" "PRAGMA integrity_check; SELECT count(*) FROM sqlite_master WHERE type='table';"
-#   期望 ok + 31 张表；若是 0 张表 → 停下排查，别启动后端
+# ③ 校验复制是真的（防"复制到空库"）：表数量应与主干一致（当前 31 张 + 历史表）
+psql "postgresql://<账号密码>@yeah981.cn:15981/echo_r$R" -tAc \
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';"
 
-# ④ 只改 ECHO_DB_PATH 指向这份拷贝（ECHO_DATA_DIR 保持不动 = 继续共享主干素材）
-#    必须绝对路径：相对路径按启动 CWD（cd backend）解析 → 落到 backend/ 下，还可能越出沙箱导致 SQLite 只读
-sed -i '' -e "s|^ECHO_DB_PATH=.*|ECHO_DB_PATH=$WT/echo_resource/echo.db|" "$WT/.env"
+# ④ 只改 ECHO_DATABASE_URL 的库名（ECHO_DATA_DIR 保持不动 = 继续共享主干素材）
+sed -i '' -E "s|^ECHO_DATABASE_URL=.*|ECHO_DATABASE_URL=postgresql+psycopg://<账号密码>@yeah981.cn:15981/echo_r$R|" "$WT/.env"
 ```
 
 最终 `.env` 两行（一个共享、一个独立）：
 
 ```bash
-ECHO_DATA_DIR=/Users/yeah/document/echo_resource                             # 共享（21GB 素材）
-ECHO_DB_PATH=/Users/yeah/document/project/echo-r221/echo_resource/echo.db   # 独立（86MB 拷贝）
+ECHO_DATA_DIR=/Users/yeah/document/echo_resource                                  # 共享（21GB 素材）
+ECHO_DATABASE_URL=postgresql+psycopg://…@yeah981.cn:15981/echo_r221              # 独立（PG 库）
 ```
 
-> ⛔ **不要先改 `.env` 再拷库**：拷贝失败（路径写错/磁盘满/源库不存在）时，后端对着不存在的路径启动，`sqlite3.connect` 会**静默新建空库**，你会得到一个"看着正常、其实没数据"的环境。
+> ⛔ **不要先改 `.env` 再建库**：建库/复制失败时，后端启动会 fail-closed 直接报错（R-235 配置校验），
+> 不会悄悄给你一个空库——但仍然先校验表数量再启动，别跳过 ③。
+
+<details><summary>历史：R-235 之前（SQLite 单文件）的拷库流程，仅供参考</summary>
+
+顺序固定：**拷 `.env` → 拷库 → 校验 → 改 `ECHO_DB_PATH`**。
+
+```bash
+WT=/Users/yeah/document/project/echo-$R
+cp /Users/yeah/document/project/echo/.env "$WT/.env"
+mkdir -p "$WT/echo_resource"
+sqlite3 /Users/yeah/document/project/echo/echo_resource/echo.db ".backup '$WT/echo_resource/echo.db'"
+sqlite3 "$WT/echo_resource/echo.db" "PRAGMA integrity_check; SELECT count(*) FROM sqlite_master WHERE type='table';"
+sed -i '' -e "s|^ECHO_DB_PATH=.*|ECHO_DB_PATH=$WT/echo_resource/echo.db|" "$WT/.env"
+```
+</details>
 
 ### 2.4 依赖：硬链接 + 软链
 
@@ -136,11 +155,11 @@ ln -s ../../echo/backend/.venv "$WT/backend/.venv"
 | 资源 | 规则 |
 |---|---|
 | 端口 | §2.2 算号；开工前 `lsof` 确认空闲 |
-| 数据库 | **只拷这个**：每个 worktree 一份库文件，`ECHO_DB_PATH` 指向它（§2.3）。共用 = SQLite 写锁 + 数据互相污染 |
+| 数据库 | **只建这个**：每个 worktree 在 PG 上独立库（如 `echo_r221`），`.env` 的 `ECHO_DATABASE_URL` 改库名指向它（§2.3）。共用 = 数据互相污染 |
 | 素材目录 | **不拷**：`ECHO_DATA_DIR` 保持共享主干（21GB）。风险与处置见 §4.3 |
 | 浏览器会话 | 所有实例共用同一个 `ECHO_ACCESS_TOKEN`，前端存的是同一个 localStorage 键 `echo_v2_token` → **登录一次，各端口都有效**；反过来也意味着别拿 8021 的页面当成主干在操作 |
 | 邮件链接 | `ECHO_WEB_BASE_URL` 指向主干（默认 `http://localhost:8000`），副实例发出的邮件链接会指到主干 |
-| 备份 | **库有备份**（`scripts/backup.sh` + `schema_guard` 的 pre_upgrade 自动备份）；**素材没有备份** |
+| 备份 | **库有备份**（`scripts/backup.sh` pg_dump + deploy.sh 升级前自动备份）；**素材没有备份** |
 | 定时任务 | ⚠️ 已知行为：`setup_scheduler()` 在 `app/main.py` 无条件启动，每个后端实例都会跑每日流水线/平台同步/备份 → **起 N 个副后端 = N 份 TikHub/LLM 消耗**。目前无开关，约定：**副后端用完就停，不要长驻** |
 | 前端 dev server | **同一时刻只归一个 worktree**（proxy 写死 8000） |
 | 副 worktree 的前端验收 | 走 **build + 自己的后端**（零配置、无串台）：<br>`cd "$WT/frontend_v2" && npm run build`<br>`cd "$WT/backend" && ./.venv/bin/python -m uvicorn app.main:app --port 8021`<br>浏览器开 `http://localhost:8021/` —— 后端按**自身文件位置**托管 `frontend_v2/dist`（`app/main.py` 的 `Path(__file__).resolve().parents[2]`），只服务自己的产物 |
@@ -148,23 +167,23 @@ ln -s ../../echo/backend/.venv "$WT/backend/.venv"
 
 ### 4.2 数据库为什么必须独立
 
-`.env` 被 gitignore，新 worktree 拷过去的就是主干的**绝对路径** —— `ECHO_DB_PATH` 不改就等于所有分支共用同一个库文件。
+`.env` 被 gitignore，新 worktree 拷过去的就是主干的**绝对路径** —— `ECHO_DATABASE_URL` 不改库名就等于所有分支共用同一个 PG 库。
 
 | 情况 | 实际用的库 | 结果 |
 |---|---|---|
-| 没拷 `.env` | config 默认 `data_dir=./data`（相对启动 CWD）→ `backend/data/echo.db` | 各一份，但是**空库**（各自建表 + seed） |
-| 拷了 `.env` 但**没改 `ECHO_DB_PATH`** | `/Users/yeah/document/echo_resource/echo.db` | ❌ **所有 worktree 共用同一个库文件** |
-| 按本规则改过 | `$WT/echo_resource/echo.db` | ✅ 各自独立 |
+| 没拷 `.env` | 无 `ECHO_DATABASE_URL` → 后端启动直接报错（R-235 fail-closed） | 起不来（故意的） |
+| 拷了 `.env` 但**没改库名** | 与主干同一个 PG 库 | ❌ **所有 worktree 共用同一个库** |
+| 按本规则改过（`echo_r$R`） | PG 上各自的独立库 | ✅ 各自独立 |
 
 共用同一个库的后果：
 
-1. **SQLite 单写**：`docs/QUICKSTART.md` 明确禁止多 worker；两个后端写同一文件 → `database is locked`、长任务/同步随机失败；且各实例的 `_housekeep_job` 会互相删对方的记录。
-2. **迁移互相踩**：各分支启动都跑幂等 `_migrate_*`；A 改表时 B 启动 → `schema_guard` 报「缺列」，且**库结构被先启动的分支定型**。
-3. **数据与配置互相污染**：A 的测试草稿出现在 B 的页面；A 清数据会删掉 B 的验证数据；`app_kv` 里的**模型设置与各功能预算**是全局的，一边改预算影响另一边。
+1. **数据互相污染**：A 的测试草稿出现在 B 的页面；A 清数据会删掉 B 的验证数据；`app_kv` 里的**模型设置与各功能预算**是全局的，一边改预算影响另一边。
+2. **任务互相删**：各实例的 `_housekeep_job` 会按保留期删通知/任务记录，删到对方的。
+3. **结构定型冲突**：A 加了字段改了线上库，B 的旧代码启动会撞上未知列。
 
-**拷贝位置与文件名**：`$WT/echo_resource/echo.db`（放在 worktree 内，因为 ① 沙箱只允许写自己的会话工作区，写外面会变成 SQLite 只读；② `.gitignore` 已忽略 `echo_resource/`，不会被误提交）。想一眼看出是谁的，可以叫 `echo-r221.db`（同步改 `ECHO_DB_PATH`；SQLite 的 `-wal`/`-shm` 会同名伴随）。
+**建库方式**：`scripts/init_test_db.sh` 从 echo_dev 复制结构+数据到自己的库（见 §2.3）；库在 PG 实例上，不占 worktree 磁盘。
 
-**用不用拷真实库**：纯后端逻辑验证用**空库**最省（启动自动 `create_all` + seed 默认提示词）；要验真实数据渲染（素材库、草稿列表、平台统计）才拷。10 个 worktree ≈ 860MB。想「只读共享」同一个库不可行——启动必然要写（迁移、seed、`app_kv`、任务表）。
+**用不用拷真实数据**：纯后端逻辑验证用**空库**最省（启动自动 `create_all` + seed 默认提示词）；要验真实数据渲染（素材库、草稿列表、平台统计）才从 echo_dev 复制。想「只读共享」同一个库不可行——启动必然要写（seed、`app_kv`、任务表）。
 
 ### 4.3 素材目录是共享的（刻意选择）
 
@@ -220,7 +239,7 @@ lsof -nP -iTCP:$WEB -sTCP:LISTEN || echo "前端端口已释放"
 ### 6.3 删 worktree
 
 ```bash
-sqlite3 "$WT/echo_resource/echo.db" ".backup /Users/yeah/document/echo_resource/verify_$R.db"   # 可选：留档验证库
+bash scripts/backup.sh                                       # 可选：留档验证库（pg_dump 到 data/backups/）
 git worktree remove "$WT"                      # 被拒时先看 git -C "$WT" status --short 再决定 --force
 git worktree list                              # 应只剩主干
 git branch -d feat/$R                          # 只删本地分支；远程分支保留
@@ -259,10 +278,10 @@ R=r221; N=21; WT=/Users/yeah/document/project/echo-$R; API=$((8000+N)); WEB=$((3
 pwd                                                          # ① 我在自己的 worktree 里吗
 git branch --show-current                                    # ② 分支名 = feat/rxxx 吗
 lsof -nP -iTCP:$API -sTCP:LISTEN                             # ③ 我的端口空着吗
-sqlite3 "$WT/echo_resource/echo.db" "SELECT count(*) FROM sqlite_master WHERE type='table';"   # ④ 库是拷贝来的、非空（~31 张表）
-grep -E '^ECHO_(DATA_DIR|DB_PATH)=' .env                     # ⑤ DB_PATH 指向自己的拷贝（绝对路径）；DATA_DIR 仍是主干共享
+psql "$ECHO_DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';"   # ④ 自己的库非空（~31 张表）
+grep -E '^ECHO_(DATA_DIR|DATABASE_URL)=' .env               # ⑤ DATABASE_URL 指向自己的库（echo_r$R）；DATA_DIR 仍是主干共享
 git log --oneline -1 main                                    # ⑥ 主干有新提交吗（有就先 rebase）
-# 后端起来后：lsof -p <后端PID> | grep echo.db                # ⑦ 确认进程连的是拷贝，不是主干的库
+# 后端起来后看启动日志的数据库行，或用 psql 确认连的是 echo_r$R，不是主干的库
 ```
 
 **收尾**
@@ -274,7 +293,7 @@ git log --oneline -1 main                                    # ⑥ 主干有新�
 - [ ] 需要就留档验证库（§6.3）
 - [ ] `git worktree remove` + `git branch -d` + `git worktree list` 只剩主干
 - [ ] 主干 `git pull --ff-only`；lock 变了才 `npm ci`
-- [ ] 主干起服务 → 日志两行（`echo 后端启动完成`、`schema_guard: 结构自检通过`）+ health 三项
+- [ ] 主干起服务 → 日志「echo 后端启动完成」+ health 三项（结构自检在 deploy.sh ⑦）
 
 ---
 

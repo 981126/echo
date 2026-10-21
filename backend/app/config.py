@@ -159,10 +159,12 @@ class Settings(BaseSettings):
         "taobao.com,tmall.com,jd.com,pinduoduo.com,1688.com"
     )
 
-    # 路径：未显式配置时由 data_dir 统一派生（env 可用 ECHO_DB_PATH / ECHO_*_DIR 覆盖）
+    # 数据库（R-235）：PostgreSQL 连接串，只从 .env 读（ECHO_DATABASE_URL），无默认值——
+    # 缺失即启动报错（fail-closed）。例：postgresql+psycopg://user:pass@host:5432/echo_dev
+    database_url: str = ""
+    # 路径：未显式配置时由 data_dir 统一派生（env 可用 ECHO_*_DIR 覆盖）
     _UNSET = Path("@unset@")
     data_dir: Path = Path("./data")
-    db_path: Path = _UNSET
     inbox_dir: Path = _UNSET
     videos_dir: Path = _UNSET
     covers_dir: Path = _UNSET
@@ -170,9 +172,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_paths(self) -> "Settings":
+        if not self.database_url:
+            raise ValueError(
+                "未配置数据库连接串：请在 .env 设置 ECHO_DATABASE_URL（如 postgresql+psycopg://user:pass@host:5432/echo_dev）"
+            )
         base = self.data_dir
-        if self.db_path == self._UNSET:
-            self.db_path = base / "echo.db"
         if self.inbox_dir == self._UNSET:
             self.inbox_dir = base / "inbox"
         if self.videos_dir == self._UNSET:
@@ -184,10 +188,6 @@ class Settings(BaseSettings):
         for key, allowed in _MODE_CHOICES.items():
             setattr(self, key, normalize_mode(getattr(self, key), allowed, _MODE_DEFAULTS[key]))
         return self
-
-    @property
-    def sqlalchemy_url(self) -> str:
-        return f"sqlite:///{self.db_path}"
 
 
 @lru_cache

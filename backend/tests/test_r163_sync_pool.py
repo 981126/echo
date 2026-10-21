@@ -17,10 +17,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db import Base
 from app.models.task import BackgroundTask
 from app.services import sync_pool
 from app.services.platform import tikhub
@@ -29,11 +28,10 @@ from app.services.platform.budget import _charge, get_budget, set_budget
 
 @pytest.fixture()
 def session_factory_local(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/p.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     factory = sessionmaker(bind=eng, autoflush=False, autocommit=False)
     yield factory
-    eng.dispose()
 
 
 def test_token_bucket_enforces_rate_and_allows_burst():

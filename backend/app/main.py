@@ -23,18 +23,7 @@ log = get_logger("main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()  # R-133：全后端此前零日志，失败不可观测
-    # R-145：启动即自动升级，所以升级前先自动备份（有待应用的结构变更时才做，失败不阻断启动）
-    from .core import schema_guard
-    from .db import engine
-
-    pending = schema_guard.pending_upgrade(engine)
-    if pending:
-        changed = list(pending.get("missing_tables") or []) + list(pending.get("missing_columns") or [])
-        log.warning("检测到待应用的结构变更（%s），升级前先自动备份", "、".join(changed) or "未知")
-        schema_guard.auto_backup_before_upgrade(engine)
-    init_db()
-    # R-144 B：结构自检（模型声明的列 vs 实际库）——缺列时日志 + 站内通知，绝不阻塞启动
-    schema_guard.run_startup_check(engine)
+    init_db()  # R-235：PG create_all 幂等建全量结构（索引/视图/提示词 seed）
     mark_interrupted_tasks_on_startup()  # R-089：重启后清理遗留 running 任务
     # R-208：一次性按规则清理历史积压的人设待确认建议（Kv 标记保证只跑一次，后台线程）
     from .services.ingest import maybe_auto_confirm_backlog_on_startup

@@ -1,5 +1,17 @@
 # 变更记录
 
+## [R-235] 2026-10-21 — SQLite 全面迁移 PostgreSQL：连接串 / 方言改写 / 测试库 / 部署备份 ✅
+
+> 作者：我已经将数据迁移到pgsql（yeah981.cn:15981/echo_dev），将项目中的 sqlite 代码改为 pgsql，移除 sqlite 相关代码。
+
+- **连接（fail-closed）**：新增 `ECHO_DATABASE_URL`（只从 .env 读、无默认，缺失启动报错；驱动写法 `postgresql+psycopg://`）；`config.py` 删除 `db_path/ECHO_DB_PATH` 派生；`db.py` 改 psycopg v3 引擎（pool_pre_ping/recycle），WAL/busy_timeout 等 SQLite 专用配置全删。
+- **历史迁移全删**：`db.py` 里 ~25 个幂等 `_migrate_*` 与一次性数据修复（UTC+8、回填、去重…）全部删除，`init_db` 只留 create_all + 索引 + 绑定唯一部分索引 + 提示词 seed + 分析视图；`schema_guard.py`（R-144）与 `schema_migrations` 表/模型随迁移记账一起下线，main.py 启动流程简化。
+- **方言改写**：`chat_sql.py` 从 sqlite3 只读连接改为 SQLAlchemy 引擎 + 服务端 `default_transaction_read_only` + `statement_timeout` 双保险；`scheduler.py` 清理 SQL 的 `datetime('now','-N days')` 改为 Python 侧算好截止点参数化传入。
+- **测试**：66 个测试文件全部改为 `conftest.fresh_engine()`（共享引擎 + 每测试 `TRUNCATE ... CASCADE` 清全表，保持空库语义）；conftest 加**库名安全闸门**——目标库不是 `echo_test` 直接拒绝启动；新增 `scripts/init_test_db.sh` 从 echo_dev 复制结构+数据到 echo_test；删除 `test_r144_schema_guard.py` 与 `fixtures/schema_baseline.sql`。
+- **部署**：`scripts/backup.sh` 由 SQLite 热备改 `pg_dump --format=custom`（连通性预检 + 空 dump 校验）；`deploy.sh` 去掉 echo.db 检查、结构自检改为「模型表 vs 实际库」比对；`release.sh` 打包校验去掉 echo.db；`docker-compose.yml` 去掉 `ECHO_DB_PATH`（数据库不在卷里，容器直连 NAS 宿主机 PG）。
+- **文档**：ARCHITECTURE/DATABASE/QUICKSTART/DESIGN/OPS-PARALLEL/PRD/AGENTS.md 同步（OPS-PARALLEL §2.3/§4.2 改为「每 worktree 独立 PG 库」，SQLite 流程收进历史折叠块）。
+- **验证**：pytest 全量绿（1 个 pg_dump 用例本机无 PG 客户端跳过）；后端连 echo_dev 冒烟待 verify 后执行。
+
 ## [R-234] 2026-10-18 — NAS 一键部署脚本：git 快进 → 备份 → 构建 → 上线 → 健康/结构自检 ✅
 
 > 作者：我需要一个脚本，在 nas 执行后会自动拉取本项目 git 最新代码，然后前后端打包成 docker 部署。

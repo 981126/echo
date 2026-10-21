@@ -400,7 +400,10 @@ def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -
     if name == "search_drafts":
         return _search_drafts(db, args)
     if name == "sql_query":
-        return chat_sql.run(_db_path_of(db), str(args.get("sql") or ""))
+        bind = db.get_bind()
+        url = bind.url if hasattr(bind, "url") else bind.engine.url
+        # 注意：str(URL) 会把密码渲染成 ***，PG 认证必然失败 → 必须显式保留密码
+        return chat_sql.run(url.render_as_string(hide_password=False), str(args.get("sql") or ""))
     if name == "get_content_opportunities":
         return _get_content_opportunities(db, args)
     # R-147 P2 / R-208：写操作——安全操作（生成草稿/回炉/可逆改状态）免确认直接执行，
@@ -441,18 +444,6 @@ def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -
             "note": "已生成待确认操作：请在回答里告诉作者这一步做什么，并请他点击「确认执行」后才会真正开始。",
         }
     return {"error": f"未知工具: {name}"}
-
-
-def _db_path_of(db: Session):
-    """取当前会话所连的 SQLite 文件路径（比读全局 settings 更准，也便于测试指向别的库）。"""
-    bind = db.get_bind()
-    url = getattr(bind, "url", None)
-    path = getattr(url, "database", None)
-    if path:
-        return path
-    from ..config import get_settings
-
-    return get_settings().db_path
 
 
 def _schema_section(db: Session) -> str:

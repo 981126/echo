@@ -19,12 +19,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.chat import _last_history
-from app.db import Base
-from app.models.chat import ChatMessage
+from app.models.chat import ChatConversation, ChatMessage
 from app.models.draft import Draft
 from app.models.video import Video
 from app.services import chat_service
@@ -33,12 +32,11 @@ from app.services.chat_service import ChatService
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/chat.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _videos(db, n: int, *, platform: str = "douyin", status: str = "published", tag: str = "") -> None:
@@ -174,6 +172,9 @@ def test_contract_note_tells_optimizer_not_to_duplicate():
 
 
 def test_legacy_history_is_scoped_to_null_conversation(db):
+    # PG 会校验 chat_messages.conversation_id 外键：会话行必须先存在
+    db.add(ChatConversation(id=7, title="别的会话"))
+    db.commit()
     db.add(ChatMessage(conversation_id=None, role="user", content="遗留线程问"))
     db.add(ChatMessage(conversation_id=None, role="assistant", content="遗留线程答"))
     db.add(ChatMessage(conversation_id=7, role="user", content="别的会话问"))
@@ -186,6 +187,8 @@ def test_legacy_history_is_scoped_to_null_conversation(db):
 
 
 def test_history_is_chronological(db):
+    db.add(ChatConversation(id=1, title="会话1"))
+    db.commit()
     for i in range(4):
         db.add(ChatMessage(conversation_id=1, role="user" if i % 2 == 0 else "assistant", content=f"m{i}"))
     db.commit()

@@ -52,7 +52,7 @@ NAS 一键部署：拉取最新代码 → 备份 → 构建前端+后端镜像 �
   --dry-run         只做检查并打印将执行的命令，不拉取/构建/启动
   -h, --help        显示本帮助
 
-首次部署没有 echo.db 时会自动跳过备份；之后每次升级前都会先备份。
+首次部署（无旧容器/镜像）会自动跳过备份；之后每次升级前都会先在容器内 pg_dump 备份。
 日志：data/logs/deploy-*.log（保留最近 30 份）
 USAGE
 }
@@ -207,16 +207,15 @@ else
 fi
 
 DATA_DIR_ENV="$(env_get ECHO_DATA_DIR)"
-DB_PATH_ENV="$(env_get ECHO_DB_PATH)"
+DB_URL_ENV="$(env_get ECHO_DATABASE_URL)"
 # 容器 WORKDIR=/app，所以 ./data 也等价于 /app/data；只对真正像宿主机路径的值告警
 case "$DATA_DIR_ENV" in
   ""|"/app/data"|"/app/data/"|"./data"|"./data/"|"data"|"data/") ;;
   *) warn ".env 里 ECHO_DATA_DIR=${DATA_DIR_ENV}；compose 会强制为 /app/data，宿主机目录请用 ECHO_HOST_DATA_DIR" ;;
 esac
-case "$DB_PATH_ENV" in
-  ""|"/app/data/"*|"./data/"*|"data/"*) ;;
-  *) warn ".env 里 ECHO_DB_PATH=${DB_PATH_ENV}；compose 会强制为 /app/data/echo.db" ;;
-esac
+if [ -z "$DB_URL_ENV" ]; then
+  warn ".env 里没有 ECHO_DATABASE_URL；后端将无法启动（R-235 起数据库必填）"
+fi
 TOKEN="$(env_get ECHO_ACCESS_TOKEN)"
 if [ -z "$TOKEN" ] || [ "$TOKEN" = "change-me" ]; then
   warn "ECHO_ACCESS_TOKEN 仍是空值/change-me，强烈建议改成强口令"
@@ -286,15 +285,9 @@ else
 fi
 
 # ---------- ③ 备份 ----------
-step "③ 备份数据库"
-DB_HOST="$HOST_DATA_DIR/echo.db"
-if [ ! -s "$DB_HOST" ] && [ -s "$ROOT/data/echo.db" ] && [ "$HOST_DATA_DIR" != "$ROOT/data" ]; then
-  warn "当前数据目录没有 echo.db，但仓库 ./data/echo.db 存在；确认 ECHO_HOST_DATA_DIR 是否改错（改错会像换了一个空库）"
-fi
+step "③ 备份数据库（pg_dump）"
 if [ "$SKIP_BACKUP" = 1 ]; then
   info "已跳过（--skip-backup）"
-elif [ ! -s "$DB_HOST" ]; then
-  info "首次部署（$DB_HOST 不存在），跳过备份"
 elif [ "$DRY_RUN" = 1 ]; then
   info "[dry-run] 将在容器内执行 scripts/backup.sh"
 else
@@ -310,7 +303,7 @@ else
       die "备份失败，已停止部署（未构建/未重启）"
     fi
   else
-    warn "容器/镜像都不存在，无法备份；继续部署（请确认 $DB_HOST 不是重要库）"
+    warn "容器/镜像都不存在，跳过备份（首次部署）"
   fi
 fi
 
@@ -374,15 +367,16 @@ if [ "$DRY_RUN" = 1 ]; then
 else
   if ! "${COMPOSE[@]}" exec -T "$CONTAINER_NAME" python - <<'PY'
 from sqlalchemy import inspect
-from backend.app.db import engine
-from backend.app.core import schema_guard
 
-miss = schema_guard.missing_schema(engine)
-st = schema_guard.migration_status(engine)
-tables = len(inspect(engine).get_table_names())
-print(f"  表数量={tables} 已应用迁移={st['applied']} 最新={st['latest']} 结构一致={miss['ok']}")
-if not miss["ok"]:
-    raise SystemExit(f"结构不一致：{miss}")
+from backend.app.db import Base, engine
+
+actual = set(inspect(engine).get_table_names())
+expected = set(Base.metadata.tables)
+missing = sorted(expected - actual)
+tables = len(actual)
+print(f"  表数量={tables} 模型表={len(expected)} 缺表={missing or '无'}")
+if not tables or missing:
+    raise SystemExit(f"结构不一致：缺表 {missing}")
 PY
   then
     die "结构自检失败（服务已启动，但库结构与代码不一致）。请查看上面的输出/容器日志"

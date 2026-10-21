@@ -82,17 +82,24 @@ def _platform_sync_job() -> None:
 
 
 def _housekeep_job() -> None:
-    """每日清理（R-061）：通知/任务/同步记录/平台统计按保留期删除，防库无限膨胀。"""
+    """每日清理（R-061）：通知/任务/同步记录/平台统计按保留期删除，防库无限膨胀。
+
+    R-235：截止时间在 Python 侧算好（naive 北京时间，与库内时间语义一致），再参数化传入。
+    """
+    from datetime import timedelta
+
+    from .core.timeutil import now
+
     db = SessionLocal()
     try:
         rules = [
-            ("DELETE FROM notifications WHERE created_at < datetime('now','-90 days')",),
-            ("DELETE FROM background_tasks WHERE created_at < datetime('now','-30 days')",),
-            ("DELETE FROM sync_jobs WHERE started_at IS NOT NULL AND started_at < datetime('now','-60 days')",),
-            ("DELETE FROM platform_post_stats WHERE stat_date < date('now','-400 days')",),
+            ("DELETE FROM notifications WHERE created_at < :cutoff", now() - timedelta(days=90)),
+            ("DELETE FROM background_tasks WHERE created_at < :cutoff", now() - timedelta(days=30)),
+            ("DELETE FROM sync_jobs WHERE started_at IS NOT NULL AND started_at < :cutoff", now() - timedelta(days=60)),
+            ("DELETE FROM platform_post_stats WHERE stat_date < :cutoff", (now() - timedelta(days=400)).date().isoformat()),
         ]
-        for (sql,) in rules:
-            db.execute(text(sql))
+        for sql, cutoff in rules:
+            db.execute(text(sql), {"cutoff": cutoff})
         db.commit()
     except Exception as exc:  # noqa: BLE001 清理失败要留痕（R-133）
         db.rollback()

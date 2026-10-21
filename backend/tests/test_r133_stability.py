@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -13,11 +12,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.pipeline import is_stale
-from app.db import Base
 from app.models.pipeline import PipelineRun
 from app.services import pipeline as pipeline_mod
 from app.services.pipeline import PipelineError, mark_stale_pipeline_runs_on_startup, run_daily_pipeline
@@ -25,12 +23,11 @@ from app.services.pipeline import PipelineError, mark_stale_pipeline_runs_on_sta
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def test_is_stale_boundaries():
@@ -95,27 +92,26 @@ def test_pipeline_stale_running_is_rerun(db, monkeypatch):
     assert run.generated_count == 0
 
 
-# ---------- 备份脚本（R-133 核心修复） ----------
+# ---------- 备份脚本（R-133 核心修复，R-235 改 pg_dump） ----------
 
 
-def test_backup_script_uses_env_db_path_and_validates(tmp_path):
+@pytest.mark.skipif(shutil.which("pg_dump") is None, reason="本机未安装 pg_dump（PG 客户端工具）")
+def test_backup_script_uses_env_db_url_and_validates(tmp_path):
     repo = Path(__file__).resolve().parents[2]
     (tmp_path / "scripts").mkdir()
     shutil.copy(repo / "scripts" / "backup.sh", tmp_path / "scripts" / "backup.sh")
     (tmp_path / "docs").mkdir()
     (tmp_path / "requirements").mkdir()
 
-    real_db = tmp_path / "echo_resource.db"
-    con = sqlite3.connect(real_db)
-    con.execute("CREATE TABLE demo(id INTEGER)")
-    con.execute("INSERT INTO demo VALUES (1)")
-    con.commit()
-    con.close()
-    (tmp_path / ".env").write_text(f"ECHO_DB_PATH={real_db}\n", encoding="utf-8")
+    from app.config import get_settings
 
-    # R-144 A：backup.sh 现在「环境变量优先、其次 .env」。本用例测的是「读 .env 那条路径」，
-    # 所以显式清空环境变量（pytest 进程本身带着 ECHO_DB_PATH，否则会盖掉 .env）。
-    env = {**os.environ, "ECHO_DB_PATH": "", "ECHO_DATA_DIR": ""}
+    db_url = get_settings().database_url  # 指向 conftest 闸门允许的 echo_test
+
+    # backup.sh 现在「环境变量优先、其次 .env」。本用例测 .env 路径，
+    # 所以显式清空继承来的 ECHO_DATABASE_URL。
+    env = {**os.environ, "ECHO_DATABASE_URL": ""}
+    (tmp_path / ".env").write_text(f'ECHO_DATABASE_URL="{db_url}"\n', encoding="utf-8")
+
     proc = subprocess.run(
         ["bash", str(tmp_path / "scripts" / "backup.sh")],
         capture_output=True,
@@ -123,24 +119,37 @@ def test_backup_script_uses_env_db_path_and_validates(tmp_path):
         cwd=tmp_path,
         env=env,
     )
-    assert proc.returncode == 0, proc.stderr
-    backups = list((tmp_path / "data" / "backups").glob("*/echo.db"))
-    assert backups, proc.stdout
-    assert backups[0].stat().st_size > 0
-    chk = sqlite3.connect(backups[0])
-    try:
-        assert chk.execute("SELECT count(*) FROM demo").fetchone()[0] == 1
-    finally:
-        chk.close()
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    dumps = list((tmp_path / "data" / "backups").glob("*/echo.dump"))
+    assert dumps, proc.stdout
+    assert dumps[0].stat().st_size > 0
 
-    # 源库缺失 → 明确失败（而不是静默新建空库）
-    real_db.unlink()
+    # 坏连接串 → 明确失败（而不是静默产出空备份）
+    (tmp_path / ".env").write_text('ECHO_DATABASE_URL="postgresql+psycopg://bad:b@d@127.0.0.1:1/none"\n', encoding="utf-8")
     proc2 = subprocess.run(
         ["bash", str(tmp_path / "scripts" / "backup.sh")],
         capture_output=True,
         text=True,
         cwd=tmp_path,
-        env=env,  # 同上：必须清掉继承来的 ECHO_DB_PATH，否则测的是另一个库
+        env=env,
     )
     assert proc2.returncode != 0
     assert "备份失败" in (proc2.stderr + proc2.stdout)
+
+
+def test_backup_script_fails_without_db_url(tmp_path):
+    """未配置 ECHO_DATABASE_URL 时备份脚本非零退出并提示（R-235 fail-closed）。"""
+    repo = Path(__file__).resolve().parents[2]
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(repo / "scripts" / "backup.sh", tmp_path / "scripts" / "backup.sh")
+    env = {**os.environ, "ECHO_DATABASE_URL": ""}
+    proc = subprocess.run(
+        ["bash", str(tmp_path / "scripts" / "backup.sh")],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
+    )
+    assert proc.returncode != 0
+    assert "ECHO_DATABASE_URL" in (proc.stderr + proc.stdout)
+

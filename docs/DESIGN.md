@@ -13,12 +13,18 @@
 ### backend/app/config.py
 - pydantic-settings，env 前缀 `ECHO_`，读取根目录 `.env`（`env_file=(".env","../.env")`，从 backend 启动时解析项目根）。
 - `normalize_mode(value, allowed, default)`：`TIKHUB_MODE/HOT_SOURCE_MODE/ASR_MODE` 先按 `#` 剥离行尾注释再 trim/lower，非法值**抛错**（R-068）。取值：`tikhub_mode ∈ mock|real`、`hot_source_mode ∈ mock|real`、`asr_mode ∈ mock|aliyun|siliconflow|tencent`（R-108/R-200）。
-- 路径：未显式给 `ECHO_DB_PATH/*_DIR` 时由 `ECHO_DATA_DIR` 派生（db=数据根/echo.db，inbox/videos/covers/uploads 同名子目录）。
+- 数据库：`ECHO_DATABASE_URL` 只从 .env 读（无默认、缺失启动报错；驱动 `postgresql+psycopg://`）。路径：未显式给 `ECHO_*_DIR` 时由 `ECHO_DATA_DIR` 派生（inbox/videos/covers/uploads 同名子目录）。
 - `get_settings()` lru_cache：改 `.env` 需重启进程。
 
-### backend/app/db.py
-- `Base.metadata.create_all` → `_ensure_indexes/_ensure_binding_integrity` → 各 `_migrate_*`（幂等补列/迁移）→ `ensure_defaults`（提示词 v1 种子）→ 时区迁移标记。
-- 迁移函数：`_migrate_videos`（platforms/main_topics/cover_path/creator_id/platform_post_id/work_id/ad_price 补列与单值转 JSON）、`_migrate_creator_scope`（work_id/tags/is_ad/ad_price/creator_id、本地绑定唯一索引、videos↔posts 反向补绑）、`_migrate_account_avatars`、`_migrate_feedback_dims`、`_migrate_chat`（conversation_id 归属）、`_migrate_comment_likes`（R-067 likes）、`_migrate_sync_progress`（R-070 done/total/note）、`_fix_app_utc_columns`/`_fix_platform_timezone`（历史 +8h 一次性）。
+### backend/app/db.py（R-235 起）
+- `Base.metadata.create_all` → `_ensure_indexes`（补索引，`create_all` 对已存在的表整个跳过，所以索引要单独补）
+  → `_ensure_binding_unique_index`（平台作品↔本地素材绑定唯一部分索引，R-061）→ `ensure_defaults`（提示词 v1 种子）。
+  - **注意**：`create_all` **不会给已存在的表补列** —— 往模型加字段必须同步对线上库执行 `ALTER TABLE`
+    （PG 无启动补列；历史 `_migrate_*` 与 `schema_guard` 记账已随 R-235 SQLite 下线删除）。
+  - **启动顺序（R-235）**：`init_db()`（create_all + 索引 + 分析视图 + seed）。新表自动建；字段变更靠
+    发布前手工 `ALTER TABLE`（runbook 见 QUICKSTART）。升级前备份由 `scripts/deploy.sh` 在构建前执行
+    （容器内 `scripts/backup.sh` → pg_dump，失败即中止部署）。
+  - 分析视图（R-147）：`core/analytics_views.py` 每次启动 DROP+CREATE 幂等重建，是 AI 对话 `sql_query` 的唯一白名单查询面。
 
 ## 1. API 层（backend/app/api/）
 | 文件 | 前缀 | 职责 |
@@ -88,19 +94,6 @@
   另外 `reply()` 会把**程序固定**的 `TOOL_DATA_RULES`（数量只认 total、不许编造、引用用真实标题/id）
   追加在系统消息末尾；它不落在 `ai_prompts` 里，所以「提示词优化」改不到 —— 与 R-129 的
   「可优化段 + 程序固定契约段」同一思路。新增工具时照这个模式走（有契约测试兜住）。
-- **库结构与增量升级（R-144）**：结构事实源是 `backend/app/models/*.py`；启动时 `init_db()` 执行
-  `create_all`（建缺失的表）+ `_ensure_indexes()`（补索引，`create_all` 对已存在的表整个跳过，所以索引要单独补）
-  + 24 个幂等 `_migrate_*`（`PRAGMA table_info` 判存在 → `ALTER TABLE ADD COLUMN`，新列 `NOT NULL` 必须带 `DEFAULT`）
-  + `ensure_defaults`（seed 默认提示词）。
-  - **注意**：`create_all` **不会给已存在的表补列** —— 所以「往模型加字段」必须手写迁移，否则线上 `no such column`。
-  - **启动顺序（R-145）**：`pending_upgrade()` 判断是否有待应用变更（库文件不存在=全新安装→跳过；结构已最新→跳过）
-    → 有变更则 `auto_backup_before_upgrade()` 先备份到 `data/backups/pre_upgrade/<时间戳>.db`（SQLite backup API +
-    `integrity_check`，保留 5 份，失败只告警不阻断）→ `init_db()` 升级 → 结构自检。这样「打包上去、启动就好」才安全可回滚。
-  - `core/schema_guard.py`：① `missing_schema(bind)` 把模型声明的表/列与实际库对一遍；启动时 `run_startup_check()`
-    跑一次，缺了就日志 error + 站内通知 + 落 `app_kv`（**绝不阻塞启动**）；② 迁移记账 `record_migration` / `migration_status`，
-    表 `schema_migrations`（首次写基线 `baseline_pre_r144`），启动日志打印「库结构版本」。
-  - 测试护栏：`tests/fixtures/schema_baseline.sql` 是生产库**结构快照**，`tests/test_r144_schema_guard.py`
-    用它模拟老库跑 `init_db()` 并断言「模型每一列都存在」—— 治「本地测试全用全新库，漏写迁移 100% 绿」。
 - `notify.py`（R-141）：`mail_config_problem(settings)` 是邮件配置的唯一体检入口（缺失 / 非 ASCII 占位符 / 非法邮箱 → 可读原因）；`_send` 把配置非法与 SMTP 异常都收敛成「log + 返回 False」，中文主题用 `Header(...,'utf-8').encode()` 做 RFC2047 编码，正文用 `msg.as_bytes()` 发送。因此邮件是**次要通道**：`run_daily_pipeline` 只在稿子生成失败时才置 failed。
   - **测试侧硬隔离（R-221）**：邮件是唯一「测试会打到真实外部世界」的通道，而 `env_file=(".env","../.env")` 会让 pytest（CWD=`backend`）读到仓库根 `.env` 的真实 SMTP 配置——`test_r208_daily_best.py` 曾因此把夹具稿（选题B / B 的口播稿正文）当真邮件发给作者。现在 `tests/conftest.py` 导入 app 前清空 `ECHO_SMTP_*`/`ECHO_MAIL_TO`（环境变量优先于 `.env` → `mail_config_problem()` 必然拦下），并用 autouse fixture 给 `smtplib.SMTP_SSL` 装 tripwire（抛 `RealMailAttempted(BaseException)`，`_send` 的 `except Exception` 吞不掉）；回归见 `tests/test_r221_mail_isolation.py`。测试里要断言推送内容就用 spy（`monkeypatch pl.send_daily_best`），**不要依赖环境配置**。
 - `platform_sync.py` 的灵感池入池（R-140）：`pool_ideas_from_comments(db, post, comments, *, account=None, per_post=None)` 是「评论 → 选题池」的**唯一实现**——`_collect_comments()`（全量/每周，非队列）与 `sync_post_comments()`（daily 逐素材队列 / 单帖）都调用它。限量：单帖 `ECHO_POOL_IDEAS_PER_POST`（默认 8，按点赞降序）、单博主每天 `ECHO_POOL_IDEAS_PER_DAY`（默认 40，`0`=不限）；保留「标题 ≥4 字」、按 `(source,title,snapshot_date)` 去重、重复点赞取大。`_pool_quota()` 负责当天剩余配额。同步说明与 payload 汇报 `pool_ideas`（灵感池新增 N 条）。
@@ -194,7 +187,7 @@
 - 作品：`(platform, platform_post_id)` 唯一约束 + `_ensure_post` 先查后建/更新（含 title/cover/publish_time/raw/tags/cover_path）。
 - 指标：`(post_id, stat_date)` 唯一 upsert（当天多次同步覆盖成最新，历史保留）。
 - 评论：`_upsert_comments` 按 post_id+text 去重、点赞保留更高值、**按点赞降序取 Top50**（R-067）。
-- 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；R-222 新增同 job_id 进度**防抖累计**（每 2s / 阶段关键词 / 完成时 flush），显著降低 SQLite 写锁竞争。`GET /api/platform/jobs` 输出进度供前端轮询（R-161：可选 `status` 过滤，前端只拉 `status=running`，避免历史 job 挤占运行中进度）。
+- 进度：`sync_jobs.progress_done/progress_total/progress_note`，`_job_progress` 用 SQL 原子累加（R-070）；R-222 新增同 job_id 进度**防抖累计**（每 2s / 阶段关键词 / 完成时 flush），显著降低数据库写竞争。`GET /api/platform/jobs` 输出进度供前端轮询（R-161：可选 `status` 过滤，前端只拉 `status=running`，避免历史 job 挤占运行中进度）。
 
 ### 编排（run_sync）
 - 入口：手动（博主页 全量/前15条/对标单账号「同步」/单账号/当前主博主「同步所有博主前15条」）、定时（06:00/17:00 两轮 `run_daily_sync_all`：主博主+全部对标统一 daily 带视频下载转写，R-109）、单条（posts/videos/works 同步）。
@@ -423,7 +416,7 @@
 - **易读**：统一风格（Python: ruff；前端: ESLint/Prettier）+ 类型标注 + 小函数 + 清晰命名。
 - **可靠**：测试覆盖（pytest + mock，离线可跑）+ 统一异常/重试/降级 + 日志 + 失败告警 + 备份。
 - **扩展**：适配器模式；分层依赖方向 `api → services → models`，不反向；接口契约稳定（Pydantic）。
-- **性能**：异步 IO（第三方请求用 httpx）；SQLite 索引；分页；长任务后台线程不阻塞 UI；前端按需加载。
+- **性能**：异步 IO（第三方请求用 httpx）；数据库索引；分页；长任务后台线程不阻塞 UI；前端按需加载。
 
 ### 9.2 表现力（R-175 起强制）
 动效不是装饰而是必备——新页面/新交互「该有的动画不能省」，且必须美观流畅、不闪、不跳。统一用 `frontend_v2/src/lib/motion.ts` 的动效令牌；切换类动画禁止从 `opacity: 0` 起步，收口必须落到 `opacity 1 / transform none`。详见 §8。

@@ -10,11 +10,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core import thumbs
-from app.db import Base
 from app.models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from app.models.video import Video
 from app.models.work import Work
@@ -24,12 +23,11 @@ from app.services.library_service import CardFilters
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _dt(value: str) -> datetime:

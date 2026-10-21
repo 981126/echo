@@ -8,10 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import create_engine
+from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db import Base
 from app.models.platform import Creator, CreatorAccount, CreatorAccountSnapshot, PlatformPost, SyncJob
 from app.models.hot_topic import TopicIdea
 from app.services.creator_service import creator_public_meta, get_current_creator, switch_current
@@ -22,12 +21,11 @@ from app.services.platform_sync import get_budget, run_sync, set_budget
 
 @pytest.fixture()
 def db(tmp_path):
-    eng = create_engine(f"sqlite:///{tmp_path}/t.db", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=eng)
+    eng = fresh_engine()
+    ensure_schema(eng)
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     yield session
     session.close()
-    eng.dispose()
 
 
 def _seed_owner(db):
@@ -409,6 +407,16 @@ def test_daily_candidates_compose_three_slots(db, monkeypatch):
 
 # ---------- R-077：同步数据后媒体补齐（缺视频下载 / 缺转写自动转写） ----------
 
+def _owner_id(db) -> int:
+    """取（必要时创建）主博主 —— PG 会校验 videos.creator_id 外键，不能像 SQLite 那样写孤儿行。"""
+    c = db.query(Creator).filter(Creator.kind == "owner").first()
+    if c is None:
+        c = Creator(kind="owner", name="我", is_current=True)
+        db.add(c)
+        db.commit()
+    return c.id
+
+
 def _mk_video_file(db, name="已有素材.mp4"):
     from app.config import get_settings
     from app.models.video import Video
@@ -416,7 +424,7 @@ def _mk_video_file(db, name="已有素材.mp4"):
     settings = get_settings()
     settings.videos_dir.mkdir(parents=True, exist_ok=True)
     (settings.videos_dir / name).write_bytes(b"fake-video")
-    v = Video(filename=name, title="已有", creator_id=1)
+    v = Video(filename=name, title="已有", creator_id=_owner_id(db))
     db.add(v)
     db.commit()
     return v
