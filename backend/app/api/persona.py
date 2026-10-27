@@ -169,7 +169,7 @@ def init_persona(db: Session = Depends(get_db)):
 def rebuild_persona(db: Session = Depends(get_db)):
     """R-182 方案B：推倒重建人设档案（清空旧档案 → 四层全量重建为待确认建议）。
 
-    已有重建/初始化任务进行中时拒绝重复入队，防连点。清空前请确已备份（启动/手动备份均可）。
+    已有重建/初始化任务进行中时拒绝重复入队，防连点。
     """
     from ..models.task import BackgroundTask
 

@@ -101,29 +101,6 @@ def _next_version(db: Session, key: str) -> int:
     return (row.version + 1) if row else 1
 
 
-def ensure_persona_layer_prompts(db: Session) -> None:
-    """R-182：把「人设归纳/增量」提示词升级为四层版（老库启用版仍是扁平输出）。
-
-    只在当前启用版还不含四层标记（core_dna）时，另存一版并用代码默认（四层）启用；
-    旧版自动归档，可回溯。
-    """
-    for key in ("persona_merge", "persona_updates"):
-        content = get_prompt(key, db)
-        if "core_dna" not in content or "发布风险" not in content:
-            save_new_version(db, key, default_content(key), note="R-182 人设四层重构")
-
-
-def ensure_generation_steering_prompt(db: Session) -> None:
-    """R-183：把 generation 提示词从「写死画像/句式」退回「方向盘」版。
-
-    老库启用版含写死的「先破后立/全程断言」等，R-183 起改由人设 + 创作模式 + 样本决定；
-    检测到旧版特征就另存并用代码默认（方向盘）启用，旧版归档可回溯。
-    """
-    content = get_prompt("generation", db)
-    if "先破后立" in content or "本次创作模式" not in content:
-        save_new_version(db, "generation", default_content("generation"), note="R-183 生成提示词退回方向盘")
-
-
 def ensure_enabled_fallback(db: Session) -> None:
     """R-231：任一提示词 key 无 enabled 版时，兜底另存启用**代码默认**（留痕可回溯）。
 

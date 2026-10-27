@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .api import benchmark, chat, creators, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .core.log import get_logger, setup_logging
-from .db import init_db
+from .migrations import run_migrations
 from .scheduler import setup_scheduler
 from .tasks import mark_interrupted_tasks_on_startup
 from .watcher import start_inbox_watcher
@@ -23,7 +23,7 @@ log = get_logger("main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()  # R-133：全后端此前零日志，失败不可观测
-    init_db()  # R-235：PG create_all 幂等建全量结构（索引/视图/提示词 seed）
+    run_migrations()
     mark_interrupted_tasks_on_startup()  # R-089：重启后清理遗留 running 任务
     # R-208：一次性按规则清理历史积压的人设待确认建议（Kv 标记保证只跑一次，后台线程）
     from .services.ingest import maybe_auto_confirm_backlog_on_startup

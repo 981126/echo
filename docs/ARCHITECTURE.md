@@ -10,8 +10,8 @@
 | 前端（R-164） | React 19 + TS + Vite + Tailwind v4 + shadcn/ui + Framer Motion + TanStack Query | **唯一前端**（R-208 起）：dev(3000) 代理 8000；build 后由 FastAPI 挂**根路径 `/`**；API 类型由 `/openapi.json` 生成（`npm run gen:api`） |
 | ~~老前端（已废弃 R-168）~~ | Vue 3 + Vite + Naive UI | 只读保留，禁止修改；build 产物仍挂根路径兜底，后续下线另立需求 |
 | 数据库 | PostgreSQL + SQLAlchemy 2.x + psycopg v3（R-235） | 连接串 `.env` 的 `ECHO_DATABASE_URL`（无默认、缺失启动报错）；连接池 `pool_pre_ping + recycle`，多线程共享单引擎 |
-| schema 演进 | `create_all` 幂等建全量结构（R-235 起） | 历史轻量迁移已随 SQLite 下线删除；**未用 Alembic**（tech-debt） |
-| 定时任务 | APScheduler BackgroundScheduler（进程内） | 每日流水线/平台同步两轮/指标留存/备份/清理/每周风格重建 |
+| schema 演进 | Alembic（R-236 起） | 启动执行 `upgrade head`；空库全量迁移，完整旧库自动 baseline，不完整旧库拒绝接管 |
+| 定时任务 | APScheduler BackgroundScheduler（进程内） | 每日流水线/平台同步两轮/指标留存/清理/每周风格重建 |
 | 后台任务 | `background_tasks` 表 + daemon 线程（tasks.py）+ 同步并发消费者池（sync_pool.py，R-163） | 长任务入库、结束自动写通知；同步类任务经队列线程池并行消费；无外部消息队列。**R-202**：任务为「进行中」唯一事实源，`GET /api/tasks` 多状态 + SSE `task.update`（带 label/target）驱动前端顶栏「进行中 N」指示器（挂载回扫 + 10s 轮询兜底），慢的同步接口已转任务 |
 | 文件监听 | watcher.py 线程轮询 `inbox`（10s） | 拖入视频移入 videos 并建行（**不自动转写**） |
 | 外部服务 | 见 §3 | 全部真实接入（LLM/ASR/TikHub/热搜/SMTP） |
@@ -27,7 +27,9 @@ echo/
 │   ├── app/
 │   │   ├── main.py        # FastAPI 组装：路由注册/令牌/静态托管/健康检查
 │   │   ├── config.py      # pydantic-settings（ECHO_ 前缀；模式字段 normalize_mode 校验）
-│   │   ├── db.py          # engine/SessionLocal/get_db/init_db + 幂等迁移
+│   │   ├── db.py          # engine/SessionLocal/get_db
+│   │   ├── migrations.py  # Alembic 启动迁移与旧库 baseline
+│   ├── alembic/           # 版本化结构/数据 migration
 │   │   ├── api/           # 薄路由：videos/works/persona/drafts/chat/topics/metrics/review/
 │   │   │                  #   pipeline/platform/creators/prompts/requirements/notifications/tasks/settings/uploads
 │   │   ├── services/      # 业务层：generation/ingest/persona/persona_profile/prompt_service/prompt_contract/prompt_eval/transcription/topic_mining/
@@ -45,7 +47,7 @@ echo/
 │   └── .venv/
 ├── frontend_v2/src/       # 唯一前端（R-164/R-208）：React 19+TS+Vite，Tailwind v4/shadcn/ui/Framer Motion/TanStack Query；api 由 /openapi.json 生成；生产挂根路径 /
 │                          #   pages/prompter/ = R-214 提词器 + R-215 内置网页录像（顶层路由，后端零改动；纯逻辑 prompter-text.ts / recorder.ts + 40 例单测）
-└── scripts/               # verify.sh / backup.sh / deploy.sh / update.sh（兼容入口）
+└── scripts/               # verify.sh / deploy.sh / update.sh（兼容入口）
 ```
 
 ## 3. 外部服务与适配器（全部真实）
@@ -71,14 +73,13 @@ echo/
 ## 4. 运行形态与定时任务（scheduler.py 为准）
 
 - Web：uvicorn :8000；dev 新前端 vite :3000（/api 代理 8000）；老前端 5173 已废弃
-- 启动时：`init_db()`（建表+迁移+索引）→ `setup_scheduler()` → `start_inbox_watcher()`（10s 轮询）
+- 启动时：`run_migrations()`（Alembic upgrade/baseline）→ `setup_scheduler()` → `start_inbox_watcher()`（10s 轮询）
 
 | 定时 | 任务 | 行为 |
 |---|---|---|
 | 每日 `daily_push_time`（默认 07:00） | 每日流水线 | 热点→选题匹配→生成≥3→入库→（可选邮件） |
 | 每日 `daily_push_time` +1h（默认 08:00） | 指标与留存 | cookie 通道未启用 → 仅 `apply_retention`（热点 30 天清理） |
 | 每日 `platform_sync_times`（默认 06:00 / 17:00） | 平台同步 | 后台任务 `run_daily_sync_all`（R-109；R-163 起主博主+对标**并发**同步）：每账号三平台 top15 + 前15条视频下载/转写（R-085/R-109）+ 评论采集；同步完成后自动触发一次「重新对标」（refetch=False，不重复拉取） |
-| 每日 02:30 | 备份 | `scripts/backup.sh`（pg_dump 逻辑备份 + requirements/docs 快照，留 10 份） |
 | 每日 04:00 | 清理 | 通知>90 天、后台任务>30 天、sync_jobs>60 天、platform_post_stats>400 天 |
 | 每周日 03:20 | 风格重建 | 基于全量素材画像+加权样本产出生成提示词候选（不启用）+ 通知 |
 

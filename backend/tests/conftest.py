@@ -3,7 +3,7 @@
 - 测试数据库固定为 PG 的 **echo_test** 库（安全闸门：指向其它库名直接拒绝启动，防误清开发库）；
   连接串从仓库根 `.env` 派生（密码只留在 .env，不进代码），可用环境变量覆盖；
 - `fresh_engine()` 每测试清空全部表（TRUNCATE ... CASCADE），保持原 tmp SQLite「空库」语义；
-- 表结构在导入时由 `init_db()` 建一次，用例里用 `ensure_schema()` 占位（不再重复反射）；
+- 表结构、视图和默认数据在导入时由 Alembic migration 建好，用例里不重复执行迁移；
 - 测试数据目录指向临时目录，避免污染仓库/本机数据；并硬隔离外发邮件（R-221）与联网搜索（R-227）。
 """
 
@@ -95,12 +95,13 @@ def _is_transient_db_error(exc: BaseException) -> bool:
     return any(m in blob for m in _TRANSIENT_DB_MARKERS)
 
 
-# 预建表 + seed 默认提示词，保证 get_prompt 等 DB 依赖离线可用
-from app.db import Base, engine, init_db  # noqa: E402
+# 会话级执行版本化迁移，保证表、视图和默认数据齐全
+from app.db import Base, engine  # noqa: E402
+from app.migrations import run_migrations  # noqa: E402
 
 for _attempt in range(3):
     try:
-        init_db()
+        run_migrations()
         break
     except OperationalError as _exc:
         if _attempt == 2 or not _is_transient_db_error(_exc):
@@ -130,7 +131,7 @@ def fresh_engine():
     """每个测试一个干净库：清空全部表（TRUNCATE ... RESTART IDENTITY CASCADE）。
 
     返回共享引擎（等价于原 tmp SQLite 空库语义：无残留数据、序列归零）。
-    被清空的表来自 ORM metadata —— 与 create_all 建出的结构一致。
+    被清空的表来自 ORM metadata；Alembic 版本表不参与逐用例清理。
     `lock_timeout` + 重试：后台线程还攥着表锁时先让一步，避免整轮 verify 被一个死锁打断。
     """
     tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
@@ -172,12 +173,7 @@ def pytest_runtest_call(item):
 
 
 def ensure_schema(_engine=None) -> None:
-    """占位：表结构已由导入时的 `init_db()` 建好，用例里不再重复 `create_all`。
-
-    为什么保留这个函数：SQLite 时代每个用例都 `Base.metadata.create_all(bind=eng)` 建一份
-    tmp 库；PG 时代全用例共用一个 echo_test，结构是会话级不变的。而 `create_all` 在 PG 上
-    会为 31 张表逐张发 `has_table`，远端 44ms RTT → 每次约 2.3 秒，531 个用例白烧 20 分钟。
-    """
+    """兼容既有用例；结构已在会话导入时由 Alembic migration 建好。"""
 
 
 def make_fresh_engine():

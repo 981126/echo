@@ -126,7 +126,7 @@ def _models_payload(db: Session) -> dict:
             for vid, meta in model_settings.VENDORS.items()
         },
         "warnings": [
-            "API Key 以明文保存在本地数据库（app_kv）；备份文件会包含明文 Key，请限制备份目录权限。",
+            "API Key 以明文保存在本地数据库（app_kv），请限制数据库访问权限。",
             "修改后立即生效，无需重启。",
             *([f"双模型兼容性自检：{w}" for w in (model_health.last_result(db) or {}).get("warnings", [])]),
         ],

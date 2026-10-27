@@ -16,7 +16,7 @@
 - [ ] 禁止 `git add -A` / `git commit -a`；只 `git add <具体文件>`。
 - [ ] 后端 `ruff` + `mypy`，前端 `ESLint` + `Prettier`；Python/TypeScript 必须带类型标注。
 - [ ] 分层方向 `api → services → models`，不反向；拒绝重复代码，路由薄、业务厚。
-- [ ] 改接口同步 `docs/API.md`，改表同步 `docs/DATABASE.md`。
+- [ ] 改接口同步 `docs/API.md`，改表同步 `docs/DATABASE.md` 并新增 Alembic revision；禁止在应用启动时临时建表补列。
 - [ ] API key / 密钥只放 `.env`（已被 gitignore），不进代码/文档/commit。
 - [ ] 开发完成且 `scripts/verify.sh` 全绿后，agent 自行合并：单 agent / 多 agent 各自负责自己的 `feat/rxxx`。合并命令 `git checkout main && git pull --ff-only && git merge --ff-only feat/rxxx && git push`；合并后删除本地分支 `git branch -d feat/rxxx`，**保留远程分支**。
 
@@ -30,7 +30,7 @@
 - [ ] 由作者/收口人在主干仓库建 worktree：`git worktree add /Users/yeah/document/project/echo-r221 -b feat/r221 main`。
 - [ ] 编号靠 git 原子抢占；若分支已存在，换号或找收口人，不要自己读最大号 +1。
 - [ ] 端口按需求编号算：`API=8000+(R mod 100)`，`WEB=3000+(R mod 100)`。开工前 `lsof` 确认空闲。
-- [ ] 数据库独立（R-235 起为 PostgreSQL）：先拷主干的 `.env`，再把 worktree 的 `ECHO_DATABASE_URL` 指向自己的库——推荐在 PG 上为每个 worktree 建独立库（如 `echo_r221`，用 `scripts/init_test_db.sh SOURCE_URL=… TARGET_URL=postgresql+psycopg://…/echo_r221` 从 echo_dev 复制结构+数据），`.env` 里改库名即可；端口不变。`ECHO_DATA_DIR` 保持共享主干。
+- [ ] 数据库独立（R-235 起为 PostgreSQL）：先拷主干的 `.env`，再把 worktree 的 `ECHO_DATABASE_URL` 指向自己的库（如 `echo_r221`），`.env` 里改库名即可；端口不变。空库由启动时的 Alembic migration 建全量结构，`ECHO_DATA_DIR` 保持共享主干。
 - [ ] 依赖共享：前端 `node_modules` 用硬链接（`cp -al`）并删 `.vite`；后端 `.venv` 用软链。worktree 内禁止 `npm install`/`pip install`。
 
 ### 运行隔离

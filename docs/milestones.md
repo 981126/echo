@@ -1,13 +1,14 @@
 # 里程碑与进度
 
 > 状态图例：✅ 已完成 / 🔨 进行中 / 🔲 待排期
-> 最后更新：2026-10-21（R-235 SQLite→PostgreSQL 迁移 ✅）
+> 最后更新：2026-10-27（R-236 Alembic 版本化迁移 ✅）
 
 ## 总览
 | 阶段 | 主题 | 状态 |
 |---|---|---|
-| M236 | R-235 SQLite 全面迁移 PostgreSQL：`ECHO_DATABASE_URL` 只从 .env 读（无默认、缺失报错）；历史迁移全删只留 create_all+索引+视图+seed；schema_guard 下线；方言 SQL 改写 PG；JSON 保持 TEXT；测试库 echo_test（每测试清表 + 库名闸门）；compose/backup/deploy/release 去 SQLite 化（pg_dump 备份 + `scripts/init_test_db.sh`） | ✅ |
-| M235 | R-234 NAS 一键部署：`scripts/deploy.sh` 预检 → git 快进 `origin/main`（脏工作区中止）→ 容器内备份 → `docker compose build`（前端多阶段 + 后端）→ `up -d` → 健康检查 → 结构自检；首次无库跳过备份、失败保留 `echo:previous`；`update.sh` 兼容入口；compose 固定容器内 `/app/data` + `ECHO_HOST_DATA_DIR` 宿主机目录；日志 30 份 | ✅ |
+| M237 | R-236 移除自动备份与 initdb 初始化；Alembic 管理表/索引/视图/数据迁移，支持空库 upgrade 与完整旧库 baseline | ✅ |
+| M236 | R-235 SQLite 全面迁移 PostgreSQL：`ECHO_DATABASE_URL` 只从 .env 读（无默认、缺失报错）；方言 SQL 改写 PG；JSON 保持 TEXT；测试库 echo_test（每测试清表 + 库名闸门）；结构与初始化机制由 R-236 取代 | ✅ |
+| M235 | R-234 NAS 一键部署：`scripts/deploy.sh` 预检 → git 快进 `origin/main`（脏工作区中止）→ `docker compose build`（前端多阶段 + 后端）→ `up -d` → 健康检查 → 结构自检；失败保留 `echo:previous`；`update.sh` 兼容入口；compose 固定容器内 `/app/data` + `ECHO_HOST_DATA_DIR` 宿主机目录；日志 30 份 | ✅ |
 | M234 | R-233 双源联网参考：豆包 + DeepSeek 并行 search（DeepSeek `need_content` 正文）+ 合并去重/文章类型/营销规则过滤 + Fetch 补齐（反爬站点退回摘要）+ 生成方按人设选 2–3 篇（含理由，45s 超时兜底）+ 只注入选中正文 + 双路 `web_search_logs` / `Draft.quality.references` / 前端「已选参考」；无 key 自动退回单豆包 | ✅ |
 | M233 | R-232 AI 设置按功能选模型：非生成功能每功能下拉选槽位（模型1/模型2，失败自动兜底）+ 展示当前实际模型名；默认全模型1=现状不变，提示词优化组默认「跟随生成方」；人设 4 引擎/优化+评测各合一 | ✅ |
 | M232 | R-231 提示词无启用版兜底：任一 key 无 enabled 时启动自动另存启用代码默认（留痕可回溯）+ generation 落位代码默认（不恢复 v3~v10） | ✅ |
@@ -107,7 +108,7 @@
 | M140 | 素材同步失败修复：TikHub 同路由限速 + 瞬时故障重试（R-151） | ✅ |
 | M136 | AI 对话升级为通用型 agent：多步可见 + 只读 SQL + 写操作确认（R-147） | ✅ |
 | M135 | AI 对话「瞎回复」修复：工具暴露总数 + 程序固定数据规则（R-146） | ✅ |
-| M134 | 一键打包/部署 + 升级前自动备份（R-145） | ✅ |
+| M134 | 一键打包/部署 + 自动增量升级（R-145；R-236 起由 Alembic 承接） | ✅ |
 | M133 | 上线部署加固：镜像带脚本 + 启动结构自检 + schema 兼容性测试 + 迁移记录表（R-144） | ✅ |
 | M126 | DeepSeek 切换 V4.1 Flash（R-137） | ✅ |
 | M122–M125 | 系统体检修复：P0 稳定性兜底 → P1 任务闭环 → P2 正确性与成本 → P3 复盘下线/文档统一（R-133~R-136） | ✅ |
@@ -117,7 +118,7 @@
 ## 明细（最新在前）
 | # | 内容 | 验收/状态 |
 |---|---|---|
-| M235 / R-234 | NAS 一键部署（代码完成）：`scripts/deploy.sh` 预检 `.env`/Docker → `git fetch` + `merge --ff-only origin/main`（已跟踪工作区脏则中止，不 stash/reset）→ 容器内 `scripts/backup.sh` → `docker compose build`（前端 Node 多阶段 + 后端 Python 单镜像）→ `up -d` → 容器 healthcheck 轮询（180s）→ 结构自检；首次无 `echo.db` 跳过备份；失败保留旧容器 + `echo:previous` 镜像，不自动回滚数据库；日志 `data/logs/deploy-*.log` 保留 30 份；`update.sh` 降为兼容入口；compose 固定容器内 `/app/data` 并用 `ECHO_HOST_DATA_DIR` 配宿主机目录 | 首次/更新/脏工作区/缺 `.env`/健康失败路径均有明确中文错误；`bash -n` + 假 Docker 干跑通过；`scripts/verify.sh` 全绿；**NAS 实机首次 `sudo bash scripts/deploy.sh` 待作者执行验证** | ✅ |
+| M235 / R-234 | NAS 一键部署（代码完成）：`scripts/deploy.sh` 预检 `.env`/Docker → `git fetch` + `merge --ff-only origin/main`（已跟踪工作区脏则中止，不 stash/reset）→ `docker compose build` → `up -d` → 容器 healthcheck 轮询（180s）→ 结构自检；失败保留旧容器 + `echo:previous` 镜像，不自动回滚数据库；日志 `data/logs/deploy-*.log` 保留 30 份；`update.sh` 降为兼容入口；compose 固定容器内 `/app/data` 并用 `ECHO_HOST_DATA_DIR` 配宿主机目录 | 首次/更新/脏工作区/缺 `.env`/健康失败路径均有明确中文错误；`bash -n` + 假 Docker 干跑通过；`scripts/verify.sh` 全绿；**NAS 实机首次 `sudo bash scripts/deploy.sh` 待作者执行验证** | ✅ |
 | M226 / R-225 | 素材库抽屉平台勾选由绑定作品决定（已完成）：根因=卡片平台从 `PlatformPost` 成员实时推导，抽屉平台勾选却读 `Video.platforms` 列，合并/同步时该列不重算导致割裂。修复：① `GET /api/videos/{id}` 存在绑定帖子时覆盖 `platforms` 为成员平台集合，与卡片同源；② 合并/绑定/拆分时持久化刷新 `Video.platforms`；③ `post_to_material` 取所属 work 全部成员平台；④ 前端已绑定作品的素材抽屉里平台勾选框只读，并提示“平台由已绑定的平台作品决定”。**明确不做**：不重新设计平台多选交互；不影响未绑定作品的本地素材可编辑性；不删除 `Video.platforms` 列 | 合并卡打开抽屉后平台勾选与卡片一致且只读；未绑定本地素材仍可手改；`scripts/verify.sh` 全绿；新增后端/前端单测 | ✅ |
 | M224 / R-222 | 同步再提速（实施中）：12 个账号 daily 前 15 条当前需 20+ min，作者要求不引入 Redis/MQ、不减少 B站 150 条历史指标补全，NAS 为 N150 4 核 12G。**方案**：纯后端内部优化——账号内作品/评论/B站补全并行化；批量写库替代逐行 commit；预加载消除 N+1；进度更新防抖；TikHub 连接复用 + 令牌桶批量；并发参数对齐（修复账号级硬编码 3）；封面下载不阻塞作品入库；媒体并发保持 2、下载并发可提到 4 | 12 账号同步耗时降到 10 min 以内（目标 6–8 min）；`scripts/verify.sh` 全绿；同步接口冒烟通过；服务保持运行 | 🔨 |
 | M222 / R-220 | 素材库切页同步遮罩必现（实施中）：根因=恢复扫描（`GET /api/tasks?status=running&kind=…`，mount 一次）与 `/api/library` 竞速——冷缓存时卡片为空，card_sync 按 `post_id` 匹配不到卡片被静默丢弃且永不重试（`use-card-tasks.ts:170-171`），热缓存才有动画；叠加跨页 SSE 丢失（无回放）与只筛 running。**修复**：未认领池（taskId→TaskRow）——refreshActive 与 SSE 未知非终态任务统一入池，cards 变化（首帧到位/翻页）时重新 `cardKeyForPayload` 命中即挂遮罩+5s 轮询并出池；终态/已认领出池；恢复查询改 `status=pending,running`（后端已支持，零改动）；池匹配抽纯函数供 vitest | 冷缓存切页遮罩必现；翻页补挂；pending 恢复；无幽灵转圈；vitest + headless r220（mock 竞速）全绿；`scripts/verify.sh` 全绿；动效点检 | ✅ |
@@ -161,8 +162,8 @@
 | M137 / R-148 | 需求页溢出：解析层剥掉 H1 里的英文 slug（108/145 条）+ 表格 `overflow-wrap:anywhere` + `.table-wrap` 兜底 | verify 全绿；6 个新用例（含对真实 requirements/ 全量护栏） | ✅ |
 | M136 / R-147 | 对话 agent：回合/预算/超时可配 + 步骤级 SSE；8 个只读视图 + `sql_query`（四层护栏）；写操作只提议 + `agent_actions` 确认/审计 | verify 全绿；27 个新用例；实测多步 SQL 答案与库一致、写操作确认前后状态正确 | ✅ |
 | M135 / R-146 | 对话工具分页结果暴露 `total/returned/truncated` + 程序固定「工具数据使用规则」+ 修非流式跨会话混历史 | verify 全绿；12 个新用例；实测「292/22/276」全部与库一致 | ✅ |
-| M134 / R-145 | 一键打包（`release.sh`，git archive，拒绝未提交改动）+ 一键部署（`update.sh`：备份→构建→启动→健康检查→结构版本）+ 启动顺序改为「判断待应用变更→自动备份→升级→自检」 | verify 全绿；8 个新用例；真实库副本跑通完整链路 | ✅ |
-| M133 / R-144 | 部署加固 A/B/C/D：镜像内置 scripts + `.dockerignore`（否则前端构建必炸）+ 健康检查去 curl；启动结构自检（缺列→日志+通知）；生产库 schema 快照做老库升级测试；`schema_migrations` 记账 + 增量上线 runbook | verify 全绿；12 个新用例；真实库副本演练通过 | ✅ |
+| M134 / R-145 | 一键打包（`release.sh`，git archive，拒绝未提交改动）+ 一键部署（构建→启动→健康检查→结构自检）；R-236 起升级由 Alembic 承接 | verify 全绿；真实库副本跑通完整链路 | ✅ |
+| M133 / R-144 | 部署加固：健康检查、启动结构自检、老库升级测试与增量上线 runbook；R-236 起由 Alembic 迁移与 baseline 测试承接 | verify 全绿；真实库副本演练通过 | ✅ |
 | M132 / R-143 | 各功能预算可配置（`budget_settings` + 「模型设置」的「推理预算（高级）」区块，存 app_kv 保存即生效）；下限退回安全网 4000，按任务标定交给 SLOTS | verify 全绿；10 个新用例；接口冒烟 | ✅ |
 | M131 / R-142 | 按实测定标推理预算（DS 8000/Kimi 10000；评审 14000/修订 16000）+ 封顶 32000 + 连接级错误重试一次 + `read`=墙钟（单次 600s） | verify 全绿；评审连跑 4/4 不截断；真实讨论 fallback=false | ✅ |
 | M130 / R-141 | 邮件配置校验（缺失/非 ASCII 占位符/非法邮箱）+ `_send` 不抛异常 + 中文主题编码 + 邮件失败不判流水线 failed | verify 全绿；4 个新用例；真实进程复现验证 | ✅ |

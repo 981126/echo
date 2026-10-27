@@ -56,8 +56,8 @@ A：不会。对标只用于数据对比与风格参考，永不进入主博主�
 **Q：质量门禁怎么跑？**
 A：`PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh`（ruff+mypy+pytest 53 项+前端 lint/build）。
 
-**Q：备份？**
-A：每日 02:30 自动 `scripts/backup.sh`（SQLite 热备 + requirements/docs 快照，保留 10 份），也可手动执行；重大操作前先备份。
+**Q：数据库结构怎么升级？**
+A：R-236 起由 Alembic migration 管理，后端启动自动执行到最新版本；新增结构变更必须提交新的 revision。
 
 **Q：接口/表结构文档会过期吗？**
 A：`docs/API.md`、`docs/DATABASE.md` 由代码自动生成；改接口/表后需重新生成，勿手改结构部分。

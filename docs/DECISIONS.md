@@ -13,10 +13,10 @@
 - **原因**：单用户规模，NAS 资源有限，越简单越可靠
 - **扩展路径**：模块化 + 适配器模式，未来加队列/拆分服务时业务逻辑不动
 
-## D-002：SQLite 数据库（Alembic 为 tech-debt）
-- **决策**：数据库用 SQLite + SQLAlchemy 2.x；schema 演进用 db.py 内**幂等轻量迁移**（建表后按需补列/建索引/回填）
-- **原因**：单用户写入小、零运维、备份即拷文件；实际代码未落地 Alembic 脚手架（R-016 起用轻量迁移兜底），文档已更正，勿再按“已用 Alembic”编写
-- **代价**：并发写受限（单用户无感）；未来多用户再评估
+## D-002：PostgreSQL + Alembic 版本化迁移（R-236 更新）
+- **决策**：数据库用 PostgreSQL + SQLAlchemy 2.x；schema 与初始化数据演进由 Alembic revision 管理，禁止运行时临时建表补列。
+- **原因**：版本可追踪、部署可重复；空库执行全部 migration，完整旧库经校验后 baseline，避免手工 SQL 与代码漂移。
+- **代价**：结构与相关数据变更必须新增 revision；代码回滚不会自动回滚数据库。
 
 ## D-003：LLM 适配器 + DeepSeek/Kimi 可插拔
 - **决策**：所有 LLM 调用统一 OpenAI 兼容客户端（services/llm.py），模型/Key 由「AI 设置 → 模型设置」的**模型1/模型2 槽位**配置（R-138，存 `app_kv`，保存即生效；`.env` 仅作 Key 回退）；默认 模型1=DeepSeek V4.1 Flash `deepseek-flash`、模型2=Kimi `kimi-k2.6`。厂家目录在代码 `services/model_settings.py::VENDORS`，加供应商只需加一行

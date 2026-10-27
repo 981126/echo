@@ -16,7 +16,7 @@
 - AI 设置：模型1/模型2 可分别配厂家+模型+API Key（保存即生效）；脚本生成的生成方/评审方、ASR 服务商与模型、讨论轮次、每日篇数都在这里；其余 AI 功能默认模型1、失败自动降级模型2（带日志/站内通知/稿子标记）
 - AI 对话：多会话 ChatGPT 式流式问答，可调用系统数据工具
 - 复盘：看板 + ABCD 复盘 + 赛道雷达（本地素材指标 + 平台数据）
-- 工程：`scripts/verify.sh` 质量门禁（ruff + mypy + pytest 212 项 + 前端 lint/build + 文档一致性）、每日自动备份、需求归档
+- 工程：`scripts/verify.sh` 质量门禁（ruff + mypy + pytest + 前端 lint/build + 文档一致性）、Alembic 版本化迁移、需求归档
 
 ## 运行（开发机）
 ```bash
@@ -58,5 +58,5 @@ PATH=backend/.venv/bin:$PATH PYTHON=backend/.venv/bin/python scripts/verify.sh
 
 ## 数据安全
 - 密钥只在 `.env`（gitignore）；数据库与素材文件在数据目录（当前 `echo_resource/`）
-- 每日 02:30 自动备份（`scripts/backup.sh`，保留最近 10 份）；也可手动执行
+- 数据库结构与初始化数据由 Alembic migration 版本化管理，启动自动执行到最新版本
 - 平台同步不会触碰本地视频 / 转写稿 / 脚本文案；同步按「平台 + 作品ID」幂等去重更新

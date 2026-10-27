@@ -2,8 +2,8 @@
 """SQLite → PostgreSQL 数据迁移（R-235 收尾）。
 
 把旧 SQLite 单文件库（默认 ECHO_DATA_DIR/echo.db）的**数据**灌进 PG 目标库
-（默认取仓库根 .env 的 ECHO_DATABASE_URL）。结构不按 sqlite 搬 —— 由 app.db
-的 create_all 按代码模型建全新结构（列类型/约束以代码为准），只搬数据：
+（默认取仓库根 .env 的 ECHO_DATABASE_URL）。结构不按 sqlite 搬 —— 由 Alembic
+按版本化 migration 建全新结构（列类型/约束以 migration 为准），只搬数据：
 
 - 逐表 INSERT（外键按 sqlite 的 foreign_key_list 做拓扑排序，父表先行）；
 - 目标列是 BOOLEAN 的，把 sqlite 的 0/1 转成 False/True；
@@ -31,7 +31,8 @@ from sqlalchemy.sql.sqltypes import Boolean, Integer
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.db import Base, engine  # noqa: E402  确保模型已注册
+from app.db import Base, engine  # noqa: E402
+from app.migrations import run_migrations  # noqa: E402
 import app.models  # noqa: E402,F401
 
 
@@ -88,13 +89,13 @@ def main() -> int:
     print(f"源：{src}")
     print(f"目标：{dsn.split('@')[-1]}（密码略）")
 
-    # 1) 目标库重建全新结构（按代码模型）
+    # 1) 目标库按版本化 migration 重建全新结构
     with psycopg.connect(dsn, autocommit=True) as c:
         c.execute("DROP SCHEMA public CASCADE")
         c.execute("CREATE SCHEMA public")
         c.execute('GRANT ALL ON SCHEMA public TO "Yeah"')
-    Base.metadata.create_all(engine)
-    print("目标结构已按代码模型重建")
+    run_migrations(os.environ.get("TARGET_URL") or None)
+    print("目标结构已按 Alembic migration 重建")
 
     # 2) 逐表搬数据
     src_conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True)

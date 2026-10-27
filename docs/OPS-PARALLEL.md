@@ -64,25 +64,20 @@ WEB=$((3000 + N))                             # → 3021
 > 每个 worktree 在 PG 上建自己的库（如 `echo_r221`），`.env` 只改 `ECHO_DATABASE_URL` 的库名。
 > 测试同理：pytest 固定连 `echo_test`（conftest 库名闸门）。
 
-顺序固定：**拷 `.env` → 建库并复制 → 校验 → 改 `ECHO_DATABASE_URL` 库名**。
+顺序固定：**拷 `.env` → 建空库 → 改 `ECHO_DATABASE_URL` 库名 → 启动执行 Alembic migration**。
 
 ```bash
 WT=/Users/yeah/document/project/echo-$R
 
-# ① 拷主干的 .env（这一轮先别改）
+# ① 拷主干的 .env
 cp /Users/yeah/document/project/echo/.env "$WT/.env"
 
-# ② 建自己的库并从 echo_dev 复制结构+数据（脚本内部用 pg_dump|psql，需要本机有 PG 客户端工具）
-SOURCE_URL="postgresql+psycopg://<同 .env 的账号密码>@yeah981.cn:15981/echo_dev" \
-TARGET_URL="postgresql+psycopg://<同 .env 的账号密码>@yeah981.cn:15981/echo_r$R" \
-  bash "$WT/scripts/init_test_db.sh"
+# ② 在 PG 中创建独立空库 echo_r$R（使用本机管理工具执行 CREATE DATABASE）
 
-# ③ 校验复制是真的（防"复制到空库"）：表数量应与主干一致（当前 31 张 + 历史表）
-psql "postgresql://<账号密码>@yeah981.cn:15981/echo_r$R" -tAc \
-  "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';"
-
-# ④ 只改 ECHO_DATABASE_URL 的库名（ECHO_DATA_DIR 保持不动 = 继续共享主干素材）
+# ③ 只改 ECHO_DATABASE_URL 的库名（ECHO_DATA_DIR 保持不动 = 继续共享主干素材）
 sed -i '' -E "s|^ECHO_DATABASE_URL=.*|ECHO_DATABASE_URL=postgresql+psycopg://<账号密码>@yeah981.cn:15981/echo_r$R|" "$WT/.env"
+
+# ④ 启动后端，自动执行全部 migration；不要从其他分支复用版本表
 ```
 
 最终 `.env` 两行（一个共享、一个独立）：
@@ -159,8 +154,7 @@ ln -s ../../echo/backend/.venv "$WT/backend/.venv"
 | 素材目录 | **不拷**：`ECHO_DATA_DIR` 保持共享主干（21GB）。风险与处置见 §4.3 |
 | 浏览器会话 | 所有实例共用同一个 `ECHO_ACCESS_TOKEN`，前端存的是同一个 localStorage 键 `echo_v2_token` → **登录一次，各端口都有效**；反过来也意味着别拿 8021 的页面当成主干在操作 |
 | 邮件链接 | `ECHO_WEB_BASE_URL` 指向主干（默认 `http://localhost:8000`），副实例发出的邮件链接会指到主干 |
-| 备份 | **库有备份**（`scripts/backup.sh` pg_dump + deploy.sh 升级前自动备份）；**素材没有备份** |
-| 定时任务 | ⚠️ 已知行为：`setup_scheduler()` 在 `app/main.py` 无条件启动，每个后端实例都会跑每日流水线/平台同步/备份 → **起 N 个副后端 = N 份 TikHub/LLM 消耗**。目前无开关，约定：**副后端用完就停，不要长驻** |
+| 定时任务 | ⚠️ 已知行为：`setup_scheduler()` 在 `app/main.py` 无条件启动，每个后端实例都会跑每日流水线/平台同步 → **起 N 个副后端 = N 份 TikHub/LLM 消耗**。目前无开关，约定：**副后端用完就停，不要长驻** |
 | 前端 dev server | **同一时刻只归一个 worktree**（proxy 写死 8000） |
 | 副 worktree 的前端验收 | 走 **build + 自己的后端**（零配置、无串台）：<br>`cd "$WT/frontend_v2" && npm run build`<br>`cd "$WT/backend" && ./.venv/bin/python -m uvicorn app.main:app --port 8021`<br>浏览器开 `http://localhost:8021/` —— 后端按**自身文件位置**托管 `frontend_v2/dist`（`app/main.py` 的 `Path(__file__).resolve().parents[2]`），只服务自己的产物 |
 | 门禁与构建 | `verify.sh` 会跑 pytest + vitest + vite build，**很吃 CPU**：2-3 个 worktree 同时跑会互相拖慢甚至超时，交付前错开跑 |
@@ -181,9 +175,9 @@ ln -s ../../echo/backend/.venv "$WT/backend/.venv"
 2. **任务互相删**：各实例的 `_housekeep_job` 会按保留期删通知/任务记录，删到对方的。
 3. **结构定型冲突**：A 加了字段改了线上库，B 的旧代码启动会撞上未知列。
 
-**建库方式**：`scripts/init_test_db.sh` 从 echo_dev 复制结构+数据到自己的库（见 §2.3）；库在 PG 实例上，不占 worktree 磁盘。
+**建库方式**：按 §2.3 建独立空库，首次启动由 Alembic 创建完整结构；库在 PG 实例上，不占 worktree 磁盘。
 
-**用不用拷真实数据**：纯后端逻辑验证用**空库**最省（启动自动 `create_all` + seed 默认提示词）；要验真实数据渲染（素材库、草稿列表、平台统计）才从 echo_dev 复制。想「只读共享」同一个库不可行——启动必然要写（seed、`app_kv`、任务表）。
+**用不用拷真实数据**：纯后端逻辑验证用**空库**最省（启动自动执行 migration）；要验真实数据渲染才通过人工数据库复制创建副本。想「只读共享」同一个库不可行——运行会写 `app_kv`、任务表和迁移版本表。
 
 ### 4.3 素材目录是共享的（刻意选择）
 
@@ -239,7 +233,6 @@ lsof -nP -iTCP:$WEB -sTCP:LISTEN || echo "前端端口已释放"
 ### 6.3 删 worktree
 
 ```bash
-bash scripts/backup.sh                                       # 可选：留档验证库（pg_dump 到 data/backups/）
 git worktree remove "$WT"                      # 被拒时先看 git -C "$WT" status --short 再决定 --force
 git worktree list                              # 应只剩主干
 git branch -d feat/$R                          # 只删本地分支；远程分支保留

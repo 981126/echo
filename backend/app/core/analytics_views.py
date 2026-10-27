@@ -4,17 +4,13 @@
 - **只暴露视图，不暴露原始表**：`app_kv`（含明文模型 Key）、`ai_prompts`（提示词正文）、
   `chat_*`、`agent_actions`、`background_tasks` 等敏感/内部表一律不进视图，也不在允许名单里。
 - **视图即白名单**：`sql_query` 校验「表引用必须全部来自这些视图名」，从根上挡住越权查询。
-- **幂等**：每次启动 `DROP VIEW IF EXISTS` + `CREATE VIEW`（PG 用 DROP+CREATE，无 CREATE OR REPLACE VIEW 的列变更兼容问题）。
+- **版本化**：视图由 Alembic migration 创建和变更。
 - **列名 + 中文说明**：PG 视图没有列注释入口，所以这里维护 `SCHEMA_NOTES` 作为给模型的 schema 卡片。
 """
 
 from __future__ import annotations
 
 from sqlalchemy import Engine, inspect
-
-from ..core.log import get_logger
-
-log = get_logger("analytics_views")
 
 # 视图名 → 定义（只读、已裁掉长文本/敏感字段）
 VIEWS: dict[str, str] = {
@@ -133,22 +129,6 @@ def allowed_views() -> set[str]:
     return set(VIEWS)
 
 
-def ensure_views(bind: Engine) -> list[str]:
-    """幂等创建全部只读视图；返回视图名列表。失败只记日志（不影响启动）。"""
-    created: list[str] = []
-    for name, body in VIEWS.items():
-        try:
-            with bind.begin() as conn:
-                conn.exec_driver_sql(f"DROP VIEW IF EXISTS {name}")
-                conn.exec_driver_sql(f"CREATE VIEW {name} AS {body}")
-            created.append(name)
-        except Exception:  # noqa: BLE001 视图建不出来不能让服务起不来
-            log.exception("创建分析视图失败：%s", name)
-    if created:
-        log.info("分析视图就绪：%d 个（%s）", len(created), "、".join(created))
-    return created
-
-
 _CARD_CACHE: str | None = None
 
 
@@ -178,4 +158,4 @@ def schema_card(bind: Engine | None = None) -> str:
     return _CARD_CACHE
 
 
-__all__ = ["SCHEMA_NOTES", "VIEWS", "allowed_views", "ensure_views", "schema_card"]
+__all__ = ["SCHEMA_NOTES", "VIEWS", "allowed_views", "schema_card"]

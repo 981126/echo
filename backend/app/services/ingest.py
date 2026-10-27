@@ -356,7 +356,7 @@ def persona_rebuild_task(db, payload: dict, update=None) -> dict:
     """R-182 方案B：推倒重建人设档案。
 
     清空当前主博主全部人设标签 → 全量逐篇提取 → 四层归纳合并 → 重建为**待确认建议**，
-    并写一条 PersonaCheck 差异单（新增/过期/分层计数）。清空前的档案由启动备份兜底。
+    并写一条 PersonaCheck 差异单（新增/过期/分层计数）。
     """
     from ..models.persona import PersonaTag
     from . import persona_profile

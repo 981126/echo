@@ -5,7 +5,7 @@
 ## 0. 运行入口与配置
 
 ### backend/app/main.py
-- `lifespan`：`init_db()` → `setup_scheduler()` → `start_inbox_watcher()`。
+- `lifespan`：`run_migrations()` → `setup_scheduler()` → `start_inbox_watcher()`。
 - 路由均挂 `/api/*` 且默认带 `Depends(require_token)`（`X-Access-Token`）。
 - `GET /health` 免令牌；`/covers`（R-179 起带 `?w=` 时按需生成缩略图并落盘缓存 `covers/thumbs/`，注册在静态挂载之前）、`/uploads` 静态目录挂载；存在 `frontend_v2/dist` 时用 FastAPI 挂**根路径 `/`** 托管前端（hash 路由，R-208）。
 - CORS 全开（局域网单用户）。
@@ -16,15 +16,11 @@
 - 数据库：`ECHO_DATABASE_URL` 只从 .env 读（无默认、缺失启动报错；驱动 `postgresql+psycopg://`）。路径：未显式给 `ECHO_*_DIR` 时由 `ECHO_DATA_DIR` 派生（inbox/videos/covers/uploads 同名子目录）。
 - `get_settings()` lru_cache：改 `.env` 需重启进程。
 
-### backend/app/db.py（R-235 起）
-- `Base.metadata.create_all` → `_ensure_indexes`（补索引，`create_all` 对已存在的表整个跳过，所以索引要单独补）
-  → `_ensure_binding_unique_index`（平台作品↔本地素材绑定唯一部分索引，R-061）→ `ensure_defaults`（提示词 v1 种子）。
-  - **注意**：`create_all` **不会给已存在的表补列** —— 往模型加字段必须同步对线上库执行 `ALTER TABLE`
-    （PG 无启动补列；历史 `_migrate_*` 与 `schema_guard` 记账已随 R-235 SQLite 下线删除）。
-  - **启动顺序（R-235）**：`init_db()`（create_all + 索引 + 分析视图 + seed）。新表自动建；字段变更靠
-    发布前手工 `ALTER TABLE`（runbook 见 QUICKSTART）。升级前备份由 `scripts/deploy.sh` 在构建前执行
-    （容器内 `scripts/backup.sh` → pg_dump，失败即中止部署）。
-  - 分析视图（R-147）：`core/analytics_views.py` 每次启动 DROP+CREATE 幂等重建，是 AI 对话 `sql_query` 的唯一白名单查询面。
+### backend/app/db.py 与 migrations.py（R-236 起）
+- `db.py` 只提供 `Base`、engine、SessionLocal 和 `get_db`，不执行结构变更。
+- `migrations.py` 在启动时执行 Alembic `upgrade head`。空库依次应用全部 revision；无版本表的完整旧库经表/字段一致性校验后 baseline 到当前版本，不完整或更新版结构会拒绝启动。
+- 新表、字段、索引、约束、视图和结构相关数据变更必须新增 `backend/alembic/versions/` revision；revision 合入后不可修改。
+- 分析视图（R-147）由 migration 创建；`core/analytics_views.py` 只维护 AI 对话 `sql_query` 的白名单与 schema 卡片。
 
 ## 1. API 层（backend/app/api/）
 | 文件 | 前缀 | 职责 |
@@ -248,7 +244,7 @@
 
 ## 7. 常见改动指南
 - 加接口：api/xxx.py + schemas + services；记得跑 verify；涉及注释/文档同步。
-- 加表/列：models/*.py + db.py 幂等迁移函数（init_db 注册）；改完生成 DATABASE.md。
+- 加表/列：models/*.py + 新增 Alembic revision；同步 DATABASE.md，并跑空库与旧库迁移测试。
 - 改平台字段：先看 platform_sync 与 tikhub `_real_*` 解析函数。
 - 改生成上下文：generation.py + prompt_service + ai_prompts 页面（版本化，不要写死进系统提示词之外的代码）。
 

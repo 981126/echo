@@ -33,7 +33,7 @@ git archive --format=tar.gz --prefix="echo/" -o "$OUT" HEAD
 
 echo "==> 校验包内容"
 fail=0
-for must in backend/app/main.py backend/app/db.py scripts/backup.sh scripts/update.sh scripts/verify.sh Dockerfile docker-compose.yml; do
+for must in backend/app/main.py backend/app/db.py backend/alembic.ini scripts/update.sh scripts/verify.sh Dockerfile docker-compose.yml; do
   if tar -tzf "$OUT" | grep -qx "echo/${must}"; then
     echo "  ✓ ${must}"
   else

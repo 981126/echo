@@ -1,9 +1,6 @@
-"""APScheduler 定时任务：每日流水线 / 每日指标与留存 / 每日备份。"""
+"""APScheduler 定时任务：每日流水线 / 每日指标与留存。"""
 
 from __future__ import annotations
-
-import subprocess
-from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -166,28 +163,6 @@ def _weekly_ideas_job() -> None:
         db.close()
 
 
-def _backup_job() -> None:
-    """每日备份（R-133）：检查退出码，失败写站内通知 + 邮件告警（原来 check=False + pass 全程无感）。"""
-    script = Path(__file__).resolve().parents[2] / "scripts" / "backup.sh"
-    if not script.exists():
-        _alert("daily_backup", "每日备份失败", f"备份脚本不存在：{script}")
-        return
-    ok = False
-    detail = ""
-    try:
-        proc = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=600)
-        ok = proc.returncode == 0
-        stdout = (proc.stdout or "").strip()
-        stderr = (proc.stderr or "").strip()
-        detail = stderr or stdout or f"exit={proc.returncode}"
-    except Exception as exc:  # noqa: BLE001
-        detail = f"执行备份脚本异常：{exc}"
-    if ok:
-        log.info("每日备份完成：%s", (detail.splitlines() or [""])[-1])
-    else:
-        _alert("daily_backup", "每日备份失败", detail)
-
-
 def setup_scheduler() -> None:
     setup_logging()
     global _scheduler
@@ -223,13 +198,6 @@ def setup_scheduler() -> None:
         _daily_metrics_job,
         CronTrigger(hour=hour + 1, minute=0, timezone=settings.tz),
         id="daily_metrics",
-        misfire_grace_time=3600,
-        coalesce=True,
-    )
-    _scheduler.add_job(
-        _backup_job,
-        CronTrigger(hour=2, minute=30, timezone=settings.tz),
-        id="daily_backup",
         misfire_grace_time=3600,
         coalesce=True,
     )

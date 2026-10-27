@@ -2,6 +2,7 @@
 
 > 表结构来源：`backend/app/models/*.py`（SQLAlchemy 2.x 声明式），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验表数量与表名和代码一致。
 > 数据库：PostgreSQL（R-235 起，SQLAlchemy 2.x + psycopg v3）。连接串由 `.env` 的 `ECHO_DATABASE_URL` 决定（无默认、缺失启动报错；驱动写法 `postgresql+psycopg://…`），运行时数据目录见 QUICKSTART。
+> 结构演进：R-236 起由 `backend/alembic/versions/` 管理；启动执行 `upgrade head`，现有完整旧库首次自动 baseline。新增表、字段、索引、视图或结构相关数据变更必须新增 revision，并同步本文。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
 ## 表总览（31 张）

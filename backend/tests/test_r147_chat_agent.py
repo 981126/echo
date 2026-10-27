@@ -32,7 +32,6 @@ from app.services.chat_service import ChatService
 def db(tmp_path):
     eng = fresh_engine()
     ensure_schema(eng)
-    analytics_views.ensure_views(eng)  # sql_query 要查视图
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     for key in ps.PROMPT_META:
         session.add(AiPrompt(key=key, version=1, content=ps.default_content(key), status="enabled", note="t"))

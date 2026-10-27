@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# R-234：NAS 一键部署 —— 拉取最新代码 → 备份 → 构建前后端镜像 → 启动 → 健康检查 → 结构自检
+# R-234：NAS 一键部署 —— 拉取最新代码 → 构建前后端镜像 → 启动 → 健康检查 → 结构自检
 #
 # 在 NAS 的仓库目录执行：
 #   sudo bash scripts/deploy.sh
@@ -9,14 +9,13 @@
 #   --branch <name>   部署分支（默认 main；也可用 ECHO_DEPLOY_BRANCH）
 #   --no-pull         跳过 git 拉取（兼容 SKIP_PULL=1）
 #   --force           代码没变也强制重建镜像
-#   --skip-backup     跳过升级前备份
 #   --pull-base       构建时 --pull（更新基础镜像）
 #   --dry-run         只做检查并打印将执行的命令，不拉取/构建/启动
 #   -h, --help        显示帮助
 #
 # 设计约束：
 #   - 单实例：APScheduler 在进程内，绝不加 --workers / 多副本
-#   - 失败不自动回滚数据库：迁移只向前，回滚需用升级前备份
+#   - 失败不自动回滚数据库：Alembic 迁移只向前
 #   - 不自动 stash/reset：工作区有已跟踪改动时中止，避免覆盖作者改动
 set -Eeuo pipefail
 
@@ -26,7 +25,6 @@ cd "$ROOT"
 BRANCH="${ECHO_DEPLOY_BRANCH:-main}"
 DO_PULL="${DO_PULL:-1}"
 FORCE=0
-SKIP_BACKUP="${SKIP_BACKUP:-0}"
 PULL_BASE=0
 DRY_RUN=0
 IMAGE_NAME="echo:local"
@@ -38,7 +36,7 @@ export GIT_TERMINAL_PROMPT=0
 
 usage() {
   cat <<'USAGE'
-NAS 一键部署：拉取最新代码 → 备份 → 构建前端+后端镜像 → 启动 → 健康检查
+NAS 一键部署：拉取最新代码 → 构建前端+后端镜像 → 启动 → 健康检查
 
 用法：
   sudo bash scripts/deploy.sh [选项]
@@ -47,12 +45,10 @@ NAS 一键部署：拉取最新代码 → 备份 → 构建前端+后端镜像 �
   --branch <name>   部署分支（默认 main；也可用 ECHO_DEPLOY_BRANCH）
   --no-pull         跳过 git 拉取（兼容 SKIP_PULL=1）
   --force           代码没变也强制重建镜像
-  --skip-backup     跳过升级前备份
   --pull-base       构建时 --pull（更新基础镜像）
   --dry-run         只做检查并打印将执行的命令，不拉取/构建/启动
   -h, --help        显示本帮助
 
-首次部署（无旧容器/镜像）会自动跳过备份；之后每次升级前都会先在容器内 pg_dump 备份。
 日志：data/logs/deploy-*.log（保留最近 30 份）
 USAGE
 }
@@ -79,10 +75,6 @@ while [ $# -gt 0 ]; do
       ;;
     --force)
       FORCE=1
-      shift
-      ;;
-    --skip-backup)
-      SKIP_BACKUP=1
       shift
       ;;
     --pull-base)
@@ -284,31 +276,8 @@ else
   info "已跳过 git 拉取（非 git 仓库，--no-pull）"
 fi
 
-# ---------- ③ 备份 ----------
-step "③ 备份数据库（pg_dump）"
-if [ "$SKIP_BACKUP" = 1 ]; then
-  info "已跳过（--skip-backup）"
-elif [ "$DRY_RUN" = 1 ]; then
-  info "[dry-run] 将在容器内执行 scripts/backup.sh"
-else
-  CID="$("${COMPOSE[@]}" ps -q "$CONTAINER_NAME" 2>/dev/null || true)"
-  if [ -n "$CID" ]; then
-    info "备份到容器内 data/backups/"
-    if ! "${COMPOSE[@]}" exec -T "$CONTAINER_NAME" bash scripts/backup.sh; then
-      die "备份失败，已停止部署（未构建/未重启；旧容器仍在运行）"
-    fi
-  elif docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-    warn "容器未运行，用一次性容器执行备份"
-    if ! "${COMPOSE[@]}" run --rm --no-deps --entrypoint bash "$CONTAINER_NAME" scripts/backup.sh; then
-      die "备份失败，已停止部署（未构建/未重启）"
-    fi
-  else
-    warn "容器/镜像都不存在，跳过备份（首次部署）"
-  fi
-fi
-
-# ---------- ④ 构建 ----------
-step "④ 构建镜像（前端 + 后端）"
+# ---------- ③ 构建 ----------
+step "③ 构建镜像（前端 + 后端）"
 if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   run docker tag "$IMAGE_NAME" "$PREV_IMAGE_NAME"
   info "已保留上一版镜像：$PREV_IMAGE_NAME"
@@ -323,12 +292,12 @@ else
   run "${COMPOSE[@]}" "${BUILD_ARGS[@]}"
 fi
 
-# ---------- ⑤ 启动 ----------
-step "⑤ 启动新版本"
+# ---------- ④ 启动 ----------
+step "④ 启动新版本"
 run "${COMPOSE[@]}" up -d --remove-orphans --no-build --force-recreate
 
-# ---------- ⑥ 健康检查 ----------
-step "⑥ 健康检查"
+# ---------- ⑤ 健康检查 ----------
+step "⑤ 健康检查"
 if [ "$DRY_RUN" = 1 ]; then
   info "[dry-run] 跳过"
 else
@@ -360,8 +329,8 @@ else
   info "健康：$STATUS"
 fi
 
-# ---------- ⑦ 结构自检 ----------
-step "⑦ 结构自检"
+# ---------- ⑥ 结构自检 ----------
+step "⑥ 结构自检"
 if [ "$DRY_RUN" = 1 ]; then
   info "[dry-run] 跳过"
 else
