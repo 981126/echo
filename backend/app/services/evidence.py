@@ -37,7 +37,7 @@ log = get_logger("evidence")
 # （selected + log_ids 非空），无 key/失败/空结果仍走原降级路径、不进缓存。
 _EVIDENCE_CACHE_TTL = 3600.0
 _EVIDENCE_CACHE_MAX = 32
-_EVIDENCE_CACHE: dict[tuple[int | None, str, str, str], tuple[float, dict]] = {}
+_EVIDENCE_CACHE: dict[tuple, tuple[float, dict]] = {}
 _EVIDENCE_CACHE_LOCK = threading.Lock()
 
 _MAX_QUERY = 100  # 豆包搜索建议 query 1~100 字（DeepSeek 1~128，取交集）
@@ -688,10 +688,25 @@ def _material_hash(material: str) -> str:
 
 
 def _evidence_cache_key(
-    creator_id: int | None, topic: str, material: str, persona: str = ""
-) -> tuple[int | None, str, str, str]:
-    """证据缓存键：creator + 选题 + 素材指纹 + **人设指纹**（人设变更后不复用旧选文）。"""
-    return (creator_id, (topic or "").strip(), _material_hash(material), _material_hash(persona))
+    creator_id: int | None,
+    topic: str,
+    material: str,
+    persona: str = "",
+    count: int | None = None,
+    time_range: str = "",
+) -> tuple[int | None, str, str, str, int | None, str]:
+    """证据缓存键：creator + 选题 + 素材指纹 + 人设指纹 + 检索参数（count/time_range）。
+
+    人设/素材/检索参数任一变化都会 miss，避免复用不匹配的旧证据。
+    """
+    return (
+        creator_id,
+        (topic or "").strip(),
+        _material_hash(material),
+        _material_hash(persona),
+        int(count) if count is not None else None,
+        (time_range or "").strip(),
+    )
 
 
 def _copy_evidence(ev: dict) -> dict:
@@ -728,16 +743,21 @@ def gather_online_cached(
 
     key = (creator_id, topic, material_hash)，TTL 1h、上限 32 条；命中直接返回同构结果
     （sources/selected/queries/block/log_ids/rejected），**跳过整段联网检索 + 选文 LLM**，
-    仍复用上次留痕的 log_ids（设计：web_search_logs 不重复写）。
+    命中时复用上次的证据内容（不重复检索/选文/写日志），但返回 ``log_ids=[]``，
+    避免把上次留痕的 used 归属覆盖成本次草稿（复核修复）。
     只缓存「selected 与 log_ids 都非空」的成功结果；空/降级/失败不进缓存，语义与现状一致。
     """
-    key = _evidence_cache_key(creator_id, topic, material, persona)
+    key = _evidence_cache_key(creator_id, topic, material, persona, count, time_range)
     now = time.monotonic()
     with _EVIDENCE_CACHE_LOCK:
         hit = _EVIDENCE_CACHE.get(key)
         if hit is not None and now - hit[0] < _EVIDENCE_CACHE_TTL:
             log.info("证据缓存命中（跳过联网检索/选文 LLM）：topic=%s", (topic or "")[:40])
-            return _copy_evidence(hit[1])
+            cached = _copy_evidence(hit[1])
+            # R-241 复核：命中时不返回上次的 log_ids —— 否则本次生成会 mark_logs_used 覆盖
+            # 旧 draft 的留痕归属；本次不写新日志，故返回空列表（可见结果/引用完全不变）。
+            cached["log_ids"] = []
+            return cached
     ev = gather_online(
         db,
         topic,

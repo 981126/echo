@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
@@ -119,7 +119,11 @@ class PlatformPost(Base):
     )  # 跨平台同作品合并（M13+）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_app_now, onupdate=_app_now
+        DateTime,
+        default=_app_now,
+        onupdate=_app_now,
+        # R-241：与 migration r241perftz 的库默认值保持一致（北京时间表达式，避免 autogenerate 漂移）
+        server_default=text("(now() AT TIME ZONE 'Asia/Shanghai')"),
     )
 
     @property
@@ -146,7 +150,11 @@ class PlatformPostStat(Base):
     source: Mapped[str] = mapped_column(String(20), default="tikhub")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_app_now, onupdate=_app_now
+        DateTime,
+        default=_app_now,
+        onupdate=_app_now,
+        # R-241：与 migration r241perftz 的库默认值保持一致（北京时间表达式，避免 autogenerate 漂移）
+        server_default=text("(now() AT TIME ZONE 'Asia/Shanghai')"),
     )  # R-241：卡片缓存版本键（感知同日统计原地更新）
 
 

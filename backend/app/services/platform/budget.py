@@ -64,23 +64,24 @@ def _charge(db: Session, count: int = 1) -> None:
         budget = get_budget(db)  # 命中 Session 缓存：limit 正确（used 仅用于异常文案）
         limit = max(0, int(budget["limit"]))
         key = f"tikhub_budget_used:{today_key()}"
-        new_used = int(
-            db.execute(
-                text(
-                    "INSERT INTO app_kv (key, value) VALUES (:k, CAST(:n AS TEXT)) "
-                    "ON CONFLICT (key) DO UPDATE "
-                    "SET value = CAST(CAST(app_kv.value AS BIGINT) + :n AS TEXT) "
-                    "RETURNING value"
-                ),
-                {"k": key, "n": count},
-            ).scalar_one()
+        # R-241 复核：用 SAVEPOINT + 条件 UPDATE 实现「不超发」，超限时只回滚本次增量，
+        # 不连带回滚调用方同 Session 未提交的业务写（旧实现 db.rollback() 会误伤）。
+        sql = text(
+            "INSERT INTO app_kv (key, value) VALUES (:k, CAST(:n AS TEXT)) "
+            "ON CONFLICT (key) DO UPDATE "
+            "SET value = CAST(CAST(app_kv.value AS BIGINT) + :n AS TEXT) "
+            "WHERE CAST(app_kv.value AS BIGINT) + :n <= :limit "
+            "RETURNING value"
         )
-        if new_used > limit:
-            # 预检读到旧值时仍可能越过上限：原子加后回滚本次增量，保持「不超发」硬约束。
-            db.rollback()
-            raise BudgetExceeded(
-                f"今日 TikHub 请求预算已用完（{new_used - count}/{limit}），未发起新请求"
-            )
+        try:
+            with db.begin_nested():  # SAVEPOINT：超限/异常只回滚这一段
+                row = db.execute(sql, {"k": key, "n": count, "limit": limit}).first()
+                if row is None or int(row[0]) > limit:  # 条件未命中（并发把额度用满）
+                    raise BudgetExceeded(
+                        f"今日 TikHub 请求预算已用完（{max(0, limit - count)}/{limit}），未发起新请求"
+                    )
+        except BudgetExceeded:
+            raise
         db.commit()
 
 

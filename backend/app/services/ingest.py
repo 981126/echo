@@ -785,7 +785,14 @@ def _rerun_if_pending(db, cid: int | None) -> None:
         row = db.get(Kv, "persona_incremental_pending")
         if row is None or row.value != "1":
             return
-        start_task("persona_incremental", {"creator_id": cid, "video_id": 0}, persona_incremental_task)
+        # R-241 复核修复（P1）：补跑与正在运行的任务 kind+payload 相同，必须 dedupe=False，
+        # 否则会被 start_task 去重吞掉、pending 标记又被清 0 → 新素材的人设增量永久丢失。
+        start_task(
+            "persona_incremental",
+            {"creator_id": cid, "video_id": 0},
+            persona_incremental_task,
+            dedupe=False,
+        )
         row.value = "0"
         db.commit()
     except Exception:  # noqa: BLE001 补跑失败不影响本次结果（标记保留，下次仍会补跑）

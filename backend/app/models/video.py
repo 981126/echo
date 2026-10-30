@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
@@ -32,7 +32,11 @@ class Video(Base):
     tags_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # AI 预打标签是否经作者确认
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_app_now, onupdate=_app_now
+        DateTime,
+        default=_app_now,
+        onupdate=_app_now,
+        # R-241：与 migration r241perftz 的库默认值保持一致（北京时间表达式，避免 autogenerate 漂移）
+        server_default=text("(now() AT TIME ZONE 'Asia/Shanghai')"),
     )  # R-241：卡片缓存版本键（感知视频标题/标签/状态等原地编辑）
 
     @property

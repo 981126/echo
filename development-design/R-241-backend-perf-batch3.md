@@ -153,7 +153,7 @@ flowchart LR
 | `platform_post_stats` | 新增列 | `updated_at DATETIME NOT NULL DEFAULT now()`（ORM `onupdate=now`） | 卡片版本键感知同日统计原地更新 |
 | `background_tasks` | 新增索引 | `ix_background_tasks_status_created (status, created_at)` | 任务轮询/运行中查询走索引 |
 
-Alembic revision：`r241perfindexcols`（down_revision=`r239douyincred`）；迁移中两列回填 `CURRENT_TIMESTAMP`；revision 支持 downgrade（删列/索引）。
+Alembic revision：`r241perf`（down_revision=`r239douyincred`，两列+索引）+ `r241perftz`（复核修复：两列库默认值改为 `now() AT TIME ZONE 'Asia/Shanghai'`，与 ORM 北京时间语义一致）；迁移中两列回填 `CURRENT_TIMESTAMP`；revision 支持 downgrade（删列/索引）。
 `docs/DATABASE.md`：两张表的字段表各追加 `updated_at` 行；`background_tasks` 索引列表追加新索引；表数量不变（38 张）。
 
 ## 7. 新增/修改接口
@@ -209,4 +209,31 @@ Alembic revision：`r241perfindexcols`（down_revision=`r239douyincred`）；迁
 | 质量门禁 | — | `scripts/verify.sh` 全绿（ruff/mypy 151 文件/pytest 全量/前端 145+build/docs）；新增 R-241 回归 57 例 |
 
 未在本机实测（真实 LLM/同步计费）：chat async 的线程占用需真实流量观测；自检并行 429、证据缓存命中率、B 站真实补全耗时建议下次真实日更/评测时对照日志确认。
+
+## 10. 实施后独立复核与修复（2026-10-30）
+
+作者要求「确保逻辑没问题、接口数据幂等」，实施后按 R-240 同样方式做 **3 路独立复核**（复核者与实现者分离，基线 `3c6a320`，前序 `beec4ec`）：
+
+| 路 | 结论 | 关键证据 |
+|---|---|---|
+| 读路径（verify-r241-api.md） | ✅ 等价 + GET 幂等 | by-post 全量 1953 帖逐条对比 0 不一致；creator-summary 703→5 SQL 输出全等；13 类写路径版本键均变化、creator 作用域隔离成立；6 并发过期只重建 1 次；27 探针 DML=0、HTTP 冷缓存重建期间 DB 写 delta=0；OpenAPI schema 深度相等 |
+| 基础设施（verify-r241-infra.md） | ✅ 主体 PASS，1 个 P1 已修 | 30 轮×4 线程双击只建 1 行；budget 并发 20×(limit=10) 恰 10 成功/used=10 不超发、8×25 计数精确；共享 Client/TikHub 单例/requests_used 8 处调用点均同线程差值计费；迁移可逆/重复 upgrade 幂等；**P1 去重误杀已修复** |
+| AI 编排（verify-r241-ai.md） | ✅ 等价 + 幂等 | platform_breakdown_map 对 602 视频逐字段一致+8 边界路径；learning_material 逐字一致（565→15~18 SQL）；persona merge 并行=串行逐字一致；content 三分支 8 组 want 键顺序一致；证据缓存命中/未命中 6 字段一致、命中零 DB；topic_mining 重复刷新幂等（并顺带修复旧实现同批重复 `uq_hot` 潜在故障） |
+
+### 10.1 复核发现并修复的问题
+
+| 级别 | 问题 | 修复 |
+|---|---|---|
+| **P1** | `start_task` 自动去重误杀人设增量补跑（任务 running 时补跑同 kind+payload 被吞 + pending 标记清 0 → 新素材增量丢失） | `ingest._rerun_if_pending` 改 `dedupe=False` + `test_r241_fixes.py` 回归 |
+| P2 | `updated_at` 库默认 UTC 与 ORM 北京时间不一致（潜在漏失效/文档不符） | migration `r241perftz` 默认改北京时间表达式；模型补 `server_default` 与索引声明；迁移测试同步 |
+| P2 | 证据缓存命中原样返回旧 `log_ids` → 下游覆盖旧草稿留痕归属 | 命中返回 `log_ids=[]`；key 补 `count/time_range`；测试锁定 |
+| P3 | 预算超卖兜底 `db.rollback()` 会误伤同 Session 未提交业务写 | 改 `SAVEPOINT + 条件 UPDATE`；新增 savepoint 回归测试 |
+| P3 | `content_opportunities` 空 want 返回 `{}`；persona `merge_profile` 未透传 factory；creator-summary 窗口无 tie-break | 分别归一化 `all`、签名探测透传、加 `id desc` 兜底 |
+| P2 残留 | `start_task` 每任务仍一线程（信号量只限执行数，不限线程数），长任务占满槽时短任务队头阻塞 | 记录为后续批次（改「固定 worker 池 + 队列」）；当前上限 8 已避免任务风暴 |
+
+### 10.2 幂等/行为变化说明
+
+- GET 全幂等零写库（缓存冷/热/过期并发/单飞等待均只读，实测 DML=0）。
+- 同步/媒体/转写/机会/证据/任务类动作重复执行不产生重复数据；生成类保持「每次新增」旧语义。
+- 有意行为变化（已在需求/CHANGELOG 记录）：`start_task` 同 kind+payload 运行中去重（补跑入口显式 `dedupe=False` 例外）；`/api/tasks` limit clamp ≤200；证据/Fetch 缓存 TTL 1h；站内检索失败降级空证据；任务/chat 等语义不变。
 

@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -97,10 +99,25 @@ def extract_pieces(
 
 
 def merge_profile(parts: list[dict], service_factory=PersonaService) -> dict:
-    """把逐篇提炼结果归纳合并成一份档案（单独一层，便于任务分阶段报进度）。"""
+    """把逐篇提炼结果归纳合并成一份档案（单独一层，便于任务分阶段报进度）。
+
+    R-241 复核：把 `service_factory` 透传给 `merge_full`（分块并行需要每线程新实例）；
+    旧替身/旧实现的 `merge_full` 不支持该关键字时退回普通调用（用签名探测，不走 try/except）。
+    """
     if not parts:
         return empty_profile()
-    return service_factory().merge_full(parts)
+    service = service_factory()
+    supports = False
+    try:
+        params = inspect.signature(service.merge_full).parameters
+        supports = "service_factory" in params or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+    except (TypeError, ValueError):
+        supports = False
+    if supports:
+        return service.merge_full(parts, service_factory=service_factory)
+    return service.merge_full(parts)
 
 
 def annotate_profile_stats(profile: dict, parts: list[dict], materials: list[tuple]) -> dict:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -14,6 +14,8 @@ from ..core.timeutil import now as _app_now
 
 class BackgroundTask(Base):
     __tablename__ = "background_tasks"
+    # R-241：任务轮询/运行中查询索引（由 migration r241perf 创建；模型声明用于避免 autogenerate 假差异）
+    __table_args__ = (Index("ix_background_tasks_status_created", "status", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kind: Mapped[str] = mapped_column(String(50), index=True)  # import_video | persona_init

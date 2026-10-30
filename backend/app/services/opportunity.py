@@ -937,6 +937,7 @@ def content_opportunities(want: str = "all", *, session_factory=None) -> dict:
     `want` 取值 all|comment|weekly|gap（与工具参数同义）。调用方只需
     `return opportunity.content_opportunities(want)`，不再让请求/工具 Session 跨线程。
     """
+    want = (want or "all").strip() or "all"  # 空字符串/None 等价 all（与 chat 工具旧实现一致）
     branches: list[str] = []
     if want in ("all", "comment"):
         branches.append("comment")

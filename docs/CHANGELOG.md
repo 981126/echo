@@ -11,6 +11,14 @@
 - 契约：前端零改动，接口请求/响应字段与 OpenAPI schema 不变；新增配置 `ECHO_MAX_PARALLEL_TASKS`。
 - 验证：`scripts/verify.sh` 全绿（ruff/mypy 151 文件/pytest 全量/前端 lint+vitest 145 例+build/文档一致性）；新增 `tests/test_r241_{readpath,ai,chat_infra,sync_http,tasks}.py` 共 57 例回归；服务重启加载新代码后 GET 冒烟/日志检查通过。
 
+- **复核修复（2026-10-30，`fix(R-241)`）**：三路独立复核发现并修复：
+  ① **P1** `start_task` 自动去重会误杀「人设增量补跑」（`_rerun_if_pending` 在任务 running 时同 kind+payload 被吞、pending 标记清 0 → 新素材增量永久丢失）→ 该调用点改 `dedupe=False` + 回归测试；
+  ② **P2** `updated_at` 库默认值为 UTC 的 `CURRENT_TIMESTAMP`（库 timezone=Etc/UTC）与 ORM 北京时间不一致 → 新增 migration `r241perftz` 把两列库默认改为 `now() AT TIME ZONE 'Asia/Shanghai'`，模型补 `server_default` 与任务索引声明（避免 autogenerate 假差异）；
+  ③ 证据缓存命中不再返回上次 `log_ids`（避免 mark_logs_used 覆盖旧草稿留痕归属），缓存 key 补 `count/time_range`；
+  ④ 预算超卖兜底由 `db.rollback()` 改 `SAVEPOINT + 条件 UPDATE`（超限只回滚本次增量，不误伤同 Session 未提交业务写）；
+  ⑤ `content_opportunities` 空 `want` 归一化 `all`；`persona.merge_profile` 透传 `service_factory`；creator-summary 窗口排序加 `id desc` tie-break。
+  新增 `tests/test_r241_fixes.py`（4 例）与 `tests/test_r241_idempotency.py`（7 例）覆盖上述修复与幂等/并发约束。
+
 ## [R-240] 2026-10-30 — 后端性能优化批次 1+2：接口慢点消除 + 可并行任务并行化 ✅
 
 - 读接口消除 N+1/全量加载：`GET /api/benchmark/top` 810 SQL/447ms → **7 SQL/27~32ms**；`/api/library` 假分页 141ms → **9~10ms（快照缓存命中，首访 150ms）**；`/api/works` 210ms → **9ms（命中）**；`/api/persona/style` 218 SQL/76ms → **7 SQL/17~21ms**；`/api/persona/phrases/suggest` 146 SQL/44ms → **4 SQL/6~7ms**；`/api/douyin-review/references` 112ms → **16~18ms**；机会缓存加单飞+60s 预热（ledger 冷 593ms → 预热后 6.5ms，attribution 225ms → 4.7ms）。

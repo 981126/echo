@@ -621,7 +621,8 @@ def creator_summary(db: Session = Depends(get_db)):
                 func.row_number()
                 .over(
                     partition_by=PlatformPost.account_id,
-                    order_by=PlatformPost.publish_time.desc(),
+                    # R-241 复核：publish_time 相同（含 NULL）时用 id 兜底，保证 rn/前50 确定性
+                    order_by=(PlatformPost.publish_time.desc(), PlatformPost.id.desc()),
                 )
                 .label("rn"),
             )

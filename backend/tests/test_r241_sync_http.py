@@ -400,7 +400,8 @@ def test_evidence_cache_hit_skips_gather_online(db, monkeypatch):
         second = evidence.gather_online_cached(db, "选题A", draft_id=2, **kwargs)
         assert calls == ["选题A"]  # 命中缓存，不再联网/选文
         assert second["block"] == first["block"] == "BLOCK:选题A"
-        assert second["log_ids"] == [11, 12]  # 复用上次留痕 id（不重复写 log）
+        # R-241 复核修复：命中不再返回上次 log_ids（避免 mark_logs_used 覆盖旧草稿留痕）
+        assert second["log_ids"] == []
         assert second["selected"][0]["reason"] == "有数据"
 
         # 返回副本：修改结果不污染缓存
