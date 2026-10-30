@@ -47,8 +47,8 @@ def test_empty_database_upgrade_and_repeat(migration_url):
     assert set(Base.metadata.tables) <= set(inspector.get_table_names())
     assert allowed_views() <= set(inspector.get_view_names())
     with engine.connect() as connection:
-        assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompts").scalar() == 9
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "7a6f0c2d9e41"
+        assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompts").scalar() == 10
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "b237a9c4e801"
     engine.dispose()
 
 
@@ -62,7 +62,7 @@ def test_matching_legacy_database_is_baselines(migration_url):
     run_migrations(migration_url)
 
     with engine.connect() as connection:
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "7a6f0c2d9e41"
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "b237a9c4e801"
     engine.dispose()
 
 

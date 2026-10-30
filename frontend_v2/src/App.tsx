@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 const LoginPage = lazy(() => import('@/pages/login'))
 const HomePage = lazy(() => import('@/pages/home'))
 const VideosPage = lazy(() => import('@/pages/videos'))
+const VideoReviewPage = lazy(() => import('@/pages/video-review'))
 const CreatorsPage = lazy(() => import('@/pages/creators'))
 const BenchmarkPage = lazy(() => import('@/pages/benchmark'))
 const DraftsPage = lazy(() => import('@/pages/drafts'))
@@ -67,6 +68,7 @@ const router = createHashRouter([
       { index: true, element: <Navigate to="/home" replace /> },
       { path: 'home', element: <Page><HomePage /></Page> },
       { path: 'videos', element: <Page><VideosPage /></Page> },
+      { path: 'video-review', element: <Page><VideoReviewPage /></Page> },
       { path: 'drafts', element: <Page><DraftsPage /></Page> },
       { path: 'inspiration', element: <Page><InspirationPage /></Page> },
       { path: 'benchmark', element: <Page><BenchmarkPage /></Page> },

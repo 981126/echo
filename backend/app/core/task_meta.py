@@ -39,6 +39,9 @@ KIND_LABELS = {
     "model_selfcheck": "双模型兼容性自检",
     "schema_check": "库结构自检",
     "task_interrupted": "任务中断",
+    "douyin_review_analyze": "视频复盘分析",
+    "douyin_review_references": "低粉爆款更新",
+    "douyin_review_plan_check": "修改效果检查",
 }
 
 
@@ -85,4 +88,8 @@ def target(kind: str, payload: dict | None = None, result=None) -> str:
         return f"/drafts?id={payload.get('draft_id', '')}"
     if kind == "model_selfcheck":
         return "/prompts"
+    if kind == "douyin_review_analyze":
+        return f"/video-review?post={payload.get('post_id', '')}"
+    if kind in ("douyin_review_references", "douyin_review_plan_check"):
+        return "/video-review"
     return "/home"

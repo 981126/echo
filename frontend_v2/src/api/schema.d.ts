@@ -355,9 +355,29 @@ export interface paths {
          * Rebuild Persona
          * @description R-182 方案B：推倒重建人设档案（清空旧档案 → 四层全量重建为待确认建议）。
          *
-         *     已有重建/初始化任务进行中时拒绝重复入队，防连点。清空前请确已备份（启动/手动备份均可）。
+         *     已有重建/初始化任务进行中时拒绝重复入队，防连点。
          */
         post: operations["rebuild_persona_api_persona_rebuild_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/persona/auto-confirm-backlog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Auto Confirm Backlog
+         * @description R-208：按同规则批量处理历史积压的待确认建议（后台任务，非禁区+高置信自动进档）。
+         */
+        post: operations["auto_confirm_backlog_api_persona_auto_confirm_backlog_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -641,6 +661,26 @@ export interface paths {
          * @description 双模型讨论生成（R-023）：先建占位草稿，后台 初稿→5轮讨论→定稿；完成后通知跳转草稿。
          */
         post: operations["generate_async_api_drafts_generate_async_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/drafts/{draft_id}/suggest-meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Meta
+         * @description 基于脚本正文 + 人设生成标题/封面字/素材标签候选（R-224）。
+         */
+        post: operations["suggest_meta_api_drafts__draft_id__suggest_meta_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -966,9 +1006,11 @@ export interface paths {
         put?: never;
         /**
          * Draft Version Rollback
-         * @description R-157：回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存。
+         * @description 回滚到此版本——把该版本快照（正文/标题/封面字/标签）覆盖写回当前草稿并保存。
          *
-         *     按作者口径：**只覆盖保存**，不额外留痕、不改草稿状态。
+         *     R-209（推翻 R-157「只覆盖保存、不留痕」）：回退**留一版**（`source="rollback"`），
+         *     版本链终点反映真实内容——否则差异分析/改稿样本会把 AI 讨论的产出错当「作者定稿」。
+         *     若回退跨过了 AI 侧版本（= 否定了 AI 的产出），同时把最近讨论运行头回填 `reverted: true`。
          */
         post: operations["draft_version_rollback_api_drafts__draft_id__versions__version_id__rollback_post"];
         delete?: never;
@@ -2457,6 +2499,228 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/douyin-review/videos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Videos */
+        get: operations["videos_api_douyin_review_videos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Analyze */
+        post: operations["analyze_api_douyin_review_analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/reviews/{review_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Review */
+        get: operations["get_review_api_douyin_review_reviews__review_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/posts/{post_id}/latest-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Latest Review */
+        get: operations["latest_review_api_douyin_review_posts__post_id__latest_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** References */
+        get: operations["references_api_douyin_review_references_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/references/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh References */
+        post: operations["refresh_references_api_douyin_review_references_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Credentials */
+        get: operations["credentials_api_douyin_review_credentials_get"];
+        /** Save Credentials */
+        put: operations["save_credentials_api_douyin_review_credentials_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/recommendations/{recommendation_id}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adopt */
+        post: operations["adopt_api_douyin_review_recommendations__recommendation_id__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/plans/{plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Plan */
+        patch: operations["patch_plan_api_douyin_review_plans__plan_id__patch"];
+        trace?: never;
+    };
+    "/api/douyin-review/plans/{plan_id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link Plan */
+        post: operations["link_plan_api_douyin_review_plans__plan_id__link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/plans/{plan_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Plan */
+        post: operations["check_plan_api_douyin_review_plans__plan_id__check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Plans */
+        get: operations["plans_api_douyin_review_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-review/homepage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Homepage */
+        put: operations["homepage_api_douyin_review_homepage_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -2583,6 +2847,21 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** AnalyzeIn */
+        AnalyzeIn: {
+            /** Post Id */
+            post_id: number;
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh: boolean;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
         };
         /** AnglesIn */
         AnglesIn: {
@@ -2774,6 +3053,13 @@ export interface components {
              */
             created_at: string;
         };
+        /** CredentialIn */
+        CredentialIn: {
+            /** Account Id */
+            account_id: number;
+            /** Cookie */
+            cookie: string;
+        };
         /** DraftCreate */
         DraftCreate: {
             /** Video Id */
@@ -2914,6 +3200,16 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
+             * Pure Manual
+             * @default false
+             */
+            pure_manual: boolean;
+            /**
+             * Feedback Comment
+             * @default
+             */
+            feedback_comment: string;
+            /**
              * Created At
              * Format: date-time
              */
@@ -3005,11 +3301,33 @@ export interface components {
              * @default
              */
             mode: string;
+            /**
+             * Query Source
+             * @default
+             */
+            query_source: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HomepageIn */
+        HomepageIn: {
+            /** Account Id */
+            account_id: number;
+            /**
+             * Bio
+             * @default
+             */
+            bio: string;
+            /** Pinned Post Ids */
+            pinned_post_ids?: number[];
+            /**
+             * Direction Note
+             * @default
+             */
+            direction_note: string;
         };
         /** MergeIn */
         MergeIn: {
@@ -3066,6 +3384,10 @@ export interface components {
              * @default false
              */
             reset_budgets: boolean;
+            /** Feature Routes */
+            feature_routes?: {
+                [key: string]: string;
+            } | null;
         };
         /** NoteIn */
         NoteIn: {
@@ -3303,6 +3625,45 @@ export interface components {
              */
             evidence: string;
         };
+        /** PlanCheckIn */
+        PlanCheckIn: {
+            /**
+             * Refresh
+             * @default true
+             */
+            refresh: boolean;
+        };
+        /** PlanIn */
+        PlanIn: {
+            /**
+             * Kept Text
+             * @default
+             */
+            kept_text: string;
+            /** Changes */
+            changes?: string[];
+            /** Target Metrics */
+            target_metrics?: string[];
+        };
+        /** PlanLinkIn */
+        PlanLinkIn: {
+            /** Published Post Id */
+            published_post_id: number;
+            /**
+             * Replace
+             * @default false
+             */
+            replace: boolean;
+        };
+        /** PlanPatchIn */
+        PlanPatchIn: {
+            /** Kept Text */
+            kept_text?: string | null;
+            /** Changes */
+            changes?: string[] | null;
+            /** Target Metrics */
+            target_metrics?: string[] | null;
+        };
         /**
          * PlatformLinkOut
          * @description 素材绑定的平台作品链接（R-035/R-037：展示三平台链接与评论用）。
@@ -3347,6 +3708,38 @@ export interface components {
         PromptSaveIn: {
             /** Content */
             content: string;
+        };
+        /** ReferenceRefreshIn */
+        ReferenceRefreshIn: {
+            /**
+             * Category Id
+             * @default 0
+             */
+            category_id: string;
+            /**
+             * Keyword
+             * @default
+             */
+            keyword: string;
+            /**
+             * Date Window
+             * @default 168
+             */
+            date_window: number;
+            /**
+             * Duration Type
+             * @default 0
+             */
+            duration_type: number;
+            /** Tags */
+            tags?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
         };
         /** RewriteSourceIn */
         RewriteSourceIn: {
@@ -4504,6 +4897,37 @@ export interface operations {
             };
         };
     };
+    auto_confirm_backlog_api_persona_auto_confirm_backlog_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     latest_persona_check_api_persona_check_latest_get: {
         parameters: {
             query?: never;
@@ -5002,6 +5426,41 @@ export interface operations {
                 "application/json": components["schemas"]["GenerateIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_meta_api_drafts__draft_id__suggest_meta_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                draft_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -8755,6 +9214,529 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    videos_api_douyin_review_videos_get: {
+        parameters: {
+            query?: {
+                account_id?: number | null;
+                query?: string;
+                cursor?: number;
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_api_douyin_review_analyze_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_review_api_douyin_review_reviews__review_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                review_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_review_api_douyin_review_posts__post_id__latest_review_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                post_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    references_api_douyin_review_references_get: {
+        parameters: {
+            query: {
+                kind: string;
+                keyword?: string;
+                category_id?: string;
+                date_days?: number;
+                duration_type?: number;
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_references_api_douyin_review_references_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceRefreshIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    credentials_api_douyin_review_credentials_get: {
+        parameters: {
+            query: {
+                account_id: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_credentials_api_douyin_review_credentials_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_api_douyin_review_recommendations__recommendation_id__adopt_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                recommendation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_plan_api_douyin_review_plans__plan_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_plan_api_douyin_review_plans__plan_id__link_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanLinkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_plan_api_douyin_review_plans__plan_id__check_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanCheckIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plans_api_douyin_review_plans_get: {
+        parameters: {
+            query?: {
+                post_id?: number | null;
+                limit?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    homepage_api_douyin_review_homepage_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HomepageIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

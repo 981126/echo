@@ -61,6 +61,11 @@ SLOTS: dict[str, dict] = {
         "default": 4000,
         "desc": "判断对标选题作者能不能讲（输出较短）",
     },
+    "video_review": {
+        "label": "视频复盘",
+        "default": 8000,
+        "desc": "依据真实数据解释原因并整理下一条主题",
+    },
     "persona_merge": {
         "label": "人设归纳合并",
         "default": 8000,

@@ -27,3 +27,6 @@ yt-dlp>=2025.6
 
 # 封面缩略图按需生成（R-179）：原图平均 191KB、最大 1MB，首屏 20 张要 13MB → 缩到 ~25-40KB
 Pillow>=10.0
+
+# 抖音创作者 Cookie 加密存储（R-237；密钥只在 ECHO_DOUYIN_COOKIE_KEY）
+cryptography>=41.0

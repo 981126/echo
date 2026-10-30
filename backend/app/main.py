@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import benchmark, chat, creators, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
+from .api import benchmark, chat, creators, douyin_review, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .core.log import get_logger, setup_logging
 from .migrations import run_migrations
@@ -83,6 +83,7 @@ app.include_router(works.router, prefix="/api/works", tags=["works"], dependenci
 app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=API_DEPENDENCIES)
 app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opportunities"], dependencies=API_DEPENDENCIES)
 app.include_router(inspiration.router, prefix="/api/inspiration", tags=["inspiration"], dependencies=API_DEPENDENCIES)
+app.include_router(douyin_review.router, prefix="/api/douyin-review", tags=["douyin-review"], dependencies=API_DEPENDENCIES)
 
 
 @app.get("/health")

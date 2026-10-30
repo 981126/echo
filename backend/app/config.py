@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     tikhub_mode: str = "mock"  # mock | real（real 需 .env 配 ECHO_TIKHUB_API_KEY）
     tikhub_daily_budget: int = 2000  # 每日请求预算上限（页面可覆盖，存 Kv）
     platform_sync_times: str = "06:00,17:00"  # R-109：每日两轮（主博主+对标统一），逗号分隔，北京时区
+    douyin_cookie_key: str = ""  # R-237：Cookie 密文密钥；Cookie 本身只经页面加密入库
     # R-163/R-222 同步并发：全局 TikHub 令牌桶（所有接口合计 ≤ rate req/s）+ 消费者池大小
     tikhub_rate_limit: float = 10.0  # 全局请求速率上限（req/s），ECHO_TIKHUB_RATE_LIMIT
     tikhub_rate_burst: int = 10  # 令牌桶容量（允许的瞬时突发），ECHO_TIKHUB_RATE_BURST

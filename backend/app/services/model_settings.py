@@ -259,6 +259,7 @@ FEATURE_GROUPS: dict[str, dict] = {
     "diff": {"label": "差异分析", "features": ("diff",)},
     "prompt_opt": {"label": "提示词优化与评测", "features": ("prompt_optimize", "prompt_eval")},
     "benchmark": {"label": "对标分析", "features": ("benchmark",)},
+    "video_review": {"label": "视频复盘", "features": ("video_review",)},
     "feedback": {"label": "反馈学习", "features": ("feedback_analysis",)},
     "draft_meta": {"label": "标题封面标签", "features": ("draft_meta",)},
     "misc": {"label": "灵感与其他", "features": ("ideas", "misc")},

@@ -7,6 +7,9 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-239 | 2026-10-30 | 账号级创作者 Cookie 与数据源策略：视频复盘去掉 Cookie 配置；博主管理「编辑账号」加开关+Cookie+状态；每账号收数先判源（开关关/无 Cookie→公开，开启+有效→创作者中心，开启+失效→停止该账号所有第三方调用+通知+标记失效，直到更新 Cookie）；合并 R-238（素材库真实播放展示/防覆盖/回填/每日保鲜）；只做抖音 | 已确认（文档已建，待「继续」开工） | M240 | 视频复盘页、博主管理、creators/douyin-review API、`douyin_creator_sync.py`、`platform_sync.py`、`library_service.py`、R-237、R-238 |
+| R-238 | 2026-10-30 | 素材库本人抖音作品数据改用创作者中心接口（已并入 R-239，保留历史文档） | ⛔ 已并入 R-239 | — | 同 R-239 |
+| R-237 | 2026-10-29 | 只做抖音：解释视频好/差原因与涨粉问题；1 个首选 + 2 个备选主题，首选附后续 3 条相关内容；同行爆款/低粉爆款作证据，3 个新话题，发布后检查修改效果；小白可懂的图标与中文 | 🔨 代码完成（私有字段待 Cookie 联调） | M238 | PRD §3.10、TikHub Creator V2、抖音榜单、对标、素材转写、frontend_v2 |
 | R-236 | 2026-10-27 | 移除自动备份与 initdb/create_all 初始化；Alembic 管理结构/视图/数据 migration，空库 upgrade，完整旧库 baseline，不完整旧库拒绝接管 | ✅ 已完成 | M237 | migrations.py、alembic/、db.py、scheduler、deploy、tests、docs |
 | R-235 | 2026-10-21 | SQLite 全面迁移 PostgreSQL：`ECHO_DATABASE_URL` 只从 .env 读（无默认、缺失启动报错）；方言 SQL 改写 PG；JSON 列保持 TEXT；测试每测试清表 + 库名安全闸门；结构与初始化机制由 R-236 取代 | 已确认 | M236 | db.py、config.py、analytics_views、chat_sql、services、scheduler、tests、docker-compose.yml、docs |
 | R-234 | 2026-10-18 | NAS 一键部署脚本：`scripts/deploy.sh` 预检 `.env`/Docker → `git fetch` + 快进 `origin/main`（工作区脏则中止）→ `docker compose build`（前端多阶段 + 后端）→ `up -d` → 健康检查 → 结构自检；失败保留 `echo:previous`；日志 `data/logs/deploy-*.log`；`update.sh` 保留为兼容入口；compose 固定容器内 `/app/data` 并用 `ECHO_HOST_DATA_DIR` 配宿主机目录 | ✅ 代码完成（NAS 实机待验证） | M235 | `scripts/deploy.sh`、`scripts/update.sh`、`docker-compose.yml`、`docs/QUICKSTART.md`、R-145 |

@@ -63,10 +63,27 @@ def main() -> int:
             if (method.upper(), path) not in documented:
                 problems.append(f"API.md 缺少路由：{method.upper()} {path}")
 
+    # ---------- 需求文档 ↔ 开发设计文档成对检查（R-237 起强制） ----------
+    # 历史需求（R-001~R-236）只登记了需求、没有开发设计，不追溯；从 R-237 起两份文档缺一不可。
+    req_dir = ROOT / "requirements"
+    design_dir = ROOT / "development-design"
+    since = 237
+    requirement_files = {
+        path.name: int(m.group(1))
+        for path in req_dir.glob("R-*.md")
+        if (m := re.match(r"R-(\d+)-", path.name))
+    }
+    for name, number in sorted(requirement_files.items()):
+        if number >= since and not (design_dir / name).exists():
+            problems.append(f"需求缺少同名开发设计：requirements/{name} → development-design/{name}")
+    for path in design_dir.glob("R-*.md"):
+        if path.name not in requirement_files:
+            problems.append(f"开发设计缺少对应需求文档：development-design/{path.name}")
+
     if problems:
         print("==> [docs] 文档与代码不一致：")
         return _fail(problems)
-    print(f"==> [docs] 一致：{len(tables)} 张表 / {operations} 个路由")
+    print(f"==> [docs] 一致：{len(tables)} 张表 / {operations} 个路由 / 需求与设计文档成对")
     return 0
 
 

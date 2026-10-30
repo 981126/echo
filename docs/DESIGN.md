@@ -1,6 +1,7 @@
 # DESIGN — 开发设计细节（代码级）
 
 > 面向开发者：模块实现、数据流、关键逻辑、错误/并发处理、动效规范、编码标准。API 与表结构以 `docs/API.md`、`docs/DATABASE.md` 为准；架构总览见 `ARCHITECTURE.md`。
+> 每个需求的开发设计统一写入与 `requirements` 同级的 `development-design/R-xxx-<short-description>.md`，必须包含开发背景、涉及技术、开发流程图、数据流转图、实现细节、逐字段表结构、详细接口、数据来源与原始字段明细八部分；复杂判断必须写清规则与证据，原始数据须区分第三方接口、现有表、作者输入和程序计算，格式要求见 `WORKFLOW.md` §三。
 
 ## 0. 运行入口与配置
 

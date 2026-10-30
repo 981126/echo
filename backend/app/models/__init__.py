@@ -25,6 +25,15 @@ from .platform import (
 from .prompt import AiPrompt, PromptEval
 from .task import BackgroundTask
 from .video import Transcript, Video
+from .video_review import (
+    DouyinCreatorCredential,
+    DouyinPostMetric,
+    DouyinReferenceVideo,
+    VideoImprovementPlan,
+    VideoReview,
+    VideoReviewFinding,
+    VideoTopicRecommendation,
+)
 from .web_search import WebSearchLog
 from .work import Work
 
@@ -59,4 +68,11 @@ __all__ = [
     "SyncJob",
     "Work",
     "WebSearchLog",
+    "DouyinCreatorCredential",
+    "DouyinPostMetric",
+    "DouyinReferenceVideo",
+    "VideoReview",
+    "VideoReviewFinding",
+    "VideoTopicRecommendation",
+    "VideoImprovementPlan",
 ]

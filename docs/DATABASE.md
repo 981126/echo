@@ -5,7 +5,7 @@
 > 结构演进：R-236 起由 `backend/alembic/versions/` 管理；启动执行 `upgrade head`，现有完整旧库首次自动 baseline。新增表、字段、索引、视图或结构相关数据变更必须新增 revision，并同步本文。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（31 张）
+## 表总览（38 张）
 
 | 表 | 说明 |
 |---|---|
@@ -39,6 +39,13 @@
 | `transcripts` | 转写稿：ASR 原文(transcript_text)、AI 校对稿(source_text)与状态；video_id 唯一。 |
 | `videos` | 本地素材：上传/导入视频元数据 + 封面 + 平台/赛道多选(JSON) + 发布状态/时间 + 绑定平台作品/合并作品。 |
 | `works` | 跨平台同作品：同一内容三平台自动/手动合并，title 规范化去重，承载素材库云端合并卡。 |
+| `douyin_creator_credentials` | 抖音创作者 Cookie 密文、可用状态、最近验证/成功同步时间与脱敏错误；密钥只在 `.env`。 |
+| `douyin_post_metrics` | 自己抖音作品创作者指标按天快照：跳出/完播/平均播放/封面点击/主页访问/单条涨粉/趋势/raw。 |
+| `douyin_reference_videos` | 抖音低粉榜和公开搜索参考：作者/公开互动/官方标签/类别关键词/分析/raw。 |
+| `video_reviews` | 每次视频复盘主记录：输入指纹、比较对象、指标快照、总结、主页分析、新话题、模型与警告。 |
+| `video_review_findings` | 复盘原因明细：规则、事实/推测、指标与内容证据、比较视频、修改建议。 |
+| `video_topic_recommendations` | 首选/备选/后续主题：理由、适合依据、证据、内容顺序、来源、评分明细与采用时间。 |
+| `video_improvement_plans` | 作者确认的修改计划：保留项、1～2 项修改、观察指标、关联新视频与检查结果。 |
 
 ## 核心数据流关系速览
 
@@ -774,6 +781,152 @@ AI 对话写操作的提案与审计（R-147 P2）。
 | `results` | TEXT | 该路候选中 JSON：`{"kept":[...],"rejected":[{"title","url","reason"}]}`（含正文/摘要/站点，原样留痕） |
 | `used` | TEXT | 生成方选文后，正文实际引用到的来源 JSON（双行写同一份） |
 | `created_at` | DATETIME | 创建时间（北京时间） |
+
+## `douyin_creator_credentials`
+
+R-237：本人或已授权抖音账号的创作者 Cookie。数据库只存 Fernet 密文，解密密钥只放 `.env` 的 `ECHO_DOUYIN_COOKIE_KEY`。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `account_id` | INTEGER | 对应 `creator_accounts.id`，唯一 |
+| `cookie_value` | TEXT | Cookie 密文，接口永不回显 |
+| `status` | VARCHAR(20) | `missing/valid/expired/invalid` |
+| `last_validated_at` | DATETIME | 最近验证时间（可空） |
+| `last_success_at` | DATETIME | 最近成功获取数据时间（可空） |
+| `last_error` | TEXT | 脱敏失败原因 |
+| `created_at` / `updated_at` | DATETIME | 创建/修改时间 |
+
+## `douyin_post_metrics`
+
+自己抖音作品的创作者指标按天快照；`(post_id, snapshot_date)` 唯一。NULL 表示平台未返回，不等于 0。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `post_id` | INTEGER | 对应 `platform_posts.id` |
+| `snapshot_date` | VARCHAR(10) | 指标日期 |
+| `captured_at` | DATETIME | 实际抓取时间 |
+| `bounce_2s_rate` | FLOAT | 2 秒跳出率（0～1，可空） |
+| `finish_5s_rate` | FLOAT | 5 秒完播率（0～1，可空） |
+| `finish_rate` | FLOAT | 完整完播率（0～1，可空） |
+| `avg_play_seconds` | FLOAT | 平均播放时长（秒，可空） |
+| `cover_click_rate` | FLOAT | 封面点击率（0～1，可空） |
+| `profile_visits` | INTEGER | 观看后主页访问量（可空） |
+| `follower_gain` | INTEGER | 单条视频粉丝增量（可空） |
+| `traffic_sources` | TEXT | 播放来源 JSON |
+| `search_terms` | TEXT | 搜索词 JSON |
+| `retention_trend` / `like_trend` / `bounce_trend` | TEXT | 留存/点赞/跳出趋势 JSON |
+| `similar_author_trend` | TEXT | 平台同类作者趋势 JSON |
+| `trend_reliable` | BOOLEAN | 播放≥200且趋势非空 |
+| `raw` | TEXT | 创作者接口原始响应，不含 Cookie |
+| `created_at` | DATETIME | 创建时间 |
+
+索引：`ix_douyin_post_metrics_post_date`、`ix_douyin_post_metrics_snapshot_date`。
+
+## `douyin_reference_videos`
+
+低粉榜和公开搜索视频，独立于手动同行关系，不进入作者人设语料。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `external_post_id` | VARCHAR(200) | 抖音作品 ID，唯一 |
+| `source` / `source_label` | VARCHAR | 来源与官方标签 |
+| `author_id` / `author_nickname` | VARCHAR | 公开作者 ID/昵称 |
+| `author_followers` | INTEGER | 公开粉丝数（可空） |
+| `title` / `cover_url` / `video_url` | VARCHAR/TEXT | 标题、封面、原视频链接 |
+| `publish_time` | DATETIME | 发布时间（可空） |
+| `duration_seconds` | INTEGER | 时长（秒，可空） |
+| `plays` / `likes` / `comments` / `shares` | INTEGER | 公开互动（可空） |
+| `category_id` / `keyword` | VARCHAR | 筛选类别和关键词 |
+| `top_comments` | TEXT | 公开评论 JSON |
+| `analysis` | TEXT | 公开内容分析 JSON |
+| `analyzed_at` | DATETIME | 最近分析时间（可空） |
+| `raw` | TEXT | 公开接口原始响应 |
+| `first_seen_at` / `last_seen_at` | DATETIME | 首次/最近出现时间 |
+
+## `video_reviews`
+
+每次分析新建记录，不覆盖历史复盘。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `account_id` / `post_id` | INTEGER | 本人抖音账号和作品 |
+| `task_id` | INTEGER | 后台任务（可空） |
+| `status` | VARCHAR(20) | `running/done/partial/failed` |
+| `input_fingerprint` | VARCHAR(64) | 输入与规则版本指纹 |
+| `rule_version` | VARCHAR(20) | 归因规则版本 |
+| `comparison_count` | INTEGER | 实际比较视频数 |
+| `comparison_post_ids` | TEXT | 比较作品 ID JSON |
+| `summary` | TEXT | 一句话结论 |
+| `overall_result` | VARCHAR(30) | `good/mixed/needs_improvement/unknown` |
+| `metrics_snapshot` | TEXT | 分析当时的指标、事实和图表快照 |
+| `homepage_analysis` | TEXT | 主页检查与作者补充信息 |
+| `new_topics` | TEXT | 账号新话题 JSON |
+| `warnings` | TEXT | 缺数据和降级说明 |
+| `model_name` / `prompt_version` | VARCHAR/INTEGER | 实际模型与提示词版本 |
+| `error` | TEXT | 脱敏错误 |
+| `created_at` / `completed_at` | DATETIME | 发起/完成时间 |
+
+## `video_review_findings`
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `review_id` | INTEGER | 所属复盘 |
+| `dimension` | VARCHAR(20) | 播放/互动/完播/涨粉 |
+| `rule_key` | VARCHAR(60) | 程序规则标识 |
+| `title` | VARCHAR(300) | 小白可读原因 |
+| `judgement_type` | VARCHAR(20) | `fact/hypothesis/unknown` |
+| `conclusion` | TEXT | 具体结论 |
+| `metric_evidence` | TEXT | 指标依据 JSON |
+| `content_evidence` | TEXT | 转写/评论/主页依据 JSON |
+| `comparison_post_ids` | TEXT | 比较视频 ID JSON |
+| `suggestion` | TEXT | 可执行修改建议 |
+| `target_metric` | VARCHAR(30) | 主要改善目标 |
+| `sort_order` | INTEGER | 展示顺序 |
+| `created_at` | DATETIME | 创建时间 |
+
+## `video_topic_recommendations`
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `review_id` | INTEGER | 所属复盘 |
+| `parent_id` | INTEGER | 后续主题指向首选（可空） |
+| `role` | VARCHAR(20) | `primary/backup/follow_up` |
+| `rank` | INTEGER | 同角色顺序；与 review_id/role 唯一 |
+| `topic` | VARCHAR(500) | 具体主题 |
+| `reason` / `fit_reason` | TEXT | 推荐理由与适合作者的原因 |
+| `evidence` | TEXT | 真实证据 JSON |
+| `outline` | TEXT | 简要内容顺序，不是完整脚本 |
+| `opening_line` | TEXT | 开头第一句建议 |
+| `target_metric` | VARCHAR(30) | 主要目标 |
+| `follow_up_role` | VARCHAR(40) | 后续内容作用 |
+| `source_types` | TEXT | 来源类型 JSON |
+| `score` | FLOAT | 本次排序分，不是爆款概率 |
+| `score_detail` | TEXT | 各维度得分与扣分 JSON |
+| `adopted_at` | DATETIME | 作者采用时间（可空） |
+| `created_at` | DATETIME | 创建时间 |
+
+## `video_improvement_plans`
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER | 主键 |
+| `review_id` | INTEGER | 来源复盘 |
+| `source_post_id` | INTEGER | 原视频 |
+| `recommendation_id` | INTEGER | 采用主题（可空） |
+| `kept_text` | TEXT | 本次保留的做法 |
+| `changes` | TEXT | 作者确认的 1～2 项修改 JSON |
+| `target_metrics` | TEXT | 主要观察指标 JSON |
+| `status` | VARCHAR(20) | `recorded/linked/checked` |
+| `published_post_id` | INTEGER | 关联的新发布视频（可空） |
+| `check_result` | TEXT | 改善/未改善/不确定及依据 |
+| `checked_at` | DATETIME | 最近检查时间（可空） |
+| `created_at` / `updated_at` | DATETIME | 创建/修改时间 |
 
 ## 只读分析视图（不是表，供 AI 对话的 `sql_query` 使用）
 

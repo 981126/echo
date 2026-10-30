@@ -1,6 +1,6 @@
 # API 接口文档（人工维护）
 
-> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 147 个路由。
+> 来源：FastAPI OpenAPI（`/openapi.json`），**人工维护**；`scripts/check_doc_consistency.py` 会在 `scripts/verify.sh` 中校验路由数量与每条路由是否收录。共 161 个路由。
 > 鉴权：除 `/health`、`/openapi.json`、`/docs` 与静态资源外，所有接口需请求头 `X-Access-Token`（值 = `ECHO_ACCESS_TOKEN`）。
 > 前端托管：`frontend_v2/dist`（R-164/R-208）挂**根路径 `/`**（非 API 路由，不计入下表）。
 
@@ -1934,3 +1934,61 @@ R-232：`feature_routes`（可选，`{组: model1|model2}`，`prompt_opt` 组可
   - `reset_budgets` boolean（可选，R-143：`true` 表示把全部预算恢复为代码默认）
 
 **返回 200**：application/json → object
+
+## douyin-review（R-237）
+
+### GET /api/douyin-review/videos
+
+当前主博主抖音视频选择列表。Query：`account_id`（可空）、`query`、`cursor`、`limit=20`（1～50）。返回账号、视频、最近复盘/同步状态和 Cookie 状态，不调用第三方。
+
+### POST /api/douyin-review/analyze
+
+发起视频复盘。Body：`post_id`（必填）、`refresh=false`（是否先更新创作者数据）、`force=false`。相同进行中任务复用；成功返回 `202 + task_id/review_id/reused`，相同输入已完成（`done` 或数据不足的 `partial`）时 `200` 直接返回复盘。`refresh=true` 走真实创作者接口，Cookie 未登录/过期时任务失败并返回明确中文原因，不写空指标、不覆盖旧复盘。
+
+### GET /api/douyin-review/reviews/{review_id}
+
+读取完整复盘：视频、数据时间、比较样本、指标、原因及证据、涨粉与主页分析、首选/备选/后续主题、新话题、修改计划和 `charts` 图表数据。`error` 为失败原因（成功时为空）。`charts` 始终返回完整结构（失败/旧复盘为空数组兜底），前端无需判空。非当前主博主返回 404。
+
+### GET /api/douyin-review/posts/{post_id}/latest-review
+
+读取某视频最近复盘和 `running_task_id`；尚未分析时 `review=null`，不返回 404。最近一次复盘失败时，`review` 返回上一次成功复盘，`failed_review={id,error,created_at,task_id}` 说明失败原因（失败不清空旧结果）。用于切页和刷新恢复。
+
+### GET /api/douyin-review/references
+
+读取同行或低粉爆款。Query：`kind=peer|low_fan`（必填）、`keyword/category_id/date_days/duration_type/limit`。返回公开视频、作者、公开互动、官方或规则判断依据和 `warnings`（空结果或播放量缺失原因）；同行仅来自手动对标账号，作品播放量由 `fetch_video_statistics` 补采。
+
+### POST /api/douyin-review/references/refresh
+
+后台刷新低粉爆款并补齐同行作品播放量。Body：`category_id/keyword/date_window/duration_type/tags/limit`；时间窗口仅 1/24/72/168，duration_type 仅 0/1/6/7/8/9，tags 必须是 `[{value,children}]`，非法参数返回 400。返回 `202 + task_id`，同主博主进行中任务复用；任务结果含 `saved/warnings/peer_plays`（同行播放量补采统计，6 小时内复用）。
+
+### GET /api/douyin-review/credentials
+
+读取 `account_id` 对应 Cookie 状态：`status/has_cookie/last_validated_at/last_success_at/last_error`，永不返回 Cookie。账号不属于当前主博主返回 400。
+
+### PUT /api/douyin-review/credentials
+
+保存并验证本人或已授权 Cookie。Body：`account_id/cookie`。Fernet 加密后存本地数据库，最小真实请求验证并计 TikHub 额度；失败返回 400（含"Cookie 未登录或已过期"可读原因）且不回显凭证。真实联调：creator_v2 在 Cookie 未登录时可能返回 HTTP 400 或 HTTP 200 + 业务码 `status_code=8`，两种情况都按 Cookie 失效处理。
+
+### POST /api/douyin-review/recommendations/{recommendation_id}/adopt
+
+采用主题并保存修改计划。Body：`kept_text`、`changes`（1～2 项）、`target_metrics`（至少 1 项）。重复采用同一推荐复用计划。
+
+### PATCH /api/douyin-review/plans/{plan_id}
+
+修改 `kept_text/changes/target_metrics` 中至少一项。已检查计划清空旧检查结果，但保留发布关联；修改超过 2 项返回 400。
+
+### POST /api/douyin-review/plans/{plan_id}/link
+
+关联实际发布的新视频。Body：`published_post_id`、`replace=false`。只能关联当前主博主同一抖音账号；重复关联幂等，替换需明确 `replace=true`。
+
+### POST /api/douyin-review/plans/{plan_id}/check
+
+后台更新并检查修改效果。Body：`refresh=true`。返回 `202 + task_id`；结果含修改前后数值、改善/未改善/不确定和原因。未关联返回 409。
+
+### GET /api/douyin-review/plans
+
+读取当前主博主修改计划历史。Query：`post_id`（可空）、`limit=20`。返回原推荐、作者修改、关联视频和检查结果。
+
+### PUT /api/douyin-review/homepage
+
+补充平台未返回的主页事实。Body：`account_id`、`bio`（≤1000 字）、`pinned_post_ids`（≤3 个）、`direction_note`（≤500 字）。保存到 `creator_accounts.extra_config.review_homepage`，标记为作者补充。

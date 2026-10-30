@@ -1557,6 +1557,21 @@ def run_daily_sync_all(db: Session) -> dict:
 
     # R-163：主博主 + 全部对标博主并发同步（每个博主独立 Session），全局 TikHub 令牌桶控速
     results = [r for _, r in gather(_sync_one, creator_ids, workers=pool_size("creator")) if isinstance(r, dict)]
+    creator_sync: dict = {"synced": 0, "errors": []}
+    peer_plays: dict = {}
+    try:
+        from .douyin_creator_sync import backfill_peer_plays, sync_account_creator_data
+
+        own_douyin = db.query(CreatorAccount).filter_by(creator_id=owner.id, platform="douyin", enabled=True).all()
+        for account in own_douyin:
+            result = sync_account_creator_data(db, account, limit=30)
+            creator_sync["synced"] += int(result["synced"])
+            creator_sync["errors"].extend(result["errors"])
+        # R-237：列表接口不返回其他账号播放量，同行爆款需要在每日同步后补采（6 小时内复用）
+        peer_plays = backfill_peer_plays(db, owner, days=30, max_requests=120)
+    except Exception as exc:
+        creator_sync["errors"].append(str(exc)[:300])
+        db.rollback()
     rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
     accounts = [a for res in results for a in (res.get("accounts") or [])]
     posts = sum(int(r.get("posts") or 0) for r in results)
@@ -1568,6 +1583,14 @@ def run_daily_sync_all(db: Session) -> dict:
     )
     if pool_ideas:
         msg += f"，灵感池新增 {pool_ideas}"
+    if creator_sync["synced"]:
+        msg += f"，抖音创作者指标更新 {creator_sync['synced']} 条"
+    if creator_sync["errors"]:
+        msg += f"，创作者指标 {len(creator_sync['errors'])} 条未完成"
+    if peer_plays.get("updated"):
+        msg += f"，同行播放量补齐 {peer_plays['updated']} 条"
+    if peer_plays.get("warnings"):
+        msg += f"，同行播放量 {len(peer_plays['warnings'])} 条未完成"
     if isinstance(rerun, str) and rerun.startswith("started:"):
         msg += "；已自动触发「重新对标」"
     elif rerun == "already_running":
@@ -1580,4 +1603,6 @@ def run_daily_sync_all(db: Session) -> dict:
         "comments": comments,
         "pool_ideas": pool_ideas,
         "rerun": rerun,
+        "creator_sync": creator_sync,
+        "peer_plays": peer_plays,
     }

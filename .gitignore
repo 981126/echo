@@ -43,3 +43,5 @@ playwright-report/
 
 # IDE
 .idea/
+
+.tmp/

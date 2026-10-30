@@ -36,6 +36,7 @@ PROMPT_META: dict[str, tuple[str, str, str]] = {
     "diff": ("app.services.diff_analysis", "DIFF_SYSTEM", "改稿差异"),
     "chat": ("app.services.chat_service", "SYSTEM_PROMPT", "AI 对话"),
     "correct": ("app.services.ingest", "CORRECT_SYSTEM", "转写校对"),
+    "video_review": ("app.services.video_review_llm", "REVIEW_SYSTEM", "视频复盘"),
 }
 
 OPT_SYSTEM = (

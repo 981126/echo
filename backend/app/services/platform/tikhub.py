@@ -221,6 +221,57 @@ class TikHubError(RuntimeError):
     pass
 
 
+class TikHubBusinessError(TikHubError):
+    """HTTP 200 但响应体内是业务错误码（如 creator_v2 透传抖音的 status_code=8 用户未登录）。
+
+    R-237 真实联调发现：creator_v2 系列 HTTP 200 只代表 TikHub 代理调用成功，
+    业务错误在 body 的 `status_code/status_msg` 或 `BaseResp.StatusCode` 里。
+    """
+
+    def __init__(self, message: str, *, code: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# 抖音创作者平台错误码 → 可读中文；8 = 用户未登录（Cookie 失效/未登录）
+_CREATOR_ERROR_HINTS = {
+    8: "Cookie 未登录或已过期，请在「视频复盘 → 抖音数据设置」重新保存创作者中心 Cookie",
+    5: "Cookie 已过期，请重新保存创作者中心 Cookie",
+    20: "当前账号没有该作品的查看权限",
+}
+
+
+def _business_error(body: dict) -> tuple[int | None, str]:
+    """识别 HTTP 200 响应体里的业务错误码；返回 (code, message)，无错误返回 (None, "")。"""
+    if not isinstance(body, dict):
+        return None, ""
+    for node in (body, body.get("data")):
+        if not isinstance(node, dict):
+            continue
+        code = node.get("status_code")
+        if isinstance(code, (int, float)) and int(code) not in (0, 200):
+            message = str(node.get("status_msg") or node.get("message") or "").strip()
+            return int(code), message
+        base = node.get("BaseResp")
+        if isinstance(base, dict):
+            code = base.get("StatusCode")
+            if isinstance(code, (int, float)) and int(code) not in (0,):
+                return int(code), str(base.get("StatusMessage") or "").strip()
+    code = body.get("code")
+    if isinstance(code, (int, float)) and int(code) not in (0, 200):
+        return int(code), str(body.get("message_zh") or body.get("message") or "").strip()
+    return None, ""
+
+
+def _raise_business_error(path: str, body: dict) -> None:
+    code, message = _business_error(body)
+    if code is None:
+        return
+    hint = _CREATOR_ERROR_HINTS.get(code)
+    detail = hint or message or "平台返回业务错误"
+    if message and message not in detail:
+        detail = f"{detail}（平台提示：{message}）"
+    raise TikHubBusinessError(f"TikHub 业务错误 {code}（{path}）：{detail}", code=code)
 
 
 
@@ -327,7 +378,9 @@ class TikHubClient:
                 last_exc = exc
             else:
                 if resp.status_code < 400:
-                    return resp.json()
+                    body = resp.json()
+                    _raise_business_error(path, body)
+                    return body
                 last = f"HTTP {resp.status_code} {resp.text[:200]}"
                 if resp.status_code == 429:
                     _penalize_route(path)  # R-163：按路由退避兜底，避免持续撞限流
@@ -343,6 +396,182 @@ class TikHubClient:
         if last_exc is not None:
             raise TikHubError(message) from last_exc
         raise TikHubError(message)
+
+    def _post(self, path: str, payload: dict, params: dict | None = None) -> dict:
+        """POST JSON，复用全局限速与重试；请求体可能含 Cookie，绝不记录。"""
+        if not self.api_key:
+            raise TikHubError("未配置 ECHO_TIKHUB_API_KEY（real 模式需要）")
+        url = f"{self.base_url}{path}"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        last = "未知错误"
+        last_exc: httpx.TransportError | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            _throttle_route(path)
+            self._requests += 1
+            try:
+                resp = self._http().post(url, params=params, json=payload, headers=headers)
+            except httpx.TransportError as exc:
+                last = f"{type(exc).__name__}: {exc}"
+                last_exc = exc
+            else:
+                if resp.status_code < 400:
+                    body = resp.json()
+                    _raise_business_error(path, body)
+                    return body
+                last = f"HTTP {resp.status_code} {resp.text[:200]}"
+                if resp.status_code == 429:
+                    _penalize_route(path)
+                if resp.status_code not in _RETRYABLE_STATUS:
+                    raise TikHubError(f"TikHub 请求失败: {last}")
+            if attempt < _MAX_ATTEMPTS:
+                time.sleep(_RETRY_DELAYS[min(attempt - 1, len(_RETRY_DELAYS) - 1)])
+        message = f"TikHub 请求失败（已重试 {_MAX_ATTEMPTS - 1} 次）: {last}"
+        if last_exc is not None:
+            raise TikHubError(message) from last_exc
+        raise TikHubError(message)
+
+    def fetch_douyin_creator_item_list(
+        self, *, cookie: str, start_time: int, end_time: int, count: int = 100, cursor: int | None = None
+    ) -> dict:
+        if self.mode != "real":
+            return {"items": [], "has_more": False}
+        payload: dict = {
+            "cookie": cookie,
+            "start_time": start_time,
+            "end_time": end_time,
+            "count": min(100, max(1, count)),
+            "fields": "metrics,review,visibility",
+        }
+        if cursor is not None:
+            payload["cursor"] = cursor
+        return self._post("/douyin/creator_v2/fetch_item_list", payload)
+
+    def fetch_douyin_creator_overview(self, *, cookie: str, item_id: str) -> dict:
+        if self.mode != "real":
+            seed = int(hashlib.sha256(item_id.encode()).hexdigest()[:6], 16)
+            # R-237：mock 对齐真实 creator_v2 字段名（短视频创作者中心），避免测试掩盖真实映射问题
+            return {
+                "data": {
+                    "items": [{
+                        "id": item_id,
+                        "create_time": str(int(_app_now().timestamp())),
+                        "video_info": {"duration": "85774"},
+                        "metrics": {
+                            "view_count": str(6734 + seed % 40000),
+                            "like_count": str(500 + seed % 2500),
+                            "comment_count": str(20 + seed % 300),
+                            "share_count": str(10 + seed % 150),
+                            "favorite_count": str(30 + seed % 500),
+                            "bounce_rate_2s": f"{0.2 + (seed % 20) / 100:.6f}",
+                            "completion_rate_5s": f"{0.45 + (seed % 30) / 100:.6f}",
+                            "completion_rate": f"{0.15 + (seed % 35) / 100:.6f}",
+                            "avg_view_second": f"{20 + seed % 70:.6f}",
+                            "homepage_visit_count": str(50 + seed % 1000),
+                            "subscribe_count": str(seed % 300),
+                            "unsubscribe_count": str(seed % 50),
+                        },
+                    }],
+                    "status_code": 0,
+                    "status_msg": "",
+                }
+            }
+        return self._post(
+            "/douyin/creator_v2/fetch_item_overview_data",
+            {"cookie": cookie, "ids": item_id, "fields": "metrics,play_info,content_analysis"},
+        )
+
+    def fetch_douyin_creator_play_source(self, *, cookie: str, item_id: str) -> dict:
+        if self.mode != "real":
+            return {
+                "data": {
+                    "play_source": [
+                        {"key": "homepage_hot", "value": 0.72},
+                        {"key": "search", "value": 0.18},
+                        {"key": "homepage", "value": 0.1},
+                    ],
+                    "status_code": 0,
+                }
+            }
+        return self._post("/douyin/creator_v2/fetch_item_play_source", {"cookie": cookie, "item_id": item_id})
+
+    def fetch_douyin_creator_search_keyword(self, *, cookie: str, item_id: str) -> dict:
+        if self.mode != "real":
+            return {
+                "data": {
+                    "id": item_id,
+                    "inspire_search": [{"keyword": "面试技巧", "percent": 0.32}],
+                    "show_from": [{"keyword": "自我介绍", "percent": 0.18}],
+                    "status_code": 0,
+                }
+            }
+        return self._post("/douyin/creator_v2/fetch_item_search_keyword", {"cookie": cookie, "item_id": item_id})
+
+    def fetch_douyin_watch_trend(self, *, cookie: str, item_id: str, analysis_type: int) -> dict:
+        if analysis_type not in (1, 2, 7):
+            raise ValueError("analysis_type 只支持 1/2/7")
+        if self.mode != "real":
+            values = [0.82, 0.68, 0.55, 0.41, 0.32, 0.25]
+            if analysis_type == 2:
+                values = [0.01, 0.03, 0.08, 0.12, 0.07, 0.04]
+            elif analysis_type == 7:
+                values = [0.05, 0.12, 0.08, 0.18, 0.09, 0.07]
+            return {
+                "analysis_trend": {
+                    "current_item": [{"key": f"00:{i * 10:02d}", "value": v} for i, v in enumerate(values)],
+                    "similar_author": [{"key": f"00:{i * 10:02d}", "value": max(0.01, v - 0.05)} for i, v in enumerate(values)],
+                }
+            }
+        return self._post(
+            "/douyin/creator_v2/fetch_item_watch_trend",
+            {"cookie": cookie, "item_id": item_id, "analysis_type": analysis_type},
+        )
+
+    def fetch_douyin_low_fan(
+        self, *, page: int = 1, page_size: int = 20, date_window: int = 168, keyword: str = "", tags: list | None = None
+    ) -> dict:
+        if self.mode != "real":
+            return {"items": []}
+        return self._post(
+            "/douyin/billboard/fetch_hot_total_low_fan_list",
+            {"page": page, "page_size": page_size, "date_window": date_window, "keyword": keyword, "tags": tags or []},
+        )
+
+    def search_douyin_items(
+        self, *, query: str, category_id: str = "0", date_type: int = 7, label_type: int = 1, duration_type: int = 0
+    ) -> dict:
+        if self.mode != "real":
+            return {"items": []}
+        return self._post(
+            "/douyin/index/fetch_item_query",
+            {},
+            params={
+                "query": query,
+                "category_id": category_id,
+                "date_type": date_type,
+                "label_type": label_type,
+                "duration_type": duration_type,
+            },
+        )
+
+    def fetch_douyin_video_statistics(self, item_ids: str | list[str]) -> dict:
+        """作品统计（播放/点赞/评论/分享）。aweme_ids 支持逗号分隔，官方上限 2 个/请求。"""
+        ids = item_ids if isinstance(item_ids, str) else ",".join(str(x) for x in item_ids)
+        if self.mode != "real":
+            seed = int(hashlib.sha256(ids.encode()).hexdigest()[:6], 16)
+            return {
+                "data": {
+                    "statistics_list": [
+                        {
+                            "aweme_id": ids.split(",")[0],
+                            "play_count": 50000 + seed % 200000,
+                            "digg_count": 1000 + seed % 5000,
+                            "share_count": seed % 300,
+                            "comment_count": seed % 500,
+                        }
+                    ]
+                }
+            }
+        return self._get("/douyin/app/v3/fetch_video_statistics", {"aweme_ids": ids})
 
     # ---------- 余额 ----------
     def get_balance(self) -> dict:
