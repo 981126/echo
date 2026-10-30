@@ -788,11 +788,21 @@ def _mark_peer_plays_fresh(db: Session) -> None:
     db.commit()
 
 
-def backfill_peer_plays(db: Session, owner: Creator, *, days: int = 30, max_requests: int = 120, force: bool = False) -> dict:
+def backfill_peer_plays(
+    db: Session,
+    owner: Creator,
+    *,
+    days: int = 30,
+    max_requests: int = 120,
+    force: bool = False,
+    concurrency: int = 1,
+) -> dict:
     """补采对标账号最近作品播放量：列表接口不返回播放量，只有 fetch_video_statistics 有。
 
     每请求最多 2 个作品 id；结果写入当天 PlatformPostStat，供「同行爆款」规则使用。
     默认 6 小时内复用，避免反复扣额度。
+    R-240 M9：`concurrency>1` 时按批并发（日更补采任务用 3）；每个成功批仍保留 0.25s
+    降速保护（真实联调 87 次连发出现 400）；默认 1 = 原串行语义（手动刷新路径不变）。
     """
     if not force and _peer_plays_fresh(db):
         return {"updated": 0, "requests": 0, "remaining": 0, "reused": True, "warnings": []}
@@ -829,32 +839,78 @@ def backfill_peer_plays(db: Session, owner: Creator, *, days: int = 30, max_requ
     requests = 0
     warnings: list[str] = []
     limit = max(0, min(max_requests, 120))
-    try:
-        for index in range(0, len(pending), 2):
-            if requests >= limit:
-                warnings.append(f"同行播放量补齐达到本次上限（{limit} 次请求），剩余 {len(pending) - index} 条下次继续")
+    batches: list[list[PlatformPost]] = []
+    for index in range(0, len(pending), 2):
+        if len(batches) >= limit:
+            break
+        batches.append(pending[index:index + 2])
+    if len(pending) > len(batches) * 2:
+        warnings.append(
+            f"同行播放量补齐达到本次上限（{limit} 次请求），"
+            f"剩余 {len(pending) - len(batches) * 2} 条下次继续"
+        )
+
+    def _fetch_batch(batch: list[PlatformPost]) -> dict:
+        """抓取一批（≤2 个 id）播放量；请求在并发任务线程执行，不碰 DB。"""
+        ids = ",".join(str(post.platform_post_id) for post in batch)
+        raw = None
+        attempts = 0
+        warning = ""
+        for attempt in (1, 2):
+            try:
+                raw = client.fetch_douyin_video_statistics(ids)
+                attempts += 1
                 break
-            batch = pending[index:index + 2]
-            ids = ",".join(str(post.platform_post_id) for post in batch)
-            raw = None
-            for attempt in (1, 2):
-                try:
-                    raw = client.fetch_douyin_video_statistics(ids)
-                    requests += 1
-                    break
-                except TikHubBusinessError as exc:
-                    requests += 1
-                    warnings.append(f"同行播放量补齐失败：{str(exc)[:120]}")
-                    break
-                except Exception as exc:
-                    requests += 1
-                    if attempt == 2:
-                        warnings.append(f"同行播放量补齐失败：{str(exc)[:120]}")
-                    else:
-                        time.sleep(1.5)  # 该接口偶发 400/抖动，稍等重试一次
+            except TikHubBusinessError as exc:
+                attempts += 1
+                warning = f"同行播放量补齐失败：{str(exc)[:120]}"
+                break
+            except Exception as exc:
+                attempts += 1
+                if attempt == 2:
+                    warning = f"同行播放量补齐失败：{str(exc)[:120]}"
+                else:
+                    time.sleep(1.5)  # 该接口偶发 400/抖动，稍等重试一次
+        if raw is not None:
+            # 保留降速保护：避免上游限流（真实联调 87 次连发出现 400）
+            time.sleep(0.25)
+        return {"raw": raw, "attempts": attempts, "warning": warning}
+
+    if batches:
+        from .sync_pool import gather
+
+        def _run(item: tuple[int, list[PlatformPost]]) -> dict:
+            index, batch = item
+            out = _fetch_batch(batch)
+            out["index"] = index
+            return out
+
+        workers = max(1, min(int(concurrency), len(batches)))
+        fetched = gather(_run, list(enumerate(batches)), workers=workers)
+        by_index: dict[int, dict] = {}
+        for item, res in fetched:
+            index = int(item[0])
+            if isinstance(res, dict):
+                by_index[index] = res
+            else:
+                by_index[index] = {
+                    "raw": None,
+                    "attempts": 0,
+                    "warning": str(res)[:120],
+                    "index": index,
+                }
+    else:
+        by_index = {}
+    try:
+        # 网络结果回主线程统一写库（减少事务次数、避免跨线程 Session）
+        for index, batch in enumerate(batches):
+            res = by_index.get(index) or {"raw": None, "attempts": 0, "warning": ""}
+            requests += int(res.get("attempts") or 0)
+            if res.get("warning"):
+                warnings.append(str(res["warning"]))
+            raw = res.get("raw")
             if raw is None:
                 continue
-            time.sleep(0.25)  # 批量补采主动降速，避免上游限流（真实联调 87 次连发出现 400）
             stats = _stats_by_aweme(raw)
             for post in batch:
                 stats_item = stats.get(str(post.platform_post_id))
@@ -872,12 +928,49 @@ def backfill_peer_plays(db: Session, owner: Creator, *, days: int = 30, max_requ
                 if stat_row.shares is None or stat_row.shares == 0:
                     stat_row.shares = int(_number(stats_item.get("share_count")) or stat_row.shares or 0)
                 updated += 1
-            db.commit()
+        db.commit()
         _mark_peer_plays_fresh(db)
     finally:
-        _charge_requests(db, client, 0)
+        # 批量计费一次（等价于原逐请求计费，但减少事务；预算不足时只计剩余额度）
+        try:
+            from .platform.budget import get_budget
+
+            budget = get_budget(db)
+            charge_count = min(requests, max(0, int(budget["remaining"])))
+            if charge_count > 0:
+                _charge(db, charge_count)
+            if charge_count < requests:
+                log.warning("同行播放量补采：预算剩余不足，仅计费 %d/%d 次", charge_count, requests)
+        except Exception as exc:  # noqa: BLE001 预算计费失败不覆盖主流程（与 _charge_requests 一致）
+            log.warning("TikHub 预算计费失败：%s", exc)
     remaining = max(0, len(pending) - updated)
     return {"updated": updated, "requests": requests, "remaining": remaining, "reused": False, "warnings": warnings}
+
+
+def peer_plays_worker(db: Session, payload: dict, update=None) -> dict:
+    """R-240 M9：同行播放量补采后台任务（从日更主链路移出；低并发 3 + 全局令牌桶）。
+
+    失败只影响本任务，不改变日更任务状态；`_peer_plays_fresh` 6 小时复用语义不变。
+    """
+    owner_id = int((payload or {}).get("owner_id") or 0)
+    owner = db.get(Creator, owner_id) if owner_id else None
+    if owner is None:
+        owner = db.query(Creator).filter(Creator.kind == "owner", Creator.is_current.is_(True)).first()
+    if owner is None:
+        raise ValueError("请先创建并切换到主博主")
+    concurrency = max(1, min(3, int((payload or {}).get("concurrency") or 3)))
+    if update is not None:
+        update(10, "补采同行播放量…")
+    result = backfill_peer_plays(
+        db,
+        owner,
+        days=int((payload or {}).get("days") or 30),
+        max_requests=int((payload or {}).get("max_requests") or 120),
+        concurrency=concurrency,
+    )
+    if update is not None:
+        update(100, f"同行播放量补齐 {int(result.get('updated') or 0)} 条")
+    return result
 
 
 def _stats_by_aweme(raw: Any) -> dict[str, dict]:

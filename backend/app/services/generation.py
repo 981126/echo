@@ -10,9 +10,11 @@ import json
 import math
 import re
 import threading
+import time
 from datetime import date
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, selectinload
 
 from ..config import get_settings
 from ..core.retrieval import TfidfIndex
@@ -135,16 +137,43 @@ _PROFILE_LOCK = threading.Lock()
 
 
 def _all_texts(db: Session) -> list[tuple[Video, str]]:
-    """全部非广告素材的可用文案（corrected 优先），保证全量参与学习。"""
+    """全部非广告素材的可用文案（corrected 优先），保证全量参与学习。
+
+    R-240 S3：`selectinload(Video.transcript)` 把逐条懒加载（1+N）降为 2 条 SQL。
+    """
     rows = []
-    q = db.query(Video).filter(Video.is_ad.is_(False))
+    q = (
+        db.query(Video)
+        .options(selectinload(Video.transcript))
+        .filter(Video.is_ad.is_(False))
+    )
     cid = _creator_filter(db)
     if cid:
         q = q.filter(Video.creator_id == cid)
     for v in q.all():
-        if v.transcript and (v.transcript.corrected_text or v.transcript.transcript_text):
-            rows.append((v, v.transcript.corrected_text or v.transcript.transcript_text))
+        tr = v.transcript
+        if tr and (tr.corrected_text or tr.transcript_text):
+            rows.append((v, tr.corrected_text or tr.transcript_text))
     return rows
+
+
+def _engagement_map(db: Session, videos: list[Video]) -> dict[int, int]:
+    """批量取每个素材最新 MetricsSnapshot 的互动加权值（R-240 S3：消除逐条指标查询）。"""
+    ids = [v.id for v in videos]
+    if not ids:
+        return {}
+    latest: dict[int, MetricsSnapshot] = {}
+    for row in (
+        db.query(MetricsSnapshot)
+        .filter(MetricsSnapshot.video_id.in_(ids))
+        .order_by(MetricsSnapshot.snapshot_date, MetricsSnapshot.id)
+        .all()
+    ):
+        latest[row.video_id] = row
+    return {
+        video_id: snap.plays + snap.likes * 5 + snap.favorites * 3 + snap.comments * 10
+        for video_id, snap in latest.items()
+    }
 
 
 def _engagement(db: Session, video: Video) -> float:
@@ -159,12 +188,22 @@ def _engagement(db: Session, video: Video) -> float:
     return float(latest.plays + latest.likes * 5 + latest.favorites * 3 + latest.comments * 10)
 
 
-def _weight(db: Session, video: Video) -> float:
+def _weight_of(video: Video, engagement: float) -> float:
     """样本权重 = 表现加权 * 时间衰减（近的、数据好的样本更该被模仿）。"""
-    engage = _engagement(db, video)
     base = video.published_at.date() if video.published_at else video.created_at.date()
     age = max((date.today() - base).days, 0)
-    return (1.0 + math.log1p(engage)) * math.exp(-age / 500.0)
+    return (1.0 + math.log1p(engagement)) * math.exp(-age / 500.0)
+
+
+def _weight_map(db: Session, videos: list[Video]) -> dict[int, float]:
+    """批量算样本权重：一次取最新指标建 map，返回 `video_id -> weight`（R-240 S3）。"""
+    engagements = _engagement_map(db, videos)
+    return {v.id: _weight_of(v, engagements.get(v.id, 0)) for v in videos}
+
+
+def _weight(db: Session, video: Video) -> float:
+    """单条素材权重（兼容包装；批量场景用 `_weight_map`，不再每条查一次指标）。"""
+    return _weight_of(video, _engagement(db, video))
 
 
 _INDEX_CACHE: dict[tuple, "TfidfIndex"] = {}
@@ -172,26 +211,34 @@ _INDEX_LOCK = threading.Lock()
 
 
 def _material_version(db: Session) -> tuple:
-    """轻量版本号：转写素材/指标/反馈/草稿变化时检索索引自动失效。"""
+    """轻量版本号：转写素材/指标/反馈/草稿变化时检索索引与生成上下文自动失效。
+
+    R-240 M5：追加「转写正文总长度」聚合，兜住「正文原地编辑（id/条数都不变）」盲区。
+    """
     from ..models.video import Transcript
 
     cid = _creator_filter(db) or 0
     q = (
-        db.query(Transcript.id)
+        db.query(
+            func.count(Transcript.id),
+            func.max(Transcript.id),
+            func.coalesce(func.sum(func.length(Transcript.corrected_text)), 0)
+            + func.coalesce(func.sum(func.length(Transcript.transcript_text)), 0),
+        )
         .join(Video, Video.id == Transcript.video_id)
         .filter(Video.is_ad.is_(False))
     )
     if cid:
         q = q.filter(Video.creator_id == cid)
-    ids = [r[0] for r in q.all()]
-    t_max = max(ids) if ids else 0
+    t_count, t_max, t_len = q.one()
     from ..models.draft import Draft
     from ..models.feedback import Feedback
 
     return (
         cid,
-        len(ids),
-        t_max,
+        int(t_count or 0),
+        int(t_max or 0),
+        int(t_len or 0),
         db.query(MetricsSnapshot).count(),
         db.query(Feedback).count(),
         db.query(Draft).filter(Draft.script != "").count(),
@@ -201,6 +248,7 @@ def _material_version(db: Session) -> tuple:
 def _build_style_index(db: Session) -> "TfidfIndex":
     """构建过程与旧 _style_samples 完全一致（文档+权重+黄金样本），仅移入缓存。"""
     rows = _all_texts(db)
+    weights_map = _weight_map(db, [v for v, _ in rows])
     docs, weights, seen = [], [], set()
     for v, text in rows:
         key = text.strip()[:200]
@@ -208,7 +256,7 @@ def _build_style_index(db: Session) -> "TfidfIndex":
             continue  # 去重：同一文案只算一次
         seen.add(key)
         docs.append(text)
-        weights.append(round(_weight(db, v), 6))
+        weights.append(round(weights_map.get(v.id, 0.0), 6))
     # R-022：作者认可的稿 = 黄金样本，更高权重
     # R-211：认可口径从「评分/点赞」改为 status 驱动——完成（done）即认可（历史 rating/liked 弃用）
     from ..models.draft import Draft
@@ -363,9 +411,11 @@ def _reverted_lessons(db: Session, limit: int = 3) -> str:
     if cid:
         q = q.filter(Draft.creator_id == cid)
     drafts = q.order_by(Draft.id.desc()).limit(60).all()
+    # R-240 M5：一次批量取全部版本链（原逐稿 chains_with_sources → 60 条 SQL）
+    chains = chains_with_sources(db, drafts)
     lessons: list[tuple[int, str, str]] = []
     for d in drafts:
-        stages = chains_with_sources(db, [d]).get(d.id) or []
+        stages = chains.get(d.id) or []
         for i in range(len(stages) - 1, 0, -1):
             src_i, text_i = stages[i]
             if src_i not in AUTHOR_SOURCES:
@@ -391,18 +441,21 @@ def _reverted_lessons(db: Session, limit: int = 3) -> str:
 
 
 def _style_profile(db: Session) -> dict:
-    """风格画像 dict（进程内缓存：素材数量/字数变化才重算）。"""
-    rows = _all_texts(db)
-    texts = [text for _, text in rows]
-    cid = _creator_filter(db) or 0
-    key = (cid, len(texts), sum(len(t) for t in texts))
+    """风格画像 dict（进程内缓存）。
+
+    R-240 M5：先算便宜版本键再查缓存，命中不再全量加载 `_all_texts`（原实现命中仍加载）。
+    """
+    version = _material_version(db)
     with _PROFILE_LOCK:
-        if key in _PROFILE_DICT_CACHE:
-            return _PROFILE_DICT_CACHE[key]
-        profile = build_style_profile(texts)
+        cached = _PROFILE_DICT_CACHE.get(version)
+    if cached is not None:
+        return cached
+    texts = [text for _v, text in _all_texts(db)]
+    profile = build_style_profile(texts)
+    with _PROFILE_LOCK:
         if len(_PROFILE_DICT_CACHE) > 20:
             _PROFILE_DICT_CACHE.clear()
-        _PROFILE_DICT_CACHE[key] = profile
+        _PROFILE_DICT_CACHE[version] = profile
         return profile
 
 
@@ -443,8 +496,10 @@ def _structure_templates(db: Session) -> str:
             break
     if not starters:
         # 无评分反馈时：用互动最高的素材转写稿的开场/结尾
-        rows = sorted(_all_texts(db), key=lambda vt: _weight(db, vt[0]), reverse=True)[:3]
-        for _v, text in rows:
+        rows = _all_texts(db)
+        weights = _weight_map(db, [v for v, _ in rows])
+        top = sorted(rows, key=lambda vt: weights.get(vt[0].id, 0.0), reverse=True)[:3]
+        for _v, text in top:
             sentences = [x.strip() for x in re.split(r"[。！？!?\n]+", text) if x.strip()]
             if not sentences:
                 continue
@@ -454,43 +509,124 @@ def _structure_templates(db: Session) -> str:
     return "表现最好的内容结构模板（只学开场与收尾的结构，内容要新）：\n" + "\n".join(f"- {x}" for x in starters)
 
 
+_STATIC_STYLE_CACHE: dict[tuple, tuple[float, dict[str, list[str]]]] = {}
+_STATIC_STYLE_LOCK = threading.Lock()
+_STATIC_STYLE_MAX = 5
+# 版本键是主失效路径；短 TTL 兜底设计未枚举的原地编辑输入（app_kv 禁用词/风格范本、
+# 对标备注、人设标签文字编辑不 bump version 等），把「永久陈旧」压到最长 60s。
+_STATIC_STYLE_TTL = 60.0
+
+
+def _style_version(db: Session) -> tuple:
+    """生成上下文静态部分的缓存键：`(creator_id, _material_version 各字段, persona_version)`。"""
+    from .persona_profile import current_persona_version
+
+    material = _material_version(db)
+    return (*material, current_persona_version(db, material[0] or None))
+
+
+def _static_style_context(db: Session) -> dict[str, list[str]]:
+    """与选题/创作模式无关的静态上下文片段（进程内缓存，命中不再全量加载语料）。
+
+    R-240 M5：原来每次生成 `author_style_context` 都要重新查一遍人设/画像/范本/结构/
+    改稿样本/回退课/禁用词/对标（实测 108 SQL / 38~47ms 且随语料线性增长）；现在按
+    「素材版本 + 人设版本」缓存（主失效路径）+ 60s TTL（兜底未枚举的原地编辑输入）。
+    返回的片段只读，调用方不得修改。
+    """
+    version = _style_version(db)
+    with _STATIC_STYLE_LOCK:
+        cached = _STATIC_STYLE_CACHE.get(version)
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+    ctx = _persona_context(db)
+    anchors = _style_anchor_samples(db)
+    avoid = _avoid_words(db)
+    profile = _style_profile_lines(db)
+    structure = _structure_templates(db)
+    rewrites = _rewrite_examples(db)
+    reverted = _reverted_lessons(db)  # R-209：被作者改回原稿的讨论方向（反面信号）
+    refs = benchmark_context_lines(db)
+    static: dict[str, list[str]] = {
+        "persona": [f"- {t}" for t in ctx["tags"] or ["（暂无）"]],
+        "redlines": [f"- {r}" for r in ctx["redlines"] or ["（无）"]],
+        "anchors": (
+            ["作者金句锚点（用它的短句语气，不要整句照搬）：", *[f"- {a}" for a in ctx["anchors"]], ""]
+            if ctx.get("anchors")
+            else []
+        ),
+        "profile": [profile],
+        "avoid": (
+            ["", "这些表达尽量别用（AI 腔/套话，用了会不像真人）：", "、".join(avoid[:20])]
+            if avoid
+            else []
+        ),
+        "anchor_samples": (
+            [
+                "",
+                "作者指定为风格范本的素材（重点体会其语气与节奏，学语气、不要照搬词句）：",
+                *[f"--- 范本{i+1} ---\n{s[:400]}" for i, s in enumerate(anchors)],
+            ]
+            if anchors
+            else []
+        ),
+        "structure": ["", structure] if structure else [],
+        "rewrites": ["", rewrites] if rewrites else [],
+        "reverted": ["", reverted] if reverted else [],
+        "refs": (
+            ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs] if refs else []
+        ),
+    }
+    with _STATIC_STYLE_LOCK:
+        if len(_STATIC_STYLE_CACHE) >= _STATIC_STYLE_MAX:
+            _STATIC_STYLE_CACHE.clear()
+        _STATIC_STYLE_CACHE[version] = (time.monotonic() + _STATIC_STYLE_TTL, static)
+    return static
+
+
+def _mode_line(mode: str) -> list[str]:
+    """创作模式说明（R-183 动态部分：随本次 mode 变化，不能进静态缓存）。"""
+    info = CREATION_MODES.get((mode or "").strip())
+    return [] if not info else ["", f"本次创作模式：{info['label']}——{info['guide']}"]
+
+
+def _topic_samples_block(db: Session, topic: str) -> list[str]:
+    """按选题检索的风格样本（动态部分：样本文本随 topic 变化，不能进静态缓存）。"""
+    samples = _style_samples(db, topic)
+    return [
+        "风格样本（按选题检索的真实原文节选）：",
+        *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],
+    ]
+
+
 def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
     """作者人设 + 语言习惯 + 样本/范本/结构/分节范例/对标参考的共享上下文。
 
     R-181：生成与「参考改写（洗稿）」共用同一份上下文，避免洗稿只拿到简化人设、
     不像作者本人。`topic` 非空时按选题检索风格样本；`mode`（R-183）为创作模式。
+    R-240 M5：静态部分进程内缓存（见 `_static_style_context`），动态部分（按选题样本/
+    创作模式）每次现拼；拼接顺序与空行与改造前逐字一致。
     """
-    ctx = _persona_context(db)
-    samples = _style_samples(db, topic) if topic else _style_samples(db, "")
-    anchors = _style_anchor_samples(db)
-    profile = _style_profile_lines(db)
-    refs = benchmark_context_lines(db)
-    structure = _structure_templates(db)
-    rewrites = _rewrite_examples(db)
-    reverted = _reverted_lessons(db)  # R-209：被作者改回原稿的讨论方向（反面信号）
-    avoid = _avoid_words(db)
-    mode_info = CREATION_MODES.get((mode or "").strip())
+    static = _static_style_context(db)
     return "\n".join(
         [
             "作者人设：",
-            *[f"- {t}" for t in ctx["tags"] or ["（暂无）"]],
-            *([] if not mode_info else ["", f"本次创作模式：{mode_info['label']}——{mode_info['guide']}"]),
+            *static["persona"],
+            *_mode_line(mode),
             "",
             "红线（不要违反）：",
-            *[f"- {r}" for r in ctx["redlines"] or ["（无）"]],
+            *static["redlines"],
             "",
-            *([] if not ctx.get("anchors") else ["作者金句锚点（用它的短句语气，不要整句照搬）：", *[f"- {a}" for a in ctx["anchors"]], ""]),
+            *static["anchors"],
             "作者语言习惯（自然贴近即可，**不要硬塞口头禅/标志词**，更不要为了像而像）：",
-            profile,
-            *([] if not avoid else ["", "这些表达尽量别用（AI 腔/套话，用了会不像真人）：", "、".join(avoid[:20])]),
-            *([] if not anchors else ["", "作者指定为风格范本的素材（重点体会其语气与节奏，学语气、不要照搬词句）：", *[f"--- 范本{i+1} ---\n{s[:400]}" for i, s in enumerate(anchors)]]),
+            *static["profile"],
+            *static["avoid"],
+            *static["anchor_samples"],
             "",
-            "风格样本（按选题检索的真实原文节选）：",
-            *[f"--- 样本{i+1} ---\n{s[:400]}" for i, s in enumerate(samples)],
-            *([] if not structure else ["", structure]),
-            *([] if not rewrites else ["", rewrites]),
-            *([] if not reverted else ["", reverted]),
-            *([] if not refs else ["", "对标博主风格参考（仅借鉴语气与结构，观点务必用作者自己的）：", refs]),
+            *_topic_samples_block(db, topic),
+            *static["structure"],
+            *static["rewrites"],
+            *static["reverted"],
+            *static["refs"],
         ]
     )
 

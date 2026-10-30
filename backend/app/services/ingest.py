@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 from ..config import get_settings
+from ..core.timeutil import now as _app_now
 from ..core.transcript import normalize_text
 from ..models.persona import PersonaCheck
 from ..models.video import Transcript, Video
@@ -85,13 +87,289 @@ def correct_transcript(transcript_text: str, source_text: str = "", llm=None, db
         return text
 
 
+# ---------- R-240 S7：转写失败退避（app_kv 计次 + 下次可重试时间，不改表） ----------
+
+ASR_FAIL_COUNT_KEY = "asr_fail_count:{video_id}"
+ASR_RETRY_AFTER_KEY = "asr_retry_after:{video_id}"
+ASR_GIVE_UP_NOTIFIED_KEY = "asr_give_up_notified:{video_id}"
+
+# 不可自动重试（无语音/音频过长/额度/配置/格式类）→ 大退避（7 天）
+_ASR_NON_RETRYABLE_KEYWORDS = (
+    "识别结果为空",
+    "无有效语音",
+    "SUCCESS_WITH_NO_VALID_FRAGMENT",
+    "音频为空",
+    "音频超过",
+    "音频时长超过",
+    "超过硅基流动",
+    "超过腾讯",
+    "额度",
+    "资源包",
+    "欠费",
+    "未开通",
+    "未配置",
+    "鉴权",
+    "格式不支持",
+    "文件不存在",
+)
+# 可自动重试（网络/超时/轮询超时/5xx 等瞬时故障）→ 指数退避
+_ASR_RETRYABLE_KEYWORDS = (
+    "超时",
+    "Timeout",
+    "timeout",
+    "轮询",
+    "网络",
+    "连接",
+    "TransportError",
+    "EOF",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "服务端",
+    "暂时",
+    "稍后重试",
+)
+
+
+def classify_asr_failure(message: str) -> bool:
+    """R-240 S7：判断 ASR 失败是否值得自动重试（True=可重试）。
+
+    规则：无语音/音频过长/额度/配置/格式类 → 不可重试（写 7 天大退避，等人工）；
+    网络/超时/轮询超时/5xx 等 → 可重试（分钟级指数退避，最多 `asr_max_attempts` 次）；
+    未知错误按可重试处理（最终次数用尽照样跳过，不会无限重试）。
+    """
+    text = str(message or "")
+    if any(kind in text for kind in _ASR_NON_RETRYABLE_KEYWORDS):
+        return False
+    if any(kind in text for kind in _ASR_RETRYABLE_KEYWORDS):
+        return True
+    return True
+
+
+def _asr_max_attempts() -> int:
+    return max(1, int(getattr(get_settings(), "asr_max_attempts", 3) or 3))
+
+
+def _asr_kv_get(db, key: str) -> str:
+    """读 app_kv（异常一律当「无记录」，不阻断转写主流程）。"""
+    try:
+        from ..models.kv import Kv
+
+        row = db.get(Kv, key)
+        return str(row.value) if row is not None and row.value is not None else ""
+    except Exception:  # noqa: BLE001 Kv 异常不阻断主流程（S7）
+        return ""
+
+
+def _asr_kv_set(db, key: str, value: str) -> None:
+    try:
+        from ..models.kv import Kv
+
+        row = db.get(Kv, key)
+        if row is None:
+            db.add(Kv(key=key, value=value))
+        else:
+            row.value = value
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
+
+def _asr_kv_delete(db, key: str) -> None:
+    try:
+        from ..models.kv import Kv
+
+        row = db.get(Kv, key)
+        if row is not None:
+            db.delete(row)
+            db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
+
+def asr_fail_count(db, video_id: int) -> int:
+    """已记录的自动转写失败次数（无记录=0）。"""
+    raw = _asr_kv_get(db, ASR_FAIL_COUNT_KEY.format(video_id=int(video_id)))
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def asr_retry_after(db, video_id: int) -> datetime | None:
+    """下次可自动重试时间（无记录=None）。"""
+    raw = _asr_kv_get(db, ASR_RETRY_AFTER_KEY.format(video_id=int(video_id)))
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def asr_backoff_reason(db, video_id: int) -> str:
+    """当前是否应跳过自动转写；返回原因文案（'' = 可自动重试）。
+
+    命中两类：已达 `asr_max_attempts` 次（放弃自动重试，等人工），
+    或处于退避窗口内（`retry_after > now`）。
+    """
+    vid = int(video_id)
+    count = asr_fail_count(db, vid)
+    max_attempts = _asr_max_attempts()
+    if count >= max_attempts:
+        return f"自动转写已失败 {count} 次（上限 {max_attempts}），已跳过；可在素材编辑页手动重试"
+    retry_at = asr_retry_after(db, vid)
+    if retry_at is not None and retry_at > _app_now():
+        return f"转写失败退避中（第 {count} 次失败，{retry_at:%m-%d %H:%M} 后自动重试；可手动重试）"
+    return ""
+
+
+def record_asr_failure(db, video_id: int, message: str) -> None:
+    """R-240 S7：记录一次自动转写失败（次数 +1 + 下次可重试时间），异常不阻断主流程。"""
+    try:
+        vid = int(video_id)
+        count = asr_fail_count(db, vid) + 1
+        retryable = classify_asr_failure(message)
+        delay_hours = min(2 ** min(count, 5), 24) if retryable else 7 * 24  # 指数退避上限 24h
+        retry_at = _app_now() + timedelta(hours=delay_hours)
+        _asr_kv_set(db, ASR_FAIL_COUNT_KEY.format(video_id=vid), str(count))
+        _asr_kv_set(db, ASR_RETRY_AFTER_KEY.format(video_id=vid), retry_at.isoformat())
+    except Exception:  # noqa: BLE001 退避记录失败不能拖垮转写任务（S7）
+        db.rollback()
+
+
+def clear_asr_failure(db, video_id: int) -> None:
+    """R-240 S7：清零退避（转写成功 / 用户手动重试时调用）。"""
+    vid = int(video_id)
+    for template in (ASR_FAIL_COUNT_KEY, ASR_RETRY_AFTER_KEY, ASR_GIVE_UP_NOTIFIED_KEY):
+        _asr_kv_delete(db, template.format(video_id=vid))
+
+
+def notify_asr_give_up_once(db, video: Video) -> bool:
+    """R-240 S7：自动转写达到上限时只通知一次，提示可手动重试。"""
+    try:
+        if video is None or video.id is None:
+            return False
+        vid = int(video.id)
+        count = asr_fail_count(db, vid)
+        max_attempts = _asr_max_attempts()
+        if count < max_attempts:
+            return False
+        notified_key = ASR_GIVE_UP_NOTIFIED_KEY.format(video_id=vid)
+        if _asr_kv_get(db, notified_key):
+            return False
+        from ..tasks import push_notification
+
+        title = (video.title or video.filename or "素材").strip()[:60]
+        push_notification(
+            db,
+            kind="import_video",
+            status="failed",
+            title="自动转写已跳过",
+            message=(
+                f"「{title}」自动转写失败 {count} 次（上限 {max_attempts}），已跳过自动重试；"
+                "可在素材编辑页手动转写。"
+            ),
+            target="/videos",
+        )
+        _asr_kv_set(db, notified_key, "1")
+        return True
+    except Exception:  # noqa: BLE001 通知失败不影响主流程（S7）
+        db.rollback()
+        return False
+
+
+def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
+    """R-240 M8：ASR 落库 +「LLM 校对」∥「LLM 预打标」并发（2 线程、各自独立 Session）。
+
+    - 校对/转写落库失败 → 向上抛（与串行版一致，任务判失败）；
+    - 预打标失败只回滚该支路（保持 tags_confirmed=False，下次补），不阻断另一支；
+    - 主线程等待两者完成后由调用方 expire 会话再读最新 transcript/tags。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from ..db import SessionLocal
+
+    provider = str(asr.get("mode") or "")
+    model = str(asr.get("model") or "") if provider in ("siliconflow", "tencent") else ""
+
+    def _correct_and_store() -> None:
+        s = SessionLocal()
+        try:
+            corrected = correct_transcript(text, db=s)
+            video = s.get(Video, video_id)
+            if video is None:
+                raise RuntimeError(f"素材不存在: {video_id}")
+            transcript = video.transcript
+            if transcript is None:
+                s.add(
+                    Transcript(
+                        video_id=video_id,
+                        transcript_text=text,
+                        corrected_text=corrected,
+                        asr_status="done",
+                        asr_provider=provider,
+                        asr_model=model,
+                    )
+                )
+            else:
+                transcript.transcript_text = text
+                transcript.corrected_text = corrected
+                transcript.asr_status = "done"
+                transcript.asr_provider = provider
+                transcript.asr_model = model
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def _tag_video() -> None:
+        s = SessionLocal()
+        try:
+            video = s.get(Video, video_id)
+            if video is None or video.tags_confirmed:
+                return
+            suggestion = PersonaService().suggest_video_tags(text)
+            if suggestion.get("main_topics"):
+                video.main_topics = json.dumps(suggestion["main_topics"], ensure_ascii=False)
+            video.is_ad = suggestion["is_ad"]
+            video.tags = json.dumps(suggestion["tags"], ensure_ascii=False)
+            video.tags_confirmed = True  # R-083：AI 预打标签自动确认，不再要求逐条点「确认标签」
+            s.commit()
+        except Exception:  # noqa: BLE001 预打标签失败不影响转写结果（保持待后续重试/手填）
+            s.rollback()
+        finally:
+            s.close()
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="echo-ingest-llm") as ex:
+        correct_future = ex.submit(_correct_and_store)
+        tag_future = ex.submit(_tag_video)
+        correct_future.result()  # 转写落库失败 → 向上抛（现语义）
+        try:
+            tag_future.result()  # 内部已吞异常；此处兜底，避免线程 bug 拖垮转写任务
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def import_video_task(db, payload: dict) -> None:
-    """后台任务：单条视频 转写→校对→预打标签。"""
+    """后台任务：单条视频 转写→校对→预打标签。
+
+    R-240：ASR 成功后「LLM 校对」与「LLM 预打标」并发（见 `_post_asr_llm`）；
+    自动转写失败按 S7 写 app_kv 退避计数；手动重试（payload 无 auto 标记）忽略退避并清零。
+    """
+    payload = payload or {}
     video = db.get(Video, int(payload["video_id"]))
     if video is None:
         return
+    if not payload.get("auto"):  # R-240 S7：用户手动重试忽略退避并清零失败计数
+        clear_asr_failure(db, video.id)
     settings = get_settings()
     asr = model_settings.asr_config(db)  # R-138：ASR 走运行时配置 → 保存即生效
+    post_processed = False
 
     if video.transcript is None or (
         not video.transcript.transcript_text and video.transcript.asr_status != "done"
@@ -114,32 +392,21 @@ def import_video_task(db, payload: dict) -> None:
             msg = str(exc) or "转写失败"
             if "识别结果为空" in msg:
                 msg += "（未识别到有效语音：视频可能无声/只有背景音乐/音量过低或音轨异常，可检查该视频音轨后重试）"
+            record_asr_failure(db, video.id, msg)  # R-240 S7：记录次数 + 下次可重试时间
             raise TranscriptionError(msg) from exc
-        corrected = correct_transcript(text, db=db)
-        if video.transcript is None:
-            db.add(
-                Transcript(
-                    video_id=video.id,
-                    transcript_text=text,
-                    corrected_text=corrected,
-                    asr_status="done",
-                    asr_provider=asr["mode"],
-                    asr_model=asr["model"] if asr["mode"] in ("siliconflow", "tencent") else "",
-                )
-            )
-        else:
-            video.transcript.transcript_text = text
-            video.transcript.corrected_text = corrected
-            video.transcript.asr_status = "done"
-            video.transcript.asr_provider = asr["mode"]
-            video.transcript.asr_model = asr["model"] if asr["mode"] in ("siliconflow", "tencent") else ""
-        db.commit()
-        db.refresh(video)
+        _post_asr_llm(db, video.id, text, asr)  # R-240 M8：校对 ∥ 预打标（独立 Session 并发）
+        clear_asr_failure(db, video.id)  # R-240 S7：成功后清退避计数
+        db.expire_all()
+        fresh = db.get(Video, video.id)
+        if fresh is None:
+            return
+        video = fresh
+        post_processed = True
 
     transcript = video.transcript
     if transcript:
         text = transcript.corrected_text or transcript.transcript_text
-        if not video.tags_confirmed:
+        if not post_processed and not video.tags_confirmed:
             try:
                 suggestion = PersonaService().suggest_video_tags(text)
                 if suggestion.get("main_topics"):

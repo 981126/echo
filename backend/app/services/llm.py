@@ -6,13 +6,18 @@ DeepSeek 与 Kimi 均为 OpenAI 兼容 API；统一实现，
 
 from __future__ import annotations
 
+import atexit
 import json
 import re
+import threading
 import time
 
 import httpx
 
 from ..config import get_settings
+from ..core.log import get_logger
+
+log = get_logger("llm")
 
 
 
@@ -76,6 +81,60 @@ def _content_or_reason(message: dict) -> str:
     return ""
 
 
+# ---------- R-240 S4：模块级 HTTP 客户端复用 ----------
+
+# 背景（.tmp/audit/infra.md F-01）：原来每次调用都 `with httpx.Client(...)` 新建 → 新连接池、
+# 重新 TCP+TLS 握手（一次 100~300ms）；一篇稿典型 12~13 次调用 → 白扔 1.3~3.9s，还放大系统代理抖动。
+# httpx.Client 官方明确线程安全（可跨线程共享连接池），同仓库 `platform/tikhub.py` 已有复用先例。
+# 单次调用的墙钟预算改为每请求传 `timeout=`（见 `_post`），因此池自身 `timeout=None`；
+# `keepalive_expiry` 必须显式给大值（httpx 默认 5s，讨论轮间隔 3~10s 会让连接复用失效）——
+# 它是 `Limits` 的参数，不是 Client 的。
+_LIMITS = httpx.Limits(
+    max_connections=8,
+    max_keepalive_connections=4,
+    keepalive_expiry=120.0,
+)
+_CLIENTS: dict[tuple[str, type], httpx.Client] = {}
+_CLIENTS_LOCK = threading.Lock()
+
+
+def _client_for(base_url: str) -> httpx.Client:
+    """按 base_url 取共享 Client（懒创建 + 双检锁）。
+
+    key 里带上当前 `httpx.Client` 类对象：生产环境恒为同一个类，等价于「只按 base_url 缓存」；
+    测试里 monkeypatch `httpx.Client` 后自然与上一用例的假客户端隔离，不会跨用例复用假连接。
+    """
+    key = (base_url or "", httpx.Client)
+    client = _CLIENTS.get(key)
+    if client is not None:
+        return client
+    with _CLIENTS_LOCK:
+        client = _CLIENTS.get(key)
+        if client is None:
+            client = httpx.Client(
+                timeout=None,
+                limits=_LIMITS,
+                trust_env=True,
+            )
+            _CLIENTS[key] = client
+    return client
+
+
+def close_all_clients() -> None:
+    """关闭并清空共享 Client（进程退出 atexit 自动调用；测试可主动重置）。"""
+    with _CLIENTS_LOCK:
+        clients = list(_CLIENTS.values())
+        _CLIENTS.clear()
+    for client in clients:
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001 退出阶段关不掉也不该再抛
+            pass
+
+
+atexit.register(close_all_clients)
+
+
 class OpenAIClient:
     """OpenAI 兼容客户端（chat completions）。
 
@@ -114,10 +173,20 @@ class OpenAIClient:
         deadline = time.monotonic() + self.timeout_seconds
         # read 与墙钟同值（见类注释）：不设 stream 时它等价于「单次调用总时限」。
         # connect 单独给短值，连不上时快速失败。
+        # R-240 S4：共享 Client 自身 timeout=None，这里每个请求显式传 timeout，语义与原来「每次新建」一致。
         timeout = httpx.Timeout(connect=15.0, read=float(self.timeout_seconds), write=60.0, pool=30.0)
+        fallback_client: httpx.Client | None = None
         try:
-            with httpx.Client(timeout=timeout) as client:
-                with client.stream("POST", url, headers=headers, json=payload) as resp:
+            try:
+                client = _client_for(self.base_url)
+            except Exception:  # noqa: BLE001 共享池建不起来 → 回退旧行为（每次新建、用完关闭）
+                log.exception("共享 LLM 客户端创建失败，回退每次新建（base_url=%s）", self.base_url)
+                fallback_client = httpx.Client(timeout=timeout)
+                client = fallback_client
+            try:
+                with client.stream(
+                    "POST", url, headers=headers, json=payload, timeout=timeout
+                ) as resp:
                     if resp.status_code >= 400:
                         resp.read()
                         raise LLMError(f"HTTP {resp.status_code}：{(resp.text or '')[:200]}")
@@ -130,8 +199,11 @@ class OpenAIClient:
                             raise LLMError(
                                 f"调用超过 {self.timeout_seconds}s 仍未返回（模型：{self.model}），按超时处理"
                             )
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"调用超时（模型：{self.model}）：{type(exc).__name__}") from exc
+            except httpx.TimeoutException as exc:
+                raise LLMError(f"调用超时（模型：{self.model}）：{type(exc).__name__}") from exc
+        finally:
+            if fallback_client is not None:
+                fallback_client.close()
         if time.monotonic() > deadline:
             raise LLMError(f"调用超过 {self.timeout_seconds}s 仍未返回（模型：{self.model}），按超时处理")
         try:

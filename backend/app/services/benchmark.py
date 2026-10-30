@@ -8,17 +8,38 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, load_only
 
 from ..core.pipeline import today_key  # noqa: F401 保留：未来可扩展
 from ..models.kv import Kv
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
-from ..models.video import Video
+from ..models.video import Transcript, Video
 from . import budget_settings
 from .text_tags import strip_hashtags
 
 # 互动权重：点赞1 + 收藏2 + 评论5（播放量只做参考不做主排序）
 W_LIKE, W_FAV, W_COMMENT = 1, 2, 5
+
+_EPOCH = __import__("datetime").datetime(2000, 1, 1)
+
+# R-240 S1：作品列表只需展示/排序字段；不加载 raw（约 19KB/行，/top 全量会白搬几十 MB）
+_POST_FIELDS = load_only(
+    PlatformPost.id,
+    PlatformPost.account_id,
+    PlatformPost.platform,
+    PlatformPost.platform_post_id,
+    PlatformPost.title,
+    PlatformPost.desc,
+    PlatformPost.tags,
+    PlatformPost.is_ad,
+    PlatformPost.cover_url,
+    PlatformPost.cover_path,
+    PlatformPost.publish_time,
+    PlatformPost.local_video_id,
+    PlatformPost.work_id,
+)
+
 
 
 def _latest_stats(db: Session, post_ids: list[int]) -> dict[int, dict]:
@@ -57,34 +78,19 @@ def _norm_title(title: str) -> str:
     return re.sub(r"[^\w\u4e00-\u9fa5]", "", t).lower()
 
 
-def candidates(db: Session, bm: Creator, limit: int = 15) -> list[dict]:
-    """对标博主最新 limit 个“作品单元”（跨平台合并 work；未合并单帖）。R-109：10 → 15。"""
-    acc_ids = [
-        a.id
-        for a in db.query(CreatorAccount).filter(
-            CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True)  # R-101
-        ).all()
-    ]
-    if not acc_ids:
-        return []
-    rows = (
-        db.query(PlatformPost)
-        .filter(PlatformPost.account_id.in_(acc_ids))
-        .order_by(PlatformPost.publish_time.desc())
-        .all()
-    )
+def _ad_video_ids(db: Session, linked_ids: list[int]) -> set[int]:
+    """R-099/R-100：一次 IN 取「已标广告」的本地视频 id（绑定了它的帖也算广告）。"""
+    if not linked_ids:
+        return set()
+    return {v.id for v in db.query(Video).filter(Video.is_ad.is_(True), Video.id.in_(linked_ids)).all()}
+
+
+def _candidate_units(rows: list[PlatformPost], ad_vid_ids: set[int], limit: int) -> list[dict]:
+    """把某个对标博主已排序的作品行转成候选单元（纯内存；R-240 单博主/批量两条路径共用）。"""
     # R-099/R-100/R-106：广告不对标；绑定了“已标广告本地视频”的帖也算广告；
     # 同款跨平台漏标(标题相同)也一并排除
-    _ad_vid_ids: set[int] = set()
-    _linked = [p.local_video_id for p in rows if p.local_video_id]
-    if _linked:
-        _ad_vid_ids = {
-            v.id
-            for v in db.query(Video).filter(Video.is_ad.is_(True), Video.id.in_(_linked)).all()
-        }
-
     def _is_ad_post(p: PlatformPost) -> bool:
-        return bool(p.is_ad or (p.local_video_id and p.local_video_id in _ad_vid_ids))
+        return bool(p.is_ad or (p.local_video_id and p.local_video_id in ad_vid_ids))
 
     ad_norms = {_norm_title(x.title) for x in rows if _is_ad_post(x)}
     posts = [x for x in rows if not _is_ad_post(x) and _norm_title(x.title) not in ad_norms]
@@ -109,11 +115,122 @@ def candidates(db: Session, bm: Creator, limit: int = 15) -> list[dict]:
     return units[:limit]
 
 
-_EPOCH = __import__("datetime").datetime(2000, 1, 1)
+def candidates(db: Session, bm: Creator, limit: int = 15) -> list[dict]:
+    """对标博主最新 limit 个“作品单元”（跨平台合并 work；未合并单帖）。R-109：10 → 15。"""
+    acc_ids = [
+        a.id
+        for a in db.query(CreatorAccount).filter(
+            CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True)  # R-101
+        ).all()
+    ]
+    if not acc_ids:
+        return []
+    rows = (
+        db.query(PlatformPost)
+        .options(_POST_FIELDS)
+        .filter(PlatformPost.account_id.in_(acc_ids))
+        .order_by(PlatformPost.publish_time.desc(), PlatformPost.id.desc())
+        .all()
+    )
+    return _candidate_units(rows, _ad_video_ids(db, [p.local_video_id for p in rows if p.local_video_id]), limit)
 
 
-def _unit_text(db: Session, unit: dict) -> str:
-    """取该作品单元已有转写文案（对标转写产物归属对标，仅作分析/洗稿）。"""
+def candidates_many(db: Session, bms: list[Creator], limit: int = 15) -> dict[int, list[dict]]:
+    """R-240 S1：一次批量取多个对标的作品单元（accounts / posts / 广告视频各 1 条 SQL）。
+
+    过滤/排序/去重口径与 `candidates()` 完全一致；供 `/api/benchmark/top` 首屏预取。
+    """
+    out: dict[int, list[dict]] = {bm.id: [] for bm in bms}
+    if not bms:
+        return out
+    accounts = (
+        db.query(CreatorAccount)
+        .filter(CreatorAccount.creator_id.in_([bm.id for bm in bms]), CreatorAccount.enabled.is_(True))
+        .all()
+    )
+    acc_to_bm = {a.id: a.creator_id for a in accounts}
+    if not acc_to_bm:
+        return out
+    rows = (
+        db.query(PlatformPost)
+        .options(_POST_FIELDS)
+        .filter(PlatformPost.account_id.in_(list(acc_to_bm)))
+        .order_by(PlatformPost.publish_time.desc(), PlatformPost.id.desc())
+        .all()
+    )
+    rows_by_bm: dict[int, list[PlatformPost]] = {bm_id: [] for bm_id in out}
+    for p in rows:
+        rows_by_bm[acc_to_bm[p.account_id]].append(p)
+    ad_vid_ids = _ad_video_ids(db, [p.local_video_id for p in rows if p.local_video_id])
+    for bm_id, bm_rows in rows_by_bm.items():
+        out[bm_id] = _candidate_units(bm_rows, ad_vid_ids, limit)
+    return out
+
+
+def unit_key(unit: dict) -> str:
+    """作品单元的稳定 key（前端卡片 key / R-114 分析结果 key 共用）。"""
+    return f"w{unit['work_id']}" if unit.get("work_id") else f"p{unit['post'].id}"
+
+
+def unit_text_map(db: Session, units: list[dict]) -> dict[int, str]:
+    """R-240 S1：一次取「作品单元 → 已有转写文案」映射（post_id → text）。
+
+    `videos LEFT JOIN transcripts` 一次查完，每个视频按 `transcript.id` 倒序取一条（防
+    `Video.transcript` 的 uselist=False 重复行告警）；本地绑定视频优先、同 work 其它平台视频兜底，
+    与 `_unit_text` 逐条查询的取值口径一致。
+    """
+    video_ids: set[int] = set()
+    work_ids: set[int] = set()
+    for unit in units:
+        post = unit["post"]
+        if post.local_video_id:
+            video_ids.add(post.local_video_id)
+        if unit.get("work_id"):
+            work_ids.add(unit["work_id"])
+    if not video_ids and not work_ids:
+        return {}
+    filters = []
+    if video_ids:
+        filters.append(Video.id.in_(video_ids))
+    if work_ids:
+        filters.append(Video.work_id.in_(work_ids))
+    text_by_video: dict[int, str] = {}
+    video_work: dict[int, int | None] = {}
+    rows = (
+        db.query(Video.id, Video.work_id, Transcript.corrected_text, Transcript.transcript_text)
+        .outerjoin(Transcript, Transcript.video_id == Video.id)
+        .filter(or_(*filters))
+        .order_by(Video.id, Transcript.id.desc())
+        .all()
+    )
+    for video_id, work_id, corrected, transcript in rows:
+        if video_id in video_work:
+            continue  # 同一视频的多条转写：只取 transcript.id 最大的一条
+        video_work[video_id] = work_id
+        text_by_video[video_id] = (corrected or transcript or "").strip()
+    videos_by_work: dict[int, list[int]] = {}
+    for video_id, work_id in video_work.items():
+        if work_id:
+            videos_by_work.setdefault(work_id, []).append(video_id)
+    out: dict[int, str] = {}
+    for unit in units:
+        post = unit["post"]
+        vids: list[int] = []
+        if post.local_video_id:
+            vids.append(post.local_video_id)
+        if unit.get("work_id"):
+            vids.extend(v for v in videos_by_work.get(unit["work_id"], []) if v not in vids)
+        out[post.id] = next((text_by_video[v] for v in vids if text_by_video.get(v)), "")
+    return out
+
+
+def _unit_text(db: Session, unit: dict, *, video_text_map: dict[int, str] | None = None) -> str:
+    """取该作品单元已有转写文案（对标转写产物归属对标，仅作分析/洗稿）。
+
+    R-240 S1：传入 `video_text_map`（`unit_text_map()` 一次预取）时直接命中，不再逐条查库。
+    """
+    if video_text_map is not None:
+        return video_text_map.get(unit["post"].id, "")
     post = unit["post"]
     vids: list[Video] = []
     if post.local_video_id:
@@ -164,11 +281,16 @@ def _flag_unit_ad(db: Session, unit: dict) -> None:
         db.commit()
 
 
-_AD_JUDGE_SYSTEM = (
+_AD_JUDGE_RULES = (
     "你是内容审核。判断这条视频口播是否属于「广告/商单/带货/引流」：包括明示广告、品牌商单、"
     "付费推广、卖课/训练营/社群/私域引流、推广自己或第三方的产品/工具/软件/小程序/App 等。"
-    "普通知识内容里顺带提到某个工具、案例或书籍不算广告。只输出 JSON："
-    '{"is_ad":true或false,"reason":"简短原因"}'
+    "普通知识内容里顺带提到某个工具、案例或书籍不算广告。"
+)
+_AD_JUDGE_SYSTEM = _AD_JUDGE_RULES + '只输出 JSON：{"is_ad":true或false,"reason":"简短原因"}'
+_AD_BATCH_SYSTEM = (
+    _AD_JUDGE_RULES
+    + "一次判断多条候选，只输出 JSON："
+    + '{"results":[{"id":<输入id>,"is_ad":true或false,"reason":"简短原因"}]}'
 )
 
 
@@ -200,9 +322,54 @@ def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
         return False
 
 
-def _sorted_by_score(db: Session, units: list[dict]) -> list[dict]:
+def _units_are_ad(db: Session, units: list[dict], texts: list[str]) -> dict[int, bool]:
+    """R-240 S8：多条候选合并为一次 LLM 广告判定，返回 post_id → is_ad。
+
+    - 已标记广告的单元直接命中，不再送审；
+    - 输出契约 `{"results":[{"id":<输入id>,"is_ad":bool,...}]}`，解析失败/LLM 异常 → 全部按 False
+      （宁可不误杀，与逐条判定口径一致）。
+    """
+    flags = {unit["post"].id: any(p.is_ad for p in (unit.get("members") or [unit["post"]])) for unit in units}
+    batch = [
+        {"id": unit["post"].id, "title": (unit["post"].title or "")[:200], "text": (text or "")[:1500]}
+        for unit, text in zip(units, texts)
+        if not flags[unit["post"].id] and (text or "").strip()
+    ]
+    if not batch:
+        return flags
+    try:
+        data = _llm(db).chat_json(
+            [
+                {"role": "system", "content": _AD_BATCH_SYSTEM},
+                {"role": "user", "content": json.dumps(batch, ensure_ascii=False)},
+            ],
+            temperature=0.1,
+            max_tokens=800,
+        )
+        results = (data or {}).get("results") if isinstance(data, dict) else None
+        if not isinstance(results, list):
+            return flags
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            raw_id = item.get("id")
+            if raw_id is None:
+                continue
+            try:
+                post_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if post_id in flags:
+                flags[post_id] = bool(item.get("is_ad", False))
+    except Exception:  # noqa: BLE001 LLM 不可用不误杀
+        return flags
+    return flags
+
+
+def _sorted_by_score(db: Session, units: list[dict], stats_map: dict[int, dict] | None = None) -> list[dict]:
     """按互动分降序（R-152 抽取，供展示/补齐/目标选取共用）。"""
-    stats_map = _stats_map(db, units)
+    if stats_map is None:
+        stats_map = _stats_map(db, units)
     return sorted(units, key=lambda u: score_unit(db, u, stats_map), reverse=True)
 
 
@@ -210,21 +377,37 @@ def _sorted_by_score(db: Session, units: list[dict]) -> list[dict]:
 BENCH_TOP_N = 3
 
 
-def target_units(db: Session, bm: Creator, limit_candidates: int = 15, with_text_first: bool = False) -> list[dict]:
+def target_units(
+    db: Session,
+    bm: Creator,
+    limit_candidates: int = 15,
+    with_text_first: bool = False,
+    *,
+    units: list[dict] | None = None,
+    video_text_map: dict[int, str] | None = None,
+    stats_map: dict[int, dict] | None = None,
+) -> list[dict]:
     """R-174 对标展示口径：前 3 + 第四篇 = 该对标最新一篇（共 4 条；R-152 原为前 2 + 最新 = 3 条）。
 
     - 候选仍为最新 N 条（广告/同款漏标已在 candidates() 过滤）。
     - 前 3 = 按互动分降序前三条；with_text_first=True 时先把「有文案」的排前（R-106 展示口径）。
     - 第四篇 = 最新一篇（publish_time 最大）；若它已在前 3 里，则按互动分顺延补位（保底 4 条）。
     - 候选不足 4 条时返回可用的全部。
+    - R-240 S1：`units/video_text_map/stats_map` 为 /top 批量预取结果（缺省时回退逐条查询）。
     """
-    units = candidates(db, bm, limit=limit_candidates)
+    if units is None:
+        units = candidates(db, bm, limit=limit_candidates)
     if not units:
         return []
     total = BENCH_TOP_N + 1
-    ranked = _sorted_by_score(db, units)
+    ranked = _sorted_by_score(db, units, stats_map)
     if with_text_first:
-        ranked = [u for u in ranked if _unit_text(db, u)] + [u for u in ranked if not _unit_text(db, u)]
+        # R-106：有文案优先。每个单元只取一次文案（原来两个列表推导各调一次 _unit_text）
+        if video_text_map is None:
+            has_text = [bool(_unit_text(db, u)) for u in ranked]
+        else:
+            has_text = [bool(video_text_map.get(u["post"].id)) for u in ranked]
+        ranked = [u for u, ok in zip(ranked, has_text) if ok] + [u for u, ok in zip(ranked, has_text) if not ok]
     latest = max(units, key=lambda u: (u["post"].publish_time or _EPOCH))
     picked: list[dict] = list(ranked[:BENCH_TOP_N])
     if latest not in picked:
@@ -241,12 +424,14 @@ def ensure_top_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -
     """R-174：取「前 3（互动分）+ 最新一篇」，逐条补齐转写；广告/无文案顺延，保底 4 条有文案。
 
     转写后仍无文案（识别为空/无声等）→ 顺延下一条顶上（R-097 Q3）。
+    R-240 S8：统计 `_stats_map` 循环外一次；有文案候选凑批后合并为一次 LLM 广告判定。
     """
     units = candidates(db, bm, limit=limit_candidates)
     if not units:
         return []
     total = BENCH_TOP_N + 1
-    ranked = _sorted_by_score(db, units)
+    stats_map = _stats_map(db, units)  # R-240 S8：循环外一次，避免每条候选重复查
+    ranked = _sorted_by_score(db, units, stats_map)
     latest = max(units, key=lambda u: (u["post"].publish_time or _EPOCH))
     order: list[dict] = list(ranked[:BENCH_TOP_N])
     if latest not in order:
@@ -256,7 +441,24 @@ def ensure_top_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -
             order.append(unit)
 
     picked: list[dict] = []
+    pending: list[tuple[dict, str]] = []
+
+    def _judge(batch: list[tuple[dict, str]]) -> None:
+        """一批候选一次 LLM 判广；命中广告的落库标记并顺延。"""
+        flags = _units_are_ad(db, [u for u, _t in batch], [t for _u, t in batch])
+        for unit, text in batch:
+            if len(picked) >= total:
+                return
+            if flags.get(unit["post"].id):
+                _flag_unit_ad(db, unit)  # R-103：广告/商单不进对标，顺延下一条
+                continue
+            unit["text"] = text
+            unit["score"] = score_unit(db, unit, stats_map)
+            picked.append(unit)
+
     for unit in order:
+        if len(picked) >= total:
+            break
         text = _unit_text(db, unit)
         if not text:
             # 缺转写：下载音频+转写（对标素材；失败/无语音则顺延）
@@ -270,26 +472,24 @@ def ensure_top_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -
             text = _unit_text(db, unit)
         if not text:
             continue
-        if _unit_is_ad(db, unit, text):
-            _flag_unit_ad(db, unit)  # R-103：广告/商单不进对标，顺延下一条
-            continue
-        unit["text"] = text
-        unit["score"] = score_unit(db, unit, _stats_map(db, [unit]))
-        picked.append(unit)
-        if len(picked) >= total:
-            break
+        pending.append((unit, text))
+        if len(pending) >= total:  # 凑满 4 条一批（典型场景全程 1 次 LLM）
+            _judge(pending)
+            pending = []
+    if pending and len(picked) < total:
+        _judge(pending)
     return picked
 
 
-def _analysis_key(owner_id: int, unit_key: str) -> str:
-    return f"ba:{owner_id}:{unit_key}"
+def _analysis_key(owner_id: int, key: str) -> str:
+    return f"ba:{owner_id}:{key}"
 
 
-def get_analysis(db: Session, owner_id: int | None, unit_key: str) -> dict | None:
+def get_analysis(db: Session, owner_id: int | None, key: str) -> dict | None:
     """读取已保存的“能不能讲”分析结果（R-114：切页不丢）。"""
     if not owner_id:
         return None
-    row = db.get(Kv, _analysis_key(owner_id, unit_key))
+    row = db.get(Kv, _analysis_key(owner_id, key))
     if row is None or not row.value:
         return None
     try:
@@ -299,19 +499,48 @@ def get_analysis(db: Session, owner_id: int | None, unit_key: str) -> dict | Non
         return None
 
 
-def set_analysis(db: Session, owner_id: int, unit_key: str, data: dict) -> None:
-    key = _analysis_key(owner_id, unit_key)
-    row = db.get(Kv, key)
+def get_analysis_map(db: Session, owner_id: int | None, keys: list[str]) -> dict[str, dict]:
+    """R-240 S1：一次 IN 取多个单元「能不能讲」分析结果（unit key → 已解析 dict）。"""
+    out: dict[str, dict] = {}
+    if not owner_id or not keys:
+        return out
+    prefix = _analysis_key(owner_id, "")
+    for row in db.query(Kv).filter(Kv.key.in_([f"{prefix}{key}" for key in keys])).all():
+        if not row.value:
+            continue
+        try:
+            data = json.loads(row.value)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict):
+            out[row.key[len(prefix):]] = data
+    return out
+
+
+def set_analysis(db: Session, owner_id: int, key: str, data: dict) -> None:
+    kv_key = _analysis_key(owner_id, key)
+    row = db.get(Kv, kv_key)
     value = json.dumps(data, ensure_ascii=False)
     if row is None:
-        db.add(Kv(key=key, value=value))
+        db.add(Kv(key=kv_key, value=value))
     else:
         row.value = value
     db.commit()
 
 
-def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = None, owner_id: int | None = None) -> dict:
-    """作品单元序列化（含分数/文案/统计，供对标页展示与分析）。"""
+def unit_payload(
+    db: Session,
+    unit: dict,
+    stats_map: dict[int, dict] | None = None,
+    owner_id: int | None = None,
+    *,
+    text: str | None = None,
+    analysis_map: dict[str, dict] | None = None,
+) -> dict:
+    """作品单元序列化（含分数/文案/统计，供对标页展示与分析）。
+
+    R-240 S1：`text` / `analysis_map` 为 /top 批量预取结果，缺省时回退逐条查询。
+    """
     if stats_map is None:
         stats_map = _stats_map(db, [unit])
     posts = unit.get("members") or [unit["post"]]
@@ -331,11 +560,14 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
     comments = sum(int((stats_map.get(p.id) or {}).get("comments") or 0) for p in posts)
     plays = sum(int((stats_map.get(p.id) or {}).get("plays") or 0) for p in posts)
     post = unit["post"]
-    text = unit.get("text")
+    if text is None:
+        text = unit.get("text")
     if text is None:
         text = _unit_text(db, unit)  # R-100：首屏也把已有 ASR 转写文案带出来
+    key = unit_key(unit)
+    analysis = analysis_map.get(key) if analysis_map is not None else get_analysis(db, owner_id, key)
     return {
-        "key": f"w{unit['work_id']}" if unit.get("work_id") else f"p{post.id}",
+        "key": key,
         "work_id": unit.get("work_id"),
         "post_id": post.id,
         "title": post.title or "",
@@ -350,8 +582,46 @@ def unit_payload(db: Session, unit: dict, stats_map: dict[int, dict] | None = No
         "has_text": bool(text),
         "text": text or "",
         "tags": tags,
-        "analysis": get_analysis(db, owner_id, f"w{unit['work_id']}" if unit.get("work_id") else f"p{post.id}"),
+        "analysis": analysis,
     }
+
+
+def benchmarks_top(db: Session, owner: Creator) -> dict:
+    """R-240 S1：对标页首屏（GET /api/benchmark/top）批量预取 + 组装。
+
+    候选单元 / 转写文案 / 最新统计 / 已存分析各一次批量查询，SQL 数不随对标数增长；
+    展示排序（有文案优先、前3+最新）与分析结果口径不变。
+    """
+    bms = benchmarks_of_owner(db, owner)
+    units_by_bm = candidates_many(db, bms, limit=15)
+    all_units = [unit for bm in bms for unit in units_by_bm.get(bm.id) or []]
+    video_text_map = unit_text_map(db, all_units)
+    stats_map = _stats_map(db, all_units)
+    analysis_map = get_analysis_map(db, owner.id, [unit_key(unit) for unit in all_units])
+    out = []
+    for bm in bms:
+        picked = target_units(
+            db,
+            bm,
+            limit_candidates=15,
+            with_text_first=True,
+            units=units_by_bm.get(bm.id) or [],
+            video_text_map=video_text_map,
+            stats_map=stats_map,
+        )
+        items = [
+            unit_payload(
+                db,
+                unit,
+                stats_map=stats_map,
+                owner_id=owner.id,
+                text=video_text_map.get(unit["post"].id, ""),
+                analysis_map=analysis_map,
+            )
+            for unit in picked
+        ]
+        out.append({"benchmark_id": bm.id, "name": bm.name, "note": bm.note or "", "items": items})
+    return {"owner_id": owner.id, "owner_name": owner.name, "benchmarks": out}
 
 
 def persona_lines(db: Session, owner: Creator) -> list[str]:
@@ -615,62 +885,95 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
     refetch=True（手动「重新对标」）：重捞最新 15 条后重算「前3+最新」；
     refetch=False（R-109 每日同步完成后自动触发）：不重复拉取，仅基于已同步数据重算/补缺转写。
     update(pct, note) 可选：由后台任务运行器注入，实时回写进度（R-081 同款）。
+
+    R-240 M2：按对标博主 `sync_pool.gather` 并发（每博主独立 Session，DB Session 不跨线程），
+    进度由主线程 `on_result` 累计；BudgetExceeded 用 cancel 事件让后续博主快速退出；
+    单博主失败不阻断其它，返回结构不变。
     """
     from ..core.timeutil import now as _app_now
     from .platform.budget import BudgetExceeded
     from .platform_sync import sync_account
+    from .sync_pool import gather, new_cancel, pool_size, session_factory
 
     bms = benchmarks_of_owner(db, owner)
     if not bms:
         raise ValueError("还没有对标博主，先去「博主管理」添加")
-    total = len(bms)
+    jobs = [(bm.id, bm.name or f"对标#{bm.id}") for bm in bms]
+    order = {bm_id: index for index, (bm_id, _name) in enumerate(jobs)}
+    total = len(jobs)
     summary: list[dict] = []
     ok_count = 0
     text_count = 0
+    done = 0
+    cancel = new_cancel()
+    budget_errors: list[BudgetExceeded] = []
+    factory = session_factory(db)
 
-    def _up(inner_pct: int, note: str = "") -> None:
-        if update is not None:
-            overall = int(((i - 1) + inner_pct / 100) / total * 100)
-            overall = max(5, min(99, overall))
-            update(overall, f"[{i}/{total}] {name}：{note}")
-
-    for i, bm in enumerate(bms, start=1):
-        name = bm.name or f"对标#{bm.id}"
+    def _run_one(job: tuple[int, str]) -> dict:
+        bm_id, _name = job
+        if cancel.is_set():
+            raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
+        session = factory()
         try:
-            _up(0, "捞数据中…" if refetch else "重算对标中…")
+            bm = session.get(Creator, bm_id)
+            if bm is None:
+                raise ValueError("对标博主不存在")
             accounts = (
-                db.query(CreatorAccount)
+                session.query(CreatorAccount)
                 .filter(CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True))
                 .order_by(CreatorAccount.id)
                 .all()
             )
             if refetch:
                 for acc in accounts:
+                    if cancel.is_set():
+                        raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
                     try:
-                        sync_account(db, acc, scope="benchmark", top_n=15, with_comments=False)  # R-109：10 → 15
-                        acc2 = db.get(CreatorAccount, acc.id)
+                        sync_account(session, acc, scope="benchmark", top_n=15, with_comments=False)  # R-109：10 → 15
+                        acc2 = session.get(CreatorAccount, acc.id)
                         if acc2 is not None:
                             acc2.sync_status = "done"
                             acc2.sync_message = ""
                             acc2.last_sync_at = _app_now()
-                            db.commit()
+                            session.commit()
                     except BudgetExceeded:
                         raise
                     except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
-                        db.rollback()
-            _up(55, "计算「前3+最新」并补齐文案…")
-            picked = ensure_top_with_text(db, bm, limit_candidates=15)  # R-109：10 → 15
-            n = len(picked)
+                        session.rollback()
+            picked = ensure_top_with_text(session, bm, limit_candidates=15)  # R-109：10 → 15
+            return {"benchmark_id": bm_id, "name": _name, "top_with_text": len(picked), "error": ""}
+        finally:
+            session.close()
+
+    def _on_result(job: tuple[int, str], result: object) -> None:
+        nonlocal done, ok_count, text_count
+        bm_id, name = job
+        if isinstance(result, BudgetExceeded):
+            if not budget_errors:
+                budget_errors.append(result)
+                cancel.set()
+            return
+        done += 1
+        if isinstance(result, Exception):
+            summary.append({"benchmark_id": bm_id, "name": name, "top_with_text": 0, "error": str(result)[:200]})
+            note = "失败"
+        else:
+            payload = result if isinstance(result, dict) else {}
+            count = int(payload.get("top_with_text") or 0)
             ok_count += 1
-            text_count += n
-            summary.append({"benchmark_id": bm.id, "name": name, "top_with_text": n, "error": ""})
-            _up(100, f"完成（前3+最新有文案 {n} 条）")
-        except BudgetExceeded:
-            raise
-        except Exception as exc:  # noqa: BLE001 单个对标失败不阻断整体
-            db.rollback()
-            summary.append({"benchmark_id": bm.id, "name": name, "top_with_text": 0, "error": str(exc)[:200]})
-            _up(100, "失败")
+            text_count += count
+            summary.append({"benchmark_id": bm_id, "name": name, "top_with_text": count, "error": ""})
+            note = f"完成（前3+最新有文案 {count} 条）"
+        if update is not None:
+            overall = max(5, min(99, int(done / total * 100)))
+            update(overall, f"[{done}/{total}] {name}：{note}")
+
+    if update is not None:
+        update(5, f"[1/{total}] {jobs[0][1]}：{'捞数据中…' if refetch else '重算对标中…'}")
+    gather(_run_one, jobs, workers=pool_size("creator"), on_result=_on_result)
+    if budget_errors:
+        raise budget_errors[0]
+    summary.sort(key=lambda row: order.get(row["benchmark_id"], 0))
     return {
         "title": f"共 {ok_count}/{total} 个对标已更新（前3+最新有文案 {text_count} 条）",
         "summary": summary,

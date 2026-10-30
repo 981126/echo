@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 import time
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -25,19 +26,50 @@ _LLM_SCAN_LIMIT = 60  # 交给模型语义聚类的评论条数上限（太大�
 _LLM_DEADLINE = 100.0  # 模型聚类硬超时（秒）：超时立即回退本地聚类，避免界面卡死
 _LLM_CACHE_TTL = 21600.0  # 模型聚类结果缓存 6 小时（调用较慢，尽量复用；每周任务会预热）
 _CACHE_TTL = 120.0
+_INFLIGHT_WAIT = 10.0  # R-240 M4：缓存过期时等待首个线程重算的上限（秒），超时降级自己算
 _CACHE: dict[str, tuple[float, object]] = {}
+_INFLIGHT: dict[str, threading.Event] = {}
+_CACHE_LOCK = threading.Lock()
 
 
 def _cached(key: str, fn, ttl: float = _CACHE_TTL):
+    """进程内 TTL 缓存（R-240 M4：单飞防击穿）。
+
+    未命中/过期时只有一个线程重算，其余线程最多等 `_INFLIGHT_WAIT` 秒后读缓存；
+    等待超时或重算失败则降级为各自重算（fail-open，不改变正确性）。
+    """
     now = time.monotonic()
     hit = _CACHE.get(key)
     if hit and now - hit[0] < ttl:
         return hit[1]
-    value = fn()
-    _CACHE[key] = (now, value)
-    if len(_CACHE) > 32:
-        _CACHE.clear()
-    return value
+    with _CACHE_LOCK:
+        hit = _CACHE.get(key)
+        if hit and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        existing = _INFLIGHT.get(key)
+        owner = existing is None
+        event = threading.Event() if existing is None else existing
+        if owner:
+            _INFLIGHT[key] = event
+    if not owner:
+        event.wait(_INFLIGHT_WAIT)
+        hit = _CACHE.get(key)
+        if hit and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        return fn()  # 等超时/首个线程重算失败 → 自己算（降级）
+    try:
+        value = fn()
+        with _CACHE_LOCK:
+            _CACHE[key] = (time.monotonic(), value)
+            if len(_CACHE) > 32:
+                _CACHE.clear()
+        return value
+    finally:
+        with _CACHE_LOCK:
+            _INFLIGHT.pop(key, None)
+        event.set()
+
+
 _EMOJI_TAG = re.compile(r"\[[^\]]{1,8}\]")
 _AT_RE = re.compile(r"@\S+")
 _QUESTION_HINTS = ("怎么", "如何", "能不能", "是不是", "为什么", "吗", "？", "?", "求", "想问", "请教")
@@ -188,19 +220,32 @@ _LLM_CLUSTER_SYSTEM = (
 )
 
 
+def _slice_clusters(full: dict, limit: int) -> dict:
+    """缓存按 `_SCAN_LIMIT` 全量计算，读取时按调用方 limit 切片（R-240 M4：缓存键与 limit 解耦）。"""
+    return {**full, "clusters": (full.get("clusters") or [])[:limit]}
+
+
 def comment_clusters(db: Session, limit: int = 15, use_llm: bool = False) -> dict:
     """观众提问榜（带缓存）：未使用评论聚类。
 
     use_llm=True（R-192）：先用模型1 做**语义聚类**（把同一类问题归并成规范问题），失败自动回退本地聚类。
+    R-240 M4：缓存 key 去掉 limit（内部按既有 `_SCAN_LIMIT` 算全量，返回时切片），不同 limit 复用同一份。
     """
     cid = _cid(db) or 0
     if use_llm:
-        return _cached(f"ccl:{cid}:{limit}", lambda: _llm_comment_clusters(db, limit), ttl=_LLM_CACHE_TTL)
-    return _cached(f"cc:{cid}:{limit}", lambda: _comment_clusters(db, limit))
+        full = _cached(f"ccl:{cid}", lambda: _llm_comment_clusters(db, _SCAN_LIMIT), ttl=_LLM_CACHE_TTL)
+        return _slice_clusters(full, limit)
+    full = _cached(f"cc:{cid}", lambda: _comment_clusters(db, _SCAN_LIMIT))
+    return _slice_clusters(full, limit)
 
 
 def _ask_groups(listing: str, deadline: float) -> list:
-    """调模型1 做语义聚类，带硬超时（超时返回空 → 调用方回退本地）。"""
+    """调模型1 做语义聚类，带硬超时（超时返回空 → 调用方回退本地）。
+
+    R-240 M6 收尾：把这里的软超时预算下传给单次 LLM 调用。只靠外层
+    `Future.result(timeout=...)` 只约束调用方等待，底层线程仍可能卡到全局 600s；
+    下传后单次调用按 `min(_LLM_DEADLINE, deadline)` 收紧，异常/超时语义不变（仍回退本地聚类）。
+    """
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as FTimeout
 
@@ -215,6 +260,7 @@ def _ask_groups(listing: str, deadline: float) -> list:
             ],
             temperature=0.3,
             max_tokens=3000,
+            timeout_seconds=int(min(_LLM_DEADLINE, deadline)),
         )
         return data.get("groups") or []
 

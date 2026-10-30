@@ -6,7 +6,7 @@ import json
 from sqlalchemy.orm import Session
 
 from ..core.timeutil import now as _app_now
-from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostComment
+from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostComment, PlatformPostStat
 from ..models.video import Video
 from ..models.video_review import (
     VideoImprovementPlan,
@@ -115,9 +115,20 @@ def list_videos(db: Session, owner: Creator, account_id: int | None, query: str,
     if cursor:
         q = q.filter(PlatformPost.id < cursor)
     rows = q.order_by(PlatformPost.id.desc()).limit(limit + 1).all()
+    page = rows[:limit]
+    latest_map: dict[int, VideoReview] = {}
+    if page:
+        # R-240 S6：一次批量取每帖最新 review（按 id 升序覆盖 → 最大 id 即最新）
+        for review in (
+            db.query(VideoReview)
+            .filter(VideoReview.post_id.in_([post.id for post in page]))
+            .order_by(VideoReview.id)
+            .all()
+        ):
+            latest_map[review.post_id] = review
     items = []
-    for post in rows[:limit]:
-        latest = db.query(VideoReview).filter_by(post_id=post.id).order_by(VideoReview.id.desc()).first()
+    for post in page:
+        latest = latest_map.get(post.id)
         items.append({
             **_post_out(post),
             "latest_review_id": latest.id if latest else None,
@@ -280,14 +291,33 @@ def _follower_sort(item: dict) -> float:
 
 
 def _follower_topics(db: Session, account: CreatorAccount) -> list[dict]:
+    """R-240 S6：一次批量取 30 条作品的私有指标与最新统计（内存内取最新），不再逐条查库。"""
     from ..models.video_review import DouyinPostMetric
-    from .video_review_comparison import _latest_stat
 
-    rows = []
     posts = db.query(PlatformPost).filter_by(account_id=account.id).order_by(PlatformPost.publish_time.desc()).limit(30).all()
+    post_ids = [post.id for post in posts]
+    if not post_ids:
+        return []
+    metrics: dict[int, DouyinPostMetric] = {}
+    for row_metric in (
+        db.query(DouyinPostMetric)
+        .filter(DouyinPostMetric.post_id.in_(post_ids))
+        .order_by(DouyinPostMetric.snapshot_date)
+        .all()
+    ):
+        metrics[row_metric.post_id] = row_metric
+    stats: dict[int, PlatformPostStat] = {}
+    for row_stat in (
+        db.query(PlatformPostStat)
+        .filter(PlatformPostStat.post_id.in_(post_ids))
+        .order_by(PlatformPostStat.stat_date)
+        .all()
+    ):
+        stats[row_stat.post_id] = row_stat
+    rows = []
     for post in posts:
-        metric = db.query(DouyinPostMetric).filter_by(post_id=post.id).order_by(DouyinPostMetric.snapshot_date.desc()).first()
-        stat = _latest_stat(db, post.id)
+        metric = metrics.get(post.id)
+        stat = stats.get(post.id)
         if not metric or metric.follower_gain is None:
             continue
         rows.append({

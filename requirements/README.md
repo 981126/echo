@@ -7,6 +7,7 @@
 ## 索引
 | 编号 | 日期 | 摘要 | 状态 | 排期 | 关联 |
 |------|------|------|------|------|------|
+| R-240 | 2026-10-30 | 后端性能优化（批次 1+2）：列表/汇总接口消除 N+1 与假分页（benchmark/top、works、library、persona/style、复盘参考、机会缓存）；可并行任务并行化（提示词评测 10 次 LLM、流水线/自测多篇草稿、对标准备/重跑、日更媒体全局池+失败退避、同行播放量补采移出主链路、单卡同步按钮多平台并行）；LLM 客户端复用+超时预算+KV 批读；请求耗时中间件 | ✅ 已完成（2026-10-30，verify 全绿 + 8000 端口 GET 复测） | M241 | `benchmark.py`、`library_service.py`、`works_service.py`、`generation.py`、`prompt_eval.py`、`pipeline.py`、`opportunity.py`、`platform_sync.py`、`media_ensure.py`、`ingest.py`、`llm.py`、`llm_router.py`、`main.py`、R-163/R-222 并发基础 |
 | R-239 | 2026-10-30 | 账号级创作者 Cookie 与数据源策略：视频复盘去掉 Cookie 配置；博主管理「编辑账号」加开关+Cookie+状态；每账号收数先判源（开关关/无 Cookie→公开，开启+有效→创作者中心，开启+失效→停止该账号所有第三方调用+通知+标记失效，直到更新 Cookie）；合并 R-238（素材库真实播放展示/防覆盖/回填/每日保鲜）；只做抖音 | ✅ 已完成（2026-10-30） | M240 | 视频复盘页、博主管理、creators/douyin-review API、`douyin_creator_sync.py`、`platform_sync.py`、`library_service.py`、R-237、R-238 |
 | R-238 | 2026-10-30 | 素材库本人抖音作品数据改用创作者中心接口（已并入 R-239，保留历史文档） | ⛔ 已并入 R-239 | — | 同 R-239 |
 | R-237 | 2026-10-29 | 只做抖音：解释视频好/差原因与涨粉问题；1 个首选 + 2 个备选主题，首选附后续 3 条相关内容；同行爆款/低粉爆款作证据，3 个新话题，发布后检查修改效果；小白可懂的图标与中文 | 🔨 代码完成（私有字段待 Cookie 联调） | M238 | TikHub Creator V2、抖音榜单、对标、素材转写、frontend_v2 |

@@ -1,5 +1,16 @@
 # 变更记录
 
+## [R-240] 2026-10-30 — 后端性能优化批次 1+2：接口慢点消除 + 可并行任务并行化 ✅
+
+- 读接口消除 N+1/全量加载：`GET /api/benchmark/top` 810 SQL/447ms → **7 SQL/27~32ms**；`/api/library` 假分页 141ms → **9~10ms（快照缓存命中，首访 150ms）**；`/api/works` 210ms → **9ms（命中）**；`/api/persona/style` 218 SQL/76ms → **7 SQL/17~21ms**；`/api/persona/phrases/suggest` 146 SQL/44ms → **4 SQL/6~7ms**；`/api/douyin-review/references` 112ms → **16~18ms**；机会缓存加单飞+60s 预热（ledger 冷 593ms → 预热后 6.5ms，attribution 225ms → 4.7ms）。
+- 可并行任务并行化：提示词金样本评测 10 次独立 LLM 串行 → 并发（默认 3，可配）；每日流水线/提示词自测多篇独立草稿并发（独立 Session，默认 2）；对标准备广告判定 4 次 LLM → 每批 1 次 + stats 批量；重新对标 11 对标串行 2.75s → 4 worker **0.87s（≈3.2×）**；视频复盘分析 DB ≈600 查询 → ≈35~40；日更媒体改进程级全局池（`ECHO_SYNC_MEDIA_CONCURRENCY` 语义改为**全局**并发，默认 6，轻卡优先），转写成功后「LLM 校对 ∥ 预打标」并发；同行播放量补采移出日更主链路为独立后台任务（低并发 3，保留 0.25s 降速），日更 message 不再拼接其结果。
+- 失败退避：自动转写失败写 `app_kv` 计次/下次可重试时间（可重试指数退避 ≤24h；无语音/额度/格式类 7 天），≥`ECHO_ASR_MAX_ATTEMPTS`（默认 3）跳过并只通知一次；手动重试清零。
+- LLM 基础：`httpx.Client` 模块级复用（keepalive 120s、per-request timeout 保持墙钟语义，一篇稿省 1.3~3.9s 握手）；feature→单次超时预算表（chat 90s / ideas 30s / 生成讨论 360s / 600s 兜底）并下传 chat 剩余 deadline 与选文 45s；`llm_router.snapshot` 20~21 条 KV 点查 → 1 条（`primary_llm` 21 → 2）。
+- 可观测：新增纯 ASGI `RequestTimingMiddleware`（`X-Response-Time` 响应头 + >500ms 慢请求日志带本请求 SQL 条数）。
+- 同步按钮接口：单卡多平台指标/评论、素材多绑定帖改并发（每任务独立 Session），2 平台 3~8s → 约 1~2s（本机 HTTP 冒烟）。
+- 不改表结构/无 Alembic revision；不改接口字段契约、前端零改动；单进程线程模型与后台任务机制保持不变。
+- 验证：`scripts/verify.sh` 全绿（ruff/mypy/pytest **705 例**、前端 lint+vitest 145 例+build、文档一致性）；真实 8000 端口 GET 复测见上；服务保持运行（重启加载新代码，health 200）。
+
 ## [R-239] 2026-10-30 — 账号级创作者 Cookie 与数据源策略（含 R-238 合并）✅
 
 - 视频复盘去掉 Cookie 配置入口，只保留账号创作者数据只读状态与「去博主管理配置」引导。

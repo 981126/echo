@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..models.persona import PersonaTag
 from ..models.platform import Creator, PlatformPost, PlatformPostComment
-from ..models.video import Video
+from ..models.video import Transcript, Video
 from .video_review_comparison import loads
 from .video_review_rules import comment_questions
 
@@ -21,20 +21,38 @@ def _keywords(db: Session, owner: Creator) -> set[str]:
 
 
 def _has_material(db: Session, owner: Creator) -> bool:
-    return any(v.transcript and (v.transcript.corrected_text or v.transcript.transcript_text) for v in db.query(Video).filter_by(creator_id=owner.id).all())
+    """是否有「视频 + 非空转写」的素材（一次 JOIN 查询，避免逐视频懒加载 transcript）。"""
+    row = (
+        db.query(Transcript.id)
+        .join(Video, Video.id == Transcript.video_id)
+        .filter(Video.creator_id == owner.id)
+        .filter((Transcript.corrected_text != "") | (Transcript.transcript_text != ""))
+        .first()
+    )
+    return row is not None
 
 
-def _fit(db: Session, owner: Creator, topic: str) -> tuple[int, list[str]]:
-    words = _keywords(db, owner)
+def _fit(
+    db: Session,
+    owner: Creator,
+    topic: str,
+    *,
+    keywords: set[str] | None = None,
+    has_material: bool | None = None,
+    persona: list[PersonaTag] | None = None,
+) -> tuple[int, list[str]]:
+    """人设契合度打分（R-240 S6：循环外预算好的 keywords/has_material/persona 可直接传入）。"""
+    words = _keywords(db, owner) if keywords is None else keywords
     related = [word for word in words if word.lower() in topic.lower()]
     score = 8 if related else 0
     reasons = [f"与你讲过的{'、'.join(related[:2])}内容相关"] if related else []
-    confirmed = db.query(PersonaTag).filter_by(creator_id=owner.id, status="confirmed").all()
+    confirmed = persona if persona is not None else db.query(PersonaTag).filter_by(creator_id=owner.id, status="confirmed").all()
     persona_matches = [p for p in confirmed if p.layer != "forbidden" and any(word in (p.label + p.description + topic) for word in related)]
     if persona_matches:
         score += 6
         reasons.append(f"符合你的人设「{persona_matches[0].label}」")
-    if _has_material(db, owner):
+    material = _has_material(db, owner) if has_material is None else has_material
+    if material:
         score += 6
         reasons.append("你已有真实视频和转写可以作为内容依据")
     if any(p.layer == "forbidden" and p.label and p.label in topic for p in confirmed):
@@ -46,7 +64,18 @@ def _candidate(topic: str, source_types: list[str], evidence: list[dict], target
     return {"topic": topic.strip(), "source_types": source_types, "evidence": evidence, "target_metric": target_metric}
 
 
-def _score(db: Session, owner: Creator, candidate: dict, facts: dict, comment_count: int, comment_likes: int) -> dict:
+def _score(
+    db: Session,
+    owner: Creator,
+    candidate: dict,
+    facts: dict,
+    comment_count: int,
+    comment_likes: int,
+    *,
+    keywords: set[str] | None = None,
+    has_material: bool | None = None,
+    persona: list[PersonaTag] | None = None,
+) -> dict:
     follower = 0
     if "own_results" in candidate["source_types"]:
         if facts["follower_per_1k"]["state"] == "high":
@@ -56,7 +85,14 @@ def _score(db: Session, owner: Creator, candidate: dict, facts: dict, comment_co
     demand = 0
     if "audience_comment" in candidate["source_types"]:
         demand = min(15, round(3 * math.log2(1 + comment_count))) + min(5, round(math.log2(1 + comment_likes)))
-    fit, fit_reasons = _fit(db, owner, candidate["topic"])
+    fit, fit_reasons = _fit(
+        db,
+        owner,
+        candidate["topic"],
+        keywords=keywords,
+        has_material=has_material,
+        persona=persona,
+    )
     public = min(10, sum(1 for x in candidate["source_types"] if x == "peer") * 5) + min(5, sum(1 for x in candidate["source_types"] if x == "low_fan") * 2)
     fresh = 10 if candidate["source_types"] else 0
     score = max(0, follower + demand + fit + public + fresh)
@@ -119,9 +155,25 @@ def recommend_topics(
             unique[key]["evidence"].extend(candidate["evidence"])
         else:
             unique[key] = candidate
+    # R-240 S6：人设关键词/素材/确认标签循环外各算一次，循环内纯计算
+    keywords = _keywords(db, owner)
+    has_material = _has_material(db, owner)
+    persona = db.query(PersonaTag).filter_by(creator_id=owner.id, status="confirmed").all()
+    question_count = sum(x["commenter_count"] for x in questions)
+    question_likes = sum(x["likes"] for x in questions)
     scored = []
     for candidate in unique.values():
-        detail = _score(db, owner, candidate, facts, sum(x["commenter_count"] for x in questions), sum(x["likes"] for x in questions))
+        detail = _score(
+            db,
+            owner,
+            candidate,
+            facts,
+            question_count,
+            question_likes,
+            keywords=keywords,
+            has_material=has_material,
+            persona=persona,
+        )
         if detail["fit"] <= 0:
             continue
         candidate["score_detail"] = detail

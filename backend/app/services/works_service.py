@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.platform_links import build_platform_page_url_from_data, parse_raw
@@ -71,6 +74,93 @@ def _latest_stat(db: Session, post_id: int):
         .order_by(PlatformPostStat.stat_date.desc())
         .first()
     )
+
+
+# ---------------------------------------------------------------------------
+# S5（R-240）：卡片快照进程内缓存
+#
+# 素材库（library_service.build_cards）与博主管理页（works_service.list_works）每次
+# 翻页/筛选都会全量重建 600~1900 行 → 这次加「数据版本键 + 20s TTL」双保险快照缓存。
+# 版本键是几条 count/max 轻查询：同步写入（新帖/新指标/合并/删除）会立刻换版本；
+# 原地编辑（标题/标签）等不改变聚合量的写由 20s TTL 兜底，不引入跨请求 Session 缓存。
+# ---------------------------------------------------------------------------
+
+_CARD_CACHE_TTL = 20.0
+_CARD_CACHE_MAX = 20
+_CARD_CACHE_LOCK = threading.Lock()
+_CARD_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+_WORKS_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+
+
+def cards_version(db: Session, creator_id: int | None) -> tuple:
+    """卡片快照的数据版本键（4 条便宜聚合，≤3ms）。
+
+    `creator_id` 为空时按全量口径（与 `build_cards`/`list_works` 的「无当前博主」行为一致）。
+    """
+    if creator_id:
+        posts_count, posts_max_id, posts_updated = (
+            db.query(
+                func.count(PlatformPost.id),
+                func.max(PlatformPost.id),
+                func.max(PlatformPost.updated_at),
+            )
+            .join(CreatorAccount, CreatorAccount.id == PlatformPost.account_id)
+            .filter(CreatorAccount.creator_id == creator_id, CreatorAccount.enabled.is_(True))
+            .one()
+        )
+        videos_count, videos_max_id, videos_created = (
+            db.query(func.count(Video.id), func.max(Video.id), func.max(Video.created_at))
+            .filter(Video.creator_id == creator_id)
+            .one()
+        )
+        works_count, works_updated = (
+            db.query(func.count(Work.id), func.max(Work.updated_at))
+            .filter(Work.creator_id == creator_id)
+            .one()
+        )
+    else:
+        posts_count, posts_max_id, posts_updated = db.query(
+            func.count(PlatformPost.id),
+            func.max(PlatformPost.id),
+            func.max(PlatformPost.updated_at),
+        ).one()
+        videos_count, videos_max_id, videos_created = db.query(
+            func.count(Video.id), func.max(Video.id), func.max(Video.created_at)
+        ).one()
+        works_count, works_updated = db.query(
+            func.count(Work.id), func.max(Work.updated_at)
+        ).one()
+    stats_count = int(db.query(func.count(PlatformPostStat.id)).scalar() or 0)
+    return (
+        creator_id or 0,
+        int(posts_count or 0),
+        int(posts_max_id or 0),
+        posts_updated,
+        int(videos_count or 0),
+        int(videos_max_id or 0),
+        videos_created,
+        int(works_count or 0),
+        works_updated,
+        stats_count,
+    )
+
+
+def _cache_get(cache: dict[tuple, tuple[float, list[dict]]], key: tuple) -> list[dict] | None:
+    """缓存命中返回**浅拷贝**（防调用方修改污染缓存）；过期/未命中返回 None。"""
+    now = time.monotonic()
+    with _CARD_CACHE_LOCK:
+        hit = cache.get(key)
+        if hit is None or hit[0] <= now:
+            return None
+        return [dict(item) for item in hit[1]]
+
+
+def _cache_put(cache: dict[tuple, tuple[float, list[dict]]], key: tuple, items: list[dict]) -> None:
+    """写入快照；条目上限 20，超限整体清空（与设计一致，单用户缓存不会持续增长）。"""
+    with _CARD_CACHE_LOCK:
+        if len(cache) >= _CARD_CACHE_MAX:
+            cache.clear()
+        cache[key] = (time.monotonic() + _CARD_CACHE_TTL, items)
 
 
 def post_item(db: Session, p: PlatformPost, account=None, stat=None, creator=None) -> dict:
@@ -259,7 +349,25 @@ def _work_member_item(db: Session, m: PlatformPost, account_map: dict, stat_map:
 
 
 def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
-    """素材库云端作品列表：已合并作品在前（含各平台数据），未合并单条在后。"""
+    """素材库云端作品列表：已合并作品在前（含各平台数据），未合并单条在后。
+
+    S5（R-240）：按数据版本键 + 20s TTL 缓存卡片快照，命中直接返回浅拷贝，
+    翻页/深链（`/api/works`、`/api/works/by-post`）不再全量重建；版本查询失败时降级直算。
+    """
+    try:
+        key = cards_version(db, creator_id)
+    except Exception:  # noqa: BLE001 缓存版本查询失败 → fail-open 到原逻辑
+        return _list_works(db, creator_id)
+    cached = _cache_get(_WORKS_CACHE, key)
+    if cached is not None:
+        return cached
+    items = _list_works(db, creator_id)
+    _cache_put(_WORKS_CACHE, key, items)
+    return items
+
+
+def _list_works(db: Session, creator_id: int | None = None) -> list[dict]:
+    """全量构建作品列表（缓存未命中时执行）。"""
     q = db.query(PlatformPost)
     if creator_id:
         acc_ids = [a.id for a in db.query(CreatorAccount).filter(CreatorAccount.creator_id == creator_id, CreatorAccount.enabled.is_(True)).all()]

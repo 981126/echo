@@ -144,32 +144,35 @@ def _split_phrases(text: str, limit: int) -> list[str]:
 
 
 def suggest_phrase_candidates(db, limit: int = 12) -> list[dict]:
-    """从当前主博主高表现素材里挑短句候选（R-030③ 金句库）。"""
-    from ..models.metrics import MetricsSnapshot
+    """从当前主博主高表现素材里挑短句候选（R-030③ 金句库）。
+
+    R-240 S3：`selectinload(Video.transcript)` + 一次批量取最新指标，消除 1+N 查询
+    （原实现每条素材一次 transcript 懒加载 + 一次 MetricsSnapshot 查询）；输出顺序/内容不变。
+    """
+    from sqlalchemy.orm import selectinload
+
     from ..models.video import Video
     from .creator_service import current_creator_id
+    from .generation import _engagement_map
 
     cid = current_creator_id(db)
-    q = db.query(Video).filter(Video.is_ad.is_(False))
+    q = (
+        db.query(Video)
+        .options(selectinload(Video.transcript))
+        .filter(Video.is_ad.is_(False))
+    )
     if cid:
         q = q.filter(Video.creator_id == cid)
+    videos = q.all()
+    engagements = _engagement_map(db, videos)
     rows = []
-    for v in q.all():
+    for v in videos:
         if not v.transcript:
             continue
         text = v.transcript.corrected_text or v.transcript.transcript_text
         if not text:
             continue
-        eng = 0
-        snap = (
-            db.query(MetricsSnapshot)
-            .filter(MetricsSnapshot.video_id == v.id)
-            .order_by(MetricsSnapshot.snapshot_date.desc())
-            .first()
-        )
-        if snap:
-            eng = snap.plays + snap.likes * 5 + snap.favorites * 3 + snap.comments * 10
-        rows.append((eng, v.title or "", text))
+        rows.append((engagements.get(v.id, 0), v.title or "", text))
     rows.sort(key=lambda x: x[0], reverse=True)
     candidates: list[dict] = []
     seen = set()

@@ -24,10 +24,13 @@ from ..models.work import Work
 from .creator_service import current_creator_id
 from .text_tags import extract_hashtags, strip_hashtags
 from .video_query import visible_videos_query
-from .works_service import latest_stats_map
+from .works_service import _cache_get, _cache_put, cards_version, latest_stats_map
 
 # R-226：卡片标签与标题的固定顺序（抖音→小红书→B站，其余排最后）
 _PLATFORM_ORDER = {"douyin": 0, "xiaohongshu": 1, "bilibili": 2}
+
+# S5（R-240）：卡片快照缓存（数据版本键 + 20s TTL，版本键与锁见 works_service）
+_CARD_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
 
 
 def _platform_rank(platform: str) -> int:
@@ -241,7 +244,26 @@ def _cloud_cards(db: Session, creator_id: int) -> tuple[list[dict], set[int]]:
 
 
 def build_cards(db: Session, creator_id: int = 0) -> list[dict]:
-    """素材库全量卡片（已合并去重、按日期倒序）。"""
+    """素材库全量卡片（已合并去重、按日期倒序）。
+
+    S5（R-240）：按数据版本键 + 20s TTL 缓存卡片快照，命中直接返回浅拷贝，
+    翻页/筛选不再全量重建；版本查询失败时降级直算（fail-open 到原逻辑）。
+    """
+    try:
+        # 与 _cloud_cards/_local_cards 同口径：creator_id=0 时按当前主博主取版本
+        key = cards_version(db, creator_id or current_creator_id(db))
+    except Exception:  # noqa: BLE001 缓存版本查询失败 → fail-open 到原逻辑
+        return _build_cards(db, creator_id)
+    cached = _cache_get(_CARD_CACHE, key)
+    if cached is not None:
+        return cached
+    cards = _build_cards(db, creator_id)
+    _cache_put(_CARD_CACHE, key, cards)
+    return cards
+
+
+def _build_cards(db: Session, creator_id: int = 0) -> list[dict]:
+    """全量构建卡片（缓存未命中时执行）。"""
     cloud, linked = _cloud_cards(db, creator_id)
     videos = (
         visible_videos_query(db, creator_id)

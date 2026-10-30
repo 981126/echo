@@ -321,6 +321,25 @@ def _auto_pick(candidates: list[dict], count: int) -> list[dict]:
     return picked
 
 
+def _pick_llm(picker, messages: list[dict], timeout_seconds: int) -> dict:
+    """选文调用（R-240 M6）：把单次墙钟预算下沉到 LLM 客户端。
+
+    软超时（`future.result(timeout=…)`）只是「不再等待」，取消不了已在跑的线程；
+    把 `timeout_seconds` 传下去后，底层调用最多跑到这个预算（原来会一直跑到 600s 上限）。
+    注入的旧客户端/测试替身不接受该参数时退回普通调用（R-233 兼容）。
+    """
+    try:
+        return picker.chat_json(
+            messages,
+            temperature=0.3,
+            max_tokens=800,
+            require=("picks",),
+            timeout_seconds=timeout_seconds,
+        )
+    except TypeError:
+        return picker.chat_json(messages, temperature=0.3, max_tokens=800, require=("picks",))
+
+
 def select_references(
     picker,
     candidates: list[dict],
@@ -357,16 +376,18 @@ def select_references(
         "【候选文章】\n" + "\n".join(lines)
     )
     timeout = max(1.0, float(settings.online_pick_timeout_seconds or 45))
+    # R-240 M6：选文调用单次墙钟预算 ≤45s（与软超时同值，配置更小则跟配置）。
+    # 这样软超时放弃等待后，底层线程最多再跑这么久，不会像原来那样漏到 600s。
+    call_timeout = int(max(1.0, min(45.0, timeout)))
     executor = ThreadPoolExecutor(max_workers=1)
     future = executor.submit(
-        picker.chat_json,
+        _pick_llm,
+        picker,
         [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0.3,
-        max_tokens=800,
-        require=("picks",),
+        call_timeout,
     )
     try:
         data = future.result(timeout=timeout)

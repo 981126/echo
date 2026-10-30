@@ -100,7 +100,11 @@ def _rework_task(db: Session, payload: dict) -> dict:
 
 @router.post("/generate", response_model=DraftOut)
 def generate(payload: GenerateIn, db: Session = Depends(get_db)):
-    """根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。"""
+    """根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。
+
+    R-240 M7：**遗留同步接口**——请求线程同步跑完整生成链路（LLM 超时预算已由 M6 收紧），
+    前端请用 `/generate-async`；后续改为后台任务，本次不改返回结构。
+    """
     return generate_draft(db, payload.topic, mode=payload.mode)
 
 

@@ -64,7 +64,11 @@ def create_note(payload: NoteIn, db: Session = Depends(get_db)):
 
 @router.post("/{note_id}/develop", response_model=dict)
 def develop_note(note_id: int, db: Session = Depends(get_db)):
-    """把随手记提炼成选题并直接入队生成一篇草稿；标记该条已用。"""
+    """把随手记提炼成选题并直接入队生成一篇草稿；标记该条已用。
+
+    R-240 M7：**遗留同步接口**——请求路径同步等 1 次 `refine_topic` LLM（M6 已收紧到 ideas 30s 预算），
+    后续应改为后台任务；本次不改返回结构/前端契约。
+    """
     note = db.get(InspirationNote, note_id)
     if note is None:
         raise HTTPException(status_code=404, detail="随手记不存在")

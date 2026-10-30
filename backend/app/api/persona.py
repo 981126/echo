@@ -248,7 +248,7 @@ def style_overview(db: Session = Depends(get_db)):
     import json
 
     from ..core.style_profile import build_style_profile, default_avoid_words, format_style_profile
-    from ..services.generation import _all_texts, _weight
+    from ..services.generation import _all_texts, _weight_map
     from ..models.kv import Kv
 
     rows = _all_texts(db)
@@ -261,12 +261,15 @@ def style_overview(db: Session = Depends(get_db)):
             avoid = [str(x).strip() for x in json.loads(row.value or "[]") if str(x).strip()]
         except (TypeError, ValueError):
             avoid = []
-    weighted = sorted(rows, key=lambda vt: _weight(db, vt[0]), reverse=True)[:3]
+    # R-240 S3：一次批量算权重 + 只排一次序（原来两个 sorted 各逐条查一遍指标）
+    weights = _weight_map(db, [v for v, _ in rows])
+    ordered = sorted(rows, key=lambda vt: weights.get(vt[0].id, 0.0), reverse=True)
+    weighted = ordered[:3]
     # R-131：风格范本（必定注入生成上下文）+ 风格样本条数
     from ..services.generation import _style_anchor_ids
 
     anchor_ids = _style_anchor_ids(db)
-    candidates = sorted(rows, key=lambda vt: _weight(db, vt[0]), reverse=True)[:20]
+    candidates = ordered[:20]
     count_row = db.get(Kv, "style_sample_count")
     try:
         sample_count = int(count_row.value) if count_row is not None and count_row.value else 5

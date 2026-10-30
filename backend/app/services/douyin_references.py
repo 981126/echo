@@ -239,11 +239,12 @@ def _owner_keywords(db: Session, owner: Creator) -> set[str]:
     return result or {"求职", "面试", "赚钱", "知识"}
 
 
-def relevance_for(db: Session, owner: Creator, row: DouyinReferenceVideo) -> int:
+def relevance_for(db: Session, owner: Creator, row: DouyinReferenceVideo, keywords: set[str] | None = None) -> int:
+    """相关性打分（R-240 S6：批量场景可传入已算好的 `keywords`，避免逐行查库）。"""
     score = 40 if row.category_id and row.category_id != "0" else 0
-    keywords = _owner_keywords(db, owner)
+    words = _owner_keywords(db, owner) if keywords is None else keywords
     haystack = f"{row.title} {row.keyword}".lower()
-    matches = sum(1 for word in keywords if word.lower() in haystack)
+    matches = sum(1 for word in words if word.lower() in haystack)
     score += min(30, matches * 15)
     if row.keyword and row.keyword.lower() in haystack:
         score += 20
@@ -252,7 +253,12 @@ def relevance_for(db: Session, owner: Creator, row: DouyinReferenceVideo) -> int
     return min(100, score)
 
 
-def reference_out(db: Session, owner: Creator, row: DouyinReferenceVideo) -> dict:
+def reference_out(
+    db: Session,
+    owner: Creator,
+    row: DouyinReferenceVideo,
+    keywords: set[str] | None = None,
+) -> dict:
     return {
         "id": f"low_fan:{row.id}",
         "kind": "low_fan",
@@ -267,6 +273,6 @@ def reference_out(db: Session, owner: Creator, row: DouyinReferenceVideo) -> dic
         "video_url": row.video_url,
         "verdict": "低粉爆款",
         "verdict_evidence": {"source": row.source, "label": row.source_label},
-        "relevance": relevance_for(db, owner, row),
+        "relevance": relevance_for(db, owner, row, keywords=keywords),
         "analysis": _loads(row.analysis, {}) or None,
     }

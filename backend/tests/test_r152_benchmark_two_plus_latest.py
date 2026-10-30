@@ -127,7 +127,7 @@ def test_ensure_top_transcribes_latest(db, monkeypatch):
         texts[payload["post_id"]] = "补齐的转写文案"
 
     monkeypatch.setattr("app.services.benchmark._unit_text", _fake_text)
-    monkeypatch.setattr("app.services.benchmark._unit_is_ad", lambda db_, unit, text="": False)
+    monkeypatch.setattr("app.services.benchmark._units_are_ad", lambda _db, _units, _texts: {})
     monkeypatch.setattr("app.services.media_ensure.platform_media_task", _fake_media)
 
     picked = ensure_top_with_text(db, bm, limit_candidates=15)

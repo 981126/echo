@@ -396,22 +396,36 @@ def platform_media_task(db: Session, payload: dict, update=None) -> dict:
             downloaded = True
 
         # 有真实文件但缺转写 => 自动触发转写（复用完整流水线：ASR→校对→预打标签）
+        # R-240 S7：自动转写失败退避中 / 已达次数上限 → 直接跳过，不再占媒体 worker；
+        # 达到上限时一次性通知「可手动重试」（手动转写入口不受退避限制）。
         transcribed = False
+        transcribe_note = ""
         if video is not None and has_real_file(video) and not has_transcript(video):
-            _up(88, "语音转写中（可能需要几分钟）…")
-            from .ingest import import_video_task  # 延迟导入避免循环
+            from .ingest import asr_backoff_reason, import_video_task, notify_asr_give_up_once
 
-            import_video_task(db, {"video_id": video.id})
-            transcribed = True
-            _up(96, "转写完成，整理中…")
+            backoff = asr_backoff_reason(db, video.id)
+            if backoff:
+                transcribe_note = f"转写跳过：{backoff}"
+                _up(96, backoff)
+                notify_asr_give_up_once(db, video)
+            else:
+                _up(88, "语音转写中（可能需要几分钟）…")
+                import_video_task(db, {"video_id": video.id, "auto": True})
+                transcribed = True
+                _up(96, "转写完成，整理中…")
 
         msg = []
         if downloaded and hit_post is not None:
             msg.append(f"已下载视频（{hit_post.platform}）")
         if transcribed:
             msg.append("已自动转写")
+        elif transcribe_note:
+            msg.append(transcribe_note)
+        # R-240 S7：纯转写退避跳过 → status=skipped（队列计入 skipped，不再 errors 激增）；
+        # 若本次已下载视频，仍按 done 返回，保证 downloaded 计数如实汇总。
+        status = "skipped" if (transcribe_note and not downloaded) else "done"
         return {
-            "status": "done",
+            "status": status,
             "message": "；".join(msg) or "完成",
             "video_id": video.id if video else None,
             "downloaded": downloaded,
@@ -445,15 +459,39 @@ def _fail_remaining(db, remaining: list[tuple[int, int]], reason: str) -> int:
     return n
 
 
+def _queue_light_card(db: Session, post_id: int) -> bool:
+    """R-240 M8：判断该卡是否「轻卡」（无需下载/转写，或转写正处退避期）。
+
+    只用于队列执行顺序（轻卡先完成，先看到卡片收尾），不改变任何处理结果；
+    查询失败按重卡处理（保守）。
+    """
+    try:
+        info = inspect_media(db, post_id=post_id)
+    except Exception:  # noqa: BLE001
+        return False
+    if info.get("action") == "skip":
+        return True
+    if info.get("action") == "transcribe" and info.get("video_id"):
+        try:
+            from .ingest import asr_backoff_reason
+
+            return bool(asr_backoff_reason(db, int(info["video_id"])))
+        except Exception:  # noqa: BLE001
+            return False
+    return False
+
+
 def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: bool = True) -> dict:
-    """R-093/R-094/R-163：逐素材异步队列（**并行消费者**，独立 Session）。
+    """R-093/R-094/R-163/R-240：逐素材异步队列（**进程级共享媒体池**，独立 Session）。
 
     - 先按平台优先级（抖音→小红书→B站）排序，同一合并作品的多个平台帖只下载/转写一次；
+    - R-240 M8：轻卡（已有文件+转写 / 转写退避中）优先执行，重卡后置；消费者改用进程级共享
+      媒体执行器（`gather_media`，总并发=ECHO_SYNC_MEDIA_CONCURRENCY），多个博主队列共享同一个池；
     - 每条：采集评论/素材数据（各平台独立） →（daily 带媒体）缺视频下载/自动转写 → 完成/失败；
     - 任一条 `BudgetExceeded` 触发取消标记，未开始的条目标记失败；
     - 任何非正常结束（失败/超时/无有效语音）都会 push 通知。
     """
-    from .sync_pool import gather, new_cancel, pool_size, session_factory
+    from .sync_pool import gather_media, new_cancel, session_factory
 
     stats = {"downloaded": 0, "transcribed": 0, "skipped": 0, "errors": 0, "comments": 0, "pool": 0}
     prio = {"douyin": 0, "xiaohongshu": 1, "bilibili": 2}
@@ -476,7 +514,20 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
                 skip = True
             else:
                 seen_work.add(work_id)
-        prepared.append({"post_id": post_id, "task_id": task_id, "idx": idx, "skip": skip})
+        prepared.append(
+            {
+                "post_id": post_id,
+                "task_id": task_id,
+                "idx": idx,
+                "skip": skip,
+                # R-240 M8：轻卡（已有文件+转写 / 转写退避中）优先，重卡后置
+                "light": _queue_light_card(db, post_id),
+            }
+        )
+    # R-240 M8：轻卡优先执行（只调顺序、不改结果）；展示序号按新顺序重排
+    prepared.sort(key=lambda pitem: (0 if pitem["light"] else 1, pitem["idx"]))
+    for new_idx, pitem in enumerate(prepared, start=1):
+        pitem["idx"] = new_idx
 
     total = len(prepared)
     cancel = new_cancel()
@@ -594,5 +645,5 @@ def run_card_sync_queue(db: Session, items: list[tuple[int, int]], with_media: b
             for key in ("downloaded", "transcribed", "skipped", "errors", "comments", "pool"):
                 stats[key] += int(res.get(key) or 0)
 
-    gather(_one, prepared, workers=pool_size("media"), on_result=_merge)
+    gather_media(_one, prepared, on_result=_merge)
     return stats

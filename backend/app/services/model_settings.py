@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -61,6 +63,10 @@ SLOT_KEYS = {
     "model2": ("model2_vendor", "model2_model", "model2_key"),
 }
 ROLES = ("model1", "model2")
+# R-240 S4：一次 `key IN (...)` 读全部模型配置键（原来每次 AI 调用 20~21 条 point query）。
+_CONFIG_KEYS: tuple[str, ...] = tuple(
+    key for slot_keys in SLOT_KEYS.values() for key in slot_keys
+) + ("gen_role", "referee_role", "generation_model", "asr_mode", "asr_model")
 
 
 class ModelConfigError(ValueError):
@@ -73,6 +79,16 @@ class ModelConfigError(ValueError):
 def _kv_get(db: Session, key: str) -> str:
     row = db.get(Kv, key)
     return (row.value or "").strip() if row is not None else ""
+
+
+def _kv_get_many(db: Session, keys: Iterable[str]) -> dict[str, str]:
+    """一次 `key IN (...)` 批量读配置（R-240 S4）。
+
+    返回已 strip 的值；缺失键**不在**结果里（调用方用 `.get(key, "")`）。
+    只做批读、不做缓存，因此「保存设置立即生效」语义不变。
+    """
+    rows = db.query(Kv.key, Kv.value).filter(Kv.key.in_(list(keys))).all()
+    return {str(key): (value or "").strip() for key, value in rows}
 
 
 def _kv_set(db: Session, key: str, value: str) -> None:
@@ -119,31 +135,42 @@ def _coerce_asr_model(mode: str, model: str) -> str:
     return model or default_asr_model(mode)
 
 
-def get_model_config(db: Session) -> dict:
-    """读取当前配置（含旧 generation_model 的无感迁移）。"""
-    config: dict = {}
+def get_model_config(db: Session, config: dict | None = None) -> dict:
+    """读取当前配置（含旧 generation_model 的无感迁移）。
+
+    `config` 传入已解析结果时直接复用（R-240 S4：同一请求只解析一次），
+    所以同请求的 `resolve_*`/`asr_config` 不会再各查一遍 KV；不跨请求缓存。
+    """
+    if config is not None:
+        return config
+    kv = _kv_get_many(db, _CONFIG_KEYS)
+    config = {}
     migrated = False
     for slot, (kv_vendor, kv_model, kv_key) in SLOT_KEYS.items():
-        vendor = _kv_get(db, kv_vendor)
-        model = _kv_get(db, kv_model)
+        vendor = kv.get(kv_vendor, "")
+        model = kv.get(kv_model, "")
         if not vendor:
             dv, dm = _default_slot(slot)
             vendor, model, migrated = dv, dm, True
-        config[slot] = {"vendor": vendor, "model": model or VENDORS.get(vendor, {}).get("default_model", ""), "key": _kv_get(db, kv_key)}
+        config[slot] = {
+            "vendor": vendor,
+            "model": model or VENDORS.get(vendor, {}).get("default_model", ""),
+            "key": kv.get(kv_key, ""),
+        }
 
-    gen_role = _kv_get(db, "gen_role")
-    referee_role = _kv_get(db, "referee_role")
+    gen_role = kv.get("gen_role", "")
+    referee_role = kv.get("referee_role", "")
     if not gen_role:
         # 旧值映射：原先 generation_model=deepseek 表示生成方用 DeepSeek，=kimi 表示生成方用 Kimi
-        legacy = (_kv_get(db, "generation_model") or get_settings().generation_model or "kimi").lower()
+        legacy = (kv.get("generation_model", "") or get_settings().generation_model or "kimi").lower()
         gen_role = "model1" if legacy == "deepseek" else "model2"
         migrated = True
     if not referee_role:
         referee_role = "model2" if gen_role == "model1" else "model1"
         migrated = True
 
-    asr_mode = _kv_get(db, "asr_mode") or get_settings().asr_mode
-    asr_model = _coerce_asr_model(asr_mode, _kv_get(db, "asr_model"))
+    asr_mode = kv.get("asr_mode", "") or get_settings().asr_mode
+    asr_model = _coerce_asr_model(asr_mode, kv.get("asr_model", ""))
 
     config.update(
         {
@@ -217,9 +244,12 @@ def save_model_config(db: Session, payload: dict) -> dict:
 # ---------- 解析（供 llm_router / transcription 实时使用） ----------
 
 
-def resolve_slots(db: Session) -> dict[str, dict]:
-    """解析出两个槽位的完整信息（base_url / api_key / 参数约束）。Key 优先 DB，回退 .env。"""
-    config = get_model_config(db)
+def resolve_slots(db: Session, config: dict | None = None) -> dict[str, dict]:
+    """解析出两个槽位的完整信息（base_url / api_key / 参数约束）。Key 优先 DB，回退 .env。
+
+    `config` 可传 `get_model_config` 的已解析结果复用（R-240 S4：避免同请求重复批读）。
+    """
+    config = get_model_config(db, config)
     out: dict[str, dict] = {}
     for slot in ROLES:
         item = config[slot]
@@ -238,9 +268,9 @@ def resolve_slots(db: Session) -> dict[str, dict]:
     return out
 
 
-def generation_roles(db: Session) -> tuple[str, str]:
-    """(生成方槽位, 评审方槽位)。"""
-    config = get_model_config(db)
+def generation_roles(db: Session, config: dict | None = None) -> tuple[str, str]:
+    """(生成方槽位, 评审方槽位)；`config` 可复用已解析配置（R-240 S4）。"""
+    config = get_model_config(db, config)
     return config["gen_role"], config["referee_role"]
 
 
@@ -269,20 +299,24 @@ _FEATURE_GROUP: dict[str, str] = {f: g for g, meta in FEATURE_GROUPS.items() for
 FEATURE_ROUTE_DEFAULTS: dict[str, str] = {g: ("gen" if g == "prompt_opt" else "model1") for g in FEATURE_GROUPS}
 
 
-def feature_route(db: Session | None, feature: str) -> str:
+def feature_route(db: Session | None, feature: str, config: dict | None = None) -> str:
     """功能主用槽位（app_kv `feature_route_<组>`；缺省按 FEATURE_ROUTE_DEFAULTS）。
 
     prompt_opt 组特殊值 `gen` = 跟随生成方（R-229；生成方对调后优化自动跟着换）。
     返回值恒为 model1/model2——`gen` 在解析时展开，调用方拿到的永远是具体槽位。
+    `config` 可传已解析配置复用（R-240 S4：`gen` 展开不再重复批读模型配置）。
     """
     group = _FEATURE_GROUP.get(feature or "", "misc")
     raw = _kv_get(db, f"feature_route_{group}") if db is not None else ""
     if not raw:
         raw = FEATURE_ROUTE_DEFAULTS[group]
     if raw == "gen":
-        if db is not None and group == "prompt_opt":
-            gen_role, _critic = generation_roles(db)
-            return gen_role
+        if group == "prompt_opt":
+            if config is not None:
+                return config["gen_role"]
+            if db is not None:
+                gen_role, _critic = generation_roles(db)
+                return gen_role
         return "model1"
     return raw if raw in ROLES else "model1"
 
@@ -302,9 +336,12 @@ def save_feature_routes(db: Session, routes: dict[str, str]) -> None:
     db.commit()
 
 
-def asr_config(db: Session) -> dict:
-    """ASR 运行时配置（Kv 优先，回退 .env）→ 保证界面保存后立即生效。"""
-    config = get_model_config(db)
+def asr_config(db: Session, config: dict | None = None) -> dict:
+    """ASR 运行时配置（Kv 优先，回退 .env）→ 保证界面保存后立即生效。
+
+    `config` 可复用已解析配置（R-240 S4：`ingest` 等调用方不必再批读一遍）。
+    """
+    config = get_model_config(db, config)
     return {"mode": config["asr_mode"], "model": config["asr_model"]}
 
 

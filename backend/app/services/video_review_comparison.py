@@ -8,13 +8,14 @@ from difflib import SequenceMatcher
 from statistics import median
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, load_only
 
 from ..core.timeutil import now as _app_now
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video import Video
 from ..models.video_review import DouyinPostMetric, DouyinReferenceVideo
-from .douyin_references import reference_out
+from .douyin_references import _owner_keywords, reference_out
 
 
 @dataclass(frozen=True)
@@ -74,36 +75,59 @@ def _sim(a: str, b: str) -> float:
     return max(len(aa & bb) / max(1, len(aa | bb)), SequenceMatcher(None, a, b).ratio())
 
 
-def _latest_stat(db: Session, post_id: int) -> PlatformPostStat | None:
-    return db.query(PlatformPostStat).filter_by(post_id=post_id).order_by(PlatformPostStat.stat_date.desc()).first()
-
-
-def _latest_private(db: Session, post_id: int) -> DouyinPostMetric | None:
-    return db.query(DouyinPostMetric).filter_by(post_id=post_id).order_by(DouyinPostMetric.snapshot_date.desc()).first()
-
-
-def _stat_at(db: Session, post: PlatformPost, age: int) -> PlatformPostStat | None:
-    if not post.publish_time:
-        return None
-    cutoff = (post.publish_time + timedelta(days=age)).date().isoformat()
-    return (
+def _stats_by_post(db: Session, post_ids: list[int]) -> dict[int, list[PlatformPostStat]]:
+    """R-240 S6：一次 IN 取多条作品的统计历史（stat_date 升序），供内存内按 cutoff 取最后一条。"""
+    out: dict[int, list[PlatformPostStat]] = {}
+    if not post_ids:
+        return out
+    for row in (
         db.query(PlatformPostStat)
-        .filter(PlatformPostStat.post_id == post.id, PlatformPostStat.stat_date <= cutoff)
-        .order_by(PlatformPostStat.stat_date.desc())
-        .first()
-    )
+        .filter(PlatformPostStat.post_id.in_(post_ids))
+        .order_by(PlatformPostStat.stat_date)
+        .all()
+    ):
+        out.setdefault(row.post_id, []).append(row)
+    return out
 
 
-def _private_at(db: Session, post: PlatformPost, age: int) -> DouyinPostMetric | None:
+def _metrics_by_post(db: Session, post_ids: list[int]) -> dict[int, list[DouyinPostMetric]]:
+    """R-240 S6：一次 IN 取多条作品的抖音私有指标历史（snapshot_date 升序）。"""
+    out: dict[int, list[DouyinPostMetric]] = {}
+    if not post_ids:
+        return out
+    for row in (
+        db.query(DouyinPostMetric)
+        .filter(DouyinPostMetric.post_id.in_(post_ids))
+        .order_by(DouyinPostMetric.snapshot_date)
+        .all()
+    ):
+        out.setdefault(row.post_id, []).append(row)
+    return out
+
+
+def _latest_stat(rows: list[PlatformPostStat]) -> PlatformPostStat | None:
+    return rows[-1] if rows else None
+
+
+def _latest_private(rows: list[DouyinPostMetric]) -> DouyinPostMetric | None:
+    return rows[-1] if rows else None
+
+
+def _stat_at(post: PlatformPost, age: int, stats: dict[int, list[PlatformPostStat]]) -> PlatformPostStat | None:
+    """与逐条 `stat_date <= cutoff ORDER BY stat_date DESC LIMIT 1` 等价的内存筛选。"""
     if not post.publish_time:
         return None
     cutoff = (post.publish_time + timedelta(days=age)).date().isoformat()
-    return (
-        db.query(DouyinPostMetric)
-        .filter(DouyinPostMetric.post_id == post.id, DouyinPostMetric.snapshot_date <= cutoff)
-        .order_by(DouyinPostMetric.snapshot_date.desc())
-        .first()
-    )
+    rows = [row for row in stats.get(post.id, []) if row.stat_date <= cutoff]
+    return rows[-1] if rows else None
+
+
+def _private_at(post: PlatformPost, age: int, metrics: dict[int, list[DouyinPostMetric]]) -> DouyinPostMetric | None:
+    if not post.publish_time:
+        return None
+    cutoff = (post.publish_time + timedelta(days=age)).date().isoformat()
+    rows = [row for row in metrics.get(post.id, []) if row.snapshot_date <= cutoff]
+    return rows[-1] if rows else None
 
 
 def _values(stat: PlatformPostStat | None, private: DouyinPostMetric | None) -> dict[str, float | int | None]:
@@ -144,11 +168,20 @@ def _state(spec: MetricSpec, value: float, baseline: float, percentile: float, s
     return "high" if high else "low" if low else "normal"
 
 
-def _topic_score(db: Session, target: PlatformPost, candidate: PlatformPost) -> float:
+def _topic_score(
+    db: Session,
+    target: PlatformPost,
+    candidate: PlatformPost,
+    videos: dict[int, Video] | None = None,
+) -> float:
     score = _sim(target.title, candidate.title) * 0.4
     if target.local_video_id and candidate.local_video_id:
-        a = db.get(Video, target.local_video_id)
-        b = db.get(Video, candidate.local_video_id)
+        if videos is not None:
+            a = videos.get(target.local_video_id)
+            b = videos.get(candidate.local_video_id)
+        else:
+            a = db.get(Video, target.local_video_id)
+            b = db.get(Video, candidate.local_video_id)
         if a and b:
             at, bt = set(loads(a.main_topics, [])), set(loads(b.main_topics, []))
             ag, bg = set(loads(a.tags, [])), set(loads(b.tags, []))
@@ -162,8 +195,7 @@ def _topic_score(db: Session, target: PlatformPost, candidate: PlatformPost) -> 
 
 
 def build_comparison(db: Session, post: PlatformPost) -> dict:
-    current_stat = _latest_stat(db, post.id)
-    current_private = _latest_private(db, post.id)
+    """R-240 S6：指标对比一次批量预取（统计/私有指标各 1 条 IN，内存内按 cutoff 取最后一条）。"""
     age = max(0, (_app_now().date() - post.publish_time.date()).days) if post.publish_time else 0
     candidates = (
         db.query(PlatformPost)
@@ -172,16 +204,27 @@ def build_comparison(db: Session, post: PlatformPost) -> dict:
         .limit(30)
         .all()
     )
-    ranked = sorted(candidates, key=lambda p: (_topic_score(db, post, p), p.publish_time or datetime.min), reverse=True)
+    video_ids = {p.local_video_id for p in [post, *candidates] if p.local_video_id}
+    videos = {v.id: v for v in db.query(Video).filter(Video.id.in_(video_ids)).all()} if video_ids else {}
+    ranked = sorted(
+        candidates,
+        key=lambda p: (_topic_score(db, post, p, videos=videos), p.publish_time or datetime.min),
+        reverse=True,
+    )
     comparison = ranked[:10]
     ids = [p.id for p in comparison]
+    stat_post_ids = [post.id, *ids]
+    stat_map = _stats_by_post(db, stat_post_ids)
+    private_map = _metrics_by_post(db, stat_post_ids)
+    current_stat = _latest_stat(stat_map.get(post.id, []))
+    current_private = _latest_private(private_map.get(post.id, []))
     current = _values(current_stat, current_private)
     metrics: list[dict] = []
     facts: dict[str, dict] = {}
     for spec in SPECS:
         history: list[float] = []
         for candidate in comparison:
-            value = _values(_stat_at(db, candidate, age), _private_at(db, candidate, age))[spec.key]
+            value = _values(_stat_at(candidate, age, stat_map), _private_at(candidate, age, private_map))[spec.key]
             if value is not None:
                 history.append(float(value))
         value = current[spec.key]
@@ -289,7 +332,55 @@ def _post_stats(db: Session, post_ids: list[int]) -> dict[int, PlatformPostStat]
     return {row.post_id: row for row in rows}
 
 
+# R-240 S6：同行参考榜只需展示字段；不加载 raw（约 19KB/行，逐账号 × 30 条会白搬数 MB）
+_PEER_POST_FIELDS = load_only(
+    PlatformPost.id,
+    PlatformPost.account_id,
+    PlatformPost.title,
+    PlatformPost.cover_url,
+    PlatformPost.cover_path,
+    PlatformPost.publish_time,
+    PlatformPost.video_url,
+)
+
+
+def _peer_posts_by_account(
+    db: Session, account_ids: list[int], per_account: int = 30
+) -> dict[int, list[PlatformPost]]:
+    """R-240 S6：窗口函数一次取各同行账号最新 N 条非广告作品（替代逐账号 2 条查询）。"""
+    if not account_ids:
+        return {}
+    numbered = (
+        db.query(
+            PlatformPost.id.label("post_id"),
+            func.row_number()
+            .over(
+                partition_by=PlatformPost.account_id,
+                order_by=(PlatformPost.publish_time.desc(), PlatformPost.id.desc()),
+            )
+            .label("rn"),
+        )
+        .filter(PlatformPost.account_id.in_(account_ids), PlatformPost.is_ad.is_(False))
+        .subquery()
+    )
+    post_ids = [row.post_id for row in db.query(numbered.c.post_id).filter(numbered.c.rn <= per_account).all()]
+    if not post_ids:
+        return {}
+    rows = (
+        db.query(PlatformPost)
+        .options(_PEER_POST_FIELDS)
+        .filter(PlatformPost.id.in_(post_ids))
+        .order_by(PlatformPost.account_id, PlatformPost.publish_time.desc(), PlatformPost.id.desc())
+        .all()
+    )
+    grouped: dict[int, list[PlatformPost]] = {}
+    for post in rows:
+        grouped.setdefault(post.account_id, []).append(post)
+    return grouped
+
+
 def peer_references(db: Session, owner: Creator, limit: int = 20) -> tuple[list[dict], list[dict]]:
+    """R-240 S6：同行参考榜批量预取（账号/各账号最新 30 帖/统计各 1 条 SQL），口径不变。"""
     accounts = (
         db.query(CreatorAccount)
         .join(Creator, CreatorAccount.creator_id == Creator.id)
@@ -299,9 +390,12 @@ def peer_references(db: Session, owner: Creator, limit: int = 20) -> tuple[list[
     items: list[dict] = []
     charts: list[dict] = []
     cutoff = _app_now() - timedelta(days=30)
+    posts_by_account = _peer_posts_by_account(db, [account.id for account in accounts])
+    all_posts = [post for posts in posts_by_account.values() for post in posts]
+    all_stats = _post_stats(db, [post.id for post in all_posts])
     for account in accounts:
-        posts = db.query(PlatformPost).filter_by(account_id=account.id, is_ad=False).order_by(PlatformPost.publish_time.desc()).limit(30).all()
-        stats = _post_stats(db, [p.id for p in posts])
+        posts = posts_by_account.get(account.id, [])
+        stats = {post.id: all_stats[post.id] for post in posts if post.id in all_stats}
         plays = [float(stats[p.id].plays) for p in posts if p.id in stats and stats[p.id].plays > 0]
         if not plays:
             continue
@@ -336,4 +430,6 @@ def low_fan_references(db: Session, owner: Creator, keyword: str = "", limit: in
     query = db.query(DouyinReferenceVideo).order_by(DouyinReferenceVideo.last_seen_at.desc())
     if keyword:
         query = query.filter(DouyinReferenceVideo.title.contains(keyword))
-    return [reference_out(db, owner, row) for row in query.limit(200).all()][:limit]
+    rows = query.limit(200).all()
+    keywords = _owner_keywords(db, owner)  # R-240 S6：关键词一次算好，避免逐行重复查库
+    return [reference_out(db, owner, row, keywords=keywords) for row in rows][:limit]

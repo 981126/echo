@@ -11,7 +11,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import benchmark, chat, creators, douyin_review, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
+from .db import engine
 from .core.log import get_logger, setup_logging
+from .core.request_metrics import RequestTimingMiddleware, install_sql_counter
 from .migrations import run_migrations
 from .scheduler import setup_scheduler
 from .tasks import mark_interrupted_tasks_on_startup
@@ -53,7 +55,11 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Response-Time"],
 )
+
+app.add_middleware(RequestTimingMiddleware)
+install_sql_counter(engine)
 
 
 def require_token(x_access_token: str = Header(default="")) -> None:

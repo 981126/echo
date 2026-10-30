@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from sqlalchemy import text
 
@@ -163,6 +164,25 @@ def _weekly_ideas_job() -> None:
         db.close()
 
 
+def _warm_opportunity_caches() -> None:
+    """R-240 M4：低频预热首页机会缓存（ledger TTL 120s / attribution TTL 300s）。
+
+    过期前重算好，避免 TTL 过期后的首个请求同步等全量重算（冷启动实测 593/225ms）。
+    best-effort：失败只记日志，不写站内通知/邮件告警（请求路径仍可现算）。
+    """
+    db = SessionLocal()
+    try:
+        from .services import opportunity
+
+        opportunity.ledger(db)
+        opportunity.topic_attribution(db)
+    except Exception:  # noqa: BLE001 预热失败不影响请求
+        db.rollback()
+        log.warning("机会缓存预热失败（best-effort，忽略）", exc_info=True)
+    finally:
+        db.close()
+
+
 def setup_scheduler() -> None:
     setup_logging()
     global _scheduler
@@ -226,5 +246,15 @@ def setup_scheduler() -> None:
         id="publish_backfill",
         misfire_grace_time=3600,
         coalesce=True,
+    )
+    # R-240 M4：按 TTL/2（60s）预热首页机会缓存（ledger 120s / attribution 300s，未过期时命中即返回）；
+    # best-effort，失败只记日志，避免过期后首个请求同步重算。
+    _scheduler.add_job(
+        _warm_opportunity_caches,
+        IntervalTrigger(seconds=60),
+        id="warm_opportunity_caches",
+        misfire_grace_time=30,
+        coalesce=True,
+        max_instances=1,
     )
     _scheduler.start()

@@ -124,9 +124,15 @@ class Settings(BaseSettings):
     sync_account_concurrency: int = 3  # 单个博主内账号并发数，ECHO_SYNC_ACCOUNT_CONCURRENCY（R-222）
     sync_post_concurrency: int = 5  # 单账号内作品/评论/B站补全并发数，ECHO_SYNC_POST_CONCURRENCY（R-222）
     sync_download_concurrency: int = 4  # 视频下载并发数（ffmpeg 保持独立限制），ECHO_SYNC_DOWNLOAD_CONCURRENCY（R-222）
-    sync_media_concurrency: int = 2  # 素材级并发消费者数（下载/转写较重，独立小池），ECHO_SYNC_MEDIA_CONCURRENCY
+    sync_media_concurrency: int = 6  # R-240：进程级全局媒体并发数（下载/转写较重，独立池），ECHO_SYNC_MEDIA_CONCURRENCY
     sync_commit_batch_size: int = 20  # 批量写库提交阈值，ECHO_SYNC_COMMIT_BATCH_SIZE（R-222）
     sync_progress_debounce_seconds: float = 2.0  # 同步进度更新防抖秒数，ECHO_SYNC_PROGRESS_DEBOUNCE_SECONDS（R-222）
+
+    # R-240 性能优化可调项（批次 1+2）
+    prompt_eval_concurrency: int = 3  # 金样本评测并发 LLM 数（1~5），ECHO_PROMPT_EVAL_CONCURRENCY
+    pipeline_generate_concurrency: int = 2  # 每日流水线并发生成草稿数（1~3），ECHO_PIPELINE_GENERATE_CONCURRENCY
+    prompt_selfcheck_concurrency: int = 2  # 提示词启用后自测并发生成数（1~3），ECHO_PROMPT_SELFCHECK_CONCURRENCY
+    asr_max_attempts: int = 3  # 自动转写最大尝试次数，超过跳过并通知；ECHO_ASR_MAX_ATTEMPTS
 
     # 联网搜索（R-227）：火山引擎豆包搜索（融合信息搜索），为生成/洗稿补充真实事实/数据。
     # 未配 key 时联网能力静默关闭（不影响生成）；结果缓存 + 单次请求超时。

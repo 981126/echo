@@ -9,13 +9,12 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models.platform import Creator
 from ..services.benchmark import (
-    benchmarks_of_owner,
-    resolve_rewrite_source,
-    target_units,
-    unit_payload,
     analyze_worker,
+    benchmarks_of_owner,
+    benchmarks_top,
     prepare_worker,
     rerun_worker,
+    resolve_rewrite_source,
     rewrite_worker,
 )
 from ..services.creator_service import get_current_creator
@@ -36,14 +35,9 @@ def benchmark_top(db: Session = Depends(get_db)):
     """每个对标博主：最新15条里按互动分取前3 + 第四篇=该对标最新一篇（R-174，原 R-152 前2+最新）。
 
     尚未转写的可先展示占位，需先 prepare；展示时仍「有文案优先」（R-106）。
+    R-240 S1：候选/文案/统计/分析各一次批量预取，SQL 数不随对标数增长（数据与排序口径不变）。
     """
-    owner = _owner(db)
-    out = []
-    for bm in benchmarks_of_owner(db, owner):
-        picked = target_units(db, bm, limit_candidates=15, with_text_first=True)
-        items = [unit_payload(db, u, owner_id=owner.id) for u in picked]
-        out.append({"benchmark_id": bm.id, "name": bm.name, "note": bm.note or "", "items": items})
-    return {"owner_id": owner.id, "owner_name": owner.name, "benchmarks": out}
+    return benchmarks_top(db, _owner(db))
 
 
 class PrepareIn(BaseModel):

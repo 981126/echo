@@ -13,12 +13,18 @@ R-129 口径：评分只做展示。R-208 起：后台自动优化链路里，�
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
+from ..core.log import get_logger
 from ..models.prompt import AiPrompt, PromptEval
 from .creator_service import current_creator_id
 from .llm import _parse_json
+
+log = get_logger("prompt_eval")
 
 GOLDEN_TOPICS = 5
 GOLDEN_VIDEOS = 8
@@ -260,6 +266,7 @@ def _score_outputs(key: str, outputs: list[str], markers: list[str], redlines: l
 
 
 def _run_version(db: Session, llm, content: str, probes: list[dict], key: str, markers: list[str], redlines: list[str]) -> dict:
+    """串行跑一个版本的 probe（并发度 ≤1 / 并发池不可用时的降级路径）。"""
     outputs: list[str] = []
     empty = 0
     errors = 0
@@ -280,6 +287,97 @@ def _run_version(db: Session, llm, content: str, probes: list[dict], key: str, m
     result["empty"] = empty
     result["errors"] = errors
     return result
+
+
+# ---------- R-240 S2：候选版/当前版的独立 LLM 调用并发 ----------
+
+
+def _eval_feature(key: str) -> str:
+    """评测所用 LLM 的功能名（与生产路由一致）：generation 走「提示词优化与评测」组。"""
+    return "prompt_optimize" if key == "generation" else "prompt_eval"
+
+
+def _llm_factory(db: Session, key: str) -> Callable[[], Any]:
+    """主线程取一次路由快照，返回「每个并发任务新建独立 RoutedLLM」的工厂。
+
+    `RoutedLLM` 持有 `used_slot/degraded` 等实例状态，禁止跨线程共享；
+    主用槽位口径与串行路径的 `_eval_llm` 一致（含 R-232 功能路由 / R-229 生成方跟随）。
+    """
+    from . import llm_router, model_settings
+
+    feature = _eval_feature(key)
+    route = llm_router.snapshot(db)
+    primary = model_settings.feature_route(db, feature)
+    if primary == "model1":
+        return lambda: llm_router.llm_from_snapshot(route, feature)
+    # llm_from_snapshot 固定 model1 主用；功能路由指定 model2 时按同语义显式构造
+    return lambda: llm_router.RoutedLLM(feature, route, primary=primary, fallback="model1")
+
+
+def _collect_parallel(
+    db: Session,
+    key: str,
+    contents: dict[str, str],
+    probes: list[dict],
+    workers: int,
+) -> tuple[dict[str, list[str]], dict[str, int]]:
+    """把两版 × 各 probe 的独立 LLM 调用合并成一个任务池，按 (tag, idx) 回填。"""
+    factory = _llm_factory(db, key)
+    jobs = [(tag, i, probe) for tag in contents for i, probe in enumerate(probes)]
+    buckets: dict[str, list[str]] = {tag: [""] * len(probes) for tag in contents}
+    errors: dict[str, int] = {tag: 0 for tag in contents}
+
+    def _run(job: tuple[str, int, dict]) -> tuple[str, int, str, int]:
+        tag, idx, probe = job
+        try:
+            out = factory().chat(
+                [
+                    {"role": "system", "content": contents[tag]},
+                    {"role": "user", "content": probe["user"]},
+                ],
+                temperature=0.4,
+                max_tokens=MAX_OUTPUT_TOKENS,
+            )
+            return tag, idx, out or "", 0
+        except Exception:  # noqa: BLE001 单个样本失败按不合格计，但单独统计
+            return tag, idx, "", 1
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="echo-prompt-eval") as ex:
+        for tag, idx, out, err in ex.map(_run, jobs):
+            buckets[tag][idx] = out
+            errors[tag] += err
+    return buckets, errors
+
+
+def _run_versions(
+    db: Session,
+    key: str,
+    contents: dict[str, str],
+    probes: list[dict],
+    markers: list[str],
+    redlines: list[str],
+) -> dict[str, dict]:
+    """R-240 S2：候选版/当前版 × probe 并发跑分；并发度 ≤1 或建池失败回退串行。
+
+    `contents` 的 key 即版本 tag（"cand"/"base"）；返回 {tag: `_score_outputs` 结果}，
+    评分口径、输出顺序与 errors/empty 统计与串行完全一致。
+    """
+    workers = min(int(get_settings().prompt_eval_concurrency or 1), len(contents) * len(probes))
+    if workers > 1:
+        try:
+            buckets, errors = _collect_parallel(db, key, contents, probes, workers)
+        except Exception:  # noqa: BLE001 并发池创建/调度异常 → 回退串行（评分口径不变）
+            log.exception("金样本评测并发出错，回退串行（key=%s）", key)
+        else:
+            out: dict[str, dict] = {}
+            for tag, outputs in buckets.items():
+                result = _score_outputs(key, outputs, markers, redlines)
+                result["empty"] = sum(1 for o in outputs if not (o or "").strip())
+                result["errors"] = errors[tag]
+                out[tag] = result
+            return out
+    llm, _mode = _eval_llm(db, key)
+    return {tag: _run_version(db, llm, contents[tag], probes, key, markers, redlines) for tag in contents}
 
 
 # ---------- 评测入口 ----------
@@ -343,13 +441,12 @@ def evaluate(db: Session, key: str, candidate_version: int, update=None) -> Prom
     redlines = golden.get("redlines") or []
     if update:
         update(20, f"金样本回放评分（{len(probes)} 个样本 × 2 版）…")
-    llm, _mode = _eval_llm(db, key)
-    cand_result = _run_version(db, llm, candidate.content, probes, key, markers, redlines)
-    if update:
-        update(60, "候选版评分完成，正在跑当前版…")
-    base_result = (
-        _run_version(db, llm, base.content, probes, key, markers, redlines) if base is not None else {}
-    )
+    contents = {"cand": candidate.content}
+    if base is not None:
+        contents["base"] = base.content
+    results = _run_versions(db, key, contents, probes, markers, redlines)
+    cand_result = results["cand"]
+    base_result = results.get("base", {})
     detail = {
         "probes": [p["label"] for p in probes],
         "candidate": cand_result,

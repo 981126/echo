@@ -18,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..core.log import get_logger
 from ..core.pipeline import today_key
 from ..models.hot_topic import TopicIdea
 from ..models.task import BackgroundTask
@@ -40,6 +41,8 @@ from .douyin_creator_sync import CredentialError
 from .platform.base import CommentData, DataSource, PostData, make_source
 
 _PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
+
+log = get_logger("platform_sync")
 
 # R-222：同步进度更新防抖——跨账号/线程共享同一 job_id 时减少数据库写压力
 _JOB_PROGRESS_LOCK = threading.Lock()
@@ -1180,39 +1183,107 @@ def run_sync(
         raise
 
 
+def _fetch_post_stats_isolated(s: Session, primitive: dict) -> dict:
+    """R-240 M3：独立会话内抓取单帖指标并写当天统计（失败抛错，由主线程决定语义）。"""
+    post = s.get(PlatformPost, int(primitive["post_id"]))
+    if post is None:
+        raise ValueError("云端作品不存在")
+    account = s.get(CreatorAccount, int(primitive["account_id"])) if primitive.get("account_id") else None
+    client = make_source(str(primitive["platform"]))
+    if primitive.get("use_creator") and account is not None:
+        from .douyin_creator_sync import creator_stats_for_post
+        from .platform.tikhub import make_client
+
+        creator_client = make_client()
+        if creator_client.mode == "real":
+            return creator_stats_for_post(s, account, post, client=creator_client)
+    stats = client.fetch_post_stats(
+        str(primitive["platform"]), str(primitive["platform_post_id"]), account
+    )
+    _charge(s)
+    _write_stat(s, post, stats, source=str(stats.get("source") or "tikhub"))
+    return stats
+
+
+def _fetch_post_comments_isolated(s: Session, primitive: dict) -> dict:
+    """R-240 M3：独立会话内抓取单帖评论 Top50（失败由调用方按现语义忽略）。"""
+    post = s.get(PlatformPost, int(primitive["post_id"]))
+    if post is None:
+        raise ValueError("云端作品不存在")
+    account = s.get(CreatorAccount, int(primitive["account_id"])) if primitive.get("account_id") else None
+    return sync_post_comments(
+        s,
+        post,
+        limit=50,
+        client=make_source(str(primitive["platform"])),
+        account=account,
+        charge=True,
+    )
+
+
 def _sync_one_post(db: Session, post: PlatformPost) -> dict:
-    """同步单条平台帖：最新指标 + 评论（点赞 Top50）入库。失败抛错。"""
+    """同步单条平台帖：最新指标 + 评论（点赞 Top50）入库。失败抛错。
+
+    R-240 M3：指标与评论是两个**互不依赖**的请求 → 各自独立 Session 并发执行；
+    指标失败向上抛（现语义）；评论失败不影响主同步（现语义）。
+    """
     account = db.get(CreatorAccount, post.account_id)
     if account is None:
         raise ValueError("平台账号不存在")
     policy = resolve_data_policy(db, account)
     if policy.is_blocked:
         raise ValueError(policy.reason)
-    client = make_source(post.platform)
-    stats: dict = {}
-    if policy.is_creator and post.platform == "douyin":
-        from .douyin_creator_sync import creator_stats_for_post
-        from .platform.tikhub import make_client
+    # 主线程把 ORM 属性抽成 primitive，避免跨线程访问主 Session 的 ORM 对象
+    primitive = {
+        "post_id": int(post.id),
+        "account_id": int(post.account_id) if post.account_id else 0,
+        "platform": str(post.platform),
+        "platform_post_id": str(post.platform_post_id),
+        "use_creator": bool(policy.is_creator and post.platform == "douyin"),
+    }
+    from .sync_pool import gather, session_factory
 
-        creator_client = make_client()
-        if creator_client.mode == "real":
-            stats = creator_stats_for_post(db, account, post, client=creator_client)
-    if not stats:
-        stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
-        _charge(db)
-        _write_stat(db, post, stats, source=str(stats.get("source") or "tikhub"))
-    cres = {"added": 0, "updated": 0, "pool_added": 0}
-    try:
-        cres = sync_post_comments(db, post, limit=50, client=client, account=account, charge=True)
-    except Exception:  # noqa: BLE001 评论失败不影响主同步
-        db.rollback()
+    new_session = session_factory(db)
+
+    def _run(item: tuple[int, str]) -> tuple[int, dict]:
+        key, kind = item
+        s = new_session()
+        try:
+            if kind == "stats":
+                return key, _fetch_post_stats_isolated(s, primitive)
+            return key, _fetch_post_comments_isolated(s, primitive)
+        finally:
+            s.close()
+
+    stats: dict = {}
+    comments: dict = {"added": 0, "updated": 0, "pool_added": 0}
+    stats_error: Exception | None = None
+    # 复用 sync_pool.gather（并发+异常收集；每个任务自建 Session）
+    # gather 返回 [((key, kind), result)]，_run 的 result 自身是 (key, payload) 元组，需先拆 item 再拆 result。
+    for item, res in gather(_run, [(0, "stats"), (1, "comments")], workers=2):
+        key = int(item[0])
+        if isinstance(res, Exception):
+            if key == 0:  # 指标失败向上抛（与串行版一致）；评论失败不影响主同步
+                stats_error = res
+            continue
+        if not (isinstance(res, tuple) and len(res) == 2):
+            if key == 0:
+                stats_error = ValueError(f"指标同步返回异常：{res!r}")
+            continue
+        _key, payload = res
+        if int(_key) == 0:
+            stats = payload
+        else:
+            comments = payload
+    if stats_error is not None:
+        raise stats_error
     return {
         "platform": post.platform,
         "post_id": post.id,
         "stats": stats,
-        "comments_added": cres["added"],
-        "comments_updated": cres["updated"],
-        "pool_added": int(cres.get("pool_added") or 0),  # R-140：本次进灵感池条数
+        "comments_added": int(comments.get("added") or 0),
+        "comments_updated": int(comments.get("updated") or 0),
+        "pool_added": int(comments.get("pool_added") or 0),  # R-140：本次进灵感池条数
     }
 
 
@@ -1247,12 +1318,14 @@ def sync_single_post(db: Session, post_id: int) -> dict:
 
 
 def sync_work_posts(db: Session, work_id: int) -> dict:
-    """云端合并作品卡「同步数据」（R-067）：遍历 work 下全部平台帖同步指标+评论。
+    """云端合并作品卡「同步数据」（R-067）：work 下全部平台帖同步指标+评论。
 
     修复：之前卡片只同步 cloudPosts[0]（第一个平台）；现合并作品全部平台帖逐个同步，
     单平台失败不中断其它平台。
+    R-240 M3：多平台帖改为并发（每任务独立 Session），结果按原顺序回填 → 响应/汇总不变。
     """
     from ..models.work import Work
+    from .sync_pool import gather, session_factory
 
     work = db.get(Work, work_id)
     if work is None:
@@ -1261,13 +1334,34 @@ def sync_work_posts(db: Session, work_id: int) -> dict:
     if not posts:
         raise ValueError("该合并作品下没有平台帖子")
     job = _log_job(db, "single", "work", creator_id=work.creator_id)
-    results: list[dict] = []
-    for post in posts:
+    post_items = [(index, int(post.id), str(post.platform)) for index, post in enumerate(posts)]
+    new_session = session_factory(db)
+
+    def _sync_isolated(item: tuple[int, int, str]) -> tuple[int, dict]:
+        index, post_id, _platform = item
+        s = new_session()
         try:
-            results.append(_sync_one_post(db, post))
-        except Exception as exc:  # noqa: BLE001 单平台失败不影响其它平台
-            db.rollback()
-            results.append({"platform": post.platform, "post_id": post.id, "error": str(exc)[:300]})
+            post = s.get(PlatformPost, post_id)
+            if post is None:
+                raise ValueError("云端作品不存在")
+            return index, _sync_one_post(s, post)
+        finally:
+            s.close()
+
+    fetched = gather(_sync_isolated, post_items, workers=min(3, len(post_items)))
+    results_by_index: dict[int, dict] = {}
+    for item, res in fetched:
+        index, post_id, platform = item
+        if isinstance(res, Exception):
+            # 单平台失败不影响其它平台（现语义）
+            results_by_index[int(index)] = {
+                "platform": platform,
+                "post_id": post_id,
+                "error": str(res)[:300],
+            }
+        else:
+            results_by_index[int(index)] = res[1]
+    results = [results_by_index[index] for index, _pid, _pl in post_items if index in results_by_index]
     totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0, "shares": 0}
     for r in results:
         st = r.get("stats") or {}
@@ -1343,13 +1437,90 @@ def _latest_stats_map(db: Session, post_ids: list[int]) -> dict[int, PlatformPos
     }
 
 
+def _sync_local_post_isolated(s: Session, job: dict) -> dict:
+    """R-240 M3：本地素材某平台绑定帖的独立会话同步（指标 + 评论）。
+
+    返回 {"ok", "used_source", "blocked", "nickname", "error", "added", "updated"}；
+    预算异常向上抛（由主线程统一处理），其它异常写入 error 字段、不中断其它平台。
+    """
+    post = s.get(PlatformPost, int(job["post_id"]))
+    if post is None:
+        return {
+            "ok": False,
+            "used_source": "public",
+            "blocked": False,
+            "nickname": "",
+            "error": "平台作品不存在",
+            "added": 0,
+            "updated": 0,
+        }
+    account = s.get(CreatorAccount, int(job["account_id"])) if job.get("account_id") else None
+    used_source = "public"
+    try:
+        if job.get("use_creator") and account is not None:
+            from .douyin_creator_sync import creator_stats_for_post
+            from .platform.tikhub import make_client
+
+            creator_client = make_client()
+            if creator_client.mode == "real":
+                creator_stats_for_post(s, account, post, client=creator_client)
+                used_source = "creator"
+        if used_source == "public":
+            client = make_source(post.platform)
+            stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
+            _charge(s)
+            _write_stat(s, post, stats, source=str(stats.get("source") or "tikhub"))
+    except BudgetExceeded:
+        raise
+    except Exception as exc:  # noqa: BLE001 单帖失败不中断，但不回退公开
+        return {
+            "ok": False,
+            "used_source": used_source,
+            "blocked": False,
+            "nickname": account.nickname if account is not None else "",
+            "error": str(exc)[:160],
+            "added": 0,
+            "updated": 0,
+        }
+    blocked = False
+    if account is not None:
+        try:
+            blocked = resolve_data_policy(s, account).is_blocked
+        except Exception:  # noqa: BLE001
+            blocked = False
+    added = 0
+    updated = 0
+    if not blocked:
+        try:
+            client = make_source(post.platform)
+            cres = sync_post_comments(s, post, limit=50, client=client, account=account, charge=True)
+            added = int(cres["added"])
+            updated = int(cres["updated"])
+        except BudgetExceeded:
+            raise
+        except Exception:  # noqa: BLE001 评论失败不影响该平台指标
+            s.rollback()
+    return {
+        "ok": True,
+        "used_source": used_source,
+        "blocked": blocked,
+        "nickname": account.nickname if account is not None else str(post.platform),
+        "added": added,
+        "updated": updated,
+    }
+
+
 def sync_local_video_metrics(db: Session, video) -> dict:
     """本地素材的"同步数据"（R-067 + R-239）：按账号策略取数 + 评论 Top50 + 当天指标快照聚合。
 
     - 抖音账号启用创作者数据：指标走创作者中心（1 次 overview），评论/媒体仍公开；
     - 无 Cookie/开关关闭：公开接口（现状不变）；
     - 账号 Cookie 失效：不发起任何请求、不回退公开，提示去博主管理更新。
+    - R-240 M3：各平台绑定帖并发（每任务独立 Session、只做网络+写库），Cookie 策略预判
+      与结果汇总仍在主线程；响应结构 / message 语义不变。
     """
+    from .sync_pool import gather, session_factory
+
     posts = _bound_platform_posts(db, video)
     if not posts:
         raise ValueError("该素材未绑定平台作品（请先在编辑页填写平台链接并保存）")
@@ -1360,6 +1531,8 @@ def sync_local_video_metrics(db: Session, video) -> dict:
     blocked_accounts: list[str] = []
     added = 0
     updated = 0
+    # 主线程做只读策略预判（Cookie 失效账号不发起任何请求）；并发任务只做网络 + 写库
+    jobs: list[dict] = []
     for post in posts:
         account = db.get(CreatorAccount, post.account_id)
         policy = resolve_data_policy(db, account) if account is not None else None
@@ -1368,46 +1541,62 @@ def sync_local_video_metrics(db: Session, video) -> dict:
             blocked_accounts.append(nickname)
             warnings.append(f"{post.platform}: 账号「{nickname}」创作者 Cookie 已失效，已停止数据收集")
             continue
-        used_source = "public"
-        try:
-            if policy is not None and policy.is_creator and account is not None and post.platform == "douyin":
-                from .douyin_creator_sync import creator_stats_for_post
-                from .platform.tikhub import make_client
+        jobs.append(
+            {
+                "post_id": int(post.id),
+                "account_id": int(post.account_id) if post.account_id else 0,
+                "platform": str(post.platform),
+                "use_creator": bool(
+                    policy is not None
+                    and policy.is_creator
+                    and account is not None
+                    and post.platform == "douyin"
+                ),
+            }
+        )
+    new_session = session_factory(db)
 
-                creator_client = make_client()
-                if creator_client.mode == "real":
-                    creator_stats_for_post(db, account, post, client=creator_client)
-                    used_source = "creator"
-            if used_source == "public":
-                client = make_source(post.platform)
-                stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
-                _charge(db)
-                _write_stat(db, post, stats, source=str(stats.get("source") or "tikhub"))
-        except BudgetExceeded:
-            raise
-        except Exception as exc:  # noqa: BLE001 单帖失败不中断，但不回退公开
-            message = str(exc)[:160]
-            errors.append(f"{post.platform}: {message}")
-            if "Cookie" in message or "创作者" in message or "失效" in message:
-                warnings.append(f"{post.platform}: {message}")
-            continue
-        sources.add(used_source)
-        synced.append(post.platform)
-        if account is not None:
-            after = resolve_data_policy(db, account)
-            if after.is_blocked:
-                blocked_accounts.append(account.nickname)
-                warnings.append(f"{post.platform}: 账号「{account.nickname}」创作者 Cookie 已失效，已停止数据收集")
-                continue
+    def _run(job: dict) -> dict:
+        s = new_session()
         try:
-            client = make_source(post.platform)
-            cres = sync_post_comments(db, post, limit=50, client=client, account=account, charge=True)
-            added += int(cres["added"])
-            updated += int(cres["updated"])
-        except BudgetExceeded:
-            raise
-        except Exception:  # noqa: BLE001 评论失败不影响该平台指标
-            db.rollback()
+            return _sync_local_post_isolated(s, job)
+        finally:
+            s.close()
+
+    fetched = gather(_run, jobs, workers=min(3, len(jobs))) if jobs else []
+    results_by_post: dict[int, dict | Exception] = {}
+    for job, res in fetched:
+        results_by_post[int(job["post_id"])] = res
+    # 主线程按原 posts 顺序聚合（platforms/errors/warnings 顺序与串行版一致）
+    for job in jobs:
+        platform = str(job["platform"])
+        res = results_by_post.get(int(job["post_id"]))
+        if res is None:
+            continue
+        if isinstance(res, BudgetExceeded):
+            raise res
+        if isinstance(res, Exception):
+            message = str(res)[:160]
+            errors.append(f"{platform}: {message}")
+            if "Cookie" in message or "创作者" in message or "失效" in message:
+                warnings.append(f"{platform}: {message}")
+            continue
+        if not res.get("ok"):
+            message = str(res.get("error") or "")[:160]
+            errors.append(f"{platform}: {message}")
+            if "Cookie" in message or "创作者" in message or "失效" in message:
+                warnings.append(f"{platform}: {message}")
+            continue
+        used_source = str(res.get("used_source") or "public")
+        sources.add(used_source)
+        synced.append(platform)
+        if res.get("blocked"):
+            nickname = str(res.get("nickname") or platform)
+            blocked_accounts.append(nickname)
+            warnings.append(f"{platform}: 账号「{nickname}」创作者 Cookie 已失效，已停止数据收集")
+            continue
+        added += int(res.get("added") or 0)
+        updated += int(res.get("updated") or 0)
     if not synced:
         reason = "；".join(dict.fromkeys(warnings + errors)) or "没有可同步的平台数据"
         if blocked_accounts:
@@ -1690,7 +1879,8 @@ def run_daily_sync_all(db: Session) -> dict:
     主博主与对标博主同规格：每账号最新 15 条 + 下载视频 + 自动转写
     （已下载/已转写自动跳过，不重复花 ASR 钱）；同步完成后自动触发一次
     「重新对标」（refetch=False：不重复拉取 TikHub，只基于刚同步的数据重算
-    前3+最新/补齐极个别缺转写）。
+    前3+最新/补齐极个别缺转写）。R-240 M9：同行播放量补采不再阻塞本任务，
+    改为独立后台任务（低并发 3 + 全局令牌桶，失败不影响日更结论）。
     """
     from .benchmark import benchmarks_of_owner, maybe_start_benchmark_rerun
     from .sync_pool import gather, pool_size, session_factory
@@ -1714,10 +1904,15 @@ def run_daily_sync_all(db: Session) -> dict:
     # R-163：主博主 + 全部对标博主并发同步（每个博主独立 Session），全局 TikHub 令牌桶控速
     results = [r for _, r in gather(_sync_one, creator_ids, workers=pool_size("creator")) if isinstance(r, dict)]
     creator_sync: dict = {"synced": 0, "errors": [], "skipped": 0, "backfill_started": 0}
-    peer_plays: dict = {}
+    peer_plays: dict = {"queued": False, "dedup": False}
     try:
         from .douyin_account_policy import resolve_data_policy
-        from .douyin_creator_sync import backfill_creator_worker, backfill_done, backfill_peer_plays, sync_account_creator_data
+        from .douyin_creator_sync import (
+            backfill_creator_worker,
+            backfill_done,
+            peer_plays_worker,
+            sync_account_creator_data,
+        )
         from ..tasks import find_running_task, start_task
 
         own_douyin = db.query(CreatorAccount).filter_by(creator_id=owner.id, platform="douyin", enabled=True).all()
@@ -1742,8 +1937,26 @@ def run_daily_sync_all(db: Session) -> dict:
                         backfill_creator_worker,
                     )
                     creator_sync["backfill_started"] += 1
-        # R-237：列表接口不返回其他账号播放量，同行爆款需要在每日同步后补采（6 小时内复用）
-        peer_plays = backfill_peer_plays(db, owner, days=30, max_requests=120)
+        # R-237/R-240 M9：列表接口不返回其他账号播放量，同行播放量补采改独立后台任务
+        # （低并发 3 + 全局令牌桶，保留 0.25s 降速保护）；失败不影响日更结论。
+        # mock 模式无真实可补采数据（TikHub 客户端直接返回空），不投递无意义任务。
+        if str(getattr(get_settings(), "tikhub_mode", "") or "").strip().lower() != "real":
+            peer_plays = {"queued": False, "dedup": False, "skipped": "mock"}
+        else:
+            try:
+                running_peer = find_running_task("peer_plays_backfill")
+                if running_peer:
+                    peer_plays = {"queued": False, "dedup": True, "task_id": running_peer}
+                else:
+                    peer_task_id = start_task(
+                        "peer_plays_backfill",
+                        {"owner_id": owner.id, "days": 30, "max_requests": 120, "concurrency": 3},
+                        peer_plays_worker,
+                    )
+                    peer_plays = {"queued": True, "dedup": False, "task_id": peer_task_id}
+            except Exception as exc:  # noqa: BLE001 补采入队失败不影响日更结论
+                peer_plays = {"queued": False, "dedup": False, "error": str(exc)[:200]}
+                log.warning("同行播放量补采入队失败：%s", exc)
     except Exception as exc:
         creator_sync["errors"].append(str(exc)[:300])
         db.rollback()
@@ -1762,10 +1975,7 @@ def run_daily_sync_all(db: Session) -> dict:
         msg += f"，抖音创作者指标更新 {creator_sync['synced']} 条"
     if creator_sync["errors"]:
         msg += f"，创作者指标 {len(creator_sync['errors'])} 条未完成"
-    if peer_plays.get("updated"):
-        msg += f"，同行播放量补齐 {peer_plays['updated']} 条"
-    if peer_plays.get("warnings"):
-        msg += f"，同行播放量 {len(peer_plays['warnings'])} 条未完成"
+    # R-240 M9：同行播放量补采已移出主链路（独立后台任务），日更 message 不再拼接其结果
     if isinstance(rerun, str) and rerun.startswith("started:"):
         msg += "；已自动触发「重新对标」"
     elif rerun == "already_running":

@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,7 @@ from .ideas_service import annotate_items, persona_profile
 from .llm import LLMError
 from .notify import send_daily_best, send_daily_digest, send_failure_alert
 from .persona import PersonaService
+from .sync_pool import gather, session_factory
 from .topic_mining import fetch_and_store
 
 log = get_logger("pipeline")
@@ -445,6 +447,50 @@ def push_daily_best(db: Session, run_date: str, settings=None) -> dict | None:
     return {"draft_id": draft.id, "title": c.title, "reason": reason}
 
 
+def _generate_candidates(db: Session, candidates: list[dict], settings) -> tuple[list[tuple[dict, int]], list[str]]:
+    """R-240 M1：多篇候选并发生成（每篇独立 Session），返回按原顺序的 (候选, draft_id) 与失败说明。
+
+    并发度取 `pipeline_generate_concurrency`（默认 2）；≤1 或只有 1 篇时等价原串行路径。
+    「主线程聚合落库」：并发任务只负责生成草稿，TopicCandidate 仍由调用方在主线程按原顺序写；
+    单篇失败不阻断其余（收集异常由调用方记入 run.error，已生成的稿子不丢）。
+    """
+    workers = int(settings.pipeline_generate_concurrency or 1)
+    if workers <= 1 or len(candidates) <= 1:
+        return [(c, generate_draft(db, c["title"], settings).id) for c in candidates], []
+    factory = session_factory(db)
+
+    def _gen(item: tuple[int, dict]) -> int:
+        _idx, candidate = item
+        session = factory()
+        try:
+            return int(generate_draft(session, candidate["title"], settings).id)
+        finally:
+            session.close()
+
+    try:
+        results = gather(_gen, list(enumerate(candidates)), workers=workers)
+    except Exception:  # noqa: BLE001 并发池不可用 → 回退串行（不丢已生成内容）
+        log.exception("流水线并发生成池不可用，回退串行")
+        return [(c, generate_draft(db, c["title"], settings).id) for c in candidates], []
+
+    by_index: dict[int, Any] = {idx: res for (idx, _candidate), res in results}
+    generated: list[tuple[dict, int]] = []
+    failed: list[str] = []
+    for idx, candidate in enumerate(candidates):
+        res = by_index.get(idx)
+        if isinstance(res, Exception):
+            title = str(candidate.get("title", ""))[:30]
+            failed.append(f"「{title}」{str(res)[:120]}")
+            log.warning("每日流水线单篇生成失败：%s（%s）", title, str(res)[:200])
+            continue
+        if res is None:  # 防御：并发结果缺失按单篇失败处理，不丢整轮
+            title = str(candidate.get("title", ""))[:30]
+            failed.append(f"「{title}」生成结果缺失")
+            continue
+        generated.append((candidate, int(res)))
+    return generated, failed
+
+
 def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> PipelineRun:
     """执行当日流水线。幂等：当天已成功且非 force 直接返回；running 超时视为卡死可重跑。
 
@@ -480,10 +526,11 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
         run.candidates_count = len(candidates)
         db.commit()
 
-        drafts = []
-        for c in candidates:
-            draft = generate_draft(db, c["title"], settings)
-            drafts.append(draft)
+        generated, failed = _generate_candidates(db, candidates, settings)
+        if failed and not generated:
+            raise RuntimeError(f"全部 {len(failed)} 篇生成失败：{failed[0]}")
+        drafts = [draft_id for _c, draft_id in generated]
+        for c, draft_id in generated:
             db.add(
                 TopicCandidate(
                     run_date=key,
@@ -492,7 +539,7 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
                     score=c.get("score", 0),
                     slot=c.get("slot", ""),
                     reason=c.get("reason", ""),
-                    draft_id=draft.id,
+                    draft_id=draft_id,
                 )
             )
         db.commit()
@@ -507,11 +554,15 @@ def run_daily_pipeline(db: Session, force: bool = False, settings=None) -> Pipel
         # R-140：稿子已经生成好了，邮件（次要通道）失败只记原因，不能把整轮判为 failed
         run.status = "done"
         run.generated_count = len(drafts)
+        notes: list[str] = []
+        if failed:  # R-240 M1：部分篇失败不阻断整轮，失败原因随完成通知带出
+            notes.append(f"{len(failed)} 篇生成失败（已保留 {len(drafts)} 篇）：" + "；".join(failed))
         if not sent:
             from .notify import mail_config_problem
 
             problem = mail_config_problem(settings)
-            run.error = f"邮件未发送：{problem}" if problem else "邮件发送失败（详见日志）"
+            notes.append(f"邮件未发送：{problem}" if problem else "邮件发送失败（详见日志）")
+        run.error = "；".join(notes)[:2000]
         db.commit()
     except Exception as exc:  # noqa: BLE001
         db.rollback()

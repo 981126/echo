@@ -533,7 +533,12 @@ class ChatService:
                 break
             try:
                 message = self.llm.chat_completion(
-                    messages, temperature=0.5, max_tokens=budget, tools=TOOLS
+                    messages,
+                    temperature=0.5,
+                    max_tokens=budget,
+                    tools=TOOLS,
+                    # R-240 M6：把剩余 deadline 下沉到单次调用，120s 墙钟上限才真正生效
+                    timeout_seconds=max(5, int(deadline - time.monotonic())),
                 )
             except LLMError:
                 if calls:
@@ -599,7 +604,10 @@ class ChatService:
         )
         try:
             final = self.llm.chat_completion(
-                messages, temperature=0.4, max_tokens=budget
+                messages,
+                temperature=0.4,
+                max_tokens=budget,
+                timeout_seconds=max(5, int(deadline - time.monotonic())),
             )
         except Exception as exc:  # noqa: BLE001
             return f"（已查到部分数据但收尾失败：{exc}）"

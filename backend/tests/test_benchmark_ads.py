@@ -82,8 +82,10 @@ def test_ensure_top_skips_ad_and_flags(db, monkeypatch):
     )
     monkeypatch.setattr("app.services.benchmark._unit_text", lambda db, unit: "有转写文案内容")
     monkeypatch.setattr(
-        "app.services.benchmark._unit_is_ad",
-        lambda db, unit, text="": unit["post"].platform_post_id in ("adv1", "adv2"),
+        "app.services.benchmark._units_are_ad",
+        lambda _db, units, _texts: {
+            u["post"].id: u["post"].platform_post_id in ("adv1", "adv2") for u in units
+        },
     )
     picked = ensure_top_with_text(db, bm, limit_candidates=10)
     picked_ids = [u["post"].platform_post_id for u in picked]

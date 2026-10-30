@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 import httpx
 
+from ..config import get_settings
 from ..core.log import get_logger
 from . import model_settings
 from .llm import LLMError, LLMUnusableOutput, OpenAIClient
@@ -47,6 +48,57 @@ FEATURE_LABELS: dict[str, str] = {
     "draft_meta": "标题封面标签生成",
     "misc": "AI 调用",
 }
+
+# R-240 M6：feature → **单次** LLM 调用的墙钟预算（秒）。只收紧、不放宽（.tmp/audit/infra.md F-02）：
+# - 全局 `ECHO_LLM_TIMEOUT_SECONDS`（默认 600）仍是硬上限，最终取 min(本表, 全局)；
+# - 交互类：chat 90（用户等回答）、ideas 30（选题灵感，接口同步返回）、draft_meta 90；
+# - JSON 小任务：correct / video_tags / diff / feedback_analysis / persona_updates / persona_compare 120；
+# - 提示词/对标/复盘：prompt_optimize 240（优化本身要重写整段提示词）、prompt_eval 180、
+#   benchmark 240、video_review 180；
+# - 人设长输出：persona_init 300 / persona_merge 360（合并要归纳多篇提炼结果，R-142 实测
+#   Kimi 12000 预算单次 180.3s，用 misc=120 会误杀→降级→再失败；故按长输出档放宽）；
+# - 生成/讨论：generation / debate / rework / rewrite 360（R-142 实测 Kimi 12000 预算单次 180.3s，
+#   留 2× 余量；生成链路单次最多 3 次尝试 → 最坏 1080s，而原来 600×3=1800s）；
+# - misc 120 兜底（表里没有的功能）。
+# 取值动机：单次逻辑调用最坏 = 主模型 2 次 + 降级 1 次，feature 预算把最坏墙钟压到 3×预算。
+FEATURE_TIMEOUTS: dict[str, int] = {
+    "chat": 90,
+    "correct": 120,
+    "video_tags": 120,
+    "persona_init": 300,
+    "persona_merge": 360,
+    "persona_updates": 120,
+    "persona_compare": 120,
+    "ideas": 30,
+    "draft_meta": 90,
+    "diff": 120,
+    "feedback_analysis": 120,
+    "prompt_optimize": 240,
+    "prompt_eval": 180,
+    "benchmark": 240,
+    "video_review": 180,
+    "generation": 360,
+    "debate": 360,
+    "rework": 360,
+    "rewrite": 360,
+    "misc": 120,
+}
+DEFAULT_FEATURE_TIMEOUT = 120
+# 客户端下限（OpenAIClient 同样夹到 ≥30，避免把预算配成 0/负数，见 R-142）。
+MIN_CALL_TIMEOUT_SECONDS = 30
+
+
+def feature_timeout_seconds(feature: str, requested: int | None = None) -> int:
+    """单次调用的墙钟预算（秒）：feature 表 → 全局上限 → 调用方剩余 deadline，三者取 min。"""
+    budget = int(FEATURE_TIMEOUTS.get(feature or "", DEFAULT_FEATURE_TIMEOUT))
+    global_limit = int(
+        getattr(get_settings(), "llm_timeout_seconds", 0) or 0
+    ) or OpenAIClient.DEFAULT_TIMEOUT_SECONDS
+    budget = min(budget, global_limit)
+    if requested is not None:
+        budget = min(budget, int(requested))
+    return max(MIN_CALL_TIMEOUT_SECONDS, budget)
+
 
 # 单次调用 max_tokens 上限（防手写参数把成本打爆）。
 # R-142：推理模型的思考会让「预算翻倍重试」把值推高，封顶给到 32000 仍留有余地。
@@ -83,14 +135,32 @@ def normalize_max_tokens(slot: dict, max_tokens: int) -> int:
     return min(max(int(max_tokens or 0), floor, 1), MAX_TOKENS_CEILING)
 
 
-def build_client(slot: dict) -> OpenAIClient:
-    """按槽位快照建客户端（纯快照，不读 settings）。"""
+def build_client(slot: dict, timeout_seconds: int | None = None) -> OpenAIClient:
+    """按槽位快照建客户端（纯快照，不读 settings）。
+
+    `timeout_seconds` 是本次调用的单次墙钟预算（R-240 M6）；不传则沿用全局 ECHO_LLM_TIMEOUT_SECONDS。
+    """
     return OpenAIClient(
         base_url=slot.get("base_url", ""),
         api_key=slot.get("api_key", ""),
         model=slot.get("model", ""),
         supports_temperature=bool(slot.get("supports_temperature", True)),
+        timeout_seconds=timeout_seconds,
     )
+
+
+def _client_with_timeout(slot: dict, timeout_seconds: int) -> OpenAIClient:
+    """建本次调用的客户端并套用墙钟预算。
+
+    兼容只有单参签名的旧实现/测试替身（`build_client` 新增可选参数后不能强求所有替换实现同步）：
+    传参报 TypeError 时退回旧签名，再在实例上覆盖 `timeout_seconds`（即单次上限）。
+    """
+    try:
+        return build_client(slot, timeout_seconds=timeout_seconds)
+    except TypeError:
+        client = build_client(slot)
+        client.timeout_seconds = timeout_seconds
+        return client
 
 
 class RouteSnapshot:
@@ -110,9 +180,11 @@ class RouteSnapshot:
 
 
 def snapshot(db: Session) -> RouteSnapshot:
+    """一次批读配置 → 派生 slots + 生成方/评审方（R-240 S4：20~21 条 KV → 1 条 `key IN`）。"""
+    config = model_settings.get_model_config(db)
     return RouteSnapshot(
-        model_settings.resolve_slots(db),
-        *model_settings.generation_roles(db),
+        model_settings.resolve_slots(db, config),
+        *model_settings.generation_roles(db, config),
     )
 
 
@@ -215,18 +287,28 @@ class RoutedLLM:
         for i, name in enumerate(names):
             yield self.route.slot(name), i == 0
 
-    def _run(self, method: str, kwargs: dict, validate: Callable[[Any], str]) -> Any:
+    def _run(
+        self,
+        method: str,
+        kwargs: dict,
+        validate: Callable[[Any], str],
+        timeout_seconds: int | None = None,
+    ) -> Any:
         """主模型 → 降级模型；`validate` 返回失败原因，空串表示通过。
 
         「输出不合法」再试一次时把 `max_tokens` 翻倍（R-139/R-142）：推理模型的思考会吃满预算导致
         正文为空，这是「重试/降级后像退化了」最常见的伪装。每个槽位各自套用自己的厂家下限；
         连接级瞬时错误（连接重置等）同类重试一次再降级，避免把网络抖动记成模型降级。
+
+        R-240 M6：每次 attempt 都带 feature 墙钟预算（`min(本功能预算, 全局上限, 调用方剩余 deadline)`），
+        重试/降级语义与异常类型保持不变，只是不再允许单次 attempt 跑满 600s。
         """
         started = time.time()
         problems: list[str] = []
         base_budget = int(kwargs.get("max_tokens") or 0)
+        per_call_timeout = feature_timeout_seconds(self.feature, timeout_seconds)
         for slot, allow_retry in self._attempts():
-            client = build_client(slot)
+            client = _client_with_timeout(slot, per_call_timeout)
             budget = base_budget
             for i in range(2 if allow_retry else 1):
                 if i:
@@ -270,8 +352,13 @@ class RoutedLLM:
         temperature: float = 0.7,
         max_tokens: int = 2000,
         tools: list[dict] | None = None,
+        timeout_seconds: int | None = None,
     ) -> dict:
-        """带 tools 的原始调用（AI 对话用）；返回 message 字典（含 tool_calls）。"""
+        """带 tools 的原始调用（AI 对话用）；返回 message 字典（含 tool_calls）。
+
+        `timeout_seconds` 是调用方给的剩余墙钟（如 chat 的 deadline-now，R-240 M6），
+        最终与 feature 预算/全局上限取 min。
+        """
         mt = normalize_max_tokens(self.route.slot(self.primary_slot_name), max_tokens)
         kwargs: dict = {"messages": messages, "temperature": temperature, "max_tokens": mt}
         if tools:
@@ -284,7 +371,7 @@ class RoutedLLM:
                 return ""
             return "返回空正文"
 
-        return self._run("chat_completion", kwargs, validate)
+        return self._run("chat_completion", kwargs, validate, timeout_seconds)
 
     def chat(
         self,
@@ -292,9 +379,18 @@ class RoutedLLM:
         temperature: float = 0.7,
         max_tokens: int = 2000,
         json_mode: bool = False,
+        timeout_seconds: int | None = None,
     ) -> str:
         if json_mode:
-            return json.dumps(self.chat_json(messages, temperature=temperature, max_tokens=max_tokens), ensure_ascii=False)
+            return json.dumps(
+                self.chat_json(
+                    messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout_seconds=timeout_seconds,
+                ),
+                ensure_ascii=False,
+            )
         mt = normalize_max_tokens(self.route.slot(self.primary_slot_name), max_tokens)
 
         def validate(out: Any) -> str:
@@ -302,7 +398,10 @@ class RoutedLLM:
 
         return str(
             self._run(
-                "chat", {"messages": messages, "temperature": temperature, "max_tokens": mt}, validate
+                "chat",
+                {"messages": messages, "temperature": temperature, "max_tokens": mt},
+                validate,
+                timeout_seconds,
             )
         )
 
@@ -312,6 +411,7 @@ class RoutedLLM:
         temperature: float = 0.3,
         max_tokens: int = 2000,
         require: tuple[str, ...] = (),
+        timeout_seconds: int | None = None,
     ) -> dict:
         """JSON 调用；`require` 是本次功能的输出契约字段（缺失即不合法 → 降级）。"""
         mt = normalize_max_tokens(self.route.slot(self.primary_slot_name), max_tokens)
@@ -323,7 +423,10 @@ class RoutedLLM:
             return ("缺少契约字段：" + "、".join(missing)) if missing else ""
 
         return self._run(
-            "chat_json", {"messages": messages, "temperature": temperature, "max_tokens": mt}, validate
+            "chat_json",
+            {"messages": messages, "temperature": temperature, "max_tokens": mt},
+            validate,
+            timeout_seconds,
         )
 
 
@@ -380,10 +483,12 @@ def llm_from_snapshot(
 
 __all__ = [
     "FEATURE_LABELS",
+    "FEATURE_TIMEOUTS",
     "RouteSnapshot",
     "RoutedLLM",
     "build_client",
     "feature_label",
+    "feature_timeout_seconds",
     "llm_from_snapshot",
     "normalize_max_tokens",
     "primary_llm",
