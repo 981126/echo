@@ -46,6 +46,14 @@ log = get_logger("platform_sync")
 
 # R-222：同步进度更新防抖——跨账号/线程共享同一 job_id 时减少数据库写压力
 _JOB_PROGRESS_LOCK = threading.Lock()
+
+# R-240 复核修复：灵感池「评论→选题」是「先 COUNT 配额再 INSERT」的读改写。
+# R-240 提高了同博主内的并发度（同作品多平台并行、进程级媒体池 6），并发调用会：
+#   ① 各自读到同一剩余配额 → 单博主当天进池总量突破 ECHO_POOL_IDEAS_PER_DAY；
+#   ② 同一评论文本在各自事务里都查不到对方未提交的行 → 重复插入（topic_ideas 无唯一约束）。
+# 进程内单 uvicorn（现状部署）用模块级可重入锁把「读配额 + 去重 + 写入 + commit」串行化；
+# commit=False 的批量模式只在单线程/单博主的批量写库循环里调用，不依赖此锁跨线程生效。
+_POOL_IDEAS_LOCK = threading.RLock()
 _job_progress_pending: dict[int, dict] = {}
 _JOB_PROGRESS_FORCE_KEYWORDS = ("完成", "失败", "拉取到", "补全", "排队中", "同步中")
 
@@ -431,64 +439,67 @@ def pool_ideas_from_comments(
 
     R-222：支持 `existing_ideas` 预加载字典（key=title）与 `commit=False` 批量模式。
     """
-    if account is None and post.account_id:
-        account = db.get(CreatorAccount, post.account_id)
-    creator_id = account.creator_id if account is not None else None
-    platform = (account.platform if account is not None else post.platform) or ""
-    nickname = (account.nickname if account is not None else "") or platform
-    limit_post = int(
-        per_post if per_post is not None else getattr(get_settings(), "pool_ideas_per_post", 0) or 0
-    )
-    date_key = today_key()
-    quota = _pool_quota(db, creator_id, date_key)
-    if quota <= 0:
-        return 0
+    # R-240 复核修复：配额检查→去重→插入→commit 必须在同一把进程内锁里完成，
+    # 否则并发消费者会各自读到相同剩余配额（超发）或查不到对方未提交行（重复进池）。
+    with _POOL_IDEAS_LOCK:
+        if account is None and post.account_id:
+            account = db.get(CreatorAccount, post.account_id)
+        creator_id = account.creator_id if account is not None else None
+        platform = (account.platform if account is not None else post.platform) or ""
+        nickname = (account.nickname if account is not None else "") or platform
+        limit_post = int(
+            per_post if per_post is not None else getattr(get_settings(), "pool_ideas_per_post", 0) or 0
+        )
+        date_key = today_key()
+        quota = _pool_quota(db, creator_id, date_key)
+        if quota <= 0:
+            return 0
 
-    usable = [c for c in comments if len((c.text or "").strip()) >= 4]
-    usable.sort(key=lambda c: int(c.likes or 0), reverse=True)
-    if limit_post > 0:
-        usable = usable[:limit_post]
+        usable = [c for c in comments if len((c.text or "").strip()) >= 4]
+        usable.sort(key=lambda c: int(c.likes or 0), reverse=True)
+        if limit_post > 0:
+            usable = usable[:limit_post]
 
-    if existing_ideas is None:
-        existing_ideas = {
-            row.title: row
-            for row in db.query(TopicIdea)
-            .filter(
-                TopicIdea.source == "comment",
-                TopicIdea.snapshot_date == date_key,
-            )
-            .all()
-        }
+        if existing_ideas is None:
+            existing_ideas = {
+                row.title: row
+                for row in db.query(TopicIdea)
+                .filter(
+                    TopicIdea.source == "comment",
+                    TopicIdea.snapshot_date == date_key,
+                )
+                .all()
+            }
 
-    added = 0
-    for c in usable:
-        if added >= quota:
-            break
-        text = (c.text or "").strip()
-        likes = int(c.likes or 0)
-        exists = existing_ideas.get(text)
-        if exists is None:
-            idea = TopicIdea(
-                source="comment",
-                platform=platform,
-                title=text,
-                detail=f"来自{nickname}作品《{(post.title or '')[:40]}》的评论",
-                post_id=post.id,
-                post_title=post.title,
-                creator_id=creator_id,
-                snapshot_date=date_key,
-                likes=likes,
-            )
-            db.add(idea)
-            existing_ideas[text] = idea
-            added += 1
-        else:
-            if likes > int(exists.likes or 0):
-                exists.likes = likes
-            existing_ideas[text] = exists
-    if commit:
-        db.commit()
-    return added
+        added = 0
+        for c in usable:
+            if added >= quota:
+                break
+            text = (c.text or "").strip()
+            likes = int(c.likes or 0)
+            exists = existing_ideas.get(text)
+            if exists is None:
+                idea = TopicIdea(
+                    source="comment",
+                    platform=platform,
+                    title=text,
+                    detail=f"来自{nickname}作品《{(post.title or '')[:40]}》的评论",
+                    post_id=post.id,
+                    post_title=post.title,
+                    creator_id=creator_id,
+                    snapshot_date=date_key,
+                    likes=likes,
+                )
+                db.add(idea)
+                existing_ideas[text] = idea
+                added += 1
+            else:
+                if likes > int(exists.likes or 0):
+                    exists.likes = likes
+                existing_ideas[text] = exists
+        if commit:
+            db.commit()
+        return added
 
 
 def sync_post_comments(
