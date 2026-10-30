@@ -72,4 +72,3 @@ M206
 
 ## 待收口文档改动
 - `docs/API.md`：新增 `POST /api/drafts/{draft_id}/suggest-meta` 接口说明。
-- `docs/DESIGN.md` §8：补充新按钮/下拉框动效说明（如需要）。

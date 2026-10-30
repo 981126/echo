@@ -32,7 +32,7 @@
 - 覆盖范围：**一次性全部页面**。
 - 推送机制：**沿用 SSE**（非 WebSocket）；指示器近实时 + 轮询兜底。
 
-## 规范（写入 AGENTS/DESIGN/WORKFLOW）
+## 规范（写入 AGENTS）
 - 凡「非实时返回 / 耗时」功能，必须给出可见「进行中」动效（spinner/进度条/覆盖层/顶栏计数），完成/失败干净落定。
 - 切页/刷新回来后，只要后端仍在跑，页面**必须**仍是进行中动效——绝不允许卸载即消失造成「已完成」错觉。
 - 动效统一用 `lib/motion.ts` 令牌，禁止从 `opacity:0` 起步（R-175），收口 `opacity 1 / transform none`。
@@ -49,5 +49,5 @@ M191 / M192
 - [x] verify.sh 全绿（后端 445 例 + 前端 lint/vitest/build + 文档一致 31 表/145 路由）
 - [x] 后端 worker/去重用例（`test_r202_async_tasks.py` 4 例）+ 前端 Provider 映射单测（3 例）
 - [x] headless 全链路：点「观众提问榜」→ 按钮转圈 + 顶栏「进行中 1」→ 切到人设页仍「进行中 1」→ 回主页按钮仍禁用 → 完成后指示器消失、按钮恢复、**结果自动回填**（观众提问榜标题出现）；整页刷新后指示器仍恢复
-- [x] 规范已写入 AGENTS/DESIGN(§8.6)/WORKFLOW/PRD
+- [x] 规范已写入 AGENTS
 - [x] 接口冒烟：`/api/tasks?status=pending,running` 返回 `label/target`；`publish-links/apply` 返回 `task_id` 并落 `task.result`

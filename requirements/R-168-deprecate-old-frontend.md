@@ -2,7 +2,7 @@
 
 - **日期**: 2026-09-28
 - **状态**: ✅ 已完成（2026-09-28，M157）
-- **关联**: `AGENTS.md`、`README.md`、`docs/QUICKSTART.md`、`docs/PRD.md`、`docs/ARCHITECTURE.md`；R-164
+- **关联**: `AGENTS.md`、`README.md`、`docs/ARCHITECTURE.md`；R-164
 
 ## 原文（作者原话，未改动）
 > 在文档中将老的前端项目标成废弃，以后说启动项目、修改项目都不修改老前端项目，而是新前端项目
@@ -14,8 +14,7 @@
   直到后续决定下线/删除——删除属新需求）。
 
 ## 范围
-- 文档标注：`AGENTS.md`（目录速览 + 技术栈 + 默认前端约定）、`README.md`（运行命令与说明）、
-  `docs/QUICKSTART.md`（启动命令改 frontend_v2:3000）、`docs/PRD.md`、`docs/ARCHITECTURE.md`、
+- 文档标注：`AGENTS.md`（目录速览 + 技术栈 + 默认前端约定）、`README.md`（运行命令与说明）、`docs/ARCHITECTURE.md`、
   milestones/CHANGELOG/需求索引。
 
 ## 不包含

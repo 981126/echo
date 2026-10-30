@@ -13,12 +13,8 @@
    - `docs/DATABASE.md`：由 SQLAlchemy 模型元数据重新生成（26 张表：字段/类型/主键/可空/默认/索引/唯一/外键/关系）+ 人工注释
 2. **按代码重写（修正过期/错误）**：
    - AGENTS.md / README.md：入口与导航，加入模式配置护栏、自动生成文档说明
-   - docs/PRD.md：功能范围与现状（截至 R-070）
-   - docs/PRODUCT.md：产品/用户视角
    - docs/ARCHITECTURE.md：进程/定时任务（以 scheduler.py 为准）、目录分层、外部服务、数据目录（echo_resource 非 data/）
-   - docs/DESIGN.md：代码级地图（api/services/core/models、平台同步重点、前端结构）
    - docs/milestones.md：M0–M52 完整进度 + 待排期
-   - docs/WORKFLOW.md：流程细则（bug 修复例外）
    - docs/DECISIONS.md：去重/整理 D-001~D-037（含 D-018+/D-031 演进标注，历史引用号不变）
    - docs/QUICKSTART.md / docs/GLOSSARY.md / docs/FAQ.md
 3. 修正事实：数据目录（.env→echo_resource）、真实模式现状、top20、评论 Top50、进度条、定时任务时间表、测试数（53）等

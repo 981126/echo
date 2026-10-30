@@ -142,10 +142,10 @@
 | M194 / R-204 | tab 选中态滑块过渡动画：`ui/tabs.tsx` 选中时渲染共享 `layoutId` 的 `motion.span` 滑块，在 tab 间 spring 平滑移动（`useId` 保证多实例不串；受控/非受控都支持） | build+vitest 通过；headless：滑块 280→345→457 与选中项对齐、仅 1 个、零报错 | ✅ |
 | M193 / R-203 | AI 设置 tab 栏改自动换行（去 `ScrollArea`，`TabsList` 加 `h-auto w-full flex-wrap justify-start`） | build 通过；headless：10 tab 换 2 行、无横向溢出、零 console 报错 | ✅ |
 | M192 / R-202 | 同步长接口转后台任务：`benchmark_prepare`/`opportunity_clusters`/`opportunity_weekly`/`opportunity_gap`/`draft_angles`/`prompt_optimize`/`hot_refresh`/`publish_backfill`（结果落 `task.result`、同 scope 去重）；前端按 scope 消费结果，切页/刷新恢复并回填 | verify 全绿；headless 实测「点观众提问榜→切人设页→回主页仍进行中→完成自动回填」；接口冒烟 `task_id`+`task.result` | ✅ |
-| M191 / R-202 | 通用「进行中」底座：后端 `/api/tasks` 多状态 + `TaskOut.label/target`（抽 `core/task_meta.py`）；前端 `ActiveWorkProvider`（挂载回扫 + SSE 实时 + 10s 轮询兜底）+ 顶栏「进行中 N」指示器；对标/AI设置/人设/灵感随手记恢复进行中动效；规范写入 AGENTS/DESIGN/WORKFLOW/PRD | verify 全绿；Provider 映射单测；headless 实测：指示器跨页 + 整页刷新均恢复、弹层显示 label/进度/note | ✅ |
+| M191 / R-202 | 通用「进行中」底座：后端 `/api/tasks` 多状态 + `TaskOut.label/target`（抽 `core/task_meta.py`）；前端 `ActiveWorkProvider`（挂载回扫 + SSE 实时 + 10s 轮询兜底）+ 顶栏「进行中 N」指示器；对标/AI设置/人设/灵感随手记恢复进行中动效；规范写入 AGENTS | verify 全绿；Provider 映射单测；headless 实测：指示器跨页 + 整页刷新均恢复、弹层显示 label/进度/note | ✅ |
 | M190 / R-201 | 主页「内容机会」区块移到「灵感池」上方（仅调整上下顺序，内容/接口不变） | verify 全绿；headless 点检顺序与零 console 报错 | ✅ |
 | M189 / R-200 | 接入腾讯云 ASR（录音文件识别）：`asr_mode` 扩 `tencent`；本地音频 base64 直传（`SourceType=1`，ffmpeg 抽轨压缩 16k 单声道 mp3，自适应 16–32kbps；≤5MB，超限明确报错走失败通知不切换服务商）；引擎界面可选默认 `16k_zh_en_2.0`；官方模块化 SDK `tencentcloud-sdk-python-asr`；密钥存 `.env`；`ingest` 落 `asr_provider=tencent/asr_model=引擎`；顺带修设置页模型 Key 保存字段（`api_key`→`key`） | verify 全绿（后端 441 例）；离线单测 15 例；接口冒烟 + headless 点检通过；真实 ffmpeg 抽/压路径通过；**真实腾讯接口联调：18s 中文口播 → 16.1s、78 字准确转写** | ✅ |
-| M157 / R-168 | 老前端 `frontend/` 标记废弃：以后「启动项目/修改项目」一律指 `frontend_v2/`（dev 3000 / 生产 /v2）；老前端只读保留（生产挂根路径兜底）、禁止改代码/加功能/修 bug，verify 保留构建防腐，下线另立需求。标注于 AGENTS.md / README / QUICKSTART / PRD / ARCHITECTURE | 文档全部标注；QUICKSTART/README 启动命令指向 frontend_v2:3000；verify.sh 全绿 | ✅ |
+| M157 / R-168 | 老前端 `frontend/` 标记废弃：以后「启动项目/修改项目」一律指 `frontend_v2/`（dev 3000 / 生产 /v2）；老前端只读保留（生产挂根路径兜底）、禁止改代码/加功能/修 bug，verify 保留构建防腐，下线另立需求。标注于 AGENTS.md / README / QUICKSTART / ARCHITECTURE | 文档全部标注；QUICKSTART/README 启动命令指向 frontend_v2:3000；verify.sh 全绿 | ✅ |
 | M156 / R-167 | ①AI 对话「出错了：[object Object]」——显式处理 `event: error` 帧 + `errText()`/`detailText()` 健壮提取（对象/嵌套/422 数组）；②对标封面裂开——后端 `unit_payload` 改 `cover_url_local`（本地优先），前端封面加 `referrerPolicy=no-referrer`；③草稿抽屉空白——本地全量复现未果（34 篇+保存链路+预览+深色+生产全通过），加 `ErrorBoundary` 兜底（编辑器崩溃降级纯文本不白屏） | 对标封面实测全加载（0 张 4xx）；错误提取单测 3 例；vitest 22 例全绿；verify.sh 全绿 | ✅ |
 | M155 / R-166 | NAS 部署闭环：Dockerfile 只构建老前端 → NAS 上 /v2 会 404。修：新增 `frontend-v2-build` 阶段（node:22-alpine，vite 7 需要 ^20.19/>=22.12）构建 frontend_v2 并 COPY 到 `/app/frontend_v2/dist`；`.dockerignore` 排除 `frontend_v2/dist/` | 静态审查路径一致（main.py 挂 /app/frontend_v2/dist）；verify.sh 全绿；NAS 下次部署实测 /v2 | ✅ |
 | M154 / R-165 | frontend_v2 三个线上 bug 修复：①素材库卡顿——MaterialCard 改 React.memo（回调稳定化+hasTask ref）/ 去 layout 动画 / 仅前 40 卡入场 / content-visibility 跳过屏外渲染；②同步·拆分无动画——use-card-tasks 新增 begin 本地 ramp + claim（直接用同步响应 media.task_id）+ finish + onSettled 自动刷新，拆分/删除卡片 spinner；③抽屉滚不到底——transform/filter 祖先使 fixed 定位异常，Drawer/重命名弹层改 createPortal 到 body | headless 实测：抽屉 top=0 覆盖全视口、滚动到底、同步卡片即时进度 17%、618 卡滚动流畅、零 console 错误；verify.sh 全绿 | ✅ |
@@ -246,7 +246,7 @@
 | M44 / R-062 | 数据源适配器：DataSource + make_source 注册中心 | 契约测试 | ✅ |
 | M43 / R-061 | 代码/表结构体检 A/B/C/D-1；D-2/D-3 暂缓 | 分批自测 | ✅ |
 | M42 / R-060 | 文档体系 v2：API(92)/表结构(26)/QUICKSTART/术语/FAQ | 自动生成+导航 | ✅ |
-| M41 / R-059 | 文档体系：PRODUCT/ARCHITECTURE/DESIGN 详细版 | 三文档评审 | ✅ |
+| M41 / R-059 | 文档体系：ARCHITECTURE 详细版 | 三文档评审 | ✅ |
 | M40 / R-058 | 标题命名文件（标题-视频/封面） | 接口冒烟 | ✅ |
 | M39 / R-057 | 深度学习增强：表达风格面板/禁词注入/每周风格重建 | verify | ✅ |
 | M38 / R-056 | 标签多行不隐藏 | 前端构建 | ✅ |

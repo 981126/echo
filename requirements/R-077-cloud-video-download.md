@@ -5,7 +5,7 @@
 - **原文摘要**: 三个平台（抖音/小红书/B站）的视频+音频都要能拿到；画质可以低一些；先核实第三方（TikHub）是否有此能力。
 - **状态**: ✅ 已完成（抖音/小红书可用；B站受 TikHub 线上端点 404 限制暂不可用，代码已预留）
 - **排期**: M59（已完成）
-- **关联**: PRD §2/§3.2/§3.3、DECISIONS D-026/D-027/D-031、`platform/tikhub.py`、`platform_assets.py`、`media_tools.py`、`media_naming.py`、`works.py /to-local`
+- **关联**: DECISIONS D-026/D-027/D-031、`platform/tikhub.py`、`platform_assets.py`、`media_tools.py`、`media_naming.py`、`works.py /to-local`
 
 ## 背景
 - 现状（D-027）：平台同步只拉「指标+评论」，**视频默认不下载**；`platform_posts.video_url` 仅抖音列表接口有值（594 条），小红书/B站为空。

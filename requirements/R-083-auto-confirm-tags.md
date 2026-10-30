@@ -5,7 +5,7 @@
 - **原文摘要**: 改为自动确认
 - **状态**: ✅ 已完成
 - **排期**: M65（已完成）
-- **关联**: PRD §3.2、ingest.import_video_task、MaterialCard、R-077/R-082
+- **关联**: ingest.import_video_task、MaterialCard、R-077/R-082
 
 ## 处理
 1. 转写流水线 import_video_task：AI 预打标签（赛道/标签/广告判定）成功后直接把 `tags_confirmed=True`，不再要求逐条点「确认标签」。

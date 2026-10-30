@@ -5,7 +5,7 @@
 - **原文摘要**: 博主页同步频率有用吗？勾了“启用每日同步”频率就没用了吧，是不是可以去掉。
 - **状态**: ✅ 已完成
 - **排期**: M56（已完成）
-- **关联**: PRD §3.3、R-029、creator_accounts.sync_frequency
+- **关联**: R-029、creator_accounts.sync_frequency
 
 ## 现状核对（代码）
 - 自动调度（scheduler 07:30/18:00 run_sync daily）只按「当前主博主 + account.enabled」过滤账号；

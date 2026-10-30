@@ -37,7 +37,7 @@
   - jobsQ 改为 `/api/platform/jobs?limit=50`（不再只筛 running）；`runningCreators` 只统计 `status==='running'`；
   - `jobFor`：running → 进度条；done 且 finished_at < 8s → 「同步完成」条；failed 且 < 60s → 失败条；否则 null（历史旧记录不显示）；
   - syncAll() 保存结构化 skipped 到本地 state，博主卡片下渲染灰色虚线提示条（AnimatePresence 软入场）；该博主出现 running job 或下次 sync-all 覆盖时移除；toast 文案适配。
-- `sync-progress-bar.tsx`：新增 done（CheckCircle 绿 + 进度 100%）/ failed（XCircle destructive + 错误摘要）形态；沿用现有展开/收起动效，收口 `opacity 1`（DESIGN.md §8）。
+- `sync-progress-bar.tsx`：新增 done（CheckCircle 绿 + 进度 100%）/ failed（XCircle destructive + 错误摘要）形态；沿用现有展开/收起动效，收口 `opacity 1`。
 - `types.ts`：+`SyncSkipped`。
 
 ## 非目标

@@ -35,7 +35,7 @@
   - `apply_diff_suggestions` 优先用版本链（≥2 版），无版本时退回原 `original_script → script`（行为不变）；
   - 定稿后触发 `diff_analysis` 任务（沿用现有后台任务 + 人设建议确认流程）；
   - `_rewrite_examples`（生成 few-shot）优先用「首版 → 终版」，无版本时退回原 `original_script → script`。
-- **文档/测试**：PRD / DESIGN / DATABASE.md / API.md / CHANGELOG / milestones / requirements 索引；新增 pytest。
+- **文档/测试**：DATABASE.md / API.md / CHANGELOG / milestones / requirements 索引；新增 pytest。
 
 ## 不包含
 - 不做**版本回滚/恢复**（本轮只留痕 + 比较；作者要回滚另立需求）。

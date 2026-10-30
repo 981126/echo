@@ -8,7 +8,7 @@
 - 账号级数据源策略：开关关闭/未配置 Cookie → 公开接口；开启且 Cookie 有效 → 创作者中心（作品列表/指标，评论/媒体仍公开）；开启但 Cookie 失效 → 停止该账号所有第三方调用、发一次通知并标记失效，直到更新 Cookie；B 站/小红书不变。
 - 平台同步、素材库同步、单帖同步、视频复盘刷新、评论加载、媒体补齐全部接入统一策略；失效账号零第三方请求。
 - 合并 R-238：素材库卡片显示真实播放（`plays_known/plays_source`）；公开接口 0 不覆盖创作者真实播放（来源优先级合并）；首次自动回填（426 条作品 / 约 12 次请求，417 条匹配入库）；每日两轮同步后自动保鲜；`metrics_snapshots` 改为从 DB 最新统计聚合。
-- 表结构：`douyin_creator_credentials` 新增 `enabled` 列 + Alembic revision `r239douyincred`；DATABASE/API/FAQ/QUICKSTART/DESIGN 同步。
+- 表结构：`douyin_creator_credentials` 新增 `enabled` 列 + Alembic revision `r239douyincred`；DATABASE/API/FAQ/QUICKSTART 同步。
 - 验证：`scripts/verify.sh` 全绿；真实接口冒烟（创作者/公开切换、失效停采+通知、恢复、历史回填、素材库真实播放、页面点检）。
 
 ## [R-237] 2026-10-29 — 抖音视频复盘、涨粉与下一步主题（✅ 2026-10-30 真实接口联调完成）
@@ -40,7 +40,7 @@
 - **方言改写**：`chat_sql.py` 从 sqlite3 只读连接改为 SQLAlchemy 引擎 + 服务端 `default_transaction_read_only` + `statement_timeout` 双保险；`scheduler.py` 清理 SQL 的 `datetime('now','-N days')` 改为 Python 侧算好截止点参数化传入。
 - **测试**：66 个测试文件全部改为 `conftest.fresh_engine()`（共享引擎 + 每测试 `TRUNCATE ... CASCADE` 清全表，保持空库语义）；conftest 加**库名安全闸门**——目标库不是 `echo_test` 直接拒绝启动；新增 `scripts/init_test_db.sh` 从 echo_dev 复制结构+数据到 echo_test；删除 `test_r144_schema_guard.py` 与 `fixtures/schema_baseline.sql`。
 - **部署**：`scripts/backup.sh` 由 SQLite 热备改 `pg_dump --format=custom`（连通性预检 + 空 dump 校验）；`deploy.sh` 去掉 echo.db 检查、结构自检改为「模型表 vs 实际库」比对；`release.sh` 打包校验去掉 echo.db；`docker-compose.yml` 去掉 `ECHO_DB_PATH`（数据库不在卷里，容器直连 NAS 宿主机 PG）。
-- **文档**：ARCHITECTURE/DATABASE/QUICKSTART/DESIGN/OPS-PARALLEL/PRD/AGENTS.md 同步（OPS-PARALLEL §2.3/§4.2 改为「每 worktree 独立 PG 库」，SQLite 流程收进历史折叠块）。
+- **文档**：ARCHITECTURE/DATABASE/QUICKSTART/OPS-PARALLEL/AGENTS.md 同步（OPS-PARALLEL §2.3/§4.2 改为「每 worktree 独立 PG 库」，SQLite 流程收进历史折叠块）。
 - **验证**：pytest 全量绿（1 个 pg_dump 用例本机无 PG 客户端跳过）；后端连 echo_dev 冒烟待 verify 后执行。
 
 ## [R-234] 2026-10-18 — NAS 一键部署脚本：git 快进 → 备份 → 构建 → 上线 → 健康/结构自检 ✅
@@ -52,7 +52,6 @@
 - **`scripts/update.sh`**：降为兼容入口，`exec` 到 `deploy.sh`；`SKIP_PULL=1` 继续有效。解包/非 git 部署用 `--no-pull`。
 - **`docker-compose.yml`**：加 `image: echo:local` 稳定 tag；容器内固定 `ECHO_DATA_DIR=/app/data`、`ECHO_DB_PATH=/app/data/echo.db`（避免搬 `.env` 时把 macOS 路径带进来）；宿主卷改 `${ECHO_HOST_DATA_DIR:-./data}:/app/data`。
 - **修正**：`.env` 默认的 `./data` / `./data/echo.db` 在容器 `WORKDIR=/app` 下等价 `/app/data`，不再误报路径告警；只有真正像宿主机路径（如 `/Users/...`）才提示改用 `ECHO_HOST_DATA_DIR`。`--dry-run` 现在只预检/打印，不会 fetch/merge、构建或重启。
-- **文档**：`QUICKSTART.md` NAS 段改为一键部署 + 参数/回滚说明；`.env.example` 增加 `ECHO_HOST_DATA_DIR`；PRD/里程碑同步 M235。
 - **验证**：`bash -n` + `--help` + 临时仓库/假 Docker 干跑（首次、脏工作区、缺 `.env`、构建失败、unhealthy、非 git 解包）；`scripts/verify.sh` 全绿；**NAS 实机首次构建/启动待作者执行**（本机 Docker daemon 未运行）。
 
 ## [R-233] 2026-10-18 — 脚本生成联网参考双源化：豆包 + DeepSeek 搜索 / 正文 / 去营销 / 生成方按人设选文 ✅
@@ -342,7 +341,7 @@
 - **M199 提示词优化后台全自动 ✅**：`maybe_notify_prompt_refresh`（只发提醒）→ `maybe_auto_optimize_prompt`（素材到量自动排队 `generation` 优化，样本不足静默跳过）；`prompt_eval_task` 评测后「候选 ≥ 当前版 ×1.10」自动启用 + 通知（附变更说明与「可回滚到 vN」），不更好则静默丢弃（候选转 rejected、不打扰），当前版无可比评分时保留候选待人工；删除 `weekly_prompt_hint` 定时任务。
 - **M200 每日「今日最佳」推送 ✅**：流水线收尾新增 `push_daily_best`——AI 从当天已生成的稿子里按「人设契合 × 热度」选 1 篇（失败退回分数最高），站内通知（kind=`daily_best`，正文含选题理由 + **完整口播稿**）+ best-effort 邮件单篇推送（复用 digest 模板）；同一天 Kv 标记只推一次，推送失败不影响流水线。
 - **M201 AI 设置瘦身 + 对话写操作白名单 ✅**：AI 设置页 10 tab 收为「基础」（模型/Key/生成方评审方/ASR/每日篇数/讨论轮次 + 保存）+「高级」（推理预算/兼容性自检/一键优化规则型/功能提示词改 Select 切换 + 版本评测）；AI 对话写操作 `agent_actions.propose` 新增 `SAFE_ACTIONS`（`generate_draft` / `rework_draft` / 可逆的 `set_draft_status`）**免确认自动执行**（审计照记 done + preview/result），删除等危险操作仍 `pending` 等确认；`TOOL_DATA_RULES` 与 dispatch 同步区分 executed/pending。
-- **M202 遗留清理 + 老前端下线 ✅**：删除真死代码 `core/review.py`（复盘启发式兜底，仅测试引用）与 `core/metrics.normalize_snapshot`（无人调用）；老前端 `frontend/` 目录**删除**，`verify.sh` 去其构建、`main.py` 根路径改挂 `frontend_v2/dist`、vite `base` 改 `/`、Dockerfile/.dockerignore/AGENTS/README/QUICKSTART/ARCHITECTURE/DESIGN/PRD/API 同步。**核实澄清**：`metrics_snapshots` 并非死代码——它是平台数据聚合的性能缓存，生成权重/人设金句/提示词样本/赛道雷达在读它，原作者拍板保留。
+- **M202 遗留清理 + 老前端下线 ✅**：删除真死代码 `core/review.py`（复盘启发式兜底，仅测试引用）与 `core/metrics.normalize_snapshot`（无人调用）；老前端 `frontend/` 目录**删除**，`verify.sh` 去其构建、`main.py` 根路径改挂 `frontend_v2/dist`、vite `base` 改 `/`、Dockerfile/.dockerignore/AGENTS/README/QUICKSTART/ARCHITECTURE/API 同步。**核实澄清**：`metrics_snapshots` 并非死代码——它是平台数据聚合的性能缓存，生成权重/人设金句/提示词样本/赛道雷达在读它，原作者拍板保留。
 
 ## [M203 / R-209+R-210+R-211] 2026-09-29 — 回退留痕与版本链归因 + 纯手写标签 + 反馈体系重构
 
@@ -378,13 +377,13 @@
   ③ 状态条 `key={state + note}` 让讨论每换一步就整条重挂，配上 `initial={{opacity:0, height:0}}` → 三点节点被替换、旧条高度收 0、新条从全透明长出（8s 4 次重挂、34 帧两条并存）。
 - **修**：① 去 `initial={false}`，改首屏前 6 条 `delay = min(i,5)×0.03` 轻 stagger（仍从 `0.85 + y10` 起步）；
   ② `ui/scroll-area.tsx` 新增可选 `viewportRef`（真正的滚动元素是 Radix Viewport）；新增 `pages/drafts/discuss-follow.ts`（`isNearBottom` 24px 阈值 / `countNewRows` / `maxRowId` + 6 例单测）——贴底自动跟随，翻历史时浮出可点「N 条新留痕 ↓」（钉在滚动区右上角：`DrawerBody` 自身可滚，钉底部会被裁一半）；切进 tab 且讨论在跑时先 `behavior:'auto'` 落到底；
-  ③ 状态条 `key` 只跟 `debate.state`，入场改 `opacity 0.85 / y-4`、去掉高度动画（DESIGN §8.3 规则 2/3）。
+  ③ 状态条 `key` 只跟 `debate.state`，入场改 `opacity 0.85 / y-4`、去掉高度动画。
 - **实现坑**：本项目 Radix `TabsContent` 比这一层晚一个 commit 才挂内容，`[tab]` 的 effect 里 `ref.current` 与 DOM 都还是 `null`（之后不再重跑）→ 滚动监听改用**回调 ref**。
-- **实测**：探针全绿（入场 21 动画帧 / 首帧 0.85 / 落定 `1 none`；8s 内状态条 0 重挂、0 节点替换、0 双条；新留痕自动进可视区；翻历史 `scrollTop` 13 不被抢、提示「2 条新留痕 ↓」点击后落到底且提示消失）；规范补进 DESIGN §8.2/§8.4/§8.5。
+- **实测**：探针全绿（入场 21 动画帧 / 首帧 0.85 / 落定 `1 none`；8s 内状态条 0 重挂、0 节点替换、0 双条；新留痕自动进可视区；翻历史 `scrollTop` 13 不被抢、提示「2 条新留痕 ↓」点击后落到底且提示消失）。
 - **第二轮（作者反馈「还是一样的没有动画，从编辑 tab 手动切到讨论 tab 就没有动画」）**：
   ① **真凶之一**：作者用的是后端托管的 `/v2` 生产包，而页面加载的入口 `index-DN48QJlf.js` **在新 dist 里已不存在**——
-  SPA 不会自己重新拉包，所以改动根本没生效（已重新 `vite build`；见 DESIGN §8.5 新增的「必须在作者实际入口验」）；
-  ② **入场确实太轻**：第一版单条 `softIn`（0.85→1 + y 10，0.24s）逐帧截图确认「肉眼分辨不出」→ 改回 §8.2 标准列表令牌
+  SPA 不会自己重新拉包，所以改动根本没生效（已重新 `vite build`）；
+  ② **入场确实太轻**：第一版单条 `softIn`（0.85→1 + y 10，0.24s）逐帧截图确认「肉眼分辨不出」→ 改回标准列表令牌
   `listVariants` + `itemVariants`（0→1 + y 14，0.34s，stagger 0.045），与草稿页卡片墙同一套观感（40 个动画帧、32 帧在淡入；
   点下去 55ms 整列还在淡入、188ms 落定）；
   ③ 受控 `Tabs` 带来的行为差异：关闭抽屉时显式把 tab 复位回「编辑」。
@@ -396,7 +395,7 @@
   （`opacity` 恒 0.25）；同一组件在草稿页卡片上（没有那层 Presence）有 87/109 帧在动。给点补显式 `initial` **兜不住**（实测仍冻）。
 - **修**：① 去掉状态条那层 `initial={false}`（顺带让状态条自己的入场动画生效）；② `ThinkingDots` 改成**纯 CSS 关键帧**
   （`index.css` 的 `@keyframes thinking-dot` + `.thinking-dot`，参数与原 framer 版一致：0.9s / ease-in-out / 0.15s 错峰），
-  「在跑」的唯一可见证据不再依赖调用方的 framer 上下文（R-202/§8.6）。
+  「在跑」的唯一可见证据不再依赖调用方的 framer 上下文（R-202）。
 - **实测**：`/v2` 上草稿页卡片 92 帧 / 抽屉 78 帧均有不同 transform+opacity；讨论 tab 探针仍全绿。
 
 
@@ -428,7 +427,7 @@
 > 作者：「页面上很多功能调用接口都在后台计算，但我切换页面回来，发现前端没有动画了，但实际上还没执行完，会让人误解已经执行完了」。
 > 「所有非实时返回的结果，该有的动画都需要有，保持动画美观流畅，不然容易误导用户」。
 
-- **规范固化（先做）**：把该要求写进 `AGENTS.md`（工程标准 + 反问清单第10项）、`docs/DESIGN.md §8.6`、`docs/WORKFLOW.md`（反问+DoD）、`docs/PRD.md`、`docs/DECISIONS.md D-042`；**不满足 = 功能不算完成**。
+- **规范固化（先做）**：把该要求写进 `AGENTS.md`（工程标准 + 反问清单第10项）、`docs/DECISIONS.md D-042`；**不满足 = 功能不算完成**。
 - **根因**：前端多数「进行中」用组件本地 `useState`，切页卸载即丢；部分页面（博主对标）挂载时查了 running 任务却 `void` 丢弃；同步长接口（内容机会/角度/转写补齐/单键优化）切页后结果还会丢。
 - **方案**：`background_tasks` 为唯一事实源；前端全局 `ActiveWorkProvider`（挂载回扫 + SSE `task.update` 实时 + 10s 轮询兜底）+ 顶栏「进行中 N」指示器；8 个同步慢接口转后台任务，结果落 `task.result` 回填。
 - **后端**：`core/task_meta.py`（`KIND_LABELS`/`target`，列表与通知共用）；`TaskOut` 增 `label/target`；`/api/tasks` 支持多状态（running+pending 按 created_at 正序）；SSE `task.update` 带 `kind/label/target`；`find_running_task` 同 scope 去重。转换：`benchmark_prepare`/`opportunity_clusters`/`opportunity_weekly`/`opportunity_gap`/`draft_angles`/`prompt_optimize`/`hot_refresh`/`publish_backfill`（快读接口保持同步）。
@@ -686,9 +685,7 @@
   **修复**：入场改 `opacity 0.85 → 1` + `y 8 → 0`、0.22s（位移继续表达"新内容进来了"）。实测切换帧 0.85、
   约 100ms 落定 1.00，无空白帧。
 - **② 写进文档（本次交付物）**：`AGENTS.md` 反问清单加第 9 条「**动效必问**」、工程标准加「**表现力（强制）**」、
-  交付前自测加**动效点检**；`docs/DESIGN.md` 新增 **§8 前端动效规范（强制）**（令牌表 / 必须有的动效清单 /
-  三条硬规则：不能省、切换类禁止从 `opacity:0` 起步且首帧 ≥0.6、不改布局且必须收口到 `1/none` /
-  已踩反例 / rAF+CDP 点检方法）；`docs/WORKFLOW.md` DoD 加「动效点检」；`docs/PRD.md` §3.8 注明动效为强制项。
+  交付前自测加**动效点检**
 - **验证**：无头 rAF 采样脚本工作台 `0.85→0.90→0.94→0.97→1.00`、AI 设置 `0.85→0.86→0.95→0.97→1.00`，
   8 页点检 0 页面错误；`vitest` 新增「入场首帧不得全透明」断言（锁死这条规则）；`scripts/verify.sh` 全绿；服务保持运行。
 
@@ -790,8 +787,7 @@
 
 - `frontend/`（Vue 3 + Naive UI）标记**废弃**：只读保留（生产挂根路径兜底），禁止改代码/加功能/修 bug；
   `frontend_v2/`（React）成为**默认前端**，「启动项目 / 修改项目」一律指它（dev 3000 / 生产 /v2）。
-- 标注：`AGENTS.md`（技术栈 + 目录速览 + 服务运行端口改 3000）、`README.md`（运行命令）、
-  `docs/QUICKSTART.md`（启动命令改 frontend_v2）、`docs/PRD.md`、`docs/ARCHITECTURE.md`（前端行）。
+- 标注：`AGENTS.md`（技术栈 + 目录速览 + 服务运行端口改 3000）、`README.md`（运行命令）、`docs/ARCHITECTURE.md`（前端行）。
 - 老前端暂不删除；verify.sh 保留其 lint/build 防腐，后续下线/删除另立需求。
 - 验证：`scripts/verify.sh` 全绿；服务保持运行（8000/3000）。
 
@@ -1078,7 +1074,7 @@
   前端新增 `composables/rewrite.js`（发起 + 轮询，状态模块级跨页保留）+ `components/RewriteDiffModal.vue`
   （博主对标页与素材库共用的原文/洗稿对照弹窗，消除重复弹窗代码）；
   `MaterialCard` 云端卡与本地卡「同步」旁、「TranscribeSection」「已转写」旁加「洗稿」（仅非主博主素材）。
-- **文档**：PRD §3.2/§3.3/§3.5、DESIGN（benchmark.py/composables/组件）、API.md（+1 路由，共 124）、
+- **文档**：API.md（+1 路由，共 124）、
   milestones（M141）、requirements/R-152。
 - **验证**：`scripts/verify.sh` 全绿（ruff + mypy + pytest **331 例**（新增 11 例：前2+最新/重叠顺延/有文案优先/
   最新补转写/来源解析与主博主编拒/接口三态）+ 前端 lint 0 error + build + 文档一致 29 表/124 路由）；
@@ -1150,7 +1146,6 @@
 - **已知限制**（不改行为，仅留档）：行内 HTML（如 `<br>`）会被 Markdown 序列化转义成 `&lt;br&gt;`；
   历史稿中无此内容，`markdown-it` 也一直是 `html:false`。
 - 门禁：`scripts/verify.sh` 全绿（ruff + mypy + pytest **314 例** + 前端 lint 0 error + 构建 + 文档一致性 29 表/123 路由）。
-- 顺带把 R-149 遗漏的 `DESIGN.md` 前端页面清单同步（去掉已下线的 `RequirementsView` / `/requirements`）。
 
 ## [M138 / R-149] 2026-09-12 — 下线「需求管理」网页（保留需求归档与 AI 查需求工具）
 > 作者：「需求管理这个菜单不用了」。按询问确认的范围 **A（正式下线网页）** 实施，沿用 R-136 下线复盘时
@@ -1163,8 +1158,7 @@
 - **保留**：`requirements/R-xxx.md` + `README.md`（工作流事实源，AGENTS.md 强制、`verify.sh` 校验、
   `backup.sh` 快照）、AI 对话的 `list_requirements` 工具（问「R-146 是什么需求」仍能答），
   以及 R-148 的标题清洗与「真实归档全量」护栏（AI 读归档同样受益）。
-- 口径同步：`docs/API.md` 删 4 条路由（**127 → 123**，`check_doc_consistency.py` 实测一致）、
-  PRD 的页面清单与「事实源」描述、PRODUCT 的能力表、milestones。
+- 口径同步：`docs/API.md` 删 4 条路由（**127 → 123**，`check_doc_consistency.py` 实测一致）、milestones。
 - 死代码检查：全仓无 `RequirementsView` / `api/requirements` / `next_requirement_id` 残留引用。
 - 测试：删掉随页面一起消失的 2 条页面样式契约用例；总数 **315 例**；verify 全绿。
 - 须知：下线后**网页不能再登记/改状态**；新需求按 AGENTS.md 既定流程由 AI 直接写入归档文件（不受影响）。
@@ -1318,8 +1312,7 @@
   用快照建库 → 跑 `init_db()` → 断言「模型每一张表、每一列都存在」。**漏写迁移今后会直接红。**
 - **D**：新增 `schema_migrations` 表（28 张）+ `record_migration` / `migration_status` / `ensure_baseline`；
   首次运行写基线 `baseline_pre_r144`；启动日志打印「结构自检通过：N 张表；库结构版本=…」。
-- 文档：`docs/QUICKSTART.md` 新增 §8「NAS 部署 + 增量上线 runbook」（改表/改字段模板、生产库副本演练、备份→升级→回滚顺序）；
-  `docs/DESIGN.md` 记结构机制与两个坑；`AGENTS.md` 技术栈同步；`docs/DATABASE.md` 27→28 张 + `schema_migrations` 章节。
+- 文档：`AGENTS.md` 技术栈同步；`docs/DATABASE.md` 27→28 张 + `schema_migrations` 章节。
 
 **验证（都是真实执行）**
 - **用真实生产库副本（61MB）演练老库升级**：`init_db()` 后结构自检通过、28 张表、库结构版本=`baseline_pre_r144`。
@@ -1384,7 +1377,6 @@
 - 各步预算抽成具名常量（`debate.BUDGET_INITIAL/BUDGET_CRITIQUE/BUDGET_REVISE`），并新增
   `tests/test_r142_thinking_budget.py` **校准护栏**：厂家下限与各步预算低于「实测最坏 8023 tokens × 1.2 余量」直接判红
   —— 护栏上线即抓到 DeepSeek 下限 8000 比实测最坏值还低 23 tokens，已一并抬到 **12000**（Kimi 对齐）。
-- `docs/DESIGN.md` 记录量测表 + 再校准方法 + 「为什么不干脆去掉 max_tokens」的评估结论。
 
 **验证**
 - 评审步骤按新预算连跑 4 次：正文 984 / 681 / 881 / 955 字，**0 次截断**（旧预算下约一半被截断）。
@@ -1540,7 +1532,7 @@
 - **复盘 ABCD 正式下线**（API/页面已在 R-097 删除）：删除 `services/review.py`、`ReviewReport` 模型与 `review_reports` 表（幂等迁移）、chat 的 `get_review_report` 工具、
   以及 prompt_service/prompt_contract/prompt_eval 中的 review 引用；**赛道雷达保留**并迁到 `services/metrics.radar`。
 - 删除 `services/metrics.py` 中无调用方的 `upsert_snapshot/import_snapshots/fetch_daily/series_for_video`。
-- 文档口径统一：PRD/ARCHITECTURE/DESIGN/README/QUICKSTART/AGENTS 更正「数据看板与复盘（已下线）」、提示词候选（手动）、27 张表、views 10、top15、pytest 183、inbox 路径；
+- 文档口径统一：ARCHITECTURE/README/QUICKSTART/AGENTS 更正「数据看板与复盘（已下线）」、提示词候选（手动）、27 张表、views 10、top15、pytest 183、inbox 路径；
   `API.md`/`DATABASE.md` 头注由「自动生成」改为「人工维护」；删除 milestones 重复的 M117 行。
 - **门禁增强**：新增 `scripts/check_doc_consistency.py`（校验表数量/表名 + 路由数量/每条路由是否收录）并接入 `verify.sh`；实测 27 张表 / 122 个路由一致。
 
@@ -1780,7 +1772,7 @@
 - 测试：`tests/test_core.py`（纯逻辑，离线可跑）+ `tests/test_services.py`（mock 外部依赖）
 
 ## [M0] 2026-09-01 — 项目脚手架 + 自描述体系 + 需求归档
-- AGENTS.md / docs（PRD、ARCHITECTURE、WORKFLOW、DECISIONS、milestones）/ requirements（R-001~R-014）
+- AGENTS.md / docs（ARCHITECTURE、DECISIONS、milestones）/ requirements（R-001~R-014）
 - scripts/verify.sh 质量门禁；Dockerfile / docker-compose / .env.example / README / update.sh
 
 ## [M6] 2026-09-03 — 体验升级：视觉重构 + 素材库多选/封面 + AI 对话会话化 + Markdown 写作（R-015~R-018）
@@ -1833,7 +1825,6 @@
 
 ## [M13] 2026-09-05 — 规划：平台数据/博主管理/选题池/写稿增强（R-027~R-030，未动业务代码）
 - 需求登记并澄清定稿：TikHub 数据源、多主博主+对标、选题池三路（热点/主评论/对标评论）、8 项写稿体验增强（requirements/R-027~R-030，状态已确认）
-- PRD 更新：§3.1/§3.3/§3.4/§3.5/§3.6 + 新增 §3.10（博主与对标）/§3.11（平台数据同步）/§3.12（写稿增强）；§4 数据流与 §5 选型表、§6 数据模型、§7 验收同步
 - DECISIONS 新增 D-026~D-030；里程碑新增 M13 任务拆分
 - 待作者确认实施计划后开工；首个动作 = 备份并清库（仅数据库，保留本地文件）
 
@@ -1983,9 +1974,7 @@
 - 删除素材时一并删除本地封面文件
 
 ## [M41 / R-059] 2026-09-05 — 文档体系
-- docs/PRODUCT.md：全部功能产品手册（模块+流程+验收主线）
 - docs/ARCHITECTURE.md：重写为详细架构（技术栈/进程/模块/ER/配置/部署）
-- docs/DESIGN.md：开发设计（API/异步/定时/ASR/同步/生成算法/讨论/复盘/护栏）
 - 全部含 Mermaid 流程图
 
 ## [M42 / R-060] 2026-09-05 — 文档体系 v2
@@ -2004,7 +1993,7 @@
 ## [M43 / R-061 批次 B 一期] 2026-09-05 — 性能与收敛
 - 生成风格画像文本加入进程内缓存（素材数量/字数变化才重算，输出一致）
 - 作品最新统计预取收敛为 works_service.latest_stats_map（works 列表与 platform 帖子列表复用，消除重复实现）
-- 文档同步：重新生成 API.md（旧 bind-link 已下线）；ARCHITECTURE/DESIGN 定时任务补 04:00 清理；DATABASE 补运行时索引附录
+- 文档同步：重新生成 API.md（旧 bind-link 已下线）；ARCHITECTURE 定时任务补 04:00 清理；DATABASE 补运行时索引附录
 
 ## [M43 / R-061 批次 B 二期] 2026-09-05 — 检索缓存与收敛
 - TF-IDF 风格样本检索索引进程内缓存（素材/指标/反馈/草稿版本变化才重建，结果一致）
@@ -2067,7 +2056,7 @@
 ## [M43 / R-061 收口] 2026-09-05 — 文档同步收口
 - 状态更新：A/B/C/D-1 完成；D-2（tags 表）/D-3（raw 归档）评估后暂缓
 - DATABASE 附录：ux_platform_posts_local_platform 唯一部分索引 + __cloud__ 占位命名约定
-- DESIGN/PRD/milestones/需求索引同步
+- milestones/需求索引同步
 
 ## [fix] 2026-09-05 — 平台发布时间时区修复（时间线与发布时间对不上）
 - 根因：平台时间戳用 utcfromtimestamp 存成 UTC，界面按北京时间展示导致凌晨发布差一天
@@ -2161,7 +2150,7 @@
 ## [M53 / R-071] 2026-09-06 — 全量重写项目文档（API/DATABASE 自动生成 + 各文档按代码校准）
 - docs/API.md：改由 FastAPI OpenAPI 自动生成（92 路由，含方法/路径/标签/参数/请求体/返回），不再手写过期内容
 - docs/DATABASE.md：改由 SQLAlchemy 模型元数据自动生成（26 表 schema + 索引/唯一/外键/关系）+ 人工注释
-- 按代码重写/校准：AGENTS.md、README.md、PRD、PRODUCT、ARCHITECTURE（定时任务以 scheduler.py 为准）、DESIGN（代码级地图）、milestones（M0–M52 + 待排期）、WORKFLOW、DECISIONS（整理 D-001~D-037）、QUICKSTART、GLOSSARY、FAQ
+- 按代码重写/校准：AGENTS.md、README.md、ARCHITECTURE（定时任务以 scheduler.py 为准）、milestones（M0–M52 + 待排期）、DECISIONS（整理 D-001~D-037）、QUICKSTART、GLOSSARY、FAQ
 - 修正关键事实：数据目录由 .env 指向 echo_resource（非仓库 data/）、模式全部 real/aliyun、top20、评论 Top50、同步进度条、测试数 53、R-061 未用 Alembic 等
 - 自测：verify.sh 全绿
 

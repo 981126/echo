@@ -30,7 +30,7 @@
   - 无留痕 → 「暂无讨论记录」处改为 **【讨论】按钮**。
   - 有留痕 → 列表底部 **【重新讨论】按钮**。
   - 运行中按钮禁用 + 沿用 `debate-status` 轮询显示「⏳ …」；完成后自动刷新弹窗内的标题/封面字/正文/标签/原文案与列表，【原文对照】展示「原文 vs 讨论后」。
-- **文档**：PRD / DESIGN / API.md(+1 路由) / CHANGELOG / milestones / requirements 索引。
+- **文档**：API.md(+1 路由) / CHANGELOG / milestones / requirements 索引。
 
 ## 不包含
 - 不改对标洗稿页的洗稿（仍走 `run_rewrite_debate` 新建草稿）。

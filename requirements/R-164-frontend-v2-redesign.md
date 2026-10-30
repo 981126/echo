@@ -31,7 +31,7 @@
   TanStack Query · openapi-typescript 生成类型客户端 · TipTap React · lucide-react · sonner · vitest。
   9 页：登录/主页/素材库（卡片墙+右侧抽屉）/脚本工作台/博主管理/博主对标/人设档案/AI 设置/AI 对话。
 - **后端最小改动**：`main.py` 挂 `/v2` 静态目录；`verify.sh` 增 `frontend_v2` 门禁（lint+tsc+vitest+build）。
-- **文档**：PRD/ARCHITECTURE/CHANGELOG/milestones/AGENTS.md/API.md 同步。
+- **文档**：ARCHITECTURE/CHANGELOG/milestones/AGENTS.md/API.md 同步。
 
 ## 不包含
 - 不改后端任何业务接口。

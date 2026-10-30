@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""文档一致性检查（R-136）：DATABASE.md 表数量、API.md 路由数量与实际代码是否一致。
+"""文档一致性检查（R-136）：DATABASE.md 表数量与实际代码是否一致；API.md 存在时校验路由。
 
 用法（仓库根目录）：`PYTHONPATH=backend python3 scripts/check_doc_consistency.py`
 退出码：0=一致；1=不一致（会打印差异，供 verify.sh 判定门禁）。
@@ -43,25 +43,27 @@ def main() -> int:
         if section not in tables and section not in {"表总览"}:
             problems.append(f"DATABASE.md 有已不存在的表章节：{section}")
 
-    # ---------- 路由 ----------
+    # ---------- 路由（docs/API.md 已随文档精简删除，仅当文件存在时校验） ----------
     spec = app.main.app.openapi()
     paths = spec["paths"]
     operations = sum(len(v) for v in paths.values())
-    api_md = (ROOT / "docs" / "API.md").read_text(encoding="utf-8")
-    m2 = re.search(r"共\s*(\d+)\s*个路由", api_md)
-    if not m2:
-        problems.append("API.md 找不到「共 N 个路由」")
-    elif int(m2.group(1)) != operations:
-        problems.append(f"API.md 写 {m2.group(1)} 个路由，OpenAPI 实际 {operations} 个 operation")
-    documented = set()
-    for method, path in re.findall(r"^### (GET|POST|PUT|PATCH|DELETE) (\S+)$", api_md, flags=re.M):
-        documented.add((method, path))
-    for path, item in paths.items():
-        for method in item:
-            if method.upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-                continue
-            if (method.upper(), path) not in documented:
-                problems.append(f"API.md 缺少路由：{method.upper()} {path}")
+    api_md_path = ROOT / "docs" / "API.md"
+    if api_md_path.exists():
+        api_md = api_md_path.read_text(encoding="utf-8")
+        m2 = re.search(r"共\s*(\d+)\s*个路由", api_md)
+        if not m2:
+            problems.append("API.md 找不到「共 N 个路由」")
+        elif int(m2.group(1)) != operations:
+            problems.append(f"API.md 写 {m2.group(1)} 个路由，OpenAPI 实际 {operations} 个 operation")
+        documented = set()
+        for method, path in re.findall(r"^### (GET|POST|PUT|PATCH|DELETE) (\S+)$", api_md, flags=re.M):
+            documented.add((method, path))
+        for path, item in paths.items():
+            for method in item:
+                if method.upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                    continue
+                if (method.upper(), path) not in documented:
+                    problems.append(f"API.md 缺少路由：{method.upper()} {path}")
 
     # ---------- 需求文档 ↔ 开发设计文档成对检查（R-237 起强制） ----------
     # 历史需求（R-001~R-236）只登记了需求、没有开发设计，不追溯；从 R-237 起两份文档缺一不可。
@@ -83,7 +85,8 @@ def main() -> int:
     if problems:
         print("==> [docs] 文档与代码不一致：")
         return _fail(problems)
-    print(f"==> [docs] 一致：{len(tables)} 张表 / {operations} 个路由 / 需求与设计文档成对")
+    api_note = f"{operations} 个路由" if api_md_path.exists() else "API.md 已删除（跳过路由校验）"
+    print(f"==> [docs] 一致：{len(tables)} 张表 / {api_note} / 需求与设计文档成对")
     return 0
 
 

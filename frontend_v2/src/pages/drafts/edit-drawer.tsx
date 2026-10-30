@@ -1052,7 +1052,7 @@ export function DraftEditDrawer({
                 />
                 <div className="relative">
                   <ScrollArea className="max-h-[52vh]" viewportRef={attachViewport}>
-                    {/* R-206：用 §8.2 的标准列表入场（`listVariants` + `itemVariants`，与草稿页卡片墙同一套观感）。
+                    {/* R-206：用标准列表入场（`listVariants` + `itemVariants`，与草稿页卡片墙同一套观感）。
                         原先外层 `initial={false}` 把「切进 tab 时已经在的这批留痕」的入场动画整个吃掉（实测 110 帧 0 帧在动），
                         后来改成单条 `softIn`（0.85→1 + y10）又太轻——作者反馈「手动切到讨论 tab 没有动画」，逐帧截图确认肉眼分辨不出。
                         注意：这里**不能**再用 `initial={false}`，否则又变回「一进 tab 就全在」。 */}

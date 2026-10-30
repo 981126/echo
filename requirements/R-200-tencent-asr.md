@@ -29,7 +29,7 @@
 ## 做法
 - 后端：`config.py` 加腾讯配置与白名单；`media_tools.extract_audio_compact`（16k 单声道 mp3，按目标大小自适应比特率）；新增 `tencent_asr.py`（CreateRecTask + DescribeTaskStatus 轮询，结果去时间戳）；`transcription.py` 增 `tencent` 路由；`model_settings` 增引擎列表与校验、mode 感知默认模型；`ingest.py` 为腾讯落 `asr_model`。
 - 前端：AI 设置服务商加「腾讯云」，腾讯/硅基流动显示各自引擎下拉，切换时重置默认并带入场动效；编辑页来源显示「腾讯云」；修复 Key 保存字段。
-- 文档：PRD/ARCHITECTURE/DESIGN/DECISIONS(D-040)/API/CHANGELOG/AGENTS/QUICKSTART/FAQ。
+- 文档：ARCHITECTURE/DECISIONS(D-040)/API/CHANGELOG/AGENTS/QUICKSTART/FAQ。
 
 ## 排期
 M189

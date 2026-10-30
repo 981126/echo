@@ -5,7 +5,7 @@
 - **原文摘要**: 素材库中悬浮的【合并】按钮改成「多选」；点开后可以多选做 删除、合并、同步。
 - **状态**: ✅ 已完成
 - **排期**: M61（已完成）
-- **关联**: PRD §3.2（素材库）、VideosView、works merge/split、删除(videos/works)、R-067/R-070/R-077 同步链路
+- **关联**: VideosView、works merge/split、删除(videos/works)、R-067/R-070/R-077 同步链路
 
 ## 现状（代码事实）
 - 悬浮 `.merge-float`：现为「合并」按钮 → 进入合并模式，仅云端卡可勾选，操作仅「合并所选（≥2）」+「取消」（VideosView.vue）。

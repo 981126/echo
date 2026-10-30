@@ -20,7 +20,7 @@ R-090 只修了本地素材（edit= 深链按 /api/videos/{id} 拉详情），�
   用与素材库同口径的 list_works 返回包含该作品的云端条目（合并作品或单条）。
 - 前端 VideosView 深链：当前列表找不到 post 时，调 by-post 接口拉取该云端条目并直接打开弹窗回显；
   若该帖已转本地（local_video_id）则打开本地编辑。找不到（已删除/账号禁用）才提示。
-- 更新 docs/API.md（新增路由）、CHANGELOG/PRD/里程碑；verify.sh 全绿。
+- 更新 docs/API.md（新增路由）、CHANGELOG/里程碑；verify.sh 全绿。
 
 ## 验收
 - verify.sh 全绿；新接口测试通过；前端 lint/build 通过。

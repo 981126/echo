@@ -24,7 +24,7 @@
 ## 处理方案（已实施）
 - 后端：`POST /api/persona/reject-all`（suggested → rejected）；`POST /api/persona/tags/batch-delete`（按 ids 只删当前博主标签，返回 deleted 数）。
 - 前端 PersonaView：「待确认建议」标题旁加「一键拒绝建议」（type=error + 确认弹窗 + loading）；「已确认档案」加多选模式——右侧中间悬浮按钮（同素材库 .merge-float 样式），进入多选后点行/勾选框选择，悬浮条显示已选数量，支持「删除所选」「取消」；多选时隐藏单行编辑/删除按钮。
-- 文档：PRD/里程碑/CHANGELOG/API.md（92→95 路由）已同步；新增 test_persona_bulk 4 用例。
+- 文档：里程碑/CHANGELOG/API.md（92→95 路由）已同步；新增 test_persona_bulk 4 用例。
 
 ## 验收
 - scripts/verify.sh 全绿；后端接口冒烟通过；前端 lint/build 通过；服务运行中。

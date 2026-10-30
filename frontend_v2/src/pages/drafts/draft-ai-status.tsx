@@ -11,7 +11,7 @@ import { aiKindLabel, type DebateState } from './types'
  *
  * R-206：**入场不能从 `opacity: 0` 起步、也不做高度动画**。讨论进行中这条文案每换一步都会更新，
  * 抽屉里又会按 `state` 重挂——`height: 0 → auto` 会让状态条先空一下、并把它下面的留痕列表
- * 上下顶一次；从全透明起步还会让三点跳动看起来「停了又重来」（见 DESIGN §8.3 规则 2/3）。
+ * 上下顶一次；从全透明起步还会让三点跳动看起来「停了又重来」。
  */
 export function DraftAiStatus({ debate, className }: { debate?: DebateState | null; className?: string }) {
   if (!debate || !debate.state) return null

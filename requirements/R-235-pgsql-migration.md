@@ -25,7 +25,7 @@
    - **安全闸门**：conftest 启动时校验目标库名必须为 `echo_test`（大小写不敏感），指向其它库直接 fail，防止误清 `echo_dev`。
    - CI/本地跑测试需可达 yeah981.cn:15981。
 10. **部署形态**：PG 在 NAS 本机，`docker-compose.yml` 去掉 `ECHO_DB_PATH`，容器靠 `.env` 的 `ECHO_DATABASE_URL` 连接（容器→宿主/NAS 的连通性在 NAS 实机验证）；`scripts/backup.sh` 由 SQLite 热备改为 `pg_dump` 备份；`deploy.sh` 去掉 `echo.db` 存在性检查/备份分支，保留结构自检；`release.sh` 打包拒绝项里的 `echo/data/echo.db` 同步移除。
-11. **文档同步**：`docs/ARCHITECTURE.md`、`docs/DATABASE.md`、`docs/QUICKSTART.md`、`docs/PRD.md`、`docs/milestones.md`、`docs/CHANGELOG.md`；`AGENTS.md` 中 worktree 数据库拷贝等 SQLite 段落列入「待收口文档改动」。
+11. **文档同步**：`docs/ARCHITECTURE.md`、`docs/DATABASE.md`、`docs/milestones.md`、`docs/CHANGELOG.md`；`AGENTS.md` 中 worktree 数据库拷贝等 SQLite 段落列入「待收口文档改动」。
 12. **不做**：Alembic 落地（tech-debt 维持）、JSONB 改造、时区改造、读写分离/连接池调优以外的 PG 特性引入、数据再迁移（作者已完成）。
 
 ## 验收标准

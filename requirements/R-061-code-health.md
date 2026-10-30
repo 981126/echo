@@ -5,7 +5,7 @@
 - **原文摘要**: 1) 检查所有代码，优化点、冗余设计；2) 表结构规划评估与优化。
 - **状态**: ✅ 已完成（A/B/C/D-1 完成；D-2/D-3 暂缓）
 - **排期**: M43（进行中）
-- **关联**: PRD §工程标准、ARCHITECTURE/DESIGN/DATABASE
+- **关联**: ARCHITECTURE/DATABASE
 
 ## 批次划分
 - **A（已完成，本批）**：删除死代码 `core/signature.py` 及测试；下线已无前端使用的旧 `bind-link` 单链接接口；补常用索引（platform_posts.local_video_id / publish_time、videos.platform_post_id、notifications.created_at，幂等）；新增每日 04:00 清理（通知90天/后台任务30天/同步记录60天/平台统计400天）

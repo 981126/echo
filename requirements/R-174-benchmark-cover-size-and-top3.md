@@ -35,7 +35,7 @@
 - **TAB 动画**：`ui/tabs.tsx` 的 `TabsContent` 包一层 `motion.div`（`key=value`，淡入 + y 8px，复用
   `EASE_OUT_EXPO`/0.25s），与全站页面转场风格一致；不做横向滑动，避免与内部列表动效叠加打架。
 - **测试/文档**：`tests/test_r152_benchmark_two_plus_latest.py` 断言改 4 条（含重叠顺延、候选不足、有文案优先）；
-  PRD §3.3 对标页口径、DESIGN `benchmark.py`、API.md、CHANGELOG、milestones 同步；`schema.d.ts` 重新生成。
+  API.md、CHANGELOG、milestones 同步；`schema.d.ts` 重新生成。
 - **验收**：无头探针量封面尺寸（对标 265×199 == 素材库 265×199）；接口冒烟确认每个对标返回 4 条（不足除外）；
   TAB 切换有入场动画（计算样式 opacity/y 变化、且切换后稳定为 1/0）；`scripts/verify.sh` 全绿 + 服务保持运行。
 

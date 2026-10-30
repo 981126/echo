@@ -309,7 +309,7 @@ def resolve_data_policy(db, account) -> AccountDataPolicy
 1. 前置：提交/合并 R-237 → 从 main 建 `feat/r239` worktree（8039/3039、独立库）。
 2. 后端：迁移（enabled 列）→ 策略函数 → creators 凭据接口 + 移除旧路由 → 各收数入口接入 → 失效通知 → 素材库/回填/保鲜（R-238 merged）。
 3. 前端：博主管理编辑弹窗/账号行 → 视频复盘去配置 + 只读状态 → 素材卡播放。
-4. 测试与 verify → 真实冒烟 → 文档同步（API/DATABASE/FAQ/CHANGELOG/milestones/PRD）。
+4. 测试与 verify → 真实冒烟 → 文档同步（API/DATABASE/FAQ/CHANGELOG/milestones）。
 
 ## 6. 新增或修改的表结构
 

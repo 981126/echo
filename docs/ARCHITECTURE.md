@@ -1,6 +1,6 @@
 # ARCHITECTURE — 系统架构总览
 
-> 面向开发者：技术栈、目录分层、外部服务、数据流、运行形态。具体编码规范见 `DESIGN.md`，部署操作见 `QUICKSTART.md`，agent 协作纪律见 `AGENTS.md`，决策原因见 `DECISIONS.md`。
+> 面向开发者：技术栈、目录分层、外部服务、数据流、运行形态。agent 协作纪律见 `AGENTS.md`，决策原因见 `DECISIONS.md`。
 
 ## 1. 技术栈与形态
 
@@ -50,7 +50,7 @@ echo/
 └── scripts/               # verify.sh / deploy.sh / update.sh（兼容入口）
 ```
 
-## 3. 外部服务与适配器（全部真实）
+## 3. 外部服务与适配器
 
 | 外部 | 用途 | 代码 | 关键配置（.env，ECHO_ 前缀） |
 |---|---|---|---|

@@ -1,7 +1,7 @@
 # 关键设计决策（DECISIONS）
 
 > 记录重要技术决策、历史事故与原因，防止后续改坏。不约束当前编码流程，新增决策追加编号 D-xxx。
-> 编码纪律见 `AGENTS.md`，实现细节见 `DESIGN.md`。
+> 编码纪律见 `AGENTS.md`。
 >
 > 编号说明：早期文档存在同号追加（如第二个 D-011/D-017/D-018），本文件用「D-xxx+」表示
 > 追加在同号之后的演进决策，正文以年份标注区分；代码/历史文档引用的 D-023/D-026/D-027/D-028/D-030 均指本文同名条目，未变。
@@ -53,7 +53,7 @@
 - **原因**：项目长期由 AI 维护，可读性与可验证性是可持续前提
 
 ## D-012：需求反问机制（强制）
-- **决策**：新需求必须先过 8 项反问清单（WORKFLOW.md），作者确认后才进 PRD/排期/代码
+- **决策**：新需求必须先过 8 项反问清单，作者确认后才进排期/代码
 - **例外**：线上明显 bug 先定位根因直接修复并登记（2026-09 实践）
 
 ## D-013：视频导入双通道
@@ -159,7 +159,7 @@
 
 ## D-037：API/DATABASE 文档自动生成（R-071，2026-09-06）
 - **决策**：`docs/API.md` 由 FastAPI OpenAPI 生成（92 路由）、`docs/DATABASE.md` 由 SQLAlchemy 模型元数据生成（26 表 + 人工注释），改接口/表结构后重新生成，不手改结构部分
-- **配套**：全量重写 AGENTS/README/PRD/PRODUCT/ARCHITECTURE/DESIGN/milestones/WORKFLOW/QUICKSTART/GLOSSARY/FAQ，以代码为准消除过期/错误表述
+- **配套**：全量重写 AGENTS/README/ARCHITECTURE/milestones/QUICKSTART/GLOSSARY/FAQ，以代码为准消除过期/错误表述
 
 ## D-039：ASR 服务商 .env 切换（R-108，2026-09-07）
 - **决策**：`ECHO_ASR_MODE` 扩为 `mock|aliyun|siliconflow`（沿用 R-068 白名单校验）；`siliconflow_asr.py` 直传 `POST /v1/audio/transcriptions`（模型 `Qwen/Qwen3-ASR-1.7B`，实测可用），视频沿用抽 16k 单声道音轨逻辑、纯音频直传；平台限制单文件 ≤50MB / ≤1 小时，超限明确报错并走现有失败通知，**不自动切换其它服务商**。
@@ -182,7 +182,7 @@
 - **原因**：作者需要腾讯通道且要求 base64 自包含与可选引擎；沿用适配器 + 运行时配置（`app_kv` 保存即生效）不动现有架构。
 
 ## D-042：非实时结果必须可见（R-202，2026-09-29）
-- **决策**：把「所有非实时返回/耗时功能必须有进行中动效、且切页/刷新可恢复」定为**强制规范与 DoD 红线**（AGENTS 工程标准 + 反问清单第10项、DESIGN §8.6、WORKFLOW DoD）。技术落点：后端 `background_tasks` 为**唯一事实源**；新增全局 `ActiveWorkProvider`（挂 `AppShell` 常驻），三段式刷新——**挂载回扫 `GET /api/tasks?status=running,pending` + SSE `task.update` 实时增量 + 10s 轮询兜底**（仅在有进行中任务时开轮询）；顶栏加「进行中 N」指示器；8 个同步长接口转为后台任务，结果落 `task.result`。
+- **决策**：把「所有非实时返回/耗时功能必须有进行中动效、且切页/刷新可恢复」定为**强制规范与 DoD 红线**（AGENTS 工程标准 + 反问清单第10项）。技术落点：后端 `background_tasks` 为**唯一事实源**；新增全局 `ActiveWorkProvider`（挂 `AppShell` 常驻），三段式刷新——**挂载回扫 `GET /api/tasks?status=running,pending` + SSE `task.update` 实时增量 + 10s 轮询兜底**（仅在有进行中任务时开轮询）；顶栏加「进行中 N」指示器；8 个同步长接口转为后台任务，结果落 `task.result`。
 - **推送为什么用 SSE 不用 WebSocket**：现有 `services/events.py` + `GET /api/events`（SSE，15s 心跳）已在用，单向服务端→前端、单进程、断线自动重连，够用且更简单；SSE 不重放断线期间事件，故必须配轮询兜底。
 - **原因**：作者反馈「切页回来动画没了、其实没跑完 → 误以为完成」；同步长接口（LLM/网络）切页后结果还会丢。根因是前端用组件本地 `useState` 表示进行中，卸载即失效。规范与实现都以**服务端状态**为准，不靠画面。
 

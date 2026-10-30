@@ -5,7 +5,7 @@
 - **原文摘要**: 1.切换页面回来后动画不见了，这个进度应该是后端实时推送的；2.动画中间应该有文字，需要知道现在做什么（视频下载中、评论同步中等等）。
 - **状态**: ✅ 已完成
 - **排期**: M63（已完成）
-- **关联**: PRD §3.2、background_tasks/tasks.py、media_ensure、MaterialCard/VideosView、R-077/R-080
+- **关联**: background_tasks/tasks.py、media_ensure、MaterialCard/VideosView、R-077/R-080
 
 ## 方案与实施结论（M63）
 1. 后端进度持久化：`background_tasks` 增加 `note` 列（阶段说明，幂等迁移 R-081）；`/api/tasks` 支持按 `status`/`kind` 过滤；TaskOut 返回 note。

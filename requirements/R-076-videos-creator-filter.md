@@ -5,7 +5,7 @@
 - **原文摘要**: 素材库里面添加博主筛选框，默认查询主博主，可以切换到其他博主。
 - **状态**: ✅ 已完成
 - **排期**: M58（已完成）
-- **关联**: PRD §3.5、videos/works API、R-029
+- **关联**: videos/works API、R-029
 
 ## 处理方案
 1. 后端：GET /api/videos 增加可选 creator_id（默认当前主博主）；/api/works 已有 creator_id 复用

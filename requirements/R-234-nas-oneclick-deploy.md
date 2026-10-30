@@ -5,7 +5,7 @@
 - **原文**: 我需要一个脚本，在nas执行后会自动拉取本项目git最新代码，然后前后端打包成docker部署
 - **状态**: ✅ 代码完成（本地干跑通过；NAS 实机待首次执行）
 - **排期**: M235
-- **关联**: `scripts/deploy.sh`（新）、`scripts/update.sh`（兼容入口）、`docker-compose.yml`、`docs/QUICKSTART.md`、R-145
+- **关联**: `scripts/deploy.sh`（新）、`scripts/update.sh`（兼容入口）、`docker-compose.yml`、R-145
 
 ## 边界与默认行为（2026-10-18 确认）
 
@@ -37,4 +37,4 @@
 - `scripts/deploy.sh`：预检 → git → 备份 → 构建（保留 `echo:previous`）→ `up -d` → 容器 healthcheck 轮询 → 结构自检 → 汇总。
 - `docker-compose.yml`：加 `image: echo:local`（稳定 tag）、`ECHO_DATA_DIR=/app/data` / `ECHO_DB_PATH=/app/data/echo.db`（容器内固定，避免搬 `.env` 踩宿主机路径）、宿主卷 `${ECHO_HOST_DATA_DIR:-./data}:/app/data`。
 - `scripts/update.sh` 降为兼容入口，内部 `exec bash scripts/deploy.sh "$@"`；`SKIP_PULL=1` 仍有效。
-- `docs/QUICKSTART.md` / `docs/PRD.md` / `docs/milestones.md` / `docs/CHANGELOG.md` 同步。
+- `docs/milestones.md` / `docs/CHANGELOG.md` 同步。

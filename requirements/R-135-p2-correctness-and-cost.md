@@ -14,7 +14,7 @@
 2. **预算护栏**：`BudgetExceeded`（RuntimeError 子类）被通用 `except` 吞掉 → 任务仍以 done 收尾报「同步完成」；
    且 `_charge` 在请求**之后**调用，护栏并不真正拦截请求。
 3. **生成模型策略**：`generate_draft` 固定 `DeepSeekClient`，设置的「生成模型策略」只对双模型讨论生效 →
-   每日自动生成、灵感池一键生成、同步生成、回炉、AI 对话生成、提示词自测全部忽略该设置（PRD 写「默认 Kimi」）。
+   每日自动生成、灵感池一键生成、同步生成、回炉、AI 对话生成、提示词自测全部忽略该设置。
 4. **选题池博主隔离**：`TopicIdea.creator_id` 只写不读，`pipeline._comment_candidates` 无 creator 过滤 →
    对标博主评论区的灵感会串进主博主每日生成。
 5. **四维分回流**：`hook/pace/ending/style_score` 只在手动提示词优化语料里用到，生成与人设学习完全不读；

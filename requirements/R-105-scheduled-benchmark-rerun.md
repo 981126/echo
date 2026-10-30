@@ -14,7 +14,7 @@
 ## 实施结论（M88，2026-09-06）
 1. scheduler.py 注册 06:00 每日任务 id=benchmark_rerun_daily；守卫与启动收敛为 services.benchmark.maybe_start_benchmark_rerun（no_owner/no_benchmark/already_running 静默跳过）。
 2. worker 提为 services.benchmark.rerun_worker（api 路由与 scheduler 共用），api/benchmark.py 已复用。
-3. 文档同步（PRD/DESIGN/CHANGELOG/milestones）+ verify.sh 全绿 + 守卫单测 4 项（新增）。
+3. 文档同步（CHANGELOG/milestones）+ verify.sh 全绿 + 守卫单测 4 项（新增）。
 
 ## 原文（作者原话，未改动）
 > 添加定时任务调用【重新对标】功能，在每日生成脚本文案前1小时

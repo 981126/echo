@@ -5,7 +5,7 @@
 - **原文摘要**: 1.全量同步按钮放到同步前20条按钮前面；2.同步前20条按钮改为 同步前10条，并且会同步视频；3.【云端作品】文字改为【作品】。
 - **状态**: ✅ 已完成
 - **排期**: M67（已完成）
-- **关联**: PRD §3.3（博主页同步）、CreatorHeaderRow/CreatorsView、platform_sync.run_sync（daily/initial）、R-070、R-077/R-078 视频补齐
+- **关联**: CreatorHeaderRow/CreatorsView、platform_sync.run_sync（daily/initial）、R-070、R-077/R-078 视频补齐
 
 ## 现状（代码事实）
 - CreatorHeaderRow：主博主行按钮顺序 = 「同步前20条」(daily, top_n 20) → 「全量同步」(initial)。

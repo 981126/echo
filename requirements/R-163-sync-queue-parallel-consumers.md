@@ -38,7 +38,7 @@
   - `db.py`：连接时 `PRAGMA journal_mode=WAL; busy_timeout=30000; synchronous=NORMAL;`。
   - `config.py`：新增并发/限速配置项。
 - **前端**：无需大改（已按 `status=running&limit=50` 轮询，天然支持多任务并行）。
-- **文档**：`.env.example`、PRD、ARCHITECTURE、DESIGN、milestones、CHANGELOG 同步。
+- **文档**：`.env.example`、ARCHITECTURE、milestones、CHANGELOG 同步。
 
 ## 不包含
 - 不改 LLM / 人工生成链路的任务调度。

@@ -5,7 +5,7 @@
 - **原文摘要**: 作者在「阿里云 ASR 与把语音文件直接给大模型解析哪个更便宜」之间比较后选择接入阿里云，提供 ISI AppKey 与阿里云 AccessKey/Secret，要求把视频语音转文字真实跑通（现有 `asr_mode=aliyun` 为占位实现，从未真实联调）。
 - **状态**: ✅ 已完成（2026-09-05 E2E 实调通过）
 - **排期**: M14（已完成）
-- **关联**: PRD §3.1/§3.2、M1、D-004；代码 `backend/app/services/aliyun_filetrans.py` + `core/signature.py`
+- **关联**: M1、D-004；代码 `backend/app/services/aliyun_filetrans.py` + `core/signature.py`
 
 ## 反问与确认（2026-09-05）
 1. **接口选型**：作者提供的是「智能语音交互(ISI)」AppKey，对应 **录音文件识别 FileTrans POP API（4.0 版）**；该接口鉴权需要阿里云 AccessKey 签名（HMAC-SHA1），AppKey 只是服务项目标识 —— 已向作者说明，作者已提供 AccessKey/Secret

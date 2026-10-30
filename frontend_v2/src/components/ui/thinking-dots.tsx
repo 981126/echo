@@ -6,7 +6,7 @@
 // 第一帧（opacity 0.25 / y 0）就再也不动了——生产包实测 98 帧里 transform 与 opacity 各只有 1 种取值、
 // 零个 WAAPI 动画；草稿页卡片上同一组件（没有那层 AnimatePresence）却完全正常。
 // 给点补显式 `initial` 也兜不住（实测仍冻住），所以改成纯 CSS 关键帧：
-// 「正在跑」的状态指示必须无条件动起来（R-202/§8.6），不能依赖调用方的 framer 上下文。
+// 「正在跑」的状态指示必须无条件动起来（R-202），不能依赖调用方的 framer 上下文。
 import { cn } from '@/lib/utils'
 
 export function ThinkingDots({ className }: { className?: string }) {

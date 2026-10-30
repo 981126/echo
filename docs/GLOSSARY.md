@@ -22,7 +22,6 @@
 | 选题池 / 灵感池 | topic_ideas：各平台热点或评论区内容，人工挑选不自动推送（R-028） |
 | 每日流水线 | 每日定时：热点→匹配→生成 ≥3 选题+脚本→入库（幂等，可邮件推送） |
 | ABCD 复盘 | A 报表/B 归因/C 建议/D 赛道方向的复盘报告（review_reports） |
-| 赛道雷达 | 各赛道互动率的雷达式排序（review/radar） |
 | 通知中心 | 右上角铃铛：后台任务完成/失败 + 点击跳转（notifications，R-019） |
 | 同步进度条 | 博主页同步时按 sync_jobs.progress_* 实时显示的进度条（R-070） |
 | access token | 登录令牌（ECHO_ACCESS_TOKEN），请求头 X-Access-Token |

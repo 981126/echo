@@ -3,7 +3,7 @@
 - **日期**: 2026-09-11
 - **状态**: ✅ 已完成
 - **排期**: M126（已完成）
-- **关联**: `backend/app/config.py`、`.env`、`.env.example`、`services/llm.py`、AGENTS/PRD/PRODUCT/DECISIONS
+- **关联**: `backend/app/config.py`、`.env`、`.env.example`、`services/llm.py`、AGENTS/DECISIONS
 
 ## 原文（作者原话，未改动）
 > 将项目中的deepseek换成最新的4.1flash模型
@@ -19,7 +19,7 @@
 1. `.env`（运行时，gitignore）：`ECHO_DEEPSEEK_MODEL=deepseek-flash`。
 2. `backend/app/config.py` 默认值：`deepseek_model = "deepseek-flash"`（无 .env 时也走新模型）。
 3. `.env.example`：同步为 `deepseek-flash`（模板不留旧模型名）。
-4. 文档同步：AGENTS.md 技术栈、PRD、PRODUCT、DECISIONS 注明 DeepSeek 模型为 V4.1 Flash（`deepseek-flash`）。
+4. 文档同步：AGENTS.md 技术栈、DECISIONS 注明 DeepSeek 模型为 V4.1 Flash（`deepseek-flash`）。
 5. **不改**：Kimi 相关配置、`generation_model` 策略（仍默认 Kimi）、base_url、鉴权方式。
 
 ## 不包含
@@ -33,7 +33,7 @@
 
 ## 实施记录（2026-09-11）
 - `.env`（运行时，gitignore）、`.env.example`、`backend/app/config.py` 默认值三处模型名统一为 **`deepseek-flash`**；仓库内已无 `deepseek-chat` 残留。
-- 文档同步：AGENTS.md 技术栈、PRD 生成模型说明、PRODUCT、DECISIONS 均注明 DeepSeek 侧为 V4.1 Flash（`deepseek-flash`）。
+- 文档同步：AGENTS.md 技术栈、DECISIONS 均注明 DeepSeek 侧为 V4.1 Flash（`deepseek-flash`）。
 - **真实调用验证**（共 3 次）：
   1. JSON 模式冒烟：`{"ok": true}` 正常解析；
   2. 长输出：334 字符 JSON、script 286 字，解析通过（确认 V4 的 thinking 模式未把 token 吃光、无空正文）；

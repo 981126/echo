@@ -59,4 +59,4 @@
 - [ ] `scripts/verify.sh` 全绿（ruff + mypy + pytest + 前端 build + 文档一致性）。
 - [ ] 同步接口冒烟通过（mock 或 real 均可）。
 - [ ] 服务保持运行（8000/3000）。
-- [ ] 文档同步更新：PRD、ARCHITECTURE、DESIGN、CHANGELOG、API.md（如接口有变）、DATABASE.md（如表/索引有变）。
+- [ ] 文档同步更新：ARCHITECTURE、CHANGELOG、API.md（如接口有变）、DATABASE.md（如表/索引有变）。

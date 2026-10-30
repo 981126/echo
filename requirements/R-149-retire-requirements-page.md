@@ -13,7 +13,7 @@
   + `services/requirements_service.py` + `core/requirement_file.py`。
 - **AI 对话依赖它**：工具 `list_requirements` → `requirements_service.list_requirements()`（读归档，用户会用「上次那个需求是啥」这类提问）。
 - **归档不能删**：`requirements/R-xxx.md` + `README.md` 是工作流事实源（AGENTS.md 强制、`verify.sh` 校验 README 存在、`backup.sh` 会快照）。
-- **文档/测试**：`docs/API.md` 有 4 条 requirements 路由；`docs/PRODUCT.md`/`PRD.md` 提到该页；测试只有 R-148 那条（断言 `RequirementsView.vue` 的布局契约）。
+- **文档/测试**：`docs/API.md` 有 4 条 requirements 路由；测试只有 R-148 那条（断言 `RequirementsView.vue` 的布局契约）。
 
 ## 建议范围（等作者确认）
 **A. 正式下线网页（推荐）**
@@ -23,7 +23,7 @@
    删 `core/requirement_file.py` 的 `next_requirement_id` / `STATUSES`（只被创建接口用）—— 即 R-136 的「不留死代码」口径；
 3. **保留**：`requirements/` 归档与 `README.md`、`parse_requirement_file`、`list_requirements`（AI 对话工具继续用），
    以及 R-148 的标题清洗与护栏（AI 读归档时同样受益）；
-4. `docs/API.md` 删掉 4 条路由（路由数 127 → 123）、`docs/PRD.md`/`PRODUCT.md` 更新口径、CHANGELOG 记录下线。
+4. `docs/API.md` 删掉 4 条路由（路由数 127 → 123）、CHANGELOG 记录下线。
 
 **B. 只摘菜单**（不建议）：页面与 4 条接口留在仓库里成为无法到达的死代码，正是 R-136 清理过的问题。
 

@@ -50,7 +50,7 @@ C 用生产库结构快照做 schema 兼容性测试；D 加轻量 `schema_migra
 2. 启动自检在真实库副本上验证：故意 `DROP COLUMN` 后 `ok=False` + 日志 + 站内通知 + 落 `app_kv`，且不影响启动 ✅
 3. 老库升级测试通过（基线快照 → `init_db()` → 零缺失表/列），并在**真实生产库副本**上演练通过 ✅
 4. `schema_migrations` 幂等、`migration_status()` 可读（库结构版本=`baseline_pre_r144`）✅
-5. `docs/DATABASE.md` 28 张 + `docs/QUICKSTART.md` §8 增量上线 runbook ✅
+5. `docs/DATABASE.md` 28 张 +  增量上线 runbook ✅
 6. `scripts/verify.sh` 全绿（263 例）✅
 7. ⚠ 未做：本机 Docker daemon 未运行，镜像构建未在本地实测（已写进 CHANGELOG 待 NAS 首次构建确认）
 
@@ -59,5 +59,5 @@ C 用生产库结构快照做 schema 兼容性测试；D 加轻量 `schema_migra
 2. 启动自检能检出「模型有列、库里没有」，写日志 + 站内通知，且不阻塞启动（有测试）；
 3. schema 兼容性测试：拿基线快照建库 → `init_db()` → 无缺失表/列（有测试）；
 4. `schema_migrations` 记录迁移且幂等，`migration_status()` 可读（有测试）；
-5. `docs/DATABASE.md` 表数同步为 28、`docs/QUICKSTART.md` 补「增量上线 runbook」；
+5. `docs/DATABASE.md` 表数同步为 28；
 6. `scripts/verify.sh` 全绿；并用**真实生产库副本**演练一次「老库升级」。

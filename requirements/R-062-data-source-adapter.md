@@ -5,7 +5,7 @@
 - **原文摘要**: tikhub 只是其中一个数据来源，接口要做适配器模式，后续可能直接切数据来源，每个第三方接口都可以单独替换。
 - **状态**: ✅ 已完成
 - **排期**: M44（已完成）
-- **关联**: PRD §3.10、R-027、ARCHITECTURE §3
+- **关联**: R-027、ARCHITECTURE §3
 
 ## 处理结论（2026-09-05）
 1. 新增 `services/platform/base.py`：`DataSource` 统一接口（fetch_profile/fetch_user_posts/fetch_post_stats/fetch_comments/get_balance）+ `PostData/ProfileData` 数据契约（自 tikhub 移入并 re-export 兼容）

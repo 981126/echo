@@ -364,4 +364,4 @@ creator_metrics_for_post(db, account, post, client=None) -> dict
 3. 前端：`LatestStat` 类型 + 卡片播放展示。
 4. 测试：pytest + 前端 lint/build + `scripts/verify.sh` 全绿。
 5. 真实冒烟：同步 1 条本人抖音作品 → 播放正确；公开同步不覆盖；回填覆盖比例；Cookie 失效降级；素材库页面点检。
-6. 文档：更新 `docs/API.md`、`docs/FAQ.md` 中“抖音播放为 0”的口径说明；如有行为变化同步 `docs/DESIGN.md`；`docs/CHANGELOG.md`、`docs/milestones.md` 由收口人更新（本设计不预先修改）。
+6. 文档：如有行为变化同步 `docs/CHANGELOG.md`、`docs/milestones.md` 
