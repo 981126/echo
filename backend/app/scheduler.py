@@ -174,8 +174,7 @@ def _warm_opportunity_caches() -> None:
     try:
         from .services import opportunity
 
-        opportunity.ledger(db)
-        opportunity.topic_attribution(db)
+        opportunity.prewarm(db)
     except Exception:  # noqa: BLE001 预热失败不影响请求
         db.rollback()
         log.warning("机会缓存预热失败（best-effort，忽略）", exc_info=True)

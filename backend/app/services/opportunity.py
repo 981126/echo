@@ -32,6 +32,29 @@ _INFLIGHT: dict[str, threading.Event] = {}
 _CACHE_LOCK = threading.Lock()
 
 
+def prewarm(db: Session) -> None:
+    """R-240 复核修复：在 TTL 过期**前**主动重算并写缓存（真正预热）。
+
+    原实现（scheduler 调 `ledger()`/`topic_attribution()`）只在缓存已过期时才重算，
+    而预热 job 每 60s 才跑一次 → 每个 TTL 周期仍有 ≤60s 的冷窗口（首个请求仍等 ~0.6s）。
+    这里按「缓存已过半 TTL」才重算，保证请求路径始终命中热态，同时不做无谓重复计算。
+    只读、best-effort：异常由调用方（scheduler）吞掉记日志。
+    """
+    cid = _cid(db) or 0
+    targets = (
+        (f"led:{cid}:50", _CACHE_TTL, lambda: _ledger(db, 50)),
+        (f"attr:{cid}:15", 300.0, lambda: _topic_attribution(db, 15)),
+    )
+    now = time.monotonic()
+    for key, ttl, fn in targets:
+        hit = _CACHE.get(key)
+        if hit is not None and now - hit[0] < ttl / 2:
+            continue
+        value = fn()
+        with _CACHE_LOCK:
+            _CACHE[key] = (time.monotonic(), value)
+
+
 def _cached(key: str, fn, ttl: float = _CACHE_TTL):
     """进程内 TTL 缓存（R-240 M4：单飞防击穿）。
 

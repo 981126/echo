@@ -328,16 +328,14 @@ def _pick_llm(picker, messages: list[dict], timeout_seconds: int) -> dict:
     把 `timeout_seconds` 传下去后，底层调用最多跑到这个预算（原来会一直跑到 600s 上限）。
     注入的旧客户端/测试替身不接受该参数时退回普通调用（R-233 兼容）。
     """
-    try:
-        return picker.chat_json(
-            messages,
-            temperature=0.3,
-            max_tokens=800,
-            require=("picks",),
-            timeout_seconds=timeout_seconds,
-        )
-    except TypeError:
-        return picker.chat_json(messages, temperature=0.3, max_tokens=800, require=("picks",))
+    from .llm import accepts_timeout
+
+    kwargs = {"temperature": 0.3, "max_tokens": 800, "require": ("picks",)}
+    if accepts_timeout(picker.chat_json):
+        kwargs["timeout_seconds"] = timeout_seconds
+    # R-240 复核修复：用签名探测代替 try/except TypeError，避免客户端内部 TypeError 被当成
+    # 「签名不兼容」而把同一次选文调用重发一遍。
+    return picker.chat_json(messages, **kwargs)
 
 
 def select_references(

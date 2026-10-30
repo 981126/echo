@@ -363,7 +363,9 @@ def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
         return cached
     items = _list_works(db, creator_id)
     _cache_put(_WORKS_CACHE, key, items)
-    return items
+    # 与命中路径一致返回浅拷贝：未命中时也不能把缓存本体交给调用方（防未来调用方原地修改污染缓存）。
+    # 注意：`posts/cloudPosts/tags` 等嵌套对象仍与缓存共享 —— 所有调用方必须只读（当前已核对）。
+    return [dict(item) for item in items]
 
 
 def _list_works(db: Session, creator_id: int | None = None) -> list[dict]:

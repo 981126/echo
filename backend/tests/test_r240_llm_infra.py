@@ -156,13 +156,13 @@ def test_settings_take_effect_immediately_without_cache(db):
 
 def test_feature_timeout_table_values():
     assert llm_router.feature_timeout_seconds("chat") == 90
-    assert llm_router.feature_timeout_seconds("ideas") == 30
+    assert llm_router.feature_timeout_seconds("ideas") == 100
     assert llm_router.feature_timeout_seconds("draft_meta") == 90
-    assert llm_router.feature_timeout_seconds("correct") == 120
+    assert llm_router.feature_timeout_seconds("correct") == 180
     assert llm_router.feature_timeout_seconds("video_tags") == 120
     assert llm_router.feature_timeout_seconds("persona_init") == 300
     assert llm_router.feature_timeout_seconds("persona_merge") == 360
-    assert llm_router.feature_timeout_seconds("persona_updates") == 120
+    assert llm_router.feature_timeout_seconds("persona_updates") == 180
     assert llm_router.feature_timeout_seconds("persona_compare") == 120
     assert llm_router.feature_timeout_seconds("diff") == 120
     assert llm_router.feature_timeout_seconds("feedback_analysis") == 120
@@ -349,8 +349,8 @@ def test_shared_client_is_reused_per_base_url(monkeypatch):
     assert client_kwargs["timeout"] is None, "共享 Client 不设全局 timeout，改由每请求传入"
     assert client_kwargs["trust_env"] is True
     limits = client_kwargs["limits"]
-    assert limits.max_connections == 8
-    assert limits.max_keepalive_connections == 4
+    assert limits.max_connections == 32
+    assert limits.max_keepalive_connections == 16
     assert limits.keepalive_expiry == pytest.approx(120.0), "keepalive_expiry=120s 保证讨论轮间连接不失效"
 
     shared = llm_mod._client_for("https://llm.example")
@@ -508,3 +508,57 @@ def test_select_references_picker_without_timeout_kwarg_still_works(monkeypatch)
     _evidence_settings(monkeypatch, 45)
     picked = evidence.select_references(_LegacyPicker(), cands, topic="选题", min_pick=2, max_pick=3)
     assert picked and picked[0]["reason"] == "旧替身选文"
+
+
+# ---------- R-240 复核修复：签名探测不能用 try/except TypeError（避免同一次 LLM 调用被重发） ----------
+
+
+def test_client_with_timeout_does_not_retry_on_internal_type_error(monkeypatch):
+    """build_client 接受 timeout 参数但内部抛 TypeError 时，只允许调用一次（不得把内部错误当签名不兼容重发）。"""
+    from app.services import llm_router
+
+    calls: list[int] = []
+
+    class _Client:
+        def __init__(self) -> None:
+            self.timeout_seconds = 600
+
+    def _build_client(slot, timeout_seconds=None):  # noqa: ANN001
+        calls.append(int(timeout_seconds or 0))
+        raise TypeError("客户端内部构造错误（不是签名不兼容）")
+
+    monkeypatch.setattr(llm_router, "build_client", _build_client)
+    try:
+        llm_router._client_with_timeout({"slot": "model1"}, 90)
+    except TypeError:
+        pass
+    else:  # pragma: no cover - 必须抛出原始 TypeError
+        raise AssertionError("内部 TypeError 必须原样抛出")
+    assert len(calls) == 1, f"同一次调用被重发：build_client 调用 {len(calls)} 次"
+
+
+def test_pick_llm_does_not_retry_on_internal_type_error(monkeypatch):
+    """选文客户端接受 timeout 参数但内部抛 TypeError 时，只允许调用一次。"""
+    from app.services import evidence
+
+    calls: list[int] = []
+
+    class _Picker:
+        def chat_json(
+            self,
+            messages,
+            temperature=0.3,
+            max_tokens=800,
+            require=(),
+            timeout_seconds=None,
+        ):
+            calls.append(int(timeout_seconds or 0))
+            raise TypeError("客户端内部错误（不是签名不兼容）")
+
+    try:
+        evidence._pick_llm(_Picker(), [{"role": "user", "content": "x"}], 45)
+    except TypeError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("内部 TypeError 必须原样抛出")
+    assert len(calls) == 1, f"同一次选文调用被重发：picker.chat_json 调用 {len(calls)} 次"

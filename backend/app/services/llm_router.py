@@ -24,7 +24,7 @@ import httpx
 from ..config import get_settings
 from ..core.log import get_logger
 from . import model_settings
-from .llm import LLMError, LLMUnusableOutput, OpenAIClient
+from .llm import LLMError, LLMUnusableOutput, OpenAIClient, accepts_timeout
 
 log = get_logger("llm_router")
 
@@ -52,7 +52,10 @@ FEATURE_LABELS: dict[str, str] = {
 # R-240 M6：feature → **单次** LLM 调用的墙钟预算（秒）。只收紧、不放宽（.tmp/audit/infra.md F-02）：
 # - 全局 `ECHO_LLM_TIMEOUT_SECONDS`（默认 600）仍是硬上限，最终取 min(本表, 全局)；
 # - 交互类：chat 90（用户等回答）、ideas 30（选题灵感，接口同步返回）、draft_meta 90；
-# - JSON 小任务：correct / video_tags / diff / feedback_analysis / persona_updates / persona_compare 120；
+# - JSON 小任务：video_tags / diff / feedback_analysis / persona_compare 120；correct 180、
+#   persona_updates 180（复核：历史 Kimi 路由下单次 p90≈110s，120s 临界 → 留给 1.6× 余量）；
+# - ideas 100（复核：历史 Kimi 语义聚类 p50≈79s，原 30s 会大概率超时回退本地聚类/原文；
+#   与 opportunity._ask_groups 的 100s 软超时对齐，仍比旧 600s 收紧 6×）；
 # - 提示词/对标/复盘：prompt_optimize 240（优化本身要重写整段提示词）、prompt_eval 180、
 #   benchmark 240、video_review 180；
 # - 人设长输出：persona_init 300 / persona_merge 360（合并要归纳多篇提炼结果，R-142 实测
@@ -63,13 +66,13 @@ FEATURE_LABELS: dict[str, str] = {
 # 取值动机：单次逻辑调用最坏 = 主模型 2 次 + 降级 1 次，feature 预算把最坏墙钟压到 3×预算。
 FEATURE_TIMEOUTS: dict[str, int] = {
     "chat": 90,
-    "correct": 120,
+    "correct": 180,
     "video_tags": 120,
     "persona_init": 300,
     "persona_merge": 360,
-    "persona_updates": 120,
+    "persona_updates": 180,
     "persona_compare": 120,
-    "ideas": 30,
+    "ideas": 100,
     "draft_meta": 90,
     "diff": 120,
     "feedback_analysis": 120,
@@ -155,12 +158,12 @@ def _client_with_timeout(slot: dict, timeout_seconds: int) -> OpenAIClient:
     兼容只有单参签名的旧实现/测试替身（`build_client` 新增可选参数后不能强求所有替换实现同步）：
     传参报 TypeError 时退回旧签名，再在实例上覆盖 `timeout_seconds`（即单次上限）。
     """
-    try:
+    if accepts_timeout(build_client):
         return build_client(slot, timeout_seconds=timeout_seconds)
-    except TypeError:
-        client = build_client(slot)
-        client.timeout_seconds = timeout_seconds
-        return client
+    # 旧单参替身：先按旧签名构造，再在实例上覆盖单次上限（不改变任何调用语义）
+    client = build_client(slot)
+    client.timeout_seconds = timeout_seconds
+    return client
 
 
 class RouteSnapshot:
@@ -308,11 +311,15 @@ class RoutedLLM:
         base_budget = int(kwargs.get("max_tokens") or 0)
         per_call_timeout = feature_timeout_seconds(self.feature, timeout_seconds)
         for slot, allow_retry in self._attempts():
-            client = _client_with_timeout(slot, per_call_timeout)
             budget = base_budget
             for i in range(2 if allow_retry else 1):
                 if i:
                     budget = min(budget * 2, MAX_TOKENS_CEILING)  # 预算翻倍后再试
+                # R-240 复核修复（BUG-3）：每次 attempt 用「总预算 - 已耗时」的剩余值建客户端，
+                # 否则主模型 2 次 + 降级 1 次会各拿满一次预算（chat 的 120s 软 deadline 会被放大）。
+                elapsed = int(time.time() - started)
+                remaining = max(MIN_CALL_TIMEOUT_SECONDS, per_call_timeout - elapsed)
+                client = _client_with_timeout(slot, remaining)
                 attempt_kwargs = dict(kwargs)
                 if "max_tokens" in kwargs:
                     attempt_kwargs["max_tokens"] = normalize_max_tokens(slot, budget)

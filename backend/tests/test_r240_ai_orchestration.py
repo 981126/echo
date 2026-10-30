@@ -472,23 +472,53 @@ def test_scheduler_registers_opportunity_warm_job(monkeypatch):
 
 
 def test_opportunity_warm_job_is_best_effort(monkeypatch):
-    """预热 job 成功时刷两个缓存；失败只记日志、不抛异常（不告警）。"""
+    """预热 job 成功时调用 prewarm；失败只记日志、不抛异常（不告警）。"""
     import app.scheduler as sch
     from app.services import opportunity
 
     calls: list[str] = []
-    monkeypatch.setattr(opportunity, "ledger", lambda db, limit=50: calls.append("ledger") or {})
-    monkeypatch.setattr(
-        opportunity, "topic_attribution", lambda db, limit=15: calls.append("attribution") or {}
-    )
+    monkeypatch.setattr(opportunity, "prewarm", lambda db: calls.append("prewarm"))
     sch._warm_opportunity_caches()
-    assert calls == ["ledger", "attribution"]
+    assert calls == ["prewarm"]
 
     def _boom(*_a, **_k):
         raise RuntimeError("db 挂了")
 
-    monkeypatch.setattr(opportunity, "ledger", _boom)
+    monkeypatch.setattr(opportunity, "prewarm", _boom)
     sch._warm_opportunity_caches()  # 不抛异常（best-effort）
+
+
+def test_opportunity_prewarm_refreshes_before_ttl(monkeypatch):
+    """R-240 复核修复：prewarm 在 TTL 过半时就重算，而不是等缓存过期后首个请求才付冷启动。"""
+    from app.services import opportunity
+
+    calls = {"ledger": 0, "attr": 0}
+
+    def _fake_ledger(db, limit=50):  # noqa: ANN001
+        calls["ledger"] += 1
+        return {"top": []}
+
+    def _fake_attr(db, limit=15):  # noqa: ANN001
+        calls["attr"] += 1
+        return {"by_tag": []}
+
+    monkeypatch.setattr(opportunity, "_ledger", _fake_ledger)
+    monkeypatch.setattr(opportunity, "_topic_attribution", _fake_attr)
+    monkeypatch.setattr(opportunity, "_cid", lambda db: 1)
+    try:
+        opportunity._CACHE.clear()
+        opportunity.prewarm(None)
+        assert calls == {"ledger": 1, "attr": 1}
+        opportunity.prewarm(None)  # 未过半 TTL → 不重复算
+        assert calls == {"ledger": 1, "attr": 1}
+        # 人为把 ledger 缓存时间推到超过半 TTL（60s）→ 只重算 ledger
+        with opportunity._CACHE_LOCK:
+            ts, val = opportunity._CACHE["led:1:50"]
+            opportunity._CACHE["led:1:50"] = (ts - 61.0, val)
+        opportunity.prewarm(None)
+        assert calls == {"ledger": 2, "attr": 1}
+    finally:
+        opportunity._CACHE.clear()
 
 
 def test_ask_groups_passes_timeout_seconds_to_llm(monkeypatch):

@@ -27,8 +27,10 @@ log = get_logger("http")
 # 慢请求阈值：README 的接口基线是 ms 级，≥500ms 即用户可感知
 SLOW_REQUEST_MS = 500
 # 静态资源/文档不统计（封面缩略图按需生成、SSE 长连接不按普通请求算）
+# 注意：_SKIP_PREFIXES = 完全跳过（无 X-Response-Time、无慢日志）；
+#       _SKIP_PATHS  = 仍带响应头，只是不写慢日志（/health 与 SSE 长连接/chat 流）。
 _SKIP_PREFIXES = ("/covers", "/media/", "/uploads", "/docs", "/redoc", "/openapi.json")
-_SKIP_PATHS = ("/health", "/api/events", "/favicon.ico")
+_SKIP_PATHS = ("/health", "/api/events", "/api/chat/stream", "/favicon.ico")
 
 _SQL_STATE: ContextVar[dict[str, int] | None] = ContextVar("echo_sql_state", default=None)
 _INSTALLED = False
@@ -87,7 +89,7 @@ class RequestTimingMiddleware:
                     "慢请求 %s %s status=%s %.0fms sql=%d",
                     scope.get("method", ""),
                     path,
-                    status,
+                    status or 500,  # 未捕获异常由外层 ServerErrorMiddleware 生成 500 响应，这里兜底标注
                     elapsed_ms,
                     state["n"],
                 )

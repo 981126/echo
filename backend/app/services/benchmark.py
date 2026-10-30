@@ -331,7 +331,7 @@ def _units_are_ad(db: Session, units: list[dict], texts: list[str]) -> dict[int,
     """
     flags = {unit["post"].id: any(p.is_ad for p in (unit.get("members") or [unit["post"]])) for unit in units}
     batch = [
-        {"id": unit["post"].id, "title": (unit["post"].title or "")[:200], "text": (text or "")[:1500]}
+        {"id": unit["post"].id, "title": (unit["post"].title or "")[:200], "text": (text or "")[:3000]}
         for unit, text in zip(units, texts)
         if not flags[unit["post"].id] and (text or "").strip()
     ]
@@ -473,9 +473,14 @@ def ensure_top_with_text(db: Session, bm: Creator, limit_candidates: int = 15) -
         if not text:
             continue
         pending.append((unit, text))
-        if len(pending) >= total:  # 凑满 4 条一批（典型场景全程 1 次 LLM）
+        # R-240 复核修复：按「还差几条」凑批，而不是固定 4 条 —— 避免尾部批次多触达 ≤3 个候选
+        # 的文案补齐/广告判定（旧逐条实现判定到第 4 条即停；多处理的媒体补齐属旧版没有的副作用）。
+        need = max(1, total - len(picked))
+        if len(pending) >= need:  # 典型场景：4 条一批、全程 1 次 LLM
             _judge(pending)
             pending = []
+            if len(picked) >= total:
+                break
     if pending and len(picked) < total:
         _judge(pending)
     return picked
@@ -940,6 +945,8 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
                         raise
                     except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
                         session.rollback()
+            if cancel.is_set():  # R-240 复核：预算已耗尽 → 不再做补齐媒体/转写
+                raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
             picked = ensure_top_with_text(session, bm, limit_candidates=15)  # R-109：10 → 15
             return {"benchmark_id": bm_id, "name": _name, "top_with_text": len(picked), "error": ""}
         finally:

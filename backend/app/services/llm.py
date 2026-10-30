@@ -7,6 +7,7 @@ DeepSeek 与 Kimi 均为 OpenAI 兼容 API；统一实现，
 from __future__ import annotations
 
 import atexit
+import inspect
 import json
 import re
 import threading
@@ -61,6 +62,22 @@ class LLMUnusableOutput(LLMError):
     """
 
 
+def accepts_timeout(fn) -> bool:
+    """判断可调用对象是否显式接受 `timeout_seconds` 关键字（或 **kwargs）。
+
+    R-240 复核修复：**不能**用 try/except TypeError 探测签名——被调用的 LLM 客户端内部
+    抛出的 TypeError 会被误判成「签名不兼容」，导致同一次调用被重发（双倍成本，
+    且第二次结果可能与第一次不同）。这里用 inspect 一次性判断。
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):  # 内置/C 扩展/某些 partial 无法取签名 → 按「不支持」走旧路径
+        return False
+    return "timeout_seconds" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 def _content_or_reason(message: dict) -> str:
     """取正文；正文为空但模型写了思考内容时，给出可读原因（R-139）。
 
@@ -89,9 +106,13 @@ def _content_or_reason(message: dict) -> str:
 # 单次调用的墙钟预算改为每请求传 `timeout=`（见 `_post`），因此池自身 `timeout=None`；
 # `keepalive_expiry` 必须显式给大值（httpx 默认 5s，讨论轮间隔 3~10s 会让连接复用失效）——
 # 它是 `Limits` 的参数，不是 Client 的。
+# 容量必须覆盖 R-240 的并发 LLM 峰值（否则打满 → PoolTimeout → 被映射成 LLMError → 误降级）：
+#   媒体补齐全局池 6 张卡 × 每卡「校对 ∥ 预打标」2 路 = 12；提示词评测 ≤5、流水线/自测各 ≤2、
+#   重新对标 4 worker、chat 1~2、生成讨论链路 1 → 峰值约 20~24。取 32/16 留余量，
+#   连接数只在真正并发时占用（keepalive 复用，不会常驻 32 条）。
 _LIMITS = httpx.Limits(
-    max_connections=8,
-    max_keepalive_connections=4,
+    max_connections=32,
+    max_keepalive_connections=16,
     keepalive_expiry=120.0,
 )
 _CLIENTS: dict[tuple[str, type], httpx.Client] = {}

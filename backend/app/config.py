@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     generation_model: str = "deepseek"
     debate_rounds: int = 5
     # 单次 LLM 调用的硬性墙钟上限（秒）：超过即按超时处理 → 由 llm_router 降级到模型2（R-139）
-    llm_timeout_seconds: int = 600
+    llm_timeout_seconds: int = 600  # R-240：同时作为各 feature 单次预算的硬上限（min），调低会全局收紧
 
     # AI 对话 agent 行为（R-147 P0）：回合数 / 单次提问的工具调用总次数 / 墙钟上限（秒）
     # 到限不再抛「未收敛」，而是带着已获得的数据收尾作答。

@@ -362,7 +362,10 @@ def _run_versions(
     `contents` 的 key 即版本 tag（"cand"/"base"）；返回 {tag: `_score_outputs` 结果}，
     评分口径、输出顺序与 errors/empty 统计与串行完全一致。
     """
-    workers = min(int(get_settings().prompt_eval_concurrency or 1), len(contents) * len(probes))
+    workers = max(
+        1,
+        min(int(get_settings().prompt_eval_concurrency or 1), 5, len(contents) * len(probes)),
+    )
     if workers > 1:
         try:
             buckets, errors = _collect_parallel(db, key, contents, probes, workers)
@@ -444,7 +447,11 @@ def evaluate(db: Session, key: str, candidate_version: int, update=None) -> Prom
     contents = {"cand": candidate.content}
     if base is not None:
         contents["base"] = base.content
+    if update:
+        update(30, "并发回放评分中…")
     results = _run_versions(db, key, contents, probes, markers, redlines)
+    if update:
+        update(85, "评分完成，正在汇总…")
     cand_result = results["cand"]
     base_result = results.get("base", {})
     detail = {

@@ -286,3 +286,10 @@ sequenceDiagram
 - **发现并修复的缺陷**：`platform_sync.pool_ideas_from_comments` 的「先 COUNT 配额再 INSERT」在 R-240 提高并发后被放大——6 并发下每日配额 10 被突破到 48、同评论重复进池 6 条（`topic_ideas` 无唯一约束）。修复：新增模块级 `_POOL_IDEAS_LOCK`，把「读配额+去重+插入+commit」串行化（单进程假设与既有 `_BUDGET_LOCK` 一致）；新增 `tests/test_r240_idempotency.py` 永久回归（6 例）。
 - **附注**：预算计数曾怀疑 identity-map 旧值丢更新，实测因 SQLAlchemy identity map 弱引用会重新查库而安全，未改代码，仅加回归测试锁定。
 
+### 10.1 独立复核结论与二次修复（2026-10-30）
+
+- 读路径（verify-api.md）：8 个复核项全部「输出等价」；旧/新 12 个读接口端到端逐字段 EQUIVALENT，OpenAPI schema 深度相等；GET 两轮零写库（27 个只读探针 DML=0，HTTP 两轮后 DB 写 delta=0）；发现并修复 S8 尾部批次多处理 ≤3 候选、卡片缓存 miss 返回缓存本体，其余 P3 记录。
+- AI 编排（verify-ai.md）：author_style_context 逐字一致 27/27、prompt_eval 并发 vs 串行 15/15 一致、pipeline 正常路径逐字段一致、opportunity 多 limit 内容一致；pipeline/selfcheck 实测真并发、每任务独立 Session/LLM；幂等项全部通过。
+- 基础设施（verify-infra.md）：S0 响应语义未变（11 用例 status/body/既有 headers 全等）、S4 复用与异常语义逐项等价、KV 批读完全等价（74 断言）、M6 重试/降级语义未变；发现并修复：连接池容量不足（8→32/16）、ideas 超时误杀（30→100s，correct/persona_updates→180s）、chat deadline 被 attempt 放大（每次 attempt 用剩余预算）、500 慢日志 status 兜底、chat 流慢日志噪音。
+- 写入路径（verify-write.md）：修复灵感池并发竞态（配额超发 10→48、同评论重复 6 条），加 `_POOL_IDEAS_LOCK` + 6 例永久回归测试。
+- 总览：四路复核均未发现阻塞性正确性 bug；修复均为小改动（P1/P2），已重新跑全量 `scripts/verify.sh` 全绿。

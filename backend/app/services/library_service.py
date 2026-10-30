@@ -259,7 +259,8 @@ def build_cards(db: Session, creator_id: int = 0) -> list[dict]:
         return cached
     cards = _build_cards(db, creator_id)
     _cache_put(_CARD_CACHE, key, cards)
-    return cards
+    # 与命中路径一致返回浅拷贝（详见 works_service 同处注释）；嵌套对象只读。
+    return [dict(item) for item in cards]
 
 
 def _build_cards(db: Session, creator_id: int = 0) -> list[dict]:
