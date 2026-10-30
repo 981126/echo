@@ -9,10 +9,10 @@ import html
 import uuid
 from pathlib import Path
 
-import httpx
-
 from ..config import get_settings
+from ..core.http import get_client
 from ..models.platform import CreatorAccount
+
 
 def _img_ext(data: bytes) -> str | None:
     """按文件头识别图片真实格式；HEIC/未知格式返回 None（需转换或放弃）。"""
@@ -86,7 +86,10 @@ def _cover_path_for(platform: str, platform_post_id: str, title: str, cover_url:
     stem = media_stem(platform, title or platform_post_id, "封面")
     if cover_url:
         try:
-            resp = httpx.get(cover_url, timeout=8, headers=_cdn_headers(platform))
+            # R-241：共享 Client（cover/avatar 复用连接池），每次请求显式 8s 超时
+            resp = get_client("cdn", timeout=8.0).get(
+                cover_url, timeout=8.0, headers=_cdn_headers(platform)
+            )
             if resp.status_code == 200 and resp.content:
                 img = _ensure_web_image(resp.content)
                 if img:
@@ -126,7 +129,9 @@ def _ensure_account_avatar(account: CreatorAccount, profile) -> str | None:
     settings.covers_dir.mkdir(parents=True, exist_ok=True)
     name = f"avatar_{uuid.uuid4().hex[:12]}"
     try:
-        resp = httpx.get(profile.avatar_url, timeout=8, headers=_cdn_headers(account.platform))
+        resp = get_client("cdn", timeout=8.0).get(
+            profile.avatar_url, timeout=8.0, headers=_cdn_headers(account.platform)
+        )
         if resp.status_code == 200 and resp.content:
             img = _ensure_web_image(resp.content)
             if img:

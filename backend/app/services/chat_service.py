@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Callable
 
 from ..config import get_settings
 from ..core.log import get_logger
+from ..db import SessionLocal
 
 from sqlalchemy.orm import Session
 
@@ -306,27 +309,15 @@ def _search_drafts(db: Session, args: dict) -> dict:
 
 
 def _get_content_opportunities(db: Session, args: dict) -> dict:
-    """三路选题灵感（R-192）：观众提问榜（本地聚类，避免嵌套 LLM）/ 每周灵感包 / 缺口选题。"""
+    """三路选题灵感（R-192）：观众提问榜（本地聚类，避免嵌套 LLM）/ 每周灵感包 / 缺口选题。
+
+    R-241：三分支改由 `opportunity.content_opportunities` 并发执行（各自独立只读 Session），
+    返回值与改造前逐字段一致；`db` 参数保留只为兼容既有调用签名。
+    """
     from . import opportunity
 
     want = str(args.get("want") or "all")
-    out: dict = {}
-    if want in ("all", "comment"):
-        cc = opportunity.comment_clusters(db, limit=8, use_llm=False)
-        out["comment_clusters"] = [
-            {"title": c["title"], "asked_by": c["count"], "matched_persona": c["matched"]}
-            for c in cc.get("clusters", [])
-        ]
-    if want in ("all", "weekly"):
-        out["weekly_pack"] = [
-            {"title": i["title"], "why": i["reason"]} for i in opportunity.weekly_pack(db, limit=12).get("items", [])
-        ]
-    if want in ("all", "gap"):
-        gap = opportunity.gap_suggestions(db, limit=6)
-        out["gap"] = [{"title": i["title"], "why": i["reason"]} for i in gap.get("items", [])]
-        if gap.get("note"):
-            out["gap_note"] = gap["note"]
-    return out
+    return opportunity.content_opportunities(want)
 
 
 def _dispatch(db: Session, name: str, args: dict, context: dict | None = None) -> dict:
@@ -482,6 +473,40 @@ def _step_summary(name: str, result: dict) -> str:
 
 log = get_logger("chat")
 
+# R-241 F6：单工具墙钟（秒）。超时只丢弃结果、返回可读原因让模型基于已有数据收尾。
+TOOL_TIMEOUT_SECONDS = 30
+TOOL_TIMEOUT_MESSAGE = "该工具超过 30s 已跳过，请基于已有数据作答"
+
+
+def _dispatch_in_own_session(name: str, args: dict, context: dict | None) -> dict:
+    """只读工具在**独立短 Session** 里执行（R-241：不跨线程共享 Session，也不占用主连接）。"""
+    own = SessionLocal()
+    try:
+        return _dispatch(own, name, args, context)
+    finally:
+        own.close()
+
+
+def _run_tool(db: Session, name: str, args: dict, context: dict | None) -> dict:
+    """执行一个工具，带单工具墙钟（R-241 F6）。
+
+    - 写操作工具（`agent_actions` 的动作）必须留在主线程/主 Session：Session 不能跨线程，
+      且提案要落库（`propose` 自己 commit）；这类工具是「建占位稿 + 入队」，本身很快。
+    - 只读工具丢到单线程池 + 独立 Session，最多等 `TOOL_TIMEOUT_SECONDS`；超时返回可读跳过原因，
+      底层线程在 LLM/DB 自身上限内自行结束（无法真正 kill，但结果丢弃）。
+    """
+    if name in agent_actions.ACTION_LABELS:
+        return _dispatch(db, name, args, context)
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="echo-chat-tool")
+    future = executor.submit(_dispatch_in_own_session, name, args, context)
+    try:
+        return future.result(timeout=TOOL_TIMEOUT_SECONDS)
+    except FuturesTimeout:
+        log.warning("chat 工具 %s 超过 %ss 未返回，已跳过（让模型基于已有数据收尾）", name, TOOL_TIMEOUT_SECONDS)
+        return {"error": TOOL_TIMEOUT_MESSAGE}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
 
 CREATE_MODE_PROMPT = (
     "\n\n【创作共创模式】当前作者在和你做**开放式创作共创**：允许发散、追问、一次给多个方向甚至反方向，"
@@ -531,6 +556,8 @@ class ChatService:
             if time.monotonic() > deadline:
                 stop_reason = f"已达时间上限（{settings.agent_timeout_seconds}s）"
                 break
+            # R-241 F-03：LLM 调用前结束读事务，DB 连接归还池（整段对话不再常驻 1 个连接）
+            db.commit()
             try:
                 message = self.llm.chat_completion(
                     messages,
@@ -575,7 +602,9 @@ class ChatService:
                             on_step({"kind": "tool", "name": name, "args": args, "round": round_no})
                         except Exception:  # noqa: BLE001 进度回调失败不影响回答
                             log.exception("on_step 回调失败")
-                    result = _dispatch(db, name, args, context)
+                    # R-241 F-03：工具调用前结束读事务；只读工具走独立 Session + 单工具 30s 墙钟
+                    db.commit()
+                    result = _run_tool(db, name, args, context)
                     if on_step is not None:
                         try:
                             on_step({"kind": "result", "name": name, "summary": _step_summary(name, result)})
@@ -602,6 +631,8 @@ class ChatService:
                 ),
             }
         )
+        # R-241 F-03：收尾 LLM 调用前同样结束读事务（工具轮可能留下读事务）
+        db.commit()
         try:
             final = self.llm.chat_completion(
                 messages,

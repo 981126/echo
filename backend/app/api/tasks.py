@@ -38,7 +38,8 @@ def list_tasks(limit: int = 50, status: str = "", kind: str = "", db: Session = 
             q = q.filter(BackgroundTask.kind.in_(kinds))
     active = any(s in ("running", "pending") for s in status.split(","))
     order = BackgroundTask.created_at.asc() if active else BackgroundTask.id.desc()
-    return [_out(t) for t in q.order_by(order).limit(min(limit, 500)).all()]
+    # R-241：limit 上限收敛到 200（前端实际轮询参数；防大 limit 全表序列化）
+    return [_out(t) for t in q.order_by(order).limit(max(1, min(limit, 200))).all()]
 
 
 @router.get("/{task_id}", response_model=TaskOut)

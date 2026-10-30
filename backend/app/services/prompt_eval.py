@@ -421,7 +421,11 @@ def _eval_llm(db: Session, key: str):
 
 
 def evaluate(db: Session, key: str, candidate_version: int, update=None) -> PromptEval | None:
-    """对候选版做金样本回放评分，与当前启用版对比；结果落 prompt_evals。"""
+    """对候选版做金样本回放评分，与当前启用版对比；结果落 prompt_evals。
+
+    R-241：样本级调用失败时 `detail.partial=True` 且 reason 追加「部分样本失败」，
+    仅作留痕/展示，评分口径与自动启用判定不变。
+    """
     candidate = (
         db.query(AiPrompt).filter(AiPrompt.key == key, AiPrompt.version == candidate_version).first()
     )
@@ -461,17 +465,26 @@ def evaluate(db: Session, key: str, candidate_version: int, update=None) -> Prom
         "markers": markers[:8],
         "redlines": redlines[:10],
     }
+    # R-241：部分样本调用失败 → detail 标记 partial，reason 追加说明（评分/启用判定完全不变）
+    failed_samples = {
+        tag: int(result.get("errors") or 0)
+        for tag, result in (("cand", cand_result), ("base", base_result))
+    }
+    failed_samples = {tag: count for tag, count in failed_samples.items() if count > 0}
+    partial_reason = ""
+    if failed_samples:
+        detail["partial"] = True
+        parts = [
+            f"{'候选版' if tag == 'cand' else '当前版'} {count} 个"
+            for tag, count in failed_samples.items()
+        ]
+        partial_reason = "部分样本失败（" + "，".join(parts) + "）"
     # 两版都产不出内容 → 评分无意义，标记为不可用而不是给个误导性的低分
     if cand_result.get("empty") == len(probes) and base_result.get("empty") == len(probes):
-        return _store(
-            db,
-            key,
-            candidate_version,
-            base_version,
-            False,
-            "AI 回放返回为空（模型未产出内容，可能是配额或上下文问题），本次评分无效",
-            detail,
-        )
+        reason = "AI 回放返回为空（模型未产出内容，可能是配额或上下文问题），本次评分无效"
+        if partial_reason:
+            reason += "；" + partial_reason
+        return _store(db, key, candidate_version, base_version, False, reason, detail)
     if update:
         update(95, "写入评测结果…")
     return _store(
@@ -480,7 +493,7 @@ def evaluate(db: Session, key: str, candidate_version: int, update=None) -> Prom
         candidate_version,
         base_version,
         True,
-        "",
+        partial_reason,
         detail,
         cand=float(cand_result.get("score") or 0.0),
         base=float(base_result.get("score") or 0.0),

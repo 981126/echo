@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from sqlalchemy.orm import Session
 
@@ -123,6 +124,7 @@ _MAX_EVIDENCE = 200
 # 归纳合并：单次送进模型的人设条目数 / 全局归纳最多接受的篇数（R-128）
 _MERGE_BATCH = 30
 GLOBAL_MERGE_MAX_PARTS = 120
+_MERGE_PARALLEL = 4  # R-241 F2：分块归并并行度上限（模型 QPS/成本折中）
 
 
 def _norm_label(label: str) -> str:
@@ -444,7 +446,7 @@ class PersonaService:
             return None
         return result
 
-    def merge_full(self, parts: list[dict]) -> dict:
+    def merge_full(self, parts: list[dict], service_factory: Callable[[], "PersonaService"] | None = None) -> dict:
         """全量归纳合并：把每篇提炼结果「总结去重」成一份人设档案（R-128 第1条）。
 
         实测结论：把「每篇提炼结果」原样喂给模型时，它能站在全局视角把 65 篇压成约 40 条；
@@ -452,6 +454,11 @@ class PersonaService:
         因此：
         1) 优先一次全局归纳（直接喂每篇提炼结果）；
         2) 全局失败或篇数过多时，退回「机械近义去重 + 分批归纳 + 再机械去重」的稳健路径。
+
+        R-241 F2：分批归并的**块间**改并发（≤`_MERGE_PARALLEL`），每线程用 `service_factory()`
+        新建 `PersonaService`（其 `_snapshot/_active` 是实例状态，不能跨线程共享）；轮间仍等全部
+        块结果（barrier）再机械去重，合并顺序/输出与串行一致。未传 factory 时按注入的 llm 复制实例
+        （`PersonaService(llm=...)`），保证测试/显式注入路径不被破坏。
         """
         clean = [p for p in (parts or []) if p]
         if not clean:
@@ -463,15 +470,24 @@ class PersonaService:
         profile = collect_profile(clean)
         if _profile_size(profile) == 0:
             return empty_profile()
+        factory = service_factory
+        if factory is None:
+            injected = self._injected
+            factory = (lambda: PersonaService(llm=injected)) if injected is not None else PersonaService
+
+        def _merge_chunk(chunk: dict) -> dict:
+            return factory()._llm_merge("persona_merge", [chunk], parser=parse_layered_result) or chunk
+
         for _ in range(3):
             if _profile_size(profile) <= _MERGE_BATCH:
                 break
             chunks = _profile_chunks(profile, _MERGE_BATCH)
             if len(chunks) <= 1:
                 break
-            merged_parts: list[dict] = []
-            for chunk in chunks:
-                merged_parts.append(self._llm_merge("persona_merge", [chunk], parser=parse_layered_result) or chunk)
+            with ThreadPoolExecutor(
+                max_workers=min(_MERGE_PARALLEL, len(chunks)), thread_name_prefix="echo-persona"
+            ) as pool:
+                merged_parts = list(pool.map(_merge_chunk, chunks))
             reduced = collect_profile(merged_parts)
             if _profile_size(reduced) >= _profile_size(profile):
                 break

@@ -159,6 +159,8 @@ def refresh_references(db: Session, owner: Creator, filters: dict) -> dict:
     if date_window not in (1, 24, 72, 168):
         raise ValueError("时间窗口只支持1/24/72/168小时")
     client = make_client()
+    # R-241：make_client 进程级复用后 requests_used 是跨调用累计值，预算按「本次调用差值」计费
+    before_requests = client.requests_used
     if keyword:
         raw = client.search_douyin_items(
             query=keyword,
@@ -221,7 +223,8 @@ def refresh_references(db: Session, owner: Creator, filters: dict) -> dict:
         saved += 1
     db.commit()
     if client.mode == "real":
-        for _ in range(client.requests_used):
+        # R-241：差值计费（共享 Client 的 requests_used 为累计值，不能直接 range）
+        for _ in range(max(0, client.requests_used - before_requests)):
             _charge(db)
     if saved == 0:
         warnings.append("当前条件下没有获取到低粉爆款视频，可换关键词或时间窗口重试")

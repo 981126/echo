@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.pipeline import today_key
@@ -587,53 +588,89 @@ def dismiss_idea(idea_id: int, db: Session = Depends(get_db)):
 
 @router.get("/creator-summary")
 def creator_summary(db: Session = Depends(get_db)):
-    """复盘/博主页"我 vs 对标"汇总（粉丝/作品数/互动中位数/爆款率，基于最新快照与统计）。"""
+    """复盘/博主页"我 vs 对标"汇总（粉丝/作品数/互动中位数/爆款率，基于最新快照与统计）。
+
+    R-241：原实现每 creator/账号/帖子逐条查询（实测 703 条 SQL / 380ms）→ 改为 5 条批量
+    SQL（创作者、账号、DISTINCT ON 最新快照、ROW_NUMBER 各账号最近 50 帖、DISTINCT ON
+    最新统计），Python 聚合算法与输出结构/排序完全不变。
+    """
     creators = db.query(Creator).order_by(Creator.id).all()
+    # 与原实现同口径：不显式排序（PG 堆序遍历），按 creator 分组后保持原相对顺序
+    accounts = db.query(CreatorAccount).all()
+    accounts_by_creator: dict[int, list[CreatorAccount]] = {}
+    for account in accounts:
+        accounts_by_creator.setdefault(account.creator_id, []).append(account)
+    account_ids = [account.id for account in accounts]
+
+    snap_by_account: dict[int, CreatorAccountSnapshot] = {}
+    posts_by_account: dict[int, list[int]] = {}
+    stat_by_post: dict[int, PlatformPostStat] = {}
+    if account_ids:
+        for row_snap in (
+            db.query(CreatorAccountSnapshot)
+            .filter(CreatorAccountSnapshot.account_id.in_(account_ids))
+            .distinct(CreatorAccountSnapshot.account_id)
+            .order_by(CreatorAccountSnapshot.account_id, CreatorAccountSnapshot.snapshot_date.desc())
+            .all()
+        ):
+            snap_by_account.setdefault(row_snap.account_id, row_snap)  # DESC 序首个即最新
+        numbered = (
+            db.query(
+                PlatformPost.account_id.label("account_id"),
+                PlatformPost.id.label("post_id"),
+                func.row_number()
+                .over(
+                    partition_by=PlatformPost.account_id,
+                    order_by=PlatformPost.publish_time.desc(),
+                )
+                .label("rn"),
+            )
+            .filter(PlatformPost.account_id.in_(account_ids))
+            .subquery()
+        )
+        post_rows = (
+            db.query(numbered.c.account_id, numbered.c.post_id)
+            .filter(numbered.c.rn <= 50)
+            .all()
+        )
+        post_ids: list[int] = []
+        for account_id, post_id in post_rows:
+            posts_by_account.setdefault(account_id, []).append(post_id)
+            post_ids.append(post_id)
+        if post_ids:
+            for row_stat in (
+                db.query(PlatformPostStat)
+                .filter(PlatformPostStat.post_id.in_(post_ids))
+                .distinct(PlatformPostStat.post_id)
+                .order_by(PlatformPostStat.post_id, PlatformPostStat.stat_date.desc())
+                .all()
+            ):
+                stat_by_post.setdefault(row_stat.post_id, row_stat)  # DESC 序首个即最新
+
     out = []
     for c in creators:
-        accounts = db.query(CreatorAccount).filter(CreatorAccount.creator_id == c.id).all()
         totals = {"followers": 0, "posts": 0, "plays": 0, "likes": 0, "favorites": 0, "comments": 0}
         account_info = []
-        for a in accounts:
-            snap = (
-                db.query(CreatorAccountSnapshot)
-                .filter(CreatorAccountSnapshot.account_id == a.id)
-                .order_by(CreatorAccountSnapshot.snapshot_date.desc())
-                .first()
-            )
-            posts = (
-                db.query(PlatformPost)
-                .filter(PlatformPost.account_id == a.id)
-                .order_by(PlatformPost.publish_time.desc())
-                .limit(50)
-                .all()
-            )
-            stat_rows = []
-            for p in posts:
-                st = (
-                    db.query(PlatformPostStat)
-                    .filter(PlatformPostStat.post_id == p.id)
-                    .order_by(PlatformPostStat.stat_date.desc())
-                    .first()
-                )
-                if st:
-                    stat_rows.append(st)
+        for a in accounts_by_creator.get(c.id, []):
+            snap = snap_by_account.get(a.id)
+            post_id_list = posts_by_account.get(a.id, [])
+            stats = [stat_by_post[pid] for pid in post_id_list if pid in stat_by_post]
             followers = snap.followers if snap else 0
-            plays_list = [s.plays for s in stat_rows]
+            plays_list = [s.plays for s in stats]
             med_plays = sorted(plays_list)[len(plays_list) // 2] if plays_list else 0
-            hot_count = sum(1 for s in stat_rows if s.plays >= 100000)
+            hot_count = sum(1 for s in stats if s.plays >= 100000)
             totals["followers"] += followers
-            totals["posts"] += len(stat_rows) or len(posts)
+            totals["posts"] += len(stats) or len(post_id_list)
             totals["plays"] += sum(plays_list)
-            totals["likes"] += sum(s.likes for s in stat_rows)
-            totals["favorites"] += sum(s.favorites for s in stat_rows)
-            totals["comments"] += sum(s.comments for s in stat_rows)
+            totals["likes"] += sum(s.likes for s in stats)
+            totals["favorites"] += sum(s.favorites for s in stats)
+            totals["comments"] += sum(s.comments for s in stats)
             account_info.append(
                 {
                     "platform": a.platform,
                     "nickname": snap.nickname if snap else a.nickname,
                     "followers": followers,
-                    "posts": len(posts),
+                    "posts": len(post_id_list),
                     "median_plays": med_plays,
                     "hot_posts": hot_count,
                 }

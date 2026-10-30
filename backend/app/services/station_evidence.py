@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..models.draft import Draft
 from ..models.platform import Creator
-from ..models.video import Video
+from ..models.video import Transcript, Video
 from .creator_service import current_creator_id
 from .draft_versions import AUTHOR_SOURCES, chains_with_sources
 
@@ -68,15 +68,38 @@ def _json_platforms(raw) -> list[str]:
     return [str(x) for x in data if x] if isinstance(data, list) else []
 
 
+def _transcript_map(db: Session, video_ids: list[int]) -> dict[int, Transcript]:
+    """R-241：一次 IN 取多条视频的转写稿（每 video 取一条，与 relationship uselist=False 口径一致）。
+
+    原先 `for v in videos: v.transcript` 造成逐视频懒加载（实测 ~300 条 SQL）；这里 1 条 SQL
+    建 map，后续纯内存查找。顺序按 (video_id, id) 保证跨次运行稳定（等价于懒加载取到的首条）。
+    """
+    if not video_ids:
+        return {}
+
+    out: dict[int, Transcript] = {}
+    for tr in (
+        db.query(Transcript)
+        .filter(Transcript.video_id.in_(video_ids))
+        .order_by(Transcript.video_id, Transcript.id)
+        .all()
+    ):
+        out.setdefault(int(tr.video_id), tr)
+    return out
+
+
 def _author_segments(db: Session, cid: int | None, topic_grams: set[str], limit: int) -> list[dict]:
     items: list[dict] = []
     seen: set[str] = set()
     # 1) 主博主已发布视频的 ASR 转写（corrected 优先）
+    # R-241：转写稿一次 IN 批量预取（_transcript_map），消除逐视频懒加载 N+1
     q = db.query(Video).filter(Video.is_ad.is_(False))
     if cid:
         q = q.filter(Video.creator_id == cid)
-    for v in q.order_by(Video.id.desc()).limit(300).all():
-        tr = v.transcript
+    videos = q.order_by(Video.id.desc()).limit(300).all()
+    tr_map = _transcript_map(db, [int(v.id) for v in videos])
+    for v in videos:
+        tr = tr_map.get(int(v.id))
         if tr is None:
             continue
         text = (tr.corrected_text or tr.transcript_text or "").strip()
@@ -140,9 +163,12 @@ def _benchmark_segments(db: Session, cid: int | None, topic_grams: set[str], lim
     names = {c.id: c.name for c in bm_creators}
     items: list[dict] = []
     seen: set[str] = set()
+    # R-241：转写稿一次 IN 批量预取（原为逐视频懒加载 1+N）
     q = db.query(Video).filter(Video.is_ad.is_(False), Video.creator_id.in_(list(names.keys())))
-    for v in q.order_by(Video.id.desc()).limit(300).all():
-        tr = v.transcript
+    videos = q.order_by(Video.id.desc()).limit(300).all()
+    tr_map = _transcript_map(db, [int(v.id) for v in videos])
+    for v in videos:
+        tr = tr_map.get(int(v.id))
         if tr is None:
             continue
         text = (tr.corrected_text or tr.transcript_text or "").strip()

@@ -31,6 +31,9 @@ class Video(Base):
     tags: Mapped[str] = mapped_column(Text, default="[]")  # JSON 数组（自定义标签）
     tags_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # AI 预打标签是否经作者确认
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_app_now, onupdate=_app_now
+    )  # R-241：卡片缓存版本键（感知视频标题/标签/状态等原地编辑）
 
     @property
     def cover_url(self) -> str | None:

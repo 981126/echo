@@ -55,21 +55,33 @@ _JOB_PROGRESS_LOCK = threading.Lock()
 # commit=False 的批量模式只在单线程/单博主的批量写库循环里调用，不依赖此锁跨线程生效。
 _POOL_IDEAS_LOCK = threading.RLock()
 _job_progress_pending: dict[int, dict] = {}
-_JOB_PROGRESS_FORCE_KEYWORDS = ("完成", "失败", "拉取到", "补全", "排队中", "同步中")
+# R-241：移除「补全」——B 站补全循环每条都命中它会导致 150 次强制 flush；改由调用方
+# 每 10 条/阶段末显式 force=True。保留其余「阶段完成/失败/开始」类关键词。
+_JOB_PROGRESS_FORCE_KEYWORDS = ("完成", "失败", "拉取到", "排队中", "同步中")
 
 
-def _job_progress(db: Session, job_id: int | None, *, done: int = 0, total: int = 0, note: str | None = None) -> None:
+def _job_progress(
+    db: Session,
+    job_id: int | None,
+    *,
+    done: int = 0,
+    total: int = 0,
+    note: str | None = None,
+    force: bool | None = None,
+) -> None:
     """R-070/R-222：累加写同步任务进度（done/total 原子累加），进度更新失败不影响同步主体。
 
     新增防抖：同 job_id 的多次小进度会先累计，每 2s（可配）或遇到阶段关键词/完成时统一 flush，
-    显著降低数据库写竞争。
+    显著降低数据库写竞争。R-241：`force` 可显式指定是否立即刷新（None=按关键词自动判断）；
+    高频循环（如 B 站补全）每 10 条/阶段末才传 force=True，最终由收尾 flush 保证 100%。
     """
     if not job_id:
         return
     settings = get_settings()
     debounce = float(getattr(settings, "sync_progress_debounce_seconds", 2.0) or 2.0)
     now = time.monotonic()
-    force = note and any(k in note for k in _JOB_PROGRESS_FORCE_KEYWORDS)
+    auto_force = bool(note and any(k in note for k in _JOB_PROGRESS_FORCE_KEYWORDS))
+    should_flush = auto_force if force is None else bool(force)
 
     with _JOB_PROGRESS_LOCK:
         pending = _job_progress_pending.setdefault(
@@ -80,7 +92,7 @@ def _job_progress(db: Session, job_id: int | None, *, done: int = 0, total: int 
         if note:
             pending["last_note"] = note
         last_at = pending["last_at"]
-        if not force and last_at and now - last_at < debounce:
+        if not should_flush and last_at and now - last_at < debounce:
             return
         flush_done = pending["done"]
         flush_total = pending["total"]
@@ -857,7 +869,7 @@ def sync_account(
     # R-222：对列表未带统计的作品，并发抓取单条详情（如 B站），再进入写入循环
     posts_need_stats = [pd for pd in posts_data if not pd.stats and pd.platform_post_id]
     if posts_need_stats:
-        _job_progress(db, job_id, note=f"{label}：并发补全 {len(posts_need_stats)} 条作品指标…")
+        _job_progress(db, job_id, note=f"{label}：并发补全 {len(posts_need_stats)} 条作品指标…", force=True)
         stats_results = _fetch_post_stats_parallel(account, client, posts_need_stats, platform=account.platform)
         for pd, fetched_stats, error in stats_results:
             if fetched_stats and error is None:
@@ -1005,7 +1017,7 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
 
     done = 0
     total = len(missing)
-    _job_progress(db, job_id, total=total, note=f"B站：补全 {len(missing)} 条缺失指标…")
+    _job_progress(db, job_id, total=total, note=f"B站：补全 {len(missing)} 条缺失指标…", force=True)
     if not missing:
         return 0
 
@@ -1016,9 +1028,18 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
         try:
             _write_stat(db, post, stats, commit=False, source=str(stats.get("source") or "tikhub"))
             done += 1
-            _job_progress(db, job_id, done=1, note=f"B站：补全中 {i}/{total}")
+            # R-241：每 10 条或阶段末才强制 flush，避免每条补全一次 commit+publish（~150 次/轮）
+            _job_progress(
+                db,
+                job_id,
+                done=1,
+                note=f"B站：补全中 {i}/{total}",
+                force=(i % 10 == 0 or i >= total),
+            )
         except Exception:  # noqa: BLE001
             db.rollback()
+    # R-241：阶段末兜底 flush（最后一条可能因错误 continue 未命中 force）
+    _job_progress(db, job_id, force=True)
     db.commit()
     return done
 

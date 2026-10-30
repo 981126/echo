@@ -606,7 +606,10 @@ def test_rerun_benchmarks_parallel_progress_and_failure_isolation(db, monkeypatc
     assert len(failed) == 1 and failed[0]["name"] == "对标2"
     assert updates[-1][0] == 99
     assert updates[-1][1].startswith("[4/4] 对标")
-    assert all(note.startswith("[") for _pct, note in updates)
+    assert all(
+        note.startswith("[") or note.startswith("计算前3+最新")
+        for _pct, note in updates
+    )  # R-241 在 5→50/55 阶段新增「计算前3+最新…」中间态
 
 
 def test_rerun_benchmarks_budget_exceeded_aborts(db, monkeypatch):

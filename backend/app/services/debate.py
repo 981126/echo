@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..core.log import get_logger
 from ..models.discussion import DraftDiscussion
 from ..models.draft import Draft
 from ..models.kv import Kv
@@ -23,6 +25,8 @@ from .generation import _persona_context, _style_profile_lines, _style_samples, 
 from .llm import LLMError
 from .prompt_service import get_prompt, get_prompt_version
 from .creator_service import current_creator_id
+
+log = get_logger("debate")
 
 
 def debate_rounds(db: Session, settings=None) -> int:
@@ -59,6 +63,63 @@ def _persona_brief(ctx: dict, profile: str = "") -> str:
     redlines = "\n".join(f"- {r}" for r in (ctx.get("redlines") or [])[:8]) or "（无）"
     style = (profile or ctx.get("profile") or "")[:800]
     return f"标签：\n{tags}\n红线：\n{redlines}\n语言风格：{style or '（暂无）'}"
+
+
+def _retrieve_station_side(topic: str, creator_id: int | None) -> tuple[dict, dict]:
+    """R-241：站内素材检索（只读，独立 Session，供与联网检索并发）。
+
+    返回 `(station, station_meta)`；失败降级为空证据（站内素材是增强项，不阻断生成）。
+    """
+    from ..db import SessionLocal
+    from .station_evidence import meta as station_meta
+    from .station_evidence import retrieve_station
+
+    s = SessionLocal()
+    try:
+        station = retrieve_station(s, topic, creator_id=creator_id)
+        return station, station_meta(station)
+    except Exception as exc:  # noqa: BLE001 站内素材检索失败不阻断生成
+        log.warning("站内素材检索失败（降级为空证据）：%s", str(exc)[:160])
+        empty = {"author": [], "benchmark": [], "block": ""}
+        return empty, station_meta(empty)
+    finally:
+        s.close()
+
+
+def _evidence_and_station(
+    db: Session,
+    *,
+    topic: str,
+    material: str,
+    draft_id: int,
+    creator_id: int | None,
+    persona: str,
+    picker,
+) -> tuple[dict, dict, dict]:
+    """R-241：联网证据与站内证据**并发**获取。
+
+    - 站内检索在独立只读 Session 线程里跑（`_retrieve_station_side`）；
+    - 联网检索走当前 Session（内部写 web_search_logs + 证据缓存），在主线程执行；
+    - 两者都完成后再由调用方按「联网 block → 站内 block」原顺序拼接。
+    """
+    from .evidence import gather_online_cached
+
+    station_exec = ThreadPoolExecutor(max_workers=1, thread_name_prefix="echo-station")
+    station_future = station_exec.submit(_retrieve_station_side, topic, creator_id)
+    try:
+        ev = gather_online_cached(
+            db,
+            topic,
+            material=material,
+            draft_id=draft_id,
+            creator_id=creator_id,
+            persona=persona,
+            picker=picker,
+        )
+        station, station_meta = station_future.result()
+    finally:
+        station_exec.shutdown(wait=False, cancel_futures=True)
+    return ev, station, station_meta
 
 
 def model_label(vendor: str, model_id: str) -> str:
@@ -348,9 +409,8 @@ def run_debate(
 
     # R-227：联网事实证据（query = 选题 + 该入口能拿到的最具体文本；无 key/失败静默）
     # R-233：豆包 + DeepSeek 双源检索/正文补齐/去营销，并由生成方按当前主博主人设选文
-    from .evidence import gather_online, mark_logs_used, public_items, resolve_used
-    from .station_evidence import meta as _station_meta
-    from .station_evidence import retrieve_station
+    # R-241：证据结果走 TTL 缓存（命中跳过选文 LLM）；站内检索与联网检索并发（见 _evidence_and_station）
+    from .evidence import mark_logs_used, public_items, resolve_used
 
     ctx = _context(db, topic)  # R-233：选文要先拿到人设（原在证据之后）
     persona_text = "\n".join(f"- {t}" for t in ctx["tags"] or ["（暂无）"]) or "（暂无）"
@@ -367,16 +427,15 @@ def run_debate(
         phase="evidence",
         rounds=rounds_total,
     )
-    ev = gather_online(
+    ev, station, station_meta = _evidence_and_station(
         db,
-        topic,
+        topic=topic,
         material=source_text or query_source,
         draft_id=draft.id,
         creator_id=draft.creator_id,
         persona=_persona_brief(ctx),
         picker=gen_llm,
     )
-    station = retrieve_station(db, topic, creator_id=draft.creator_id)  # R-227 第 2 步：站内素材
     evidence_block = "\n\n".join(x for x in (ev.get("block") or "", station.get("block") or "") if x)
     # R-227：证据先落库——讨论进行中前端「论点/引用来源」即时可见（不必等跑完）
     _merge_quality(
@@ -386,7 +445,7 @@ def run_debate(
             "search_queries": ev.get("queries") or [],
             "online_sources": public_items(ev.get("sources") or []),
             "references": public_items(ev.get("selected") or [], 5),
-            "station": _station_meta(station),
+            "station": station_meta,
         },
     )
 
@@ -600,7 +659,7 @@ def run_debate(
             "online_sources": public_items(ev.get("sources") or []),
             "references": public_items(ev.get("selected") or [], 5),
             "search_queries": ev.get("queries") or [],
-            "station": _station_meta(station),
+            "station": station_meta,
             # R-230：outlines/sources 是初稿口径；讨论后正文若已偏离论点，标记供前端提示
             "outline_drift": detect_outline_drift(outlines, draft.script),
         },
@@ -773,7 +832,8 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     payload["draft_id"] = draft.id
     # R-227：联网事实证据（无 key/失败静默返回空），并写留痕
     # R-233：双源检索/正文补齐/去营销 + 生成方按当前主博主人设选文
-    from .evidence import gather_online, mark_logs_used, public_items, resolve_used
+    # R-241：证据缓存 + 站内检索与联网检索并发（同 run_debate）
+    from .evidence import mark_logs_used, public_items, resolve_used
 
     rewrite_rounds = debate_rounds(db, settings)
     _status(
@@ -785,21 +845,14 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         phase="evidence",
         rounds=rewrite_rounds,
     )
-    ev = gather_online(
+    ev, station, station_meta = _evidence_and_station(
         db,
-        source_title,
+        topic=source_title,
         material=source_text,
         draft_id=draft.id,
         creator_id=owner.id,
         persona=_persona_brief(_persona_context(db), profile=author_ctx),
         picker=gen_llm,
-    )
-    # R-227 第 2 步：站内真实素材（作者 ASR + 作者侧定稿；对标=参考）
-    from .station_evidence import meta as _station_meta
-    from .station_evidence import retrieve_station
-
-    station = retrieve_station(
-        db, source_title, creator_id=owner.id, author_k=4, bench_k=3
     )
     evidence_block = "\n\n".join(x for x in (ev.get("block") or "", station.get("block") or "") if x)
     # R-227：证据先落库——讨论进行中前端「论点/引用来源」即时可见
@@ -810,7 +863,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             "search_queries": ev.get("queries") or [],
             "online_sources": public_items(ev.get("sources") or []),
             "references": public_items(ev.get("selected") or [], 5),
-            "station": _station_meta(station),
+            "station": station_meta,
         },
     )
     # R-178：洗稿同样留运行头 + 每次调用记实际模型
@@ -988,7 +1041,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
             "online_sources": public_items(ev.get("sources") or []),
             "references": public_items(ev.get("selected") or [], 5),
             "search_queries": ev.get("queries") or [],
-            "station": _station_meta(station),
+            "station": station_meta,
             # R-230：outlines/sources 是洗稿初稿口径；讨论后正文若已偏离论点，标记供前端提示
             "outline_drift": detect_outline_drift(initial_outlines, latest),
         },
@@ -1011,6 +1064,6 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         "online_sources": public_items(ev.get("sources") or []),
         "references": public_items(ev.get("selected") or [], 5),
         "search_queries": ev.get("queries") or [],
-        "station": _station_meta(station),
+        "station": station_meta,
     }
 

@@ -10,10 +10,11 @@ import json
 import re
 import threading
 import time
+from typing import Callable
 
 from fastapi import HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from ..core.platform_links import build_platform_page_url_from_data, parse_raw
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
@@ -24,6 +25,38 @@ from .text_tags import strip_hashtags
 _SPACE_RE = re.compile(r"\\s+")
 _TAG_RE = re.compile(r"[#＃][^\\s#＃，,。！？!?]*")
 _PUNCT_RE = re.compile(r"[，。！？!?,.;:：、|\\[\\]()（）《》\"'“”…\\-—\\s]+")
+
+# R-241 S5：列表/卡片查询只加载实际使用的列（逐项核对 post_item/_work_member_item/
+# _slim_post 的字段）。`platform_posts.raw` 约 19KB/行：作品列表的 `post_item.page_url`
+# 需要 raw 里的 bvid/share_url，必须保留；素材库卡片不输出 page_url，其查询在 library 里排除。
+_LIST_POST_FIELDS = load_only(
+    PlatformPost.id,
+    PlatformPost.account_id,
+    PlatformPost.platform,
+    PlatformPost.platform_post_id,
+    PlatformPost.title,
+    PlatformPost.desc,
+    PlatformPost.tags,
+    PlatformPost.is_ad,
+    PlatformPost.ad_price,
+    PlatformPost.cover_url,
+    PlatformPost.cover_path,
+    PlatformPost.video_url,
+    PlatformPost.publish_time,
+    PlatformPost.raw,
+    PlatformPost.local_video_id,
+    PlatformPost.work_id,
+    PlatformPost.created_at,
+)
+_LIST_ACCOUNT_FIELDS = load_only(
+    CreatorAccount.id,
+    CreatorAccount.creator_id,
+    CreatorAccount.platform,
+    CreatorAccount.nickname,
+    CreatorAccount.enabled,
+)
+_LIST_CREATOR_FIELDS = load_only(Creator.id, Creator.name, Creator.kind)
+_LIST_WORK_FIELDS = load_only(Work.id, Work.creator_id, Work.title)
 
 
 def normalize_work_title(title: str) -> str:
@@ -81,8 +114,9 @@ def _latest_stat(db: Session, post_id: int):
 #
 # 素材库（library_service.build_cards）与博主管理页（works_service.list_works）每次
 # 翻页/筛选都会全量重建 600~1900 行 → 这次加「数据版本键 + 20s TTL」双保险快照缓存。
-# 版本键是几条 count/max 轻查询：同步写入（新帖/新指标/合并/删除）会立刻换版本；
-# 原地编辑（标题/标签）等不改变聚合量的写由 20s TTL 兜底，不引入跨请求 Session 缓存。
+# R-241：版本键补 videos.updated_at / platform_post_stats.updated_at（视频原地编辑、
+# 同日统计原地更新也能精确失效），stats 组按 creator 作品集合作用域（不再全表 count
+# 导致跨 creator 抖动）；TTL 保留 20s 作为 fail-safe；并发过期由单飞只重建一次。
 # ---------------------------------------------------------------------------
 
 _CARD_CACHE_TTL = 20.0
@@ -91,11 +125,19 @@ _CARD_CACHE_LOCK = threading.Lock()
 _CARD_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
 _WORKS_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
 
+# R-241 单飞：per-key Event；构建在锁外，等待者上限 2s 后降级自行构建（fail-open）
+_INFLIGHT_WAIT = 2.0
+_INFLIGHT_LOCK = threading.Lock()
+_INFLIGHT: dict[tuple[int, tuple], threading.Event] = {}
+
 
 def cards_version(db: Session, creator_id: int | None) -> tuple:
-    """卡片快照的数据版本键（4 条便宜聚合，≤3ms）。
+    """卡片快照的数据版本键（4 条便宜聚合，≤5ms）。
 
-    `creator_id` 为空时按全量口径（与 `build_cards`/`list_works` 的「无当前博主」行为一致）。
+    - videos 组含 `max(updated_at)`：视频标题/标签/状态等原地编辑精确失效；
+    - stats 组按「该 creator enabled 账号下的作品集合」取 `max(updated_at)`/count：
+      同日统计原地更新精确失效，且不再任一 creator 新统计就全局失效；
+    - `creator_id` 为空时按全量口径（与 `build_cards`/`list_works` 的「无当前博主」行为一致）。
     """
     if creator_id:
         posts_count, posts_max_id, posts_updated = (
@@ -108,8 +150,13 @@ def cards_version(db: Session, creator_id: int | None) -> tuple:
             .filter(CreatorAccount.creator_id == creator_id, CreatorAccount.enabled.is_(True))
             .one()
         )
-        videos_count, videos_max_id, videos_created = (
-            db.query(func.count(Video.id), func.max(Video.id), func.max(Video.created_at))
+        videos_count, videos_max_id, videos_created, videos_updated = (
+            db.query(
+                func.count(Video.id),
+                func.max(Video.id),
+                func.max(Video.created_at),
+                func.max(Video.updated_at),
+            )
             .filter(Video.creator_id == creator_id)
             .one()
         )
@@ -118,19 +165,31 @@ def cards_version(db: Session, creator_id: int | None) -> tuple:
             .filter(Work.creator_id == creator_id)
             .one()
         )
+        stats_count, stats_updated = (
+            db.query(func.count(PlatformPostStat.id), func.max(PlatformPostStat.updated_at))
+            .join(PlatformPost, PlatformPost.id == PlatformPostStat.post_id)
+            .join(CreatorAccount, CreatorAccount.id == PlatformPost.account_id)
+            .filter(CreatorAccount.creator_id == creator_id, CreatorAccount.enabled.is_(True))
+            .one()
+        )
     else:
         posts_count, posts_max_id, posts_updated = db.query(
             func.count(PlatformPost.id),
             func.max(PlatformPost.id),
             func.max(PlatformPost.updated_at),
         ).one()
-        videos_count, videos_max_id, videos_created = db.query(
-            func.count(Video.id), func.max(Video.id), func.max(Video.created_at)
+        videos_count, videos_max_id, videos_created, videos_updated = db.query(
+            func.count(Video.id),
+            func.max(Video.id),
+            func.max(Video.created_at),
+            func.max(Video.updated_at),
         ).one()
         works_count, works_updated = db.query(
             func.count(Work.id), func.max(Work.updated_at)
         ).one()
-    stats_count = int(db.query(func.count(PlatformPostStat.id)).scalar() or 0)
+        stats_count, stats_updated = db.query(
+            func.count(PlatformPostStat.id), func.max(PlatformPostStat.updated_at)
+        ).one()
     return (
         creator_id or 0,
         int(posts_count or 0),
@@ -139,9 +198,11 @@ def cards_version(db: Session, creator_id: int | None) -> tuple:
         int(videos_count or 0),
         int(videos_max_id or 0),
         videos_created,
+        videos_updated,
         int(works_count or 0),
         works_updated,
-        stats_count,
+        int(stats_count or 0),
+        stats_updated,
     )
 
 
@@ -161,6 +222,46 @@ def _cache_put(cache: dict[tuple, tuple[float, list[dict]]], key: tuple, items: 
         if len(cache) >= _CARD_CACHE_MAX:
             cache.clear()
         cache[key] = (time.monotonic() + _CARD_CACHE_TTL, items)
+
+
+def cached_cards(
+    cache: dict[tuple, tuple[float, list[dict]]],
+    key: tuple,
+    build: Callable[[], list[dict]],
+) -> list[dict]:
+    """R-241 S5：卡片缓存读取 + 单飞（缓存过期瞬间并发只重建一次）。
+
+    - 命中：返回浅拷贝（与 `_cache_get` 一致）；
+    - 未命中：首个线程在锁外构建；其余线程最多等 `_INFLIGHT_WAIT` 后读缓存，
+      等待超时则降级自行构建（fail-open，不阻塞请求）；
+    - 构建异常：清除 inflight 并向上抛（等待者醒来后缓存仍 miss，再自行构建/失败），不产生死锁。
+    """
+    cached = _cache_get(cache, key)
+    if cached is not None:
+        return cached
+    inflight_key = (id(cache), key)
+    event: threading.Event | None
+    with _INFLIGHT_LOCK:
+        event = _INFLIGHT.get(inflight_key)
+        owner = event is None
+        if event is None:
+            event = threading.Event()
+            _INFLIGHT[inflight_key] = event
+    assert event is not None
+    if not owner:
+        event.wait(_INFLIGHT_WAIT)
+        cached = _cache_get(cache, key)
+        if cached is not None:
+            return cached
+    try:
+        items = build()
+        _cache_put(cache, key, items)
+        return [dict(item) for item in items]
+    finally:
+        if owner:
+            with _INFLIGHT_LOCK:
+                _INFLIGHT.pop(inflight_key, None)
+            event.set()
 
 
 def post_item(db: Session, p: PlatformPost, account=None, stat=None, creator=None) -> dict:
@@ -351,26 +452,19 @@ def _work_member_item(db: Session, m: PlatformPost, account_map: dict, stat_map:
 def list_works(db: Session, creator_id: int | None = None) -> list[dict]:
     """素材库云端作品列表：已合并作品在前（含各平台数据），未合并单条在后。
 
-    S5（R-240）：按数据版本键 + 20s TTL 缓存卡片快照，命中直接返回浅拷贝，
-    翻页/深链（`/api/works`、`/api/works/by-post`）不再全量重建；版本查询失败时降级直算。
+    S5（R-240/R-241）：按数据版本键（精确到 updated_at）+ 20s TTL 缓存快照，命中直接返回
+    浅拷贝并复用缓存；缓存过期瞬间由单飞保证只重建一次；版本查询失败时降级直算。
     """
     try:
         key = cards_version(db, creator_id)
     except Exception:  # noqa: BLE001 缓存版本查询失败 → fail-open 到原逻辑
         return _list_works(db, creator_id)
-    cached = _cache_get(_WORKS_CACHE, key)
-    if cached is not None:
-        return cached
-    items = _list_works(db, creator_id)
-    _cache_put(_WORKS_CACHE, key, items)
-    # 与命中路径一致返回浅拷贝：未命中时也不能把缓存本体交给调用方（防未来调用方原地修改污染缓存）。
-    # 注意：`posts/cloudPosts/tags` 等嵌套对象仍与缓存共享 —— 所有调用方必须只读（当前已核对）。
-    return [dict(item) for item in items]
+    return cached_cards(_WORKS_CACHE, key, lambda: _list_works(db, creator_id))
 
 
 def _list_works(db: Session, creator_id: int | None = None) -> list[dict]:
     """全量构建作品列表（缓存未命中时执行）。"""
-    q = db.query(PlatformPost)
+    q = db.query(PlatformPost).options(_LIST_POST_FIELDS)
     if creator_id:
         acc_ids = [a.id for a in db.query(CreatorAccount).filter(CreatorAccount.creator_id == creator_id, CreatorAccount.enabled.is_(True)).all()]
         q = q.filter(PlatformPost.account_id.in_(acc_ids)) if acc_ids else q.filter(PlatformPost.id < 0)
@@ -385,11 +479,15 @@ def _list_works(db: Session, creator_id: int | None = None) -> list[dict]:
             singles.append(p)
 
     # 批量预取：账号、作品、每条最新统计、创作者（避免 N+1 逐条查询）
-    account_map = {a.id: a for a in db.query(CreatorAccount).all()}
-    creator_map = {c.id: c for c in db.query(Creator).all()}
-    work_map_cache = {
-        w.id: w for w in db.query(Work).filter(Work.id.in_(work_map.keys())).all()
+    account_map = {
+        a.id: a for a in db.query(CreatorAccount).options(_LIST_ACCOUNT_FIELDS).all()
     }
+    creator_map = {c.id: c for c in db.query(Creator).options(_LIST_CREATOR_FIELDS).all()}
+    work_map_cache = (
+        {w.id: w for w in db.query(Work).options(_LIST_WORK_FIELDS).filter(Work.id.in_(work_map.keys())).all()}
+        if work_map
+        else {}
+    )
     post_ids = [p.id for p in posts]
     stat_map = latest_stats_map(db, post_ids)
 
@@ -424,3 +522,77 @@ def _list_works(db: Session, creator_id: int | None = None) -> list[dict]:
             }
         )
     return out
+
+
+def work_item_for_post(db: Session, post_id: int) -> dict | None:
+    """R-241：按单帖直接取所属云端条目（`/api/works/by-post/{id}` 深链）。
+
+    旧实现会先 `list_works()` 全量重建（缓存未命中时 200ms+）再线性扫描；这里只查该
+    work 的成员（或单帖）并复用账号/创作者/最新统计批量 map。成员过滤口径与
+    `_list_works` 完全一致（同 creator + enabled 账号），work 行缺失/禁用账号 → None。
+    """
+    post = db.get(PlatformPost, post_id)
+    if post is None or not post.account_id:
+        return None
+    acc = db.get(CreatorAccount, post.account_id)
+    if acc is None or not acc.enabled:
+        return None
+    if post.work_id:
+        work = db.get(Work, post.work_id)
+        if work is None:
+            return None
+        candidates = (
+            db.query(PlatformPost)
+            .options(_LIST_POST_FIELDS)
+            .filter(PlatformPost.work_id == post.work_id)
+            .order_by(PlatformPost.publish_time.desc().nullslast(), PlatformPost.id.desc())
+            .all()
+        )
+        account_map = {
+            a.id: a
+            for a in db.query(CreatorAccount)
+            .options(_LIST_ACCOUNT_FIELDS)
+            .filter(CreatorAccount.id.in_({m.account_id for m in candidates}))
+            .all()
+        }
+        members = [
+            m
+            for m in candidates
+            if (member_acc := account_map.get(m.account_id)) is not None
+            and member_acc.enabled
+            and member_acc.creator_id == acc.creator_id
+        ]
+        if not members:
+            return None
+        members.sort(key=lambda m: m.platform)
+        creator_map = {
+            c.id: c
+            for c in db.query(Creator)
+            .options(_LIST_CREATOR_FIELDS)
+            .filter(Creator.id.in_({a.creator_id for a in account_map.values()}))
+            .all()
+        }
+        stat_map = latest_stats_map(db, [m.id for m in members])
+        return {
+            "type": "work",
+            "id": work.id,
+            "title": work.title or members[0].title,
+            "creator_id": work.creator_id,
+            "cover": next((m.cover_url_local for m in members if m.cover_url_local), None),
+            "platforms": [m.platform for m in members],
+            "posts": [_work_member_item(db, m, account_map, stat_map, creator_map) for m in members],
+        }
+    creator_map = {
+        c.id: c
+        for c in db.query(Creator).options(_LIST_CREATOR_FIELDS).filter(Creator.id == acc.creator_id).all()
+    }
+    stat_map = latest_stats_map(db, [post.id])
+    return {
+        "type": "post",
+        "id": post.id,
+        "title": post.title,
+        "creator_id": acc.creator_id,
+        "cover": post.cover_url_local,
+        "platforms": [post.platform],
+        "posts": [post_item(db, post, acc, stat_map.get(post.id), creator_map.get(acc.creator_id))],
+    }

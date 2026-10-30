@@ -6,6 +6,9 @@ TikHub 只是“默认数据源”；通过统一接口（DataSource Protocol）
 - 整体替换默认源：`register_platform_source("default", factory)`（工厂返回 DataSource）
 - 按平台替换：`register_platform_source("douyin", factory)` 只换抖音
 - 运行期取源：`make_source(platform)` —— 有 override 用之，否则回落到 TikHub
+  （R-241：回落路径的 `tikhub.make_client` 为进程级复用，同一 (mode, base_url, api_key)
+  只建一次；`requests_used` 是**线程内累计值**，计费方用「同一线程调用前后差值」，
+  `douyin_creator_sync._charge_requests` / `douyin_references` 已按该口径实现）
 """
 
 from __future__ import annotations

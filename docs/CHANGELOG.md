@@ -1,5 +1,16 @@
 # 变更记录
 
+## [R-241] 2026-10-30 — 后端性能优化收尾（批次 3：结构性优化 + 复核遗留项）✅
+
+- 卡片缓存精确失效：新增 `videos.updated_at` / `platform_post_stats.updated_at` 两列（Alembic `r241perf`），`cards_version` 纳入两列并按 creator 作用域统计 → 视频原地编辑/同日统计更新**下一次请求即生效**（不再等 20s TTL）、他人更新不再让本 creator 缓存失效；缓存过期单飞（6 并发只重建 1 次）；`/api/works/by-post/{id}` 204~213ms → **5~10ms**（直查，不再全量重建）；`/api/library` 冷构建 214→**114ms**（列瘦身不拉 `raw`）；`creator-summary` 703 SQL/364~380ms → **5 SQL/14~28ms**。
+- chat 流 async 化：`POST /api/chat/stream` 改 async 生成器 + asyncio.Queue，SSE 事件逐字不变，流期间不再占 anyio 线程；`ChatService` 每次 LLM/工具调用前 commit，DB 连接不常驻；chat 工具加单工具 30s 墙钟（超时返回可读跳过原因）；模型兼容性自检 6 探针并行（串行 0.9s→0.3s 级、每探针 90s 上限）。
+- 后台任务：`start_task` 同 kind+payload 自动去重（双击不再跑两份）+ 全局并发上限 `ECHO_MAX_PARALLEL_TASKS`（默认 8，超出保持 pending 排队不丢任务）；新增 `(status, created_at)` 索引，`/api/tasks` limit clamp ≤200（前端参数不变）。
+- 写放大/连接复用：预算 `_charge` 改单条 `INSERT…ON CONFLICT…RETURNING` 原子计费（1 写 1 commit，超卖兜底回滚）；B 站补全进度每 10 条/阶段末才强制刷新（每轮 ~150→~15-18 次 commit）；新增 `core/http.py` 共享 httpx.Client，TikHub `make_client` 进程级单例（`requests_used` 改线程内累计保证差值计费）、封面/头像/搜索/DeepSeek 全部复用连接；DeepSeek Fetch 按 URL 1h 缓存。
+- N+1/串行收尾：opportunity 视频互动批量（逐视频 1746 SQL→4、attribution 完整路径 7 SQL）、`learning_material` ≈1766→18 SQL、`weekly_pack` 456→23 SQL；`retrieve_station` 380 查询→**8 SQL/96ms** 并与联网检索并发（生成链路少一段串行 DB）；证据选文结果按 (creator, topic, material, **persona**) 缓存 1h（命中跳过检索+选文 LLM）；`get_content_opportunities` 三分支并发（独立 Session，单分支降级）；topic_mining 平台并发+批量去重入库（查重 20~60→1）；persona `merge_full` 分块并行（≤4，输出与串行一致）；prompt_eval 部分失败标记；rerun 进度增加中间态。
+- 表结构：`videos.updated_at`、`platform_post_stats.updated_at` 两列 + `ix_background_tasks_status_created` 索引（Alembic `r241perf`，down_revision `r239douyincred`）；`docs/DATABASE.md` 已同步；表数量不变（38 张）。
+- 契约：前端零改动，接口请求/响应字段与 OpenAPI schema 不变；新增配置 `ECHO_MAX_PARALLEL_TASKS`。
+- 验证：`scripts/verify.sh` 全绿（ruff/mypy 151 文件/pytest 全量/前端 lint+vitest 145 例+build/文档一致性）；新增 `tests/test_r241_{readpath,ai,chat_infra,sync_http,tasks}.py` 共 57 例回归；服务重启加载新代码后 GET 冒烟/日志检查通过。
+
 ## [R-240] 2026-10-30 — 后端性能优化批次 1+2：接口慢点消除 + 可并行任务并行化 ✅
 
 - 读接口消除 N+1/全量加载：`GET /api/benchmark/top` 810 SQL/447ms → **7 SQL/27~32ms**；`/api/library` 假分页 141ms → **9~10ms（快照缓存命中，首访 150ms）**；`/api/works` 210ms → **9ms（命中）**；`/api/persona/style` 218 SQL/76ms → **7 SQL/17~21ms**；`/api/persona/phrases/suggest` 146 SQL/44ms → **4 SQL/6~7ms**；`/api/douyin-review/references` 112ms → **16~18ms**；机会缓存加单飞+60s 预热（ledger 冷 593ms → 预热后 6.5ms，attribution 225ms → 4.7ms）。

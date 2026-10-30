@@ -314,10 +314,12 @@ def learning_material(db: Session, max_items: int = 16) -> str:
     import math
     from datetime import date as _date
 
+    from sqlalchemy.orm import selectinload
+
     from ..models.metrics import MetricsSnapshot
     from ..models.video import Video
     from .generation import _creator_filter, _persona_context, _style_profile_lines
-    from .metrics import _platform_breakdown
+    from .opportunity import platform_breakdown_map
 
     parts: list[str] = []
     cid = _creator_filter(db)
@@ -336,15 +338,18 @@ def learning_material(db: Session, max_items: int = 16) -> str:
     except Exception:  # noqa: BLE001 画像失败不阻断
         pass
 
-    q = db.query(Video).filter(Video.is_ad.is_(False))
+    # R-241 F10：转写稿 selectinload（消 600 次懒加载 N+1）+ 平台数据一次批量预取（原逐视频 3+ 查询）
+    q = db.query(Video).options(selectinload(Video.transcript)).filter(Video.is_ad.is_(False))
     if cid:
         q = q.filter(Video.creator_id == cid)
     snap: dict[int, MetricsSnapshot] = {}
     for _s in db.query(MetricsSnapshot).order_by(MetricsSnapshot.snapshot_date.desc()).all():
         snap.setdefault(_s.video_id, _s)
 
+    videos = q.all()
+    breakdown_map = platform_breakdown_map(db, videos)
     scored: list[tuple[float, str, str]] = []
-    for v in q.all():
+    for v in videos:
         tr = v.transcript
         if tr is None:
             continue
@@ -352,7 +357,7 @@ def learning_material(db: Session, max_items: int = 16) -> str:
         if not text:
             continue
         plays = likes = fav = comments = 0
-        for row in _platform_breakdown(db, v):  # 绑定平台最新真实数据
+        for row in breakdown_map.get(v.id, []):  # 绑定平台最新真实数据
             plays += int(row.get("plays") or 0)
             likes += int(row.get("likes") or 0)
             fav += int(row.get("favorites") or 0)

@@ -5,10 +5,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-import queue
 import threading
-import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -150,56 +149,69 @@ def chat(payload: ChatIn, db: Session = Depends(get_db)):
 
 
 @router.post("/stream")
-def chat_stream(payload: ChatStreamIn):
-    """SSE 流式问答：先按非流式求解（含工具调用），再逐段下发结果（打字机式流式）。"""
+async def chat_stream(payload: ChatStreamIn):
+    """SSE 流式问答：先按非流式求解（含工具调用），再逐段下发结果（打字机式流式）。
+
+    R-241 F-03：改 async 生成器 + asyncio.Queue，worker 线程经 `loop.call_soon_threadsafe`
+    投递事件 —— 等待 LLM/打字机期间不再占用 anyio 线程池 token（原来整条流占 1 个线程）。
+    事件类型/顺序/JSON/文案与旧实现逐字一致。
+    """
     user_msg = payload.message.strip()
     if not user_msg:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
-    def gen():
+    loop = asyncio.get_running_loop()
+    out: asyncio.Queue = asyncio.Queue()
+
+    def emit(kind: str, data) -> None:
+        """worker 线程 → 事件循环（非阻塞投递）；事件循环已关闭（进程退出）时丢弃。"""
+        try:
+            loop.call_soon_threadsafe(out.put_nowait, (kind, data))
+        except RuntimeError:  # 事件循环已关闭：没有消费者，丢弃（进程退出路径）
+            pass
+
+    def worker() -> None:
         """R-147 P0：agent 在后台线程里跑，每步工具调用实时下发（event: step），
         最后把整段回答按打字机节奏发出去。"""
-        out: queue.Queue = queue.Queue()
+        db = SessionLocal()
+        try:
+            conversation_id = payload.conversation_id
+            if conversation_id is not None and db.get(ChatConversation, conversation_id) is None:
+                emit("error", "会话不存在")
+                return
+            history = _last_history(db, conversation_id)
+            db.add(ChatMessage(conversation_id=conversation_id, role="user", content=user_msg))
+            db.commit()
 
-        def worker() -> None:
-            db = SessionLocal()
-            try:
-                conversation_id = payload.conversation_id
-                if conversation_id is not None and db.get(ChatConversation, conversation_id) is None:
-                    out.put(("error", "会话不存在"))
-                    return
-                history = _last_history(db, conversation_id)
-                db.add(ChatMessage(conversation_id=conversation_id, role="user", content=user_msg))
-                db.commit()
+            def on_step(step: dict) -> None:
+                emit("step", step)
 
-                def on_step(step: dict) -> None:
-                    out.put(("step", step))
+            reply = ChatService(db=db).reply(
+                db, user_msg, history, conversation_id=conversation_id, on_step=on_step, mode=payload.mode
+            )
+            msg = ChatMessage(conversation_id=conversation_id, role="assistant", content=reply)
+            db.add(msg)
+            db.commit()
+            db.refresh(msg)
+            if conversation_id is not None:
+                conv = db.get(ChatConversation, conversation_id)
+                if conv:
+                    conv.updated_at = _app_now()
+                    db.commit()
+            emit("reply", (reply, msg.id))
+        except Exception as exc:  # noqa: BLE001 统一转成 error 事件
+            emit("error", str(exc))
+        finally:
+            db.close()
+            emit("end", None)
 
-                reply = ChatService(db=db).reply(
-                    db, user_msg, history, conversation_id=conversation_id, on_step=on_step, mode=payload.mode
-                )
-                msg = ChatMessage(conversation_id=conversation_id, role="assistant", content=reply)
-                db.add(msg)
-                db.commit()
-                db.refresh(msg)
-                if conversation_id is not None:
-                    conv = db.get(ChatConversation, conversation_id)
-                    if conv:
-                        conv.updated_at = _app_now()
-                        db.commit()
-                out.put(("reply", (reply, msg.id)))
-            except Exception as exc:  # noqa: BLE001 统一转成 error 事件
-                out.put(("error", str(exc)))
-            finally:
-                db.close()
-                out.put(("end", None))
+    threading.Thread(target=worker, daemon=True).start()
 
-        threading.Thread(target=worker, daemon=True).start()
-
+    async def gen():
         reply_text = ""
         message_id = 0
         while True:
-            kind, data = out.get()
+            kind, data = await out.get()
             if kind == "end":
                 break
             if kind == "step":
@@ -217,7 +229,7 @@ def chat_stream(payload: ChatStreamIn):
         for i in range(0, len(reply_text), step):
             chunk = reply_text[i : i + step]
             yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"
-            time.sleep(0.015)
+            await asyncio.sleep(0.015)
         yield f"event: done\ndata: {json.dumps({'done': True, 'message_id': message_id}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

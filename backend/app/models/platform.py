@@ -145,6 +145,9 @@ class PlatformPostStat(Base):
     extra: Mapped[str] = mapped_column(Text, default="{}")  # 平台特有字段（投币/弹幕等）JSON
     source: Mapped[str] = mapped_column(String(20), default="tikhub")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_app_now, onupdate=_app_now
+    )  # R-241：卡片缓存版本键（感知同日统计原地更新）
 
 
 class PlatformPostComment(Base):

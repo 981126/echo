@@ -104,7 +104,7 @@ AI 提示词版本库（R-021）：key 标识用途，version 递增，status=en
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 | `updated_at` | DATETIME |  | 否 | 当前时间（北京） |
 
-**索引**：`ix_background_tasks_kind`（kind）
+**索引**：`ix_background_tasks_kind`（kind）；`ix_background_tasks_status_created`（status, created_at，R-241 轮询/运行中查询）
 
 ---
 
@@ -527,6 +527,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `extra` | TEXT |  | 否 | {} |
 | `source` | VARCHAR(20) |  | 否 | tikhub |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+| `updated_at` | DATETIME |  | 否 | 当前时间（北京）/更新时刷新（R-241：卡片缓存版本键） |
 
 **索引**：`ix_platform_post_stats_stat_date`（stat_date）；`ix_platform_post_stats_post_id`（post_id）
 
@@ -716,6 +717,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `tags` | TEXT |  | 否 | [] |
 | `tags_confirmed` | BOOLEAN |  | 否 | false |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+| `updated_at` | DATETIME |  | 否 | 当前时间（北京）/更新时刷新（R-241：卡片缓存版本键） |
 
 **索引**：`ix_videos_work_id`（work_id）；`ix_videos_creator_id`（creator_id）；`ix_videos_filename`（filename）
 

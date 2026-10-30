@@ -12,12 +12,17 @@ import math
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from difflib import SequenceMatcher
+from typing import Any
 
 from sqlalchemy.orm import Session
 
+from ..core.log import get_logger
 from ..models.hot_topic import TopicIdea
+
+log = get_logger("opportunity")
 
 _SIM_THRESHOLD = 0.5
 _COVERED_THRESHOLD = 0.62
@@ -50,16 +55,23 @@ def prewarm(db: Session) -> None:
         hit = _CACHE.get(key)
         if hit is not None and now - hit[0] < ttl / 2:
             continue
-        value = fn()
-        with _CACHE_LOCK:
-            _CACHE[key] = (time.monotonic(), value)
+        _cache_put(key, fn())
+
+
+def _cache_put(key: str, value) -> None:
+    """写入缓存（容量上限 32 条，超限整体清空；与单飞/预热共用）。"""
+    with _CACHE_LOCK:
+        _CACHE[key] = (time.monotonic(), value)
+        if len(_CACHE) > 32:
+            _CACHE.clear()
 
 
 def _cached(key: str, fn, ttl: float = _CACHE_TTL):
     """进程内 TTL 缓存（R-240 M4：单飞防击穿）。
 
     未命中/过期时只有一个线程重算，其余线程最多等 `_INFLIGHT_WAIT` 秒后读缓存；
-    等待超时或重算失败则降级为各自重算（fail-open，不改变正确性）。
+    等待超时或首个线程重算失败则降级为各自重算（fail-open，不改变正确性）。
+    R-241：等待者降级重算的结果也写回缓存，避免持续故障/长计算时每个请求都重算一遍。
     """
     now = time.monotonic()
     hit = _CACHE.get(key)
@@ -79,13 +91,12 @@ def _cached(key: str, fn, ttl: float = _CACHE_TTL):
         hit = _CACHE.get(key)
         if hit and time.monotonic() - hit[0] < ttl:
             return hit[1]
-        return fn()  # 等超时/首个线程重算失败 → 自己算（降级）
+        value = fn()  # 等超时/首个线程重算失败 → 自己算（降级），结果同样写回缓存
+        _cache_put(key, value)
+        return value
     try:
         value = fn()
-        with _CACHE_LOCK:
-            _CACHE[key] = (time.monotonic(), value)
-            if len(_CACHE) > 32:
-                _CACHE.clear()
+        _cache_put(key, value)
         return value
     finally:
         with _CACHE_LOCK:
@@ -269,7 +280,6 @@ def _ask_groups(listing: str, deadline: float) -> list:
     `Future.result(timeout=...)` 只约束调用方等待，底层线程仍可能卡到全局 600s；
     下传后单次调用按 `min(_LLM_DEADLINE, deadline)` 收紧，异常/超时语义不变（仍回退本地聚类）。
     """
-    from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as FTimeout
 
     from .persona import PersonaService
@@ -582,6 +592,148 @@ def topic_attribution(db: Session, limit: int = 15) -> dict:
     return _cached(f"attr:{cid}:{limit}", lambda: _topic_attribution(db, limit), ttl=300.0)
 
 
+# ---------- R-241：机会/语料共用的批量平台数据（消除逐视频 N+1） ----------
+
+_PLATFORMS = ("douyin", "bilibili", "xiaohongshu")
+
+
+def platform_breakdown_map(db: Session, videos: list) -> dict[int, list[dict]]:
+    """批量版 `metrics._platform_breakdown`：`video_id -> 三平台最新互动数据`。
+
+    与逐条版逐字段等价（绑定顺序 local_video_id → work_id → platform_post_id、
+    同平台取第一个绑定作品、统计取 stat_date 最新），但查询数固定为 2~3 条：
+    一次绑定作品 IN + 一次 platform_post_id 精确匹配 + 一次统计 IN（升序覆盖）。
+    供 `opportunity`（归因/周包）与 `prompt_service.learning_material` 共用。
+    """
+    from ..models.platform import PlatformPost, PlatformPostStat
+
+    video_ids = [v.id for v in videos]
+    if not video_ids:
+        return {}
+    bound: dict[int, list[Any]] = {vid: [] for vid in video_ids}
+    seen: dict[int, set[int]] = {vid: set() for vid in video_ids}
+
+    def _add(vid: int, post: Any) -> None:
+        if post.id in seen[vid]:
+            return
+        seen[vid].add(post.id)
+        bound[vid].append(post)
+
+    # 1) 直接绑定本地素材的作品
+    for post in db.query(PlatformPost).filter(PlatformPost.local_video_id.in_(video_ids)).all():
+        if post.local_video_id in bound:
+            _add(post.local_video_id, post)
+    # 2) 同 work 的跨平台作品
+    work_ids = sorted({v.work_id for v in videos if v.work_id})
+    if work_ids:
+        work_posts: dict[int, list[Any]] = {}
+        for post in db.query(PlatformPost).filter(PlatformPost.work_id.in_(work_ids)).all():
+            work_id = post.work_id
+            if work_id is not None:
+                work_posts.setdefault(work_id, []).append(post)
+        for v in videos:
+            if v.work_id:
+                for post in work_posts.get(v.work_id, []):
+                    _add(v.id, post)
+    # 3) video.platform_post_id（"platform:external_id"）兜底
+    keys: dict[int, tuple[str, str]] = {}
+    for v in videos:
+        raw = v.platform_post_id or ""
+        if ":" in raw:
+            platform, ext = raw.split(":", 1)
+            keys[v.id] = (platform, ext)
+    if keys:
+        ext_ids = sorted({ext for _platform, ext in keys.values()})
+        found: dict[tuple[str, str], list[Any]] = {}
+        for post in db.query(PlatformPost).filter(PlatformPost.platform_post_id.in_(ext_ids)).all():
+            found.setdefault((post.platform, post.platform_post_id), []).append(post)
+        for v in videos:
+            matches = found.get(keys.get(v.id, ("", ""))) if v.id in keys else None
+            if matches:
+                _add(v.id, matches[0])
+
+    # 每个素材每个平台取第一个绑定作品 → 每个作品最新一条统计（升序覆盖）
+    chosen: dict[int, dict[str, Any]] = {}
+    post_ids: set[int] = set()
+    for vid in video_ids:
+        by_platform: dict[str, Any] = {}
+        for post in bound[vid]:
+            by_platform.setdefault(post.platform, post)
+        chosen[vid] = by_platform
+        post_ids.update(post.id for post in by_platform.values())
+    latest: dict[int, Any] = {}
+    if post_ids:
+        for stat_row in (
+            db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id.in_(sorted(post_ids)))
+            .order_by(PlatformPostStat.stat_date)
+            .all()
+        ):
+            latest[stat_row.post_id] = stat_row
+
+    out: dict[int, list[dict]] = {}
+    for vid in video_ids:
+        rows: list[dict] = []
+        for platform in _PLATFORMS:
+            bound_post = chosen[vid].get(platform)
+            stat = latest.get(bound_post.id) if bound_post is not None else None
+            rows.append(
+                {
+                    "platform": platform,
+                    "plays": stat.plays if stat else None,
+                    "likes": stat.likes if stat else None,
+                    "favorites": stat.favorites if stat else None,
+                    "comments": stat.comments if stat else None,
+                }
+            )
+        out[vid] = rows
+    return out
+
+
+def _video_engagement_map(db: Session, videos: list) -> dict[int, float]:
+    """批量版 `_video_engagement`（R-241）：有平台数据按平台合计，否则退回指标快照，逐条等价。"""
+    from ..models.metrics import MetricsSnapshot
+
+    breakdown = platform_breakdown_map(db, videos)
+    out: dict[int, float] = {}
+    fallback: list = []
+    for v in videos:
+        totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0}
+        has = False
+        for row in breakdown.get(v.id, []):
+            for k in totals:
+                if row.get(k) is not None:
+                    has = True
+                    totals[k] += int(row.get(k) or 0)
+        if has:
+            out[v.id] = _engagement(totals)
+        else:
+            fallback.append(v)
+    if fallback:
+        snapshots: dict[int, Any] = {}
+        for snap_row in (
+            db.query(MetricsSnapshot)
+            .filter(MetricsSnapshot.video_id.in_([v.id for v in fallback]))
+            .order_by(MetricsSnapshot.snapshot_date)
+            .all()
+        ):
+            snapshots[snap_row.video_id] = snap_row
+        for v in fallback:
+            snapshot = snapshots.get(v.id)
+            if snapshot is None:
+                out[v.id] = 0.0
+                continue
+            out[v.id] = _engagement(
+                {
+                    "plays": snapshot.plays or 0,
+                    "likes": snapshot.likes or 0,
+                    "favorites": snapshot.favorites or 0,
+                    "comments": snapshot.comments or 0,
+                }
+            )
+    return out
+
+
 def _video_engagement(db: Session, video) -> float:
     """素材表现（优先平台实时，退回指标快照）；无数据返回 0。"""
     from .metrics import _platform_breakdown
@@ -637,11 +789,14 @@ def _topic_attribution(db: Session, limit: int) -> dict:
             by_tag.setdefault(tag, []).append(eng)
 
     # 2) 已发布素材（R-197：历史数据主要在 videos/works，不在草稿）
+    # R-241 L8：逐视频 `_video_engagement`（每次 3+ 查询）改一次批量预取，查询数从 O(视频数) → 常数级
     vq = db.query(Video).filter(Video.is_ad.is_(False), Video.status == "published")
     if cid:
         vq = vq.filter(Video.creator_id == cid)
-    for v in vq.all():
-        eng = _video_engagement(db, v)
+    videos = vq.all()
+    engagement_map = _video_engagement_map(db, videos)
+    for v in videos:
+        eng = engagement_map.get(v.id, 0.0)
         if eng <= 0:
             continue
         tags = list(dict.fromkeys(_draft_tags(v.main_topics) + _draft_tags(v.tags)))
@@ -736,3 +891,84 @@ def weekly_task(db: Session, payload: dict) -> dict:
 
 def gap_task(db: Session, payload: dict) -> dict:
     return gap_suggestions(db, limit=int(payload.get("limit", 6)))
+
+
+# ---------- R-241：chat 工具「三路选题灵感」三分支并发 ----------
+
+
+def _content_comment_branch(db: Session) -> dict:
+    cc = comment_clusters(db, limit=8, use_llm=False)
+    return {
+        "comment_clusters": [
+            {"title": c["title"], "asked_by": c["count"], "matched_persona": c["matched"]}
+            for c in cc.get("clusters", [])
+        ]
+    }
+
+
+def _content_weekly_branch(db: Session) -> dict:
+    return {
+        "weekly_pack": [
+            {"title": i["title"], "why": i["reason"]} for i in weekly_pack(db, limit=12).get("items", [])
+        ]
+    }
+
+
+def _content_gap_branch(db: Session) -> dict:
+    gap = gap_suggestions(db, limit=6)
+    out: dict = {"gap": [{"title": i["title"], "why": i["reason"]} for i in gap.get("items", [])]}
+    if gap.get("note"):
+        out["gap_note"] = gap["note"]
+    return out
+
+
+_CONTENT_DEGRADED: dict[str, dict] = {
+    "comment": {"comment_clusters": []},
+    "weekly": {"weekly_pack": []},
+    "gap": {"gap": [], "gap_note": "AI 暂不可用：该分支计算失败"},
+}
+
+
+def content_opportunities(want: str = "all", *, session_factory=None) -> dict:
+    """R-241：chat 工具「三路选题灵感」三分支并发（各自独立只读 Session，单分支失败降级）。
+
+    返回值与 `chat_service._get_content_opportunities(db, args)` 逐字段一致：
+    `{"comment_clusters":[...], "weekly_pack":[...], "gap":[...], "gap_note":"..."}`；
+    `want` 取值 all|comment|weekly|gap（与工具参数同义）。调用方只需
+    `return opportunity.content_opportunities(want)`，不再让请求/工具 Session 跨线程。
+    """
+    branches: list[str] = []
+    if want in ("all", "comment"):
+        branches.append("comment")
+    if want in ("all", "weekly"):
+        branches.append("weekly")
+    if want in ("all", "gap"):
+        branches.append("gap")
+    if not branches:
+        return {}
+    handlers = {
+        "comment": _content_comment_branch,
+        "weekly": _content_weekly_branch,
+        "gap": _content_gap_branch,
+    }
+    factory = session_factory
+    if factory is None:
+        from ..db import SessionLocal
+
+        factory = SessionLocal
+
+    def _run(name: str) -> tuple[str, dict]:
+        session = factory()
+        try:
+            return name, handlers[name](session)
+        except Exception:  # noqa: BLE001 单分支失败只降级该分支（与现有 try/except 语义一致）
+            log.warning("内容机会分支计算失败，已降级：%s", name, exc_info=True)
+            return name, dict(_CONTENT_DEGRADED[name])
+        finally:
+            session.close()
+
+    merged: dict = {}
+    with ThreadPoolExecutor(max_workers=len(branches), thread_name_prefix="echo-opps") as pool:
+        for _name, value in pool.map(_run, branches):
+            merged.update(value)
+    return merged

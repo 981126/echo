@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from ..models.platform import CreatorAccount, PlatformPost
 from ..models.video import Video
@@ -24,13 +24,38 @@ from ..models.work import Work
 from .creator_service import current_creator_id
 from .text_tags import extract_hashtags, strip_hashtags
 from .video_query import visible_videos_query
-from .works_service import _cache_get, _cache_put, cards_version, latest_stats_map
+from .works_service import _LIST_WORK_FIELDS, cached_cards, cards_version, latest_stats_map
 
 # R-226：卡片标签与标题的固定顺序（抖音→小红书→B站，其余排最后）
 _PLATFORM_ORDER = {"douyin": 0, "xiaohongshu": 1, "bilibili": 2}
 
-# S5（R-240）：卡片快照缓存（数据版本键 + 20s TTL，版本键与锁见 works_service）
+# S5（R-240）：卡片快照缓存（数据版本键 + 20s TTL，版本键/锁/单飞见 works_service）
 _CARD_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+
+# R-241 S5：素材库卡片不输出 page_url，云端帖查询可排除 raw（约 19KB/行）等大字段
+_CLOUD_POST_FIELDS = load_only(
+    PlatformPost.id,
+    PlatformPost.account_id,
+    PlatformPost.platform,
+    PlatformPost.title,
+    PlatformPost.desc,
+    PlatformPost.tags,
+    PlatformPost.is_ad,
+    PlatformPost.ad_price,
+    PlatformPost.cover_url,
+    PlatformPost.cover_path,
+    PlatformPost.publish_time,
+    PlatformPost.local_video_id,
+    PlatformPost.work_id,
+)
+_BOUND_VIDEO_FIELDS = load_only(
+    Video.id,
+    Video.filename,
+    Video.main_topics,
+    Video.tags,
+    Video.is_ad,
+    Video.ad_price,
+)
 
 
 def _platform_rank(platform: str) -> int:
@@ -163,7 +188,7 @@ def _slim_post(p: PlatformPost, stat) -> dict:
 def _cloud_cards(db: Session, creator_id: int) -> tuple[list[dict], set[int]]:
     """云端作品 → 卡片；同时返回被绑定的本地素材 id（本地卡片要剔除它们）。"""
     cid = creator_id or current_creator_id(db)
-    q = db.query(PlatformPost)
+    q = db.query(PlatformPost).options(_CLOUD_POST_FIELDS)
     if cid:
         acc_ids = [
             a.id
@@ -182,11 +207,19 @@ def _cloud_cards(db: Session, creator_id: int) -> tuple[list[dict], set[int]]:
         else:
             singles.append(p)
 
-    work_rows = {w.id: w for w in db.query(Work).filter(Work.id.in_(work_map.keys())).all()} if work_map else {}
+    work_rows = (
+        {w.id: w for w in db.query(Work).options(_LIST_WORK_FIELDS).filter(Work.id.in_(work_map.keys())).all()}
+        if work_map
+        else {}
+    )
     account_map = {a.id: a for a in db.query(CreatorAccount).all()}
     stat_map = latest_stats_map(db, [p.id for p in posts])
     linked = {p.local_video_id for p in posts if p.local_video_id}
-    bound_videos = {v.id: v for v in db.query(Video).filter(Video.id.in_(linked)).all()} if linked else {}
+    bound_videos = (
+        {v.id: v for v in db.query(Video).options(_BOUND_VIDEO_FIELDS).filter(Video.id.in_(linked)).all()}
+        if linked
+        else {}
+    )
 
     groups: list[tuple[str, int, list[PlatformPost], int | None, str]] = []
     for wid, members in work_map.items():
@@ -254,13 +287,7 @@ def build_cards(db: Session, creator_id: int = 0) -> list[dict]:
         key = cards_version(db, creator_id or current_creator_id(db))
     except Exception:  # noqa: BLE001 缓存版本查询失败 → fail-open 到原逻辑
         return _build_cards(db, creator_id)
-    cached = _cache_get(_CARD_CACHE, key)
-    if cached is not None:
-        return cached
-    cards = _build_cards(db, creator_id)
-    _cache_put(_CARD_CACHE, key, cards)
-    # 与命中路径一致返回浅拷贝（详见 works_service 同处注释）；嵌套对象只读。
-    return [dict(item) for item in cards]
+    return cached_cards(_CARD_CACHE, key, lambda: _build_cards(db, creator_id))
 
 
 def _build_cards(db: Session, creator_id: int = 0) -> list[dict]:

@@ -133,6 +133,7 @@ class Settings(BaseSettings):
     pipeline_generate_concurrency: int = 2  # 每日流水线并发生成草稿数（1~3），ECHO_PIPELINE_GENERATE_CONCURRENCY
     prompt_selfcheck_concurrency: int = 2  # 提示词启用后自测并发生成数（1~3），ECHO_PROMPT_SELFCHECK_CONCURRENCY
     asr_max_attempts: int = 3  # 自动转写最大尝试次数，超过跳过并通知；ECHO_ASR_MAX_ATTEMPTS
+    max_parallel_tasks: int = 8  # R-241：后台任务全局并发上限（超出保持 pending 排队）；ECHO_MAX_PARALLEL_TASKS
 
     # 联网搜索（R-227）：火山引擎豆包搜索（融合信息搜索），为生成/洗稿补充真实事实/数据。
     # 未配 key 时联网能力静默关闭（不影响生成）；结果缓存 + 单次请求超时。

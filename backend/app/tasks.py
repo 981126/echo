@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import threading
+import time
 
 from .db import SessionLocal
 from .core.log import get_logger
@@ -79,21 +80,82 @@ def find_running_task(kind: str, payload_match: dict | None = None) -> int | Non
         db.close()
 
 
-def start_task(kind: str, payload: dict, fn) -> int:
+# R-241：同 kind + payload 完全相同的 pending/running 任务直接复用（防双击/重试重复造任务）。
+# 与 `find_running_task`（入口自选 payload 子集匹配）互补；这里用于 start_task 的默认去重。
+_START_LOCK = threading.Lock()
+
+
+def find_running_payload(kind: str, payload: dict) -> int | None:
+    """同 kind 且 payload 完全相等的 pending/running 任务 id（无则 None）。"""
     db = SessionLocal()
     try:
-        task = BackgroundTask(kind=kind, payload=json.dumps(payload, ensure_ascii=False))
-        db.add(task)
-        db.commit()
-        db.refresh(task)
-        task_id = task.id
+        rows = (
+            db.query(BackgroundTask)
+            .filter(BackgroundTask.kind == kind, BackgroundTask.status.in_(["pending", "running"]))
+            .order_by(BackgroundTask.id.desc())
+            .limit(50)
+            .all()
+        )
+        for row in rows:
+            if row.payload_dict() == payload:
+                return row.id
+        return None
     finally:
         db.close()
+
+
+# R-241：后台任务全局并发上限（超出任务保持 pending 排队，不丢任务）。
+# 用懒初始化：测试可把 `_TASK_SLOTS` 替换成小信号量验证排队行为。
+_TASK_SLOTS: threading.BoundedSemaphore | None = None
+_TASK_SLOTS_LOCK = threading.Lock()
+
+
+def _task_slots() -> threading.BoundedSemaphore:
+    global _TASK_SLOTS
+    if _TASK_SLOTS is None:
+        with _TASK_SLOTS_LOCK:
+            if _TASK_SLOTS is None:
+                from .config import get_settings
+
+                limit = max(1, int(getattr(get_settings(), "max_parallel_tasks", 8) or 8))
+                _TASK_SLOTS = threading.BoundedSemaphore(limit)
+    return _TASK_SLOTS
+
+
+def start_task(kind: str, payload: dict, fn, *, dedupe: bool = True) -> int:
+    """创建后台任务并启动 daemon 线程；`dedupe=True`（默认）时同 kind+payload 运行中任务直接复用。"""
+    from .core.log import get_logger
+
+    log = get_logger("tasks")
+    with _START_LOCK:
+        if dedupe:
+            existing = find_running_payload(kind, payload)
+            if existing is not None:
+                log.info("任务去重：复用运行中的 %s task_id=%s payload=%s", kind, existing, payload)
+                return existing
+        db = SessionLocal()
+        try:
+            task = BackgroundTask(kind=kind, payload=json.dumps(payload, ensure_ascii=False))
+            db.add(task)
+            db.commit()
+            db.refresh(task)
+            task_id = task.id
+        finally:
+            db.close()
     threading.Thread(target=_run_worker, args=(task_id, kind, payload, fn), daemon=True).start()
     return task_id
 
 
 def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
+    from .core.log import get_logger
+
+    log = get_logger("tasks")
+    slots = _task_slots()
+    wait_started = time.monotonic()
+    slots.acquire()  # R-241：全局并发上限；等待期间任务保持 pending（前端进行中可见）
+    waited = time.monotonic() - wait_started
+    if waited > 1.0:
+        log.info("任务排队 %.1fs 后开始执行（kind=%s task_id=%s）", waited, kind, task_id)
     db = SessionLocal()
 
     def _emit(status: str, progress: int, note: str, error: str = "") -> None:
@@ -168,6 +230,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             log.exception("后台任务失败通知写入失败 task_id=%s", task_id)
     finally:
         db.close()
+        slots.release()  # R-241：释放全局并发名额（异常/失败路径也必须释放）
 
 
 def _maybe_optimize_prompt(db, payload: dict) -> None:

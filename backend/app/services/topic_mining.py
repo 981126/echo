@@ -6,13 +6,16 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 
-import httpx
-
 from ..config import get_settings
+from ..core.http import get_client
+from ..core.log import get_logger
 from ..core.pipeline import today_key
 from ..models.hot_topic import HotTopic
+
+log = get_logger("topic_mining")
 
 
 @dataclass
@@ -76,10 +79,11 @@ class BilibiliHotSource(BaseHotSource):
     name = "bilibili"
 
     def fetch(self) -> list[HotItem]:
-        with httpx.Client(timeout=15) as client:
-            resp = client.get("https://api.bilibili.com/x/web-interface/popular?ps=20")
-            resp.raise_for_status()
-            data = resp.json()
+        resp = get_client("bilibili", timeout=15).get(
+            "https://api.bilibili.com/x/web-interface/popular?ps=20", timeout=15
+        )
+        resp.raise_for_status()
+        data = resp.json()
         items = []
         for row in (data.get("data") or {}).get("list") or []:
             items.append(
@@ -104,12 +108,14 @@ class DouyinHotSource(BaseHotSource):
             "aid": "6383",
             "channel": "channel_pc_web",
         }
-        with httpx.Client(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            resp = client.get(
-                "https://www.douyin.com/aweme/v1/web/hot/search/list/", params=params
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        resp = get_client("douyin", timeout=15).get(
+            "https://www.douyin.com/aweme/v1/web/hot/search/list/",
+            params=params,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
         items = []
         word_list = (data.get("data") or {}).get("word_list") or []
         for row in word_list:
@@ -129,10 +135,13 @@ class XiaohongshuHotSource(BaseHotSource):
     name = "xiaohongshu"
 
     def fetch(self) -> list[HotItem]:
-        with httpx.Client(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            resp = client.get("https://www.xiaohongshu.com/api/sns/web/v1/hot_search")
-            resp.raise_for_status()
-            data = resp.json()
+        resp = get_client("xiaohongshu", timeout=15).get(
+            "https://www.xiaohongshu.com/api/sns/web/v1/hot_search",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
         items = []
         for row in ((data.get("data") or {}).get("items")) or []:
             items.append(
@@ -157,12 +166,14 @@ class TikHubHotSource(BaseHotSource):
         self._base = (settings.tikhub_base_url or "https://api.tikhub.io/api/v1").rstrip("/")
 
     def _get(self, path: str, params: dict | None = None) -> dict:
-        with httpx.Client(
-            timeout=20, headers={"Authorization": f"Bearer {self._key}"}
-        ) as client:
-            resp = client.get(f"{self._base}{path}", params=params or {})
-            resp.raise_for_status()
-            return resp.json()
+        resp = get_client(self._base, timeout=20).get(
+            f"{self._base}{path}",
+            params=params or {},
+            headers={"Authorization": f"Bearer {self._key}"},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
 class DouyinTikHubHotSource(TikHubHotSource):
@@ -238,38 +249,53 @@ def get_sources(settings=None) -> list[BaseHotSource]:
     return [DouyinHotSource(), BilibiliHotSource(), XiaohongshuHotSource()]
 
 
+def _safe_fetch(source: BaseHotSource) -> list[HotItem]:
+    """单平台抓取（失败只跳过该平台，不拖垮其它源）。"""
+    try:
+        return source.fetch()
+    except Exception:  # noqa: BLE001 单个平台失败不影响整体（重试由下次热点刷新负责）
+        log.warning("热点源抓取失败，已跳过：%s", source.name)
+        return []
+
+
 def fetch_and_store(db, settings=None) -> list[HotItem]:
-    """抓取并入库（按 平台+标题+日期 去重），返回全部热点。"""
+    """抓取并入库（按 平台+标题+日期 去重），返回全部热点。
+
+    R-241 F12：① 各热点源并发抓取（每源独立 try/except，保持源顺序收集结果）；
+    ② 入库前一次查当天已有 `(platform, title)` 集合，内存去重后 `add_all` + 一次 commit
+    （原实现逐条存在性查询，20~60 条热点即 20~60 条 SQL）。结果集与去重口径不变。
+    """
     settings = settings or get_settings()
     key = today_key()
+    sources = get_sources(settings)
     collected: list[HotItem] = []
-    for source in get_sources(settings):
-        try:
-            items = source.fetch()
-        except Exception:  # noqa: BLE001  单个平台失败不影响整体
+    if sources:
+        with ThreadPoolExecutor(max_workers=len(sources), thread_name_prefix="echo-hot") as pool:
+            for items in pool.map(_safe_fetch, sources):
+                collected.extend(items)
+
+    existing = {
+        (platform, title)
+        for platform, title in db.query(HotTopic.platform, HotTopic.title)
+        .filter(HotTopic.topic_date == key)
+        .all()
+    }
+    new_rows: list[HotTopic] = []
+    for item in collected:
+        dedupe_key = (item.platform, item.title)
+        if dedupe_key in existing:
             continue
-        for item in items:
-            exists = (
-                db.query(HotTopic)
-                .filter(
-                    HotTopic.platform == item.platform,
-                    HotTopic.title == item.title,
-                    HotTopic.topic_date == key,
-                )
-                .first()
+        existing.add(dedupe_key)
+        new_rows.append(
+            HotTopic(
+                platform=item.platform,
+                title=item.title,
+                heat=item.heat,
+                url=item.url,
+                topic_date=key,
             )
-            if exists is None:
-                db.add(
-                    HotTopic(
-                        platform=item.platform,
-                        title=item.title,
-                        heat=item.heat,
-                        url=item.url,
-                        topic_date=key,
-                    )
-                )
-                collected.append(item)
-            else:
-                collected.append(item)
+        )
+    if new_rows:
+        db.add_all(new_rows)
     db.commit()
     return collected

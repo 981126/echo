@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..services.creator_service import current_creator_id
 from ..services.text_tags import extract_hashtags, strip_hashtags
-from ..services.works_service import list_works, merge_manual, split_work
+from ..services.works_service import list_works, merge_manual, split_work, work_item_for_post
 
 router = APIRouter()
 
@@ -167,21 +167,13 @@ def get_works(creator_id: int = 0, db: Session = Depends(get_db)):
 def get_work_by_post(post_id: int, db: Session = Depends(get_db)):
     """按平台作品 id 返回其所属云端条目（可跨博主，素材库深链/来源素材跳转用，R-122）。
 
-    与素材库列表同口径：按该作品所属博主取 list_works，命中即返回包含它的合并作品或单条；
-    找不到（已删除/账号禁用）返回 404，前端提示而不是静默打不开。
+    R-241：直接按 work_id/单帖查询其成员并复用批量 map（不再全量重建 list_works），
+    输出与旧实现逐字段一致；找不到（已删除/账号禁用）返回 404，前端提示而不是静默打不开。
     """
-    from ..models.platform import CreatorAccount, PlatformPost
-
-    p = db.get(PlatformPost, post_id)
-    if p is None or not p.account_id:
+    item = work_item_for_post(db, post_id)
+    if item is None:
         raise HTTPException(status_code=404, detail="云端素材不存在或已删除")
-    acc = db.get(CreatorAccount, p.account_id)
-    if acc is None:
-        raise HTTPException(status_code=404, detail="云端素材不存在或已删除")
-    for item in list_works(db, acc.creator_id):
-        if any(x.get("id") == p.id for x in (item.get("posts") or [])):
-            return item
-    raise HTTPException(status_code=404, detail="云端素材不存在或已删除")
+    return item
 
 
 class MetaIn(BaseModel):

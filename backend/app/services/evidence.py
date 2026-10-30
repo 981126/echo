@@ -14,8 +14,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -29,6 +31,14 @@ from ..models.web_search import WebSearchLog
 from . import deepseek_search, web_search
 
 log = get_logger("evidence")
+
+# R-241：证据缓存（选文结果 + 证据块），按 (creator_id, topic, material_hash) 缓存 1h，上限 32 条。
+# 命中时跳过整段联网检索（含正文抓取）与生成方选文 LLM；只缓存「有联网证据且已留痕」的结果
+# （selected + log_ids 非空），无 key/失败/空结果仍走原降级路径、不进缓存。
+_EVIDENCE_CACHE_TTL = 3600.0
+_EVIDENCE_CACHE_MAX = 32
+_EVIDENCE_CACHE: dict[tuple[int | None, str, str, str], tuple[float, dict]] = {}
+_EVIDENCE_CACHE_LOCK = threading.Lock()
 
 _MAX_QUERY = 100  # 豆包搜索建议 query 1~100 字（DeepSeek 1~128，取交集）
 _SPLIT_RE = re.compile(r"[\s，。！？!?,.;:：、|\[\]()（）《》“”\"'…\-—#＃]+")
@@ -670,6 +680,81 @@ def gather_online(
         "log_ids": log_ids,
         "rejected": rejected[:30],
     }
+
+
+def _material_hash(material: str) -> str:
+    """证据缓存 key 的素材指纹（选题/正文变化即 miss）。"""
+    return hashlib.sha256((material or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _evidence_cache_key(
+    creator_id: int | None, topic: str, material: str, persona: str = ""
+) -> tuple[int | None, str, str, str]:
+    """证据缓存键：creator + 选题 + 素材指纹 + **人设指纹**（人设变更后不复用旧选文）。"""
+    return (creator_id, (topic or "").strip(), _material_hash(material), _material_hash(persona))
+
+
+def _copy_evidence(ev: dict) -> dict:
+    """返回证据字典的浅层深拷贝（列表/字典元素复制，防止调用方原地修改污染缓存）。"""
+    return {
+        "sources": [dict(x) for x in (ev.get("sources") or []) if isinstance(x, dict)],
+        "selected": [dict(x) for x in (ev.get("selected") or []) if isinstance(x, dict)],
+        "queries": [dict(x) for x in (ev.get("queries") or []) if isinstance(x, dict)],
+        "block": ev.get("block") or "",
+        "log_ids": list(ev.get("log_ids") or []),
+        "rejected": [dict(x) for x in (ev.get("rejected") or []) if isinstance(x, dict)],
+    }
+
+
+def _reset_evidence_cache() -> None:
+    """清空证据缓存（测试用；生产不调用）。"""
+    with _EVIDENCE_CACHE_LOCK:
+        _EVIDENCE_CACHE.clear()
+
+
+def gather_online_cached(
+    db: Session,
+    topic: str,
+    *,
+    material: str = "",
+    draft_id: int | None = None,
+    creator_id: int | None = None,
+    count: int | None = None,
+    time_range: str = "",
+    persona: str = "",
+    picker=None,
+) -> dict:
+    """R-241：`gather_online` 的进程内 TTL 缓存版本（生成/洗稿专用）。
+
+    key = (creator_id, topic, material_hash)，TTL 1h、上限 32 条；命中直接返回同构结果
+    （sources/selected/queries/block/log_ids/rejected），**跳过整段联网检索 + 选文 LLM**，
+    仍复用上次留痕的 log_ids（设计：web_search_logs 不重复写）。
+    只缓存「selected 与 log_ids 都非空」的成功结果；空/降级/失败不进缓存，语义与现状一致。
+    """
+    key = _evidence_cache_key(creator_id, topic, material, persona)
+    now = time.monotonic()
+    with _EVIDENCE_CACHE_LOCK:
+        hit = _EVIDENCE_CACHE.get(key)
+        if hit is not None and now - hit[0] < _EVIDENCE_CACHE_TTL:
+            log.info("证据缓存命中（跳过联网检索/选文 LLM）：topic=%s", (topic or "")[:40])
+            return _copy_evidence(hit[1])
+    ev = gather_online(
+        db,
+        topic,
+        material=material,
+        draft_id=draft_id,
+        creator_id=creator_id,
+        count=count,
+        time_range=time_range,
+        persona=persona,
+        picker=picker,
+    )
+    if ev.get("selected") and ev.get("log_ids"):
+        with _EVIDENCE_CACHE_LOCK:
+            if len(_EVIDENCE_CACHE) >= _EVIDENCE_CACHE_MAX:
+                _EVIDENCE_CACHE.clear()
+            _EVIDENCE_CACHE[key] = (now, _copy_evidence(ev))
+    return ev
 
 
 _PUBLIC_KEYS = (

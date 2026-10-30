@@ -340,19 +340,36 @@ class TikHubClient:
         self.api_key = api_key or settings.tikhub_api_key
         self.base_url = (base_url or settings.tikhub_base_url).rstrip("/")
         self._requests = 0
-        # R-222：复用 httpx.Client 减少 TCP/TLS 握手；Client 是线程安全的，可在并发请求中复用
-        self._client: httpx.Client | None = None
+        # R-241：make_client 返回进程级单例后，requests_used 会被多线程并发累加。
+        # 计费方都是「同一线程内 before=requests_used…结束后取差值」，因此对外暴露
+        # **线程内累计值**（threading.local）：各并发消费者差值精确、不会把别人的请求算进
+        # 自己的预算；`total_requests_used` 保留全局累计供观测。
+        self._requests_lock = threading.Lock()
+        self._local = threading.local()
 
     def _http(self) -> httpx.Client:
-        if self._client is None:
-            self._client = httpx.Client(
-                follow_redirects=True,
-                timeout=httpx.Timeout(connect=20, read=12, write=60, pool=20),
-            )
-        return self._client
+        """R-241：使用进程级共享 httpx.Client（按 base_url 复用连接；线程安全）。"""
+        from ...core.http import get_client
+
+        return get_client(
+            self.base_url,
+            follow_redirects=True,
+            timeout=httpx.Timeout(connect=20, read=12, write=60, pool=20),
+        )
+
+    def _bump_request(self) -> None:
+        with self._requests_lock:
+            self._requests += 1
+        self._local.count = int(getattr(self._local, "count", 0)) + 1
 
     @property
     def requests_used(self) -> int:
+        """当前线程在该 client 上的累计请求数（差值计费口径；进程级单例下按线程隔离）。"""
+        return int(getattr(self._local, "count", 0))
+
+    @property
+    def total_requests_used(self) -> int:
+        """进程内该 client 的全局累计请求数（观测用，不作计费口径）。"""
         return self._requests
 
     # ---------- 内部 ----------
@@ -370,7 +387,7 @@ class TikHubClient:
         last_exc: httpx.TransportError | None = None
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             _throttle_route(path)
-            self._requests += 1
+            self._bump_request()
             try:
                 resp = self._http().get(url, params=params, headers=headers)
             except httpx.TransportError as exc:  # 代理掐断/连接重置/读写超时等瞬时故障
@@ -407,7 +424,7 @@ class TikHubClient:
         last_exc: httpx.TransportError | None = None
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             _throttle_route(path)
-            self._requests += 1
+            self._bump_request()
             try:
                 resp = self._http().post(url, params=params, json=payload, headers=headers)
             except httpx.TransportError as exc:
@@ -1175,5 +1192,27 @@ def _ts(value) -> datetime | None:
         return None
 
 
+# R-241：进程级复用 TikHubClient（按 mode/base_url/api_key）。共享后 requests_used 为
+# **线程内累计值**：计费方按「同一线程内调用前后差值」实现（douyin_creator_sync._charge_requests
+# / douyin_references 均已核对），并发消费者各自精确、不会互相污染预算。
+# mock 模式复用无副作用（mock 分支不发请求）。
+_CLIENT_CACHE: dict[tuple[str, str, str], TikHubClient] = {}
+_CLIENT_CACHE_LOCK = threading.Lock()
+
+
 def make_client(mode: str = "") -> TikHubClient:
-    return TikHubClient(mode=mode)
+    """取进程级共享的 TikHubClient（R-241）。同一个 (mode, base_url, api_key) 只建一次。"""
+    settings = get_settings()
+    resolved_mode = (mode or settings.tikhub_mode or "mock").strip().lower()
+    key = (
+        resolved_mode,
+        (settings.tikhub_base_url or "").rstrip("/"),
+        settings.tikhub_api_key or "",
+    )
+    with _CLIENT_CACHE_LOCK:
+        cached = _CLIENT_CACHE.get(key)
+        if cached is not None:
+            return cached
+        client = TikHubClient(mode=mode)
+        _CLIENT_CACHE[key] = client
+        return client

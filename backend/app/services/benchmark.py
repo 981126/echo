@@ -894,6 +894,8 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
     R-240 M2：按对标博主 `sync_pool.gather` 并发（每博主独立 Session，DB Session 不跨线程），
     进度由主线程 `on_result` 累计；BudgetExceeded 用 cancel 事件让后续博主快速退出；
     单博主失败不阻断其它，返回结构不变。
+    R-241：拆「捞数据 → 计算前3+最新」两阶段，中间态 `update(55, "计算前3+最新…")`；
+    每阶段仍按博主并发、每博主独立 Session，汇总/返回结构不变。
     """
     from ..core.timeutil import now as _app_now
     from .platform.budget import BudgetExceeded
@@ -914,52 +916,89 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
     budget_errors: list[BudgetExceeded] = []
     factory = session_factory(db)
 
-    def _run_one(job: tuple[int, str]) -> dict:
+    def _load_benchmark(session: Session, bm_id: int) -> Creator:
+        bm = session.get(Creator, bm_id)
+        if bm is None:
+            raise ValueError("对标博主不存在")
+        return bm
+
+    def _sync_one(job: tuple[int, str]) -> dict:
+        """阶段1：按博主导入最新数据（refetch=True 时）。"""
         bm_id, _name = job
         if cancel.is_set():
             raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
         session = factory()
         try:
-            bm = session.get(Creator, bm_id)
-            if bm is None:
-                raise ValueError("对标博主不存在")
+            bm = _load_benchmark(session, bm_id)
             accounts = (
                 session.query(CreatorAccount)
                 .filter(CreatorAccount.creator_id == bm.id, CreatorAccount.enabled.is_(True))
                 .order_by(CreatorAccount.id)
                 .all()
             )
-            if refetch:
-                for acc in accounts:
-                    if cancel.is_set():
-                        raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
-                    try:
-                        sync_account(session, acc, scope="benchmark", top_n=15, with_comments=False)  # R-109：10 → 15
-                        acc2 = session.get(CreatorAccount, acc.id)
-                        if acc2 is not None:
-                            acc2.sync_status = "done"
-                            acc2.sync_message = ""
-                            acc2.last_sync_at = _app_now()
-                            session.commit()
-                    except BudgetExceeded:
-                        raise
-                    except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
-                        session.rollback()
-            if cancel.is_set():  # R-240 复核：预算已耗尽 → 不再做补齐媒体/转写
-                raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
-            picked = ensure_top_with_text(session, bm, limit_candidates=15)  # R-109：10 → 15
-            return {"benchmark_id": bm_id, "name": _name, "top_with_text": len(picked), "error": ""}
+            for acc in accounts:
+                if cancel.is_set():
+                    raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
+                try:
+                    sync_account(session, acc, scope="benchmark", top_n=15, with_comments=False)  # R-109：10 → 15
+                    acc2 = session.get(CreatorAccount, acc.id)
+                    if acc2 is not None:
+                        acc2.sync_status = "done"
+                        acc2.sync_message = ""
+                        acc2.last_sync_at = _app_now()
+                        session.commit()
+                except BudgetExceeded:
+                    raise
+                except Exception:  # noqa: BLE001 单账号失败不影响该对标其它账号
+                    session.rollback()
+            return {"benchmark_id": bm_id}
         finally:
             session.close()
 
-    def _on_result(job: tuple[int, str], result: object) -> None:
-        nonlocal done, ok_count, text_count
+    def _ensure_one(job: tuple[int, str]) -> dict:
+        """阶段2：计算「前3+最新」并补齐文案。"""
         bm_id, name = job
+        if cancel.is_set():  # R-240 复核：预算已耗尽 → 不再做补齐媒体/转写
+            raise BudgetExceeded("今日 TikHub 请求预算已用完，后续对标已取消")
+        session = factory()
+        try:
+            bm = _load_benchmark(session, bm_id)
+            picked = ensure_top_with_text(session, bm, limit_candidates=15)  # R-109：10 → 15
+            return {"benchmark_id": bm_id, "name": name, "top_with_text": len(picked), "error": ""}
+        finally:
+            session.close()
+
+    def _track_budget(result: object) -> bool:
         if isinstance(result, BudgetExceeded):
             if not budget_errors:
                 budget_errors.append(result)
                 cancel.set()
+            return True
+        return False
+
+    if update is not None:
+        update(5, f"[1/{total}] {jobs[0][1]}：{'捞数据中…' if refetch else '重算对标中…'}")
+    if refetch:
+        synced = {"done": 0}
+
+        def _on_sync(job: tuple[int, str], result: object) -> None:
+            _track_budget(result)
+            synced["done"] += 1
+            if update is not None:
+                overall = max(5, min(50, int(synced["done"] / total * 50)))
+                update(overall, f"[{synced['done']}/{total}] {job[1]}：捞数据中…")
+
+        gather(_sync_one, jobs, workers=pool_size("creator"), on_result=_on_sync)
+        if budget_errors:
+            raise budget_errors[0]
+    if update is not None:
+        update(55, "计算前3+最新…")
+
+    def _on_result(job: tuple[int, str], result: object) -> None:
+        nonlocal done, ok_count, text_count
+        if _track_budget(result):
             return
+        bm_id, name = job
         done += 1
         if isinstance(result, Exception):
             summary.append({"benchmark_id": bm_id, "name": name, "top_with_text": 0, "error": str(result)[:200]})
@@ -972,12 +1011,10 @@ def rerun_benchmarks(db: Session, owner: Creator, update=None, refetch: bool = T
             summary.append({"benchmark_id": bm_id, "name": name, "top_with_text": count, "error": ""})
             note = f"完成（前3+最新有文案 {count} 条）"
         if update is not None:
-            overall = max(5, min(99, int(done / total * 100)))
+            overall = max(55, min(99, int(done / total * 100)))
             update(overall, f"[{done}/{total}] {name}：{note}")
 
-    if update is not None:
-        update(5, f"[1/{total}] {jobs[0][1]}：{'捞数据中…' if refetch else '重算对标中…'}")
-    gather(_run_one, jobs, workers=pool_size("creator"), on_result=_on_result)
+    gather(_ensure_one, jobs, workers=pool_size("creator"), on_result=_on_result)
     if budget_errors:
         raise budget_errors[0]
     summary.sort(key=lambda row: order.get(row["benchmark_id"], 0))

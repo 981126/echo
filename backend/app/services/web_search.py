@@ -10,9 +10,8 @@ from __future__ import annotations
 import threading
 import time
 
-import httpx
-
 from ..config import get_settings
+from ..core.http import get_client
 from ..core.log import get_logger
 
 log = get_logger("web_search")
@@ -109,13 +108,17 @@ def search(
         "X-Traffic-Tag": settings.web_search_traffic_tag or "skill_web_search_common",
     }
     results: list[dict] = []
+    timeout = float(settings.web_search_timeout_seconds or 15)
     try:
-        with httpx.Client(timeout=float(settings.web_search_timeout_seconds or 15)) as client:
-            resp = client.post(settings.web_search_base_url, headers=headers, json=body)
-            if resp.status_code >= 400:
-                log.warning("豆包搜索 HTTP %s：%s", resp.status_code, (resp.text or "")[:200])
-                return []
-            data = resp.json()
+        # R-241：共享 httpx.Client（keep-alive 复用），每次请求显式 timeout
+        client = get_client(settings.web_search_base_url, timeout=timeout)
+        resp = client.post(
+            settings.web_search_base_url, headers=headers, json=body, timeout=timeout
+        )
+        if resp.status_code >= 400:
+            log.warning("豆包搜索 HTTP %s：%s", resp.status_code, (resp.text or "")[:200])
+            return []
+        data = resp.json()
         err = ((data or {}).get("ResponseMetadata") or {}).get("Error")
         if err:
             log.warning("豆包搜索返回错误：%s", str(err)[:200])

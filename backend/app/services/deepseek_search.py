@@ -21,9 +21,8 @@ import time
 from datetime import date, timedelta
 from urllib.parse import urlsplit
 
-import httpx
-
 from ..config import get_settings
+from ..core.http import get_client
 from ..core.log import get_logger
 
 log = get_logger("deepseek_search")
@@ -34,6 +33,12 @@ _SEM = threading.BoundedSemaphore(3)  # 账号级 5 QPS 下的保守并发
 _PACE_LOCK = threading.Lock()
 _LAST_CALL = 0.0
 _MIN_INTERVAL = 0.25
+
+# R-241：Fetch 正文按 URL 缓存 1h（同一批候选去重后仍可能多次抓同一 URL；重跑同选题直接命中）。
+_FETCH_CACHE: dict[str, tuple[float, str]] = {}
+_FETCH_CACHE_LOCK = threading.Lock()
+_FETCH_CACHE_TTL = 3600.0
+_FETCH_CACHE_MAX = 100
 
 
 def enabled() -> bool:
@@ -69,11 +74,17 @@ def _post(path: str, body: dict, timeout: float) -> dict | None:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.deepseek_api_key.strip()}",
     }
+    # R-241：共享 httpx.Client（按 DeepSeek base_url 复用连接），每次请求显式 timeout
+    try:
+        client = get_client(settings.deepseek_base_url)
+    except Exception as exc:  # noqa: BLE001 客户端不可用 → 与失败同语义（静默降级）
+        log.warning("DeepSeek %s 共享客户端不可用：%s", path, str(exc)[:160])
+        return None
     for attempt in (0, 1):
         _pace()
         try:
             with _SEM:
-                resp = httpx.post(
+                resp = client.post(
                     _api_url(path), headers=headers, json=body, timeout=max(5.0, timeout)
                 )
         except Exception as exc:  # noqa: BLE001 联网失败静默（生成不因此失败）
@@ -186,10 +197,18 @@ def search(query: str, count: int | None = None, time_range: str = "") -> list[d
 
 
 def fetch(url: str) -> str:
-    """抓取单页 Markdown 正文；失败返回空串（调用方退回摘要）。"""
+    """抓取单页 Markdown 正文；失败返回空串（调用方退回摘要）。
+
+    R-241：成功结果按 URL 进程内缓存 1h（上限 100 条），重跑同选题/同批候选不重复抓正文。
+    """
     url = (url or "").strip()
     if not url or not enabled():
         return ""
+    now = time.monotonic()
+    with _FETCH_CACHE_LOCK:
+        hit = _FETCH_CACHE.get(url)
+        if hit is not None and now - hit[0] < _FETCH_CACHE_TTL:
+            return hit[1]
     settings = get_settings()
     data = _post(
         "/v1/tools/fetch",
@@ -199,4 +218,10 @@ def fetch(url: str) -> str:
     if not data:
         return ""
     content = data.get("content")
-    return str(content).strip() if isinstance(content, str) else ""
+    text = str(content).strip() if isinstance(content, str) else ""
+    if text:
+        with _FETCH_CACHE_LOCK:
+            if len(_FETCH_CACHE) >= _FETCH_CACHE_MAX:
+                _FETCH_CACHE.clear()
+            _FETCH_CACHE[url] = (now, text)
+    return text
