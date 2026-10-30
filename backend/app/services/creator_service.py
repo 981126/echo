@@ -56,7 +56,9 @@ def latest_account_snapshot(db: Session, account_id: int):
 
 
 def account_meta(db: Session, a: CreatorAccount) -> dict:
-    """单个账号的展示信息：头像 + 最新粉丝/作品数（主页快照）。"""
+    """单个账号的展示信息：头像 + 最新粉丝/作品数（主页快照）+ 抖音创作者凭据状态。"""
+    from .douyin_account_policy import credential_summary
+
     snap = latest_account_snapshot(db, a.id)
     return {
         "id": a.id,
@@ -77,6 +79,7 @@ def account_meta(db: Session, a: CreatorAccount) -> dict:
         "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
         "sync_status": a.sync_status,
         "sync_message": a.sync_message,
+        "douyin_credential": credential_summary(db, a),
     }
 
 

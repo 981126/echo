@@ -42,6 +42,7 @@ KIND_LABELS = {
     "douyin_review_analyze": "视频复盘分析",
     "douyin_review_references": "低粉爆款更新",
     "douyin_review_plan_check": "修改效果检查",
+    "douyin_creator_backfill": "抖音历史作品数据补齐",
 }
 
 
@@ -54,6 +55,8 @@ def target(kind: str, payload: dict | None = None, result=None) -> str:
     payload = payload or {}
     if kind == "import_video":
         return f"/videos?edit={payload.get('video_id', '')}"
+    if kind in ("douyin_creator_backfill", "douyin_credential_invalid"):
+        return "/creators"
     if kind == "platform_media":
         if isinstance(result, dict) and result.get("video_id"):
             return f"/videos?edit={result['video_id']}"

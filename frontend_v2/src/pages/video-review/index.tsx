@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { BarChart3, Check, ChevronDown, ExternalLink, Lightbulb, Loader2, Play, RefreshCw, Settings2, Sparkles, UserPlus } from 'lucide-react'
+import { BarChart3, Check, ChevronDown, ExternalLink, Lightbulb, Loader2, Play, RefreshCw, Sparkles, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
 import { Button } from '@/components/ui/button'
@@ -22,9 +22,6 @@ export default function VideoReviewPage() {
   const [loading, setLoading] = useState(true)
   const [task, setTask] = useState<{ id: number; progress: number; note: string } | null>(null)
   const [credential, setCredential] = useState<Credential | null>(null)
-  const [cookieOpen, setCookieOpen] = useState(false)
-  const [cookie, setCookie] = useState('')
-  const [savingCookie, setSavingCookie] = useState(false)
   const [kind, setKind] = useState<'peer' | 'low_fan'>('peer')
   const [references, setReferences] = useState<ReferenceItem[]>([])
   const [referenceLoading, setReferenceLoading] = useState(false)
@@ -89,15 +86,14 @@ export default function VideoReviewPage() {
       try {
         const params = new URLSearchParams(location.hash.split('?')[1] ?? '')
         const wanted = Number(params.get('post') || 0)
-        const data = await apiJson<{ account: { id: number; nickname: string; avatar?: string }; items: VideoItem[]; credential_status: string }>('/api/douyin-review/videos?limit=50')
+        const data = await apiJson<{ account: { id: number; nickname: string; avatar?: string }; items: VideoItem[]; credential_status: string; credential?: Credential | null }>('/api/douyin-review/videos?limit=50')
         setAccount(data.account)
         setVideos(data.items)
+        setCredential(data.credential ?? null)
         const selected = wanted && data.items.some((x) => x.post_id === wanted) ? wanted : data.items[0]?.post_id ?? 0
         activePost.current = selected
         setPostId(selected)
         if (selected) await loadReview(selected)
-        const cred = await apiJson<Credential>(`/api/douyin-review/credentials?account_id=${data.account.id}`)
-        setCredential(cred)
         await loadReferences('peer')
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '视频复盘加载失败')
@@ -125,22 +121,6 @@ export default function VideoReviewPage() {
       if (data.task_id) await followTask(data.task_id)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '分析失败')
-    }
-  }
-
-  async function saveCookie() {
-    if (!account || !cookie.trim()) return
-    setSavingCookie(true)
-    try {
-      const result = await apiJson<Credential>('/api/douyin-review/credentials', { method: 'PUT', body: JSON.stringify({ account_id: account.id, cookie }) })
-      setCredential(result)
-      setCookie('')
-      setCookieOpen(false)
-      toast.success('抖音创作者数据验证成功')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Cookie验证失败')
-    } finally {
-      setSavingCookie(false)
     }
   }
 
@@ -230,7 +210,6 @@ export default function VideoReviewPage() {
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><span className="h-2 w-2 rounded-full bg-indigo-500" />{account?.nickname || '当前抖音账号'} · 只分析抖音</div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setCookieOpen(true)}><Settings2 className="mr-2 h-4 w-4" />抖音数据设置</Button>
           <Button variant="outline" disabled={!postId || !!task} onClick={() => void analyze(false)}><BarChart3 className="mr-2 h-4 w-4" />{review ? '重新分析' : '开始分析'}</Button>
           <Button disabled={!postId || !!task} onClick={() => void analyze(true)}><RefreshCw className="mr-2 h-4 w-4" />更新数据并分析</Button>
         </div>
@@ -244,7 +223,22 @@ export default function VideoReviewPage() {
           </select>
           {review?.post.video_url && <a href={review.post.video_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-indigo-500 hover:underline">查看原视频<ExternalLink className="h-3 w-3" /></a>}
         </div>
-        <div className="mt-2 text-xs text-muted-foreground">最近成功数据时间：{review?.data_time ? new Date(review.data_time).toLocaleString('zh-CN') : '尚未分析'} · {credential?.status === 'valid' ? '创作者数据可用' : '需要检查创作者数据设置'}</div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          最近成功数据时间：{review?.data_time ? new Date(review.data_time).toLocaleString('zh-CN') : '尚未分析'} ·{' '}
+          {credential?.status === 'valid'
+            ? '创作者数据可用'
+            : credential?.status === 'invalid'
+              ? '创作者 Cookie 已失效，数据收集已停止'
+              : credential?.status === 'disabled'
+                ? '创作者数据已关闭，当前使用公开数据'
+                : '未配置创作者数据，当前使用公开数据'}
+        </div>
+        {credential?.status === 'invalid' && (
+          <p className="mt-1 text-xs text-destructive">请到「博主管理 → 编辑账号」更新该账号的抖音创作者 Cookie，更新前不会发起第三方请求。</p>
+        )}
+        {credential && credential.status !== 'valid' && (
+          <p className="mt-1 text-xs text-muted-foreground">创作者数据在「博主管理 → 编辑账号」配置；视频复盘不再提供 Cookie 设置入口。</p>
+        )}
       </div>
 
       {task && <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 dark:border-indigo-900 dark:bg-indigo-950/30"><div className="mb-2 flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 animate-spin" />{task.note}</div><Progress value={task.progress} /></div>}
@@ -311,7 +305,6 @@ export default function VideoReviewPage() {
         {!referenceLoading && !references.length && <div className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">{kind === 'peer' ? '暂无符合规则的同行爆款，请先在博主管理添加抖音同行并同步数据。' : '当前条件下暂无低粉爆款，点击更新获取。'}</div>}
       </section>
 
-      {cookieOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onMouseDown={() => setCookieOpen(false)}><motion.div initial={{ opacity: 0.7, y: 10 }} animate={{ opacity: 1, y: 0 }} onMouseDown={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl"><h2 className="text-lg font-semibold">抖音创作者数据设置</h2><p className="mt-2 text-xs leading-5 text-muted-foreground">只用于你本人或已授权账号。Cookie加密保存，不会回显，也不会写入日志、任务或AI分析。</p><div className="mt-4 text-xs">当前状态：{credential?.status === 'valid' ? '可用' : '未设置或已失效'}<br />最近成功：{credential?.last_success_at ? new Date(credential.last_success_at).toLocaleString('zh-CN') : '暂无'}</div><Textarea className="mt-4 min-h-28 font-mono text-xs" value={cookie} onChange={(e) => setCookie(e.target.value)} placeholder="粘贴本人抖音创作者平台 Cookie" /><div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={() => setCookieOpen(false)}>关闭</Button><Button disabled={!cookie.trim() || savingCookie} onClick={() => void saveCookie()}>{savingCookie && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}保存并验证</Button></div></motion.div></div>}
     </motion.div>
   )
 }

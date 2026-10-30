@@ -15,7 +15,7 @@ import {
   Link2
 } from 'lucide-react'
 import { apiJson } from '@/api/client'
-import { platformName, fmtNum } from '@/lib/format'
+import { platformName, fmtNum, fmtDate } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -30,7 +30,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toaster'
-import type { CreatorMeta, AccountMeta, SyncJob, SyncSkipped } from './types'
+import type { CreatorMeta, AccountMeta, DouyinCredential, SyncJob, SyncSkipped } from './types'
 import { AccountRow } from './account-row'
 import { SyncProgressBar, SyncSkippedBar } from './sync-progress-bar'
 import { PostsDialog } from './posts-dialog'
@@ -52,10 +52,13 @@ interface AccountForm {
   home_link: string
   platform_user_id: string
   cookie: string
+  douyinEnabled: boolean
+  douyinCookie: string
+  douyinStatus: DouyinCredential | null
 }
 
 const EMPTY_CREATOR: CreatorForm = { id: 0, kind: 'owner', name: '', parent_id: null, note: '' }
-const EMPTY_ACCOUNT: AccountForm = { id: 0, creator_id: 0, platform: 'douyin', nickname: '', home_link: '', platform_user_id: '', cookie: '' }
+const EMPTY_ACCOUNT: AccountForm = { id: 0, creator_id: 0, platform: 'douyin', nickname: '', home_link: '', platform_user_id: '', cookie: '', douyinEnabled: true, douyinCookie: '', douyinStatus: null }
 
 // R-219：完成/失败的同步条延迟消失——done 停留 8s、failed 停留 60s（含原因），超时淡出；
 // 历史旧记录（超阈值）打开页面不误显示。后端时间是无时区尾缀的北京时间（core/timeutil），
@@ -330,24 +333,51 @@ export default function CreatorsPage() {
   // ---------- 账号 ----------
   async function saveAccount() {
     if (!accountForm) return
+    const isDouyin = accountForm.platform === 'douyin'
+    const form = accountForm
+    if (isDouyin && form.douyinEnabled && !form.douyinCookie.trim() && !form.douyinStatus?.has_cookie) {
+      toast.error('请先粘贴抖音创作者 Cookie 后再开启创作者数据')
+      return
+    }
     try {
-      const extra_config = accountForm.cookie ? { cookie: accountForm.cookie } : {}
+      const extra_config = !isDouyin && form.cookie ? { cookie: form.cookie } : {}
       const body = {
-        platform: accountForm.platform,
-        nickname: accountForm.nickname,
-        home_link: accountForm.home_link,
-        platform_user_id: accountForm.platform_user_id,
+        platform: form.platform,
+        nickname: form.nickname,
+        home_link: form.home_link,
+        platform_user_id: form.platform_user_id,
         extra_config,
         enabled: true,
         sync_frequency: 'daily'
       }
-      if (accountForm.id) {
-        await apiJson(`/api/creators/accounts/${accountForm.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+      let accountId = form.id
+      if (form.id) {
+        await apiJson(`/api/creators/accounts/${form.id}`, { method: 'PATCH', body: JSON.stringify(body) })
       } else {
-        await apiJson(`/api/creators/${accountForm.creator_id}/accounts`, { method: 'POST', body: JSON.stringify(body) })
+        const created = await apiJson<{ id: number }>(`/api/creators/${form.creator_id}/accounts`, { method: 'POST', body: JSON.stringify(body) })
+        accountId = created.id
       }
-      toast.success('账号已保存')
-      setAccountForm(null)
+      let credentialWarning = false
+      if (isDouyin && accountId) {
+        try {
+          if (form.douyinCookie.trim()) {
+            await apiJson(`/api/creators/accounts/${accountId}/douyin-credential`, {
+              method: 'PUT',
+              body: JSON.stringify({ cookie: form.douyinCookie.trim(), enabled: form.douyinEnabled })
+            })
+          } else if (form.douyinStatus?.has_cookie || form.douyinStatus?.status === 'valid') {
+            await apiJson(`/api/creators/accounts/${accountId}/douyin-credential`, {
+              method: 'PUT',
+              body: JSON.stringify({ enabled: form.douyinEnabled })
+            })
+          }
+        } catch (e) {
+          credentialWarning = true
+          toast.error((e as Error).message)
+        }
+      }
+      if (!credentialWarning) toast.success('账号已保存')
+      if (!credentialWarning) setAccountForm(null)
       reload()
     } catch (e) {
       toast.error((e as Error).message)
@@ -454,7 +484,10 @@ export default function CreatorsPage() {
         nickname: acc.nickname,
         home_link: acc.home_link,
         platform_user_id: acc.platform_user_id,
-        cookie: (acc.extra_config?.cookie as string) || ''
+        cookie: (acc.extra_config?.cookie as string) || '',
+        douyinEnabled: acc.douyin_credential?.enabled ?? true,
+        douyinCookie: '',
+        douyinStatus: acc.douyin_credential ?? null
       }),
     onRemoveAccount: setDeleteAccount,
     onPosts: setPostsAccount,
@@ -616,6 +649,34 @@ export default function CreatorsPage() {
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-muted-foreground">B站 Cookie（可选，yt-dlp 兜底下载用）</label>
                   <Textarea rows={2} value={accountForm.cookie} onChange={(e) => setAccountForm({ ...accountForm, cookie: e.target.value })} />
+                </div>
+              )}
+              {accountForm.platform === 'douyin' && (
+                <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-medium">启用创作者中心数据</div>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">开启且 Cookie 有效时，账号数据走抖音创作者中心；关闭则使用公开接口</p>
+                    </div>
+                    <Switch checked={accountForm.douyinEnabled} onCheckedChange={(v: boolean) => setAccountForm({ ...accountForm, douyinEnabled: v })} />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-muted-foreground">抖音创作者 Cookie（不回显，留空表示不修改）</label>
+                    <Textarea
+                      rows={3}
+                      value={accountForm.douyinCookie}
+                      onChange={(e) => setAccountForm({ ...accountForm, douyinCookie: e.target.value })}
+                      placeholder="粘贴 creator.douyin.com 的完整 Cookie（含 sessionid/sid_tt）"
+                      className="font-mono text-[11px]"
+                    />
+                  </div>
+                  {accountForm.douyinStatus && (
+                    <p className="text-[11px] text-muted-foreground">
+                      当前状态：{accountForm.douyinStatus.status_label}
+                      {accountForm.douyinStatus.last_success_at ? ` · 最近成功 ${fmtDate(accountForm.douyinStatus.last_success_at)}` : ''}
+                      {accountForm.douyinStatus.last_error ? <span className="block text-destructive">{accountForm.douyinStatus.last_error}</span> : null}
+                    </p>
+                  )}
                 </div>
               )}
               <div className="flex justify-end gap-2">

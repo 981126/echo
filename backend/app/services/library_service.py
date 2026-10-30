@@ -124,8 +124,16 @@ def _post_tags(p: PlatformPost) -> list[str]:
     return [str(t) for t in raw if t]
 
 
+def _plays_known(platform: str, source: str) -> bool:
+    """播放量是否可信：B 站公开可拿；抖音只有创作者中心/作品统计接口可信，普通公开接口恒 0 视为未知。"""
+    if platform == "bilibili":
+        return True
+    return (source or "tikhub") in ("tikhub_creator", "tikhub_statistics")
+
+
 def _slim_post(p: PlatformPost, stat) -> dict:
     """卡片只需要这些（完整字段由 `/api/works` 详情接口提供）。"""
+    source = (stat.source or "tikhub") if stat is not None else ""
     return {
         "id": p.id,
         "platform": p.platform,
@@ -140,6 +148,8 @@ def _slim_post(p: PlatformPost, stat) -> dict:
                 "favorites": stat.favorites,
                 "shares": stat.shares,
                 "plays": stat.plays,
+                "plays_known": _plays_known(p.platform, source),
+                "plays_source": source,
             }
             if stat
             else None

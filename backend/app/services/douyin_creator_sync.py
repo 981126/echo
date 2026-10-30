@@ -29,8 +29,16 @@ from ..core.timeutil import now as _app_now
 from ..models.kv import Kv
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video_review import DouyinCreatorCredential, DouyinPostMetric
+from .douyin_account_policy import (
+    get_credential,
+    mark_invalid,
+    mark_valid,
+    normalize_status,
+    resolve_data_policy,
+)
 from .platform.budget import _charge
-from .platform.tikhub import TikHubBusinessError, TikHubClient, make_client
+from .platform.tikhub import TikHubBusinessError, TikHubClient, TikHubError, make_client
+from .text_tags import extract_hashtags
 
 log = get_logger("douyin_creator_sync")
 
@@ -90,23 +98,16 @@ def decrypt_cookie(value: str) -> str:
 
 
 def credential_out(db: Session, account_id: int) -> dict:
-    row = db.query(DouyinCreatorCredential).filter_by(account_id=account_id).first()
-    if row is None:
-        return {
-            "account_id": account_id,
-            "status": "missing",
-            "has_cookie": False,
-            "last_validated_at": None,
-            "last_success_at": None,
-            "last_error": "",
-        }
+    row = get_credential(db, account_id)
+    status = normalize_status(row)
     return {
         "account_id": account_id,
-        "status": row.status,
-        "has_cookie": bool(row.cookie_value),
-        "last_validated_at": row.last_validated_at,
-        "last_success_at": row.last_success_at,
-        "last_error": row.last_error,
+        "enabled": bool(row.enabled) if row is not None else True,
+        "status": status,
+        "has_cookie": bool(row is not None and (row.cookie_value or "").strip()),
+        "last_validated_at": row.last_validated_at if row is not None else None,
+        "last_success_at": row.last_success_at if row is not None else None,
+        "last_error": (row.last_error or "") if row is not None else "",
     }
 
 
@@ -114,7 +115,14 @@ def _auth_error(exc: Exception) -> bool:
     return isinstance(exc, TikHubBusinessError) and exc.code in (5, 8)
 
 
-CREDENTIAL_HINT = "Cookie 未登录或已过期，请在「视频复盘 → 抖音数据设置」重新保存创作者中心 Cookie"
+def is_auth_failure(exc: Exception) -> bool:
+    """创作者接口的 Cookie 失效判定：业务码 5/8，或 TikHub 代理把失效 Cookie 包成 HTTP 400。"""
+    if _auth_error(exc):
+        return True
+    return isinstance(exc, TikHubError) and "HTTP 400" in str(exc)
+
+
+CREDENTIAL_HINT = "Cookie 未登录或已过期，请在「博主管理 → 编辑账号」重新保存抖音创作者 Cookie"
 
 
 def _credential_message(exc: Exception) -> str:
@@ -130,28 +138,31 @@ def _credential_message(exc: Exception) -> str:
 
 
 def _mark_credential(db: Session, account_id: int, *, ok: bool, error: str = "", auth: bool = False) -> None:
-    row = db.query(DouyinCreatorCredential).filter_by(account_id=account_id).first()
-    if row is None:
+    """兼容旧调用：成功标 valid；失败标 invalid 并按状态迁移发一次通知。"""
+    account = db.get(CreatorAccount, account_id)
+    if account is None:
         return
     if ok:
-        row.status = "valid"
-        row.last_success_at = _app_now()
-        row.last_error = ""
-        return
-    row.status = "invalid" if auth else "expired"
-    row.last_error = error[:500]
-    row.last_validated_at = _app_now()
+        mark_valid(db, account)
+    else:
+        mark_invalid(db, account, error or "创作者接口调用失败", notify=auth)
 
 
-def save_credential(db: Session, account: CreatorAccount, cookie: str) -> dict:
-    """保存并做一次最小真实请求验证（会消耗一次 TikHub 额度）。"""
+def save_credential(db: Session, account: CreatorAccount, cookie: str, *, enabled: bool | None = None) -> dict:
+    """保存并做一次最小真实请求验证（会消耗一次 TikHub 额度）；不回显 Cookie。"""
+    if account.platform != "douyin":
+        raise CredentialError("只有抖音账号支持创作者数据配置")
     encrypted = encrypt_cookie(cookie)
-    row = db.query(DouyinCreatorCredential).filter_by(account_id=account.id).first()
+    row = get_credential(db, account.id)
     if row is None:
         row = DouyinCreatorCredential(account_id=account.id)
         db.add(row)
     row.cookie_value = encrypted
     row.last_validated_at = _app_now()
+    if enabled is not None:
+        row.enabled = bool(enabled)
+    elif row.enabled is None:
+        row.enabled = True
     client = make_client()
     before = client.requests_used
     try:
@@ -165,14 +176,32 @@ def save_credential(db: Session, account: CreatorAccount, cookie: str) -> dict:
         row.status = "valid"
         row.last_success_at = _app_now()
         row.last_error = ""
+        db.commit()
     except Exception as exc:
         message = _credential_message(exc)
         row.status = "invalid"
+        row.last_validated_at = _app_now()
         row.last_error = message[:500]
         db.commit()
         raise CredentialError(message) from exc
     finally:
         _charge_requests(db, client, before)
+    return credential_out(db, account.id)
+
+
+def set_credential_enabled(db: Session, account: CreatorAccount, enabled: bool) -> dict:
+    """只切换开关：不需要重新校验 Cookie。"""
+    if account.platform != "douyin":
+        raise CredentialError("只有抖音账号支持创作者数据配置")
+    row = get_credential(db, account.id)
+    if row is None:
+        raise CredentialError("请先粘贴并保存抖音创作者 Cookie 后再开启")
+    if enabled and not (row.cookie_value or "").strip():
+        raise CredentialError("请先粘贴并保存抖音创作者 Cookie 后再开启")
+    row.enabled = bool(enabled)
+    if not enabled:
+        row.last_error = ""
+        row.status = "valid" if (row.cookie_value or "").strip() else "missing"
     db.commit()
     return credential_out(db, account.id)
 
@@ -324,46 +353,79 @@ def _duration_seconds(item: dict) -> int | None:
     return round(value / 1000) if value > 1000 else value
 
 
-def _apply_item_metrics(db: Session, post: PlatformPost, item: dict) -> tuple[DouyinPostMetric, PlatformPostStat]:
-    """把创作者接口返回的单条作品指标落库（按天快照 + 公开统计）。真实字段名优先。"""
+def stats_from_item(item: dict) -> dict:
+    """把创作者接口单条作品映射成标准统计 dict（平台同步/素材库/复盘共用）。"""
     raw_metrics = item.get("metrics")
     metrics: dict = raw_metrics if isinstance(raw_metrics, dict) else {}
+    bounce = _metric(metrics, {"bounce_rate_2s", "bounce_2s_rate", "2s_bounce_rate"})
+    finish5 = _metric(metrics, {"completion_rate_5s", "finish_5s_rate", "5s_finish_rate"})
+    finish = _metric(metrics, {"completion_rate", "finish_rate", "play_finish_ratio"})
+    avg_play = _metric(metrics, {"avg_view_second", "avg_play_seconds", "avg_play_duration"})
+    cover = _metric(metrics, {"cover_click_rate", "cover_ctr"})
+    profile = _int_metric(metrics, {"homepage_visit_count", "profile_visits", "profile_visit_count"})
+    follower = _int_metric(metrics, {"subscribe_count", "follower_gain", "fans_increment"})
+    return {
+        "plays": int(_metric(metrics, {"view_count", "play_count", "plays"}) or 0),
+        "likes": int(_metric(metrics, {"like_count", "digg_count", "likes"}) or 0),
+        "comments": int(_metric(metrics, {"comment_count", "comments"}) or 0),
+        "favorites": int(_metric(metrics, {"favorite_count", "collect_count", "favorites"}) or 0),
+        "shares": int(_metric(metrics, {"share_count", "shares"}) or 0),
+        "source": "tikhub_creator",
+        "extra": {
+            "source": "douyin_creator_v2",
+            "bounce_2s_rate": bounce,
+            "finish_5s_rate": finish5,
+            "finish_rate": finish,
+            "avg_play_seconds": avg_play,
+            "cover_click_rate": cover,
+            "profile_visits": profile,
+            "follower_gain": follower,
+            "duration_seconds": _duration_seconds(item),
+        },
+    }
+
+
+def _apply_item_metrics(db: Session, post: PlatformPost, item: dict) -> tuple[DouyinPostMetric, PlatformPostStat]:
+    """把创作者接口返回的单条作品指标落库（按天快照 + 公开统计）。真实字段名优先。"""
+    stats = stats_from_item(item)
     today = today_key()
     row = db.query(DouyinPostMetric).filter_by(post_id=post.id, snapshot_date=today).first()
     if row is None:
         row = DouyinPostMetric(post_id=post.id, snapshot_date=today)
         db.add(row)
     row.captured_at = _app_now()
-    row.bounce_2s_rate = _metric(metrics, {"bounce_rate_2s", "bounce_2s_rate", "2s_bounce_rate"})
-    row.finish_5s_rate = _metric(metrics, {"completion_rate_5s", "finish_5s_rate", "5s_finish_rate"})
-    row.finish_rate = _metric(metrics, {"completion_rate", "finish_rate", "play_finish_ratio"})
-    row.avg_play_seconds = _metric(metrics, {"avg_view_second", "avg_play_seconds", "avg_play_duration"})
-    # 平台真实接口目前不返回封面点击率；按需求不估算，保持空值（页面显示暂无数据）
-    row.cover_click_rate = _metric(metrics, {"cover_click_rate", "cover_ctr"})
-    row.profile_visits = _int_metric(metrics, {"homepage_visit_count", "profile_visits", "profile_visit_count"})
-    # 创作者中心「吸粉量」= 该视频带来的新增关注（subscribe_count），不是净增（会再被取关抵消）
-    row.follower_gain = _int_metric(metrics, {"subscribe_count", "follower_gain", "fans_increment"})
+    row.bounce_2s_rate = stats["extra"]["bounce_2s_rate"]
+    row.finish_5s_rate = stats["extra"]["finish_5s_rate"]
+    row.finish_rate = stats["extra"]["finish_rate"]
+    row.avg_play_seconds = stats["extra"]["avg_play_seconds"]
+    row.cover_click_rate = stats["extra"]["cover_click_rate"]
+    row.profile_visits = stats["extra"]["profile_visits"]
+    row.follower_gain = stats["extra"]["follower_gain"]
     row.raw = _json({"item": item, "source": "douyin_creator_v2"})
 
     public = db.query(PlatformPostStat).filter_by(post_id=post.id, stat_date=today).first()
     if public is None:
         public = PlatformPostStat(post_id=post.id, stat_date=today, source="tikhub_creator")
         db.add(public)
-    public.plays = int(_metric(metrics, {"view_count", "play_count", "plays"}) or public.plays or 0)
-    public.likes = int(_metric(metrics, {"like_count", "digg_count", "likes"}) or public.likes or 0)
-    public.comments = int(_metric(metrics, {"comment_count", "comments"}) or public.comments or 0)
-    public.shares = int(_metric(metrics, {"share_count", "shares"}) or public.shares or 0)
-    public.favorites = int(_metric(metrics, {"favorite_count", "collect_count", "favorites"}) or public.favorites or 0)
-    duration = _duration_seconds(item)
-    if duration is not None:
-        try:
-            extra = json.loads(public.extra or "{}")
-        except (TypeError, ValueError):
-            extra = {}
-        if not isinstance(extra, dict):
-            extra = {}
-        extra["duration_seconds"] = duration
-        public.extra = _json(extra)
+    public.plays = int(stats["plays"])
+    public.likes = int(stats["likes"])
+    public.comments = int(stats["comments"])
+    public.shares = int(stats["shares"])
+    public.favorites = int(stats["favorites"])
+    public.source = "tikhub_creator"
+    try:
+        extra = json.loads(public.extra or "{}")
+    except (TypeError, ValueError):
+        extra = {}
+    if not isinstance(extra, dict):
+        extra = {}
+    if stats["extra"].get("duration_seconds") is not None:
+        extra["duration_seconds"] = stats["extra"]["duration_seconds"]
+    extra["creator_metrics"] = {
+        key: stats["extra"][key]
+        for key in ("bounce_2s_rate", "finish_5s_rate", "finish_rate", "avg_play_seconds", "profile_visits", "follower_gain")
+    }
+    public.extra = _json(extra)
     db.flush()
     return row, public
 
@@ -371,7 +433,12 @@ def _apply_item_metrics(db: Session, post: PlatformPost, item: dict) -> tuple[Do
 def sync_post_creator_data(
     db: Session, account: CreatorAccount, post: PlatformPost, client: TikHubClient | None = None
 ) -> dict:
-    """单条作品刷新：作品指标 + 流量来源 + 搜索词 + 观看/跳出趋势（真实模式 5 次请求）。"""
+    """单条作品刷新（视频复盘/发布后检查用）：指标 + 流量来源 + 搜索词 + 观看/跳出趋势。"""
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        raise CredentialError(policy.reason)
+    if not policy.is_creator:
+        raise CredentialError("当前账号未启用创作者数据，无法刷新创作者私有指标")
     client = client or make_client()
     before = client.requests_used
     cookie = _cookie(db, account.id, client)
@@ -396,15 +463,14 @@ def sync_post_creator_data(
         row.like_trend = _json([])
         row.similar_author_trend = _json(similar)
         row.trend_reliable = bool((public.plays or 0) >= 200 and trends["retention"])
-        _mark_credential(db, account.id, ok=True)
-        db.commit()
+        mark_valid(db, account)
         return {"post_id": post.id, "metric_id": row.id, "trend_reliable": row.trend_reliable}
     except Exception as exc:
         db.rollback()
-        auth = _auth_error(exc)
+        auth = is_auth_failure(exc)
         message = _credential_message(exc) if isinstance(exc, (TikHubBusinessError, CredentialError)) else str(exc)
-        _mark_credential(db, account.id, ok=False, error=message, auth=auth)
-        db.commit()
+        if auth:
+            mark_invalid(db, account, message, notify=True)
         if isinstance(exc, (TikHubBusinessError, CredentialError)):
             raise CredentialError(message) from exc
         raise
@@ -412,28 +478,190 @@ def sync_post_creator_data(
         _charge_requests(db, client, before)
 
 
-def _creator_items(db: Session, account: CreatorAccount, posts: list[PlatformPost], client: TikHubClient, cookie: str) -> dict[str, dict]:
-    """用 item_list 一次拉取最近作品指标（真实模式 1 次请求，替代逐条 overview）。"""
-    if not posts:
-        return {}
-    start = min((post.publish_time or _app_now()) for post in posts) - timedelta(days=1)
-    raw = client.fetch_douyin_creator_item_list(
-        cookie=cookie,
-        start_time=int(start.timestamp() * 1000),
-        end_time=int(_app_now().timestamp() * 1000),
-        count=min(100, max(1, len(posts) + 5)),
+def creator_stats_for_post(
+    db: Session, account: CreatorAccount, post: PlatformPost, client: TikHubClient | None = None
+) -> dict:
+    """素材库/单帖同步用的轻量创作者取数：只调 overview（1 次请求），不取流量/趋势。"""
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        raise CredentialError(policy.reason)
+    if not policy.is_creator:
+        raise CredentialError("当前账号未启用创作者数据")
+    client = client or make_client()
+    before = client.requests_used
+    try:
+        cookie = _cookie(db, account.id, client)
+        overview = client.fetch_douyin_creator_overview(cookie=cookie, item_id=post.platform_post_id)
+        item = _item(overview, post.platform_post_id)
+        if not item:
+            raise CredentialError("创作者接口没有返回这条作品的数据")
+        _apply_item_metrics(db, post, item)
+        db.commit()
+        mark_valid(db, account)
+        return stats_from_item(item)
+    except Exception as exc:
+        db.rollback()
+        auth = is_auth_failure(exc)
+        message = _credential_message(exc) if isinstance(exc, (TikHubBusinessError, CredentialError)) else str(exc)
+        if auth:
+            mark_invalid(db, account, message, notify=True)
+        if isinstance(exc, (TikHubBusinessError, CredentialError)):
+            raise CredentialError(message) from exc
+        raise
+    finally:
+        _charge_requests(db, client, before)
+
+
+def _creator_item_id(item: dict) -> str:
+    return str(item.get("id") or item.get("item_id") or item.get("aweme_id") or "")
+
+
+def _creator_item_cover(item: dict) -> str:
+    cover = item.get("cover")
+    if isinstance(cover, dict):
+        urls = cover.get("url_list")
+        if isinstance(urls, list):
+            for url in urls:
+                if isinstance(url, str) and url:
+                    return url
+    return ""
+
+
+def _creator_item_publish(item: dict) -> datetime | None:
+    value = _number(item.get("create_time"))
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(float(value)))
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _iter_creator_items(
+    client: TikHubClient,
+    cookie: str,
+    *,
+    full: bool,
+    recent_days: int,
+    max_requests: int,
+) -> tuple[list[dict], bool]:
+    """时间窗向前分页拉作品；返回 (items, 是否已确认没有更多)。
+
+    creator_v2 的 `cursor` 参数实测无效（返回同一页），因此按 `start_time/end_time` 时间窗分页：
+    每次取 [end-90d, end]，再用响应里的 max_cursor（最早作品时间）作为下一页 end，
+    直到请求数达到上限、作品为空或时间窗走到 0。full=False 时只看最近 recent_days。
+    """
+    now = _app_now()
+    end = int(now.timestamp() * 1000)
+    floor = 0 if full else int((now - timedelta(days=recent_days)).timestamp() * 1000)
+    window_ms = 90 * 86400 * 1000
+    seen: dict[str, dict] = {}
+    requests = 0
+    exhausted = False
+    while requests < max_requests:
+        start = max(floor, end - window_ms)
+        raw = client.fetch_douyin_creator_item_list(
+            cookie=cookie,
+            start_time=start,
+            end_time=end,
+            count=100,
+        )
+        requests += 1
+        page_items = _items(raw)
+        data = _data(raw)
+        for item in page_items:
+            key = _creator_item_id(item)
+            if key:
+                seen[key] = item
+        has_more = bool(data.get("has_more")) if isinstance(data, dict) else False
+        if not page_items:
+            exhausted = True
+            break
+        if not full and not has_more:
+            exhausted = True
+            break
+        nxt = _number(data.get("max_cursor")) if isinstance(data, dict) else None
+        next_end = int(nxt) if nxt is not None and int(nxt) > 0 else start
+        if next_end >= end:
+            # 游标没有前进 → 退到窗口起点，仍不前进则终止，避免死循环
+            next_end = start
+            if next_end >= end:
+                exhausted = True
+                break
+        end = next_end
+        if end <= floor:
+            exhausted = True
+            break
+    return list(seen.values()), exhausted
+
+
+def fetch_creator_items(
+    db: Session,
+    account: CreatorAccount,
+    *,
+    full: bool = False,
+    recent_days: int = 120,
+    max_requests: int = 60,
+    client: TikHubClient | None = None,
+    return_meta: bool = False,
+):
+    """拉取账号作品（时间窗分页）；请求数计入 TikHub 预算。"""
+    client = client or make_client()
+    before = client.requests_used
+    try:
+        cookie = _cookie(db, account.id, client)
+        items, exhausted = _iter_creator_items(client, cookie, full=full, recent_days=recent_days, max_requests=max_requests)
+        if return_meta:
+            return items, exhausted, client.requests_used - before
+        return items
+    finally:
+        _charge_requests(db, client, before)
+
+
+def fetch_creator_post_data(
+    db: Session,
+    account: CreatorAccount,
+    *,
+    limit: int | None = None,
+    full: bool = False,
+    recent_days: int = 120,
+    max_requests: int = 60,
+    client: TikHubClient | None = None,
+) -> list[dict]:
+    """创作者作品 → 平台同步用的 PostData 字典（评论/媒体仍由调用方走公开接口）。"""
+    items = fetch_creator_items(
+        db, account, full=full, recent_days=recent_days, max_requests=max_requests, client=client
     )
-    return {
-        str(item.get("id") or item.get("item_id") or ""): item
-        for item in _items(raw)
-        if str(item.get("id") or item.get("item_id") or "")
-    }
+    out: list[dict] = []
+    for item in items:
+        pid = _creator_item_id(item)
+        if not pid:
+            continue
+        desc = str(item.get("description") or "")
+        out.append({
+            "platform_post_id": pid,
+            "title": desc,
+            "desc": desc,
+            "tags": extract_hashtags(desc),
+            "cover_url": _creator_item_cover(item),
+            "video_url": "",
+            "publish_time": _creator_item_publish(item),
+            "stats": stats_from_item(item),
+            "raw": item,
+        })
+        if limit is not None and not full and len(out) >= limit:
+            break
+    return out
 
 
 def sync_account_creator_data(db: Session, account: CreatorAccount, limit: int = 30) -> dict:
-    """账号级创作者指标同步：真实模式优先 item_list 一次拉取；mock 模式逐条走 mock。"""
+    """账号级创作者指标同步（每日保鲜）：只同步最近 limit 条已有作品，不新建平台作品。"""
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        raise CredentialError(policy.reason)
+    if not policy.is_creator:
+        return {"synced": 0, "errors": [], "total": 0, "skipped": "public", "source": policy.source}
     client = make_client()
-    before = client.requests_used
     posts = (
         db.query(PlatformPost)
         .filter_by(account_id=account.id, platform="douyin")
@@ -452,10 +680,10 @@ def sync_account_creator_data(db: Session, account: CreatorAccount, limit: int =
                 except Exception as exc:
                     errors.append(f"{post.title[:30]}：{str(exc)[:100]}")
             return {"synced": synced, "errors": errors, "total": len(posts)}
-        cookie = _cookie(db, account.id, client)
-        items = _creator_items(db, account, posts, client, cookie)
+        items = fetch_creator_items(db, account, full=False, recent_days=120, max_requests=2, client=client)
+        index = {_creator_item_id(item): item for item in items if _creator_item_id(item)}
         for post in posts:
-            item = items.get(str(post.platform_post_id))
+            item = index.get(str(post.platform_post_id))
             if item is None:
                 continue
             try:
@@ -464,21 +692,80 @@ def sync_account_creator_data(db: Session, account: CreatorAccount, limit: int =
             except Exception as exc:
                 errors.append(f"{post.title[:30]}：{str(exc)[:100]}")
         db.commit()
-        _mark_credential(db, account.id, ok=True)
-        db.commit()
+        mark_valid(db, account)
         return {"synced": synced, "errors": errors, "total": len(posts)}
     except Exception as exc:
         db.rollback()
-        auth = _auth_error(exc)
-        _mark_credential(db, account.id, ok=False, error=_credential_message(exc), auth=auth)
-        db.commit()
+        auth = is_auth_failure(exc)
+        message = _credential_message(exc) if isinstance(exc, (TikHubBusinessError, CredentialError)) else str(exc)
+        if auth:
+            mark_invalid(db, account, message, notify=True)
         if isinstance(exc, (TikHubBusinessError, CredentialError)):
-            raise CredentialError(_credential_message(exc)) from exc
+            raise CredentialError(message) from exc
         raise
-    finally:
-        if client.mode == "real":
-            for _ in range(max(0, client.requests_used - before)):
-                _charge(db)
+
+
+def _backfill_marker_key(account_id: int) -> str:
+    return f"douyin_creator_backfill_done:{account_id}"
+
+
+def backfill_done(db: Session, account_id: int) -> bool:
+    return db.get(Kv, _backfill_marker_key(account_id)) is not None
+
+
+def _mark_backfill_done(db: Session, account_id: int) -> None:
+    key = _backfill_marker_key(account_id)
+    row = db.get(Kv, key)
+    if row is None:
+        db.add(Kv(key=key, value=_app_now().isoformat()))
+    else:
+        row.value = _app_now().isoformat()
+    db.commit()
+
+
+def backfill_account_creator_data(db: Session, account: CreatorAccount, max_requests: int = 60) -> dict:
+    """首次历史回填：把账号全部抖音作品的当天统计补齐；跑完写幂等标记。"""
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        raise CredentialError(policy.reason)
+    if not policy.is_creator:
+        return {"synced": 0, "complete": False, "skipped": "public", "account_id": account.id}
+    client = make_client()
+    items, exhausted, _requests = fetch_creator_items(
+        db, account, full=True, max_requests=max_requests, client=client, return_meta=True
+    )
+    posts = db.query(PlatformPost).filter_by(account_id=account.id, platform="douyin").all()
+    index = {str(post.platform_post_id): post for post in posts}
+    synced = 0
+    errors: list[str] = []
+    for item in items:
+        post = index.get(_creator_item_id(item))
+        if post is None:
+            continue
+        try:
+            _apply_item_metrics(db, post, item)
+            synced += 1
+        except Exception as exc:  # noqa: BLE001 单条失败不阻断
+            errors.append(f"{post.platform_post_id}: {str(exc)[:120]}")
+            log.warning("历史回填单条失败 %s：%s", post.platform_post_id, exc)
+            db.rollback()
+    db.commit()
+    mark_valid(db, account)
+    if exhausted:
+        _mark_backfill_done(db, account.id)
+    return {"synced": synced, "complete": exhausted, "items": len(items), "errors": errors, "account_id": account.id}
+
+
+def backfill_creator_worker(db: Session, payload: dict, update=None) -> dict:
+    account = db.get(CreatorAccount, int(payload.get("account_id") or 0))
+    if account is None:
+        raise LookupError("账号不存在")
+    if update:
+        update(10, "检查账号创作者数据")
+    result = backfill_account_creator_data(db, account, max_requests=int(payload.get("max_requests") or 60))
+    if update:
+        update(100, "历史作品数据补齐完成")
+    return result
 
 
 def _peer_plays_fresh(db: Session) -> bool:

@@ -35,6 +35,8 @@ from .text_tags import strip_hashtags
 from .platform.budget import BudgetExceeded, _charge, ensure_budget, get_budget, set_budget  # noqa: F401
 from .events import publish
 from .creator_service import get_current_creator
+from .douyin_account_policy import resolve_data_policy
+from .douyin_creator_sync import CredentialError
 from .platform.base import CommentData, DataSource, PostData, make_source
 
 _PLATFORM_LABEL = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
@@ -191,12 +193,12 @@ def _ensure_post(
         row.tags = json.dumps(list(dict.fromkeys(post.tags))[:20], ensure_ascii=False)
     # 单条统计：列表自带统计则不额外请求（省额度）；否则拉单作品详情
     if post.stats:
-        _write_stat(db, row, post.stats, commit=False)
+        _write_stat(db, row, post.stats, commit=False, source=str(post.stats.get("source") or "tikhub"))
     else:
         try:
             stats = client.fetch_post_stats(account.platform, post.platform_post_id, account)
             _charge(db)
-            _write_stat(db, row, stats, commit=False)
+            _write_stat(db, row, stats, commit=False, source=str(stats.get("source") or "tikhub"))
         except BudgetExceeded:
             raise
         except Exception:  # noqa: BLE001 单条失败不中断
@@ -238,28 +240,64 @@ def _ensure_covers_batch(db: Session, account: CreatorAccount, posts: list[Platf
             db.rollback()
 
 
-def _write_stat(db: Session, post: PlatformPost, stats: dict, *, commit: bool = True) -> None:
-    """R-222：新增 commit=False 批量模式，由调用方统一 commit。"""
+_STAT_SOURCE_PRIORITY = {"tikhub": 1, "tikhub_statistics": 2, "tikhub_creator": 3}
+
+
+def _write_stat(db: Session, post: PlatformPost, stats: dict, *, commit: bool = True, source: str = "") -> None:
+    """写当天平台统计（R-222 commit=False 批量模式；R-239 来源优先级合并）。
+
+    合并规则（防止公开接口的 0 覆盖创作者真实播放）：
+    - 新来源优先级 > 行内来源：覆盖全部字段（含真实 0）；
+    - 新来源优先级 <= 行内来源：只覆盖 >0 的字段，0 不覆盖已有真实值；
+    - stats 里缺失的字段不写（如 fetch_video_statistics 没有收藏）。
+    """
     extra = stats.get("extra") or {}
+    incoming_source = source or str(stats.get("source") or "tikhub")
     row = (
         db.query(PlatformPostStat)
         .filter(PlatformPostStat.post_id == post.id, PlatformPostStat.stat_date == today_key())
         .first()
     )
-    data = {
-        "plays": int(stats.get("plays") or 0),
-        "likes": int(stats.get("likes") or 0),
-        "favorites": int(stats.get("favorites") or 0),
-        "shares": int(stats.get("shares") or 0),
-        "comments": int(stats.get("comments") or 0),
-        "extra": json.dumps(extra if isinstance(extra, dict) else {}, ensure_ascii=False),
-    }
+    fields = ("plays", "likes", "favorites", "shares", "comments")
+    values = {key: int(stats[key]) for key in fields if stats.get(key) is not None}
+    extra_json = json.dumps(extra if isinstance(extra, dict) else {}, ensure_ascii=False)
     if row is None:
-        row = PlatformPostStat(post_id=post.id, stat_date=today_key(), source="tikhub", **data)
-        db.add(row)
+        db.add(
+            PlatformPostStat(
+                post_id=post.id,
+                stat_date=today_key(),
+                source=incoming_source,
+                plays=values.get("plays", 0),
+                likes=values.get("likes", 0),
+                favorites=values.get("favorites", 0),
+                shares=values.get("shares", 0),
+                comments=values.get("comments", 0),
+                extra=extra_json,
+            )
+        )
     else:
-        for k, v in data.items():
-            setattr(row, k, v)
+        current_source = row.source or "tikhub"
+        incoming_priority = _STAT_SOURCE_PRIORITY.get(incoming_source, 1)
+        current_priority = _STAT_SOURCE_PRIORITY.get(current_source, 1)
+        kept_existing = False
+        for key, value in values.items():
+            existing = int(getattr(row, key) or 0)
+            if incoming_priority >= current_priority:
+                setattr(row, key, value)
+            elif value > 0 or existing <= 0:
+                setattr(row, key, value)
+            else:
+                kept_existing = True
+        if not kept_existing:
+            row.source = incoming_source
+        if isinstance(extra, dict) and extra:
+            try:
+                merged = json.loads(row.extra or "{}")
+            except (TypeError, ValueError):
+                merged = {}
+            if isinstance(merged, dict):
+                merged.update(extra)
+                row.extra = json.dumps(merged, ensure_ascii=False)
     if commit:
         db.commit()
 
@@ -744,11 +782,24 @@ def sync_account(
     """
     if not account.enabled:
         return {"account_id": account.id, "skipped": "disabled"}
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        account.sync_status = "failed"
+        account.sync_message = policy.reason
+        db.commit()
+        return {"account_id": account.id, "platform": account.platform, "skipped": "cookie_invalid", "reason": policy.reason, "posts": 0, "comments": 0}
     if not account.platform_user_id:
         raise ValueError(f"账号 {account.nickname or account.id} 未配置平台用户 ID（先解析主页链接）")
     ensure_budget(db)  # R-135：预算预检，避免"先发请求、后计费"
     label = _PLATFORM_LABEL.get(account.platform, account.platform)
     client = make_source(account.platform)
+    creator_client = None
+    creator_mode = False
+    if policy.is_creator and account.platform == "douyin":
+        from .platform.tikhub import make_client
+
+        creator_client = make_client()
+        creator_mode = creator_client.mode == "real"
     account.sync_status = "running"
     db.commit()
     stats: dict = {"posts": 0, "comments": 0}
@@ -758,8 +809,34 @@ def sync_account(
 
     _job_progress(db, job_id, note=f"{label}：拉取主页与作品列表…")
     _upsert_profile_snapshot(db, account, client)
-    posts_data = client.fetch_user_posts(account.platform, account.platform_user_id, top_n, account=account)
-    _charge(db)
+    if creator_mode:
+        # R-239：启用创作者中心的抖音账号——作品列表/指标走创作者接口；评论/媒体仍用公开接口
+        from .platform.base import PostData as _PostData
+
+        from .douyin_creator_sync import fetch_creator_post_data
+
+        try:
+            creator_rows = fetch_creator_post_data(
+                db,
+                account,
+                limit=None if scope == "initial" else max(1, int(top_n)),
+                full=scope == "initial",
+                recent_days=120,
+                max_requests=60 if scope == "initial" else 2,
+                client=creator_client,
+            )
+        except Exception as exc:
+            from .douyin_creator_sync import _credential_message, is_auth_failure
+            from .douyin_account_policy import mark_invalid
+
+            if is_auth_failure(exc):
+                mark_invalid(db, account, _credential_message(exc), notify=True)
+            raise
+        posts_data = [_PostData(**row) for row in creator_rows]
+        _job_progress(db, job_id, note=f"{label}：创作者中心返回 {len(posts_data)} 条作品")
+    else:
+        posts_data = client.fetch_user_posts(account.platform, account.platform_user_id, top_n, account=account)
+        _charge(db)
     if posts_data:
         _job_progress(db, job_id, total=len(posts_data), note=f"{label}：拉取到 {len(posts_data)} 条作品")
 
@@ -923,7 +1000,7 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
         if error is not None or stats is None:
             continue
         try:
-            _write_stat(db, post, stats, commit=False)
+            _write_stat(db, post, stats, commit=False, source=str(stats.get("source") or "tikhub"))
             done += 1
             _job_progress(db, job_id, done=1, note=f"B站：补全中 {i}/{total}")
         except Exception:  # noqa: BLE001
@@ -1106,10 +1183,24 @@ def run_sync(
 def _sync_one_post(db: Session, post: PlatformPost) -> dict:
     """同步单条平台帖：最新指标 + 评论（点赞 Top50）入库。失败抛错。"""
     account = db.get(CreatorAccount, post.account_id)
+    if account is None:
+        raise ValueError("平台账号不存在")
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        raise ValueError(policy.reason)
     client = make_source(post.platform)
-    stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
-    _charge(db)
-    _write_stat(db, post, stats)
+    stats: dict = {}
+    if policy.is_creator and post.platform == "douyin":
+        from .douyin_creator_sync import creator_stats_for_post
+        from .platform.tikhub import make_client
+
+        creator_client = make_client()
+        if creator_client.mode == "real":
+            stats = creator_stats_for_post(db, account, post, client=creator_client)
+    if not stats:
+        stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
+        _charge(db)
+        _write_stat(db, post, stats, source=str(stats.get("source") or "tikhub"))
     cres = {"added": 0, "updated": 0, "pool_added": 0}
     try:
         cres = sync_post_comments(db, post, limit=50, client=client, account=account, charge=True)
@@ -1232,34 +1323,84 @@ def _bound_platform_posts(db: Session, video) -> list[PlatformPost]:
     return list(posts.values())
 
 
-def sync_local_video_metrics(db: Session, video) -> dict:
-    """本地素材的"同步数据"（R-067）：同步其绑定的各平台最新数据 + 每平台评论点赞 Top50。
+def _latest_stats_map(db: Session, post_ids: list[int]) -> dict[int, PlatformPostStat]:
+    """每个作品取最新一天的统计行（避免逐条 N+1）。"""
+    if not post_ids:
+        return {}
+    from sqlalchemy import func
 
-    一个本地素材可绑定抖音/B站/小红书多条作品，逐个拉取最新数据写入
-    平台作品表与指标快照（当天多平台聚合），供看板/复盘使用；单平台失败不中断其它平台。
+    sub = (
+        db.query(PlatformPostStat.post_id, func.max(PlatformPostStat.stat_date).label("max_date"))
+        .filter(PlatformPostStat.post_id.in_(post_ids))
+        .group_by(PlatformPostStat.post_id)
+        .subquery()
+    )
+    return {
+        row.post_id: row
+        for row in db.query(PlatformPostStat)
+        .join(sub, (PlatformPostStat.post_id == sub.c.post_id) & (PlatformPostStat.stat_date == sub.c.max_date))
+        .all()
+    }
+
+
+def sync_local_video_metrics(db: Session, video) -> dict:
+    """本地素材的"同步数据"（R-067 + R-239）：按账号策略取数 + 评论 Top50 + 当天指标快照聚合。
+
+    - 抖音账号启用创作者数据：指标走创作者中心（1 次 overview），评论/媒体仍公开；
+    - 无 Cookie/开关关闭：公开接口（现状不变）；
+    - 账号 Cookie 失效：不发起任何请求、不回退公开，提示去博主管理更新。
     """
     posts = _bound_platform_posts(db, video)
     if not posts:
         raise ValueError("该素材未绑定平台作品（请先在编辑页填写平台链接并保存）")
-    totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0, "shares": 0}
-    synced: list[str] = []
     errors: list[str] = []
+    warnings: list[str] = []
+    synced: list[str] = []
+    sources: set[str] = set()
+    blocked_accounts: list[str] = []
     added = 0
     updated = 0
     for post in posts:
         account = db.get(CreatorAccount, post.account_id)
-        client = make_source(post.platform)
-        try:
-            stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
-            _charge(db)
-        except Exception as exc:  # noqa: BLE001 单平台失败不中断
-            errors.append(f"{post.platform}: {exc}")
+        policy = resolve_data_policy(db, account) if account is not None else None
+        if policy is not None and policy.is_blocked:
+            nickname = account.nickname if account is not None else post.platform
+            blocked_accounts.append(nickname)
+            warnings.append(f"{post.platform}: 账号「{nickname}」创作者 Cookie 已失效，已停止数据收集")
             continue
-        _write_stat(db, post, stats)
-        for field in totals:
-            totals[field] += int(stats.get(field) or 0)
-        synced.append(post.platform)
+        used_source = "public"
         try:
+            if policy is not None and policy.is_creator and account is not None and post.platform == "douyin":
+                from .douyin_creator_sync import creator_stats_for_post
+                from .platform.tikhub import make_client
+
+                creator_client = make_client()
+                if creator_client.mode == "real":
+                    creator_stats_for_post(db, account, post, client=creator_client)
+                    used_source = "creator"
+            if used_source == "public":
+                client = make_source(post.platform)
+                stats = client.fetch_post_stats(post.platform, post.platform_post_id, account)
+                _charge(db)
+                _write_stat(db, post, stats, source=str(stats.get("source") or "tikhub"))
+        except BudgetExceeded:
+            raise
+        except Exception as exc:  # noqa: BLE001 单帖失败不中断，但不回退公开
+            message = str(exc)[:160]
+            errors.append(f"{post.platform}: {message}")
+            if "Cookie" in message or "创作者" in message or "失效" in message:
+                warnings.append(f"{post.platform}: {message}")
+            continue
+        sources.add(used_source)
+        synced.append(post.platform)
+        if account is not None:
+            after = resolve_data_policy(db, account)
+            if after.is_blocked:
+                blocked_accounts.append(account.nickname)
+                warnings.append(f"{post.platform}: 账号「{account.nickname}」创作者 Cookie 已失效，已停止数据收集")
+                continue
+        try:
+            client = make_source(post.platform)
             cres = sync_post_comments(db, post, limit=50, client=client, account=account, charge=True)
             added += int(cres["added"])
             updated += int(cres["updated"])
@@ -1267,15 +1408,22 @@ def sync_local_video_metrics(db: Session, video) -> dict:
             raise
         except Exception:  # noqa: BLE001 评论失败不影响该平台指标
             db.rollback()
-    # 同步写回本地指标快照（当天多平台聚合），供现有看板/复盘复用
+    if not synced:
+        reason = "；".join(dict.fromkeys(warnings + errors)) or "没有可同步的平台数据"
+        if blocked_accounts:
+            raise CredentialError(reason)
+        raise ValueError(reason)
+    # 从 DB 最新统计聚合（含本次未同步平台的旧值），避免内存 totals 漏算
+    latest = _latest_stats_map(db, [post.id for post in posts])
+    totals = {"plays": 0, "likes": 0, "favorites": 0, "comments": 0, "shares": 0}
+    for stat in latest.values():
+        for field in totals:
+            totals[field] += int(getattr(stat, field) or 0)
     from ..models.metrics import MetricsSnapshot
 
     row = (
         db.query(MetricsSnapshot)
-        .filter(
-            MetricsSnapshot.video_id == video.id,
-            MetricsSnapshot.snapshot_date == today_key(),
-        )
+        .filter(MetricsSnapshot.video_id == video.id, MetricsSnapshot.snapshot_date == today_key())
         .first()
     )
     if row is None:
@@ -1297,16 +1445,24 @@ def sync_local_video_metrics(db: Session, video) -> dict:
         row.comments = totals["comments"]
         row.source = "tikhub"
     db.commit()
-    if not synced and errors:
-        raise ValueError("；".join(errors))
+    data_source = next(iter(sources)) if len(sources) == 1 else "mixed"
     msg = f"同步完成（{len(synced)} 个平台，评论新增 {added} 条）"
+    if data_source == "creator":
+        msg += "，指标来自抖音创作者中心"
+    elif data_source == "mixed":
+        msg += "，部分指标来自抖音创作者中心"
+    if warnings:
+        msg += "；" + "；".join(dict.fromkeys(warnings))[:300]
     if errors:
-        msg += "；部分失败：" + "；".join(errors)
+        msg += "；部分失败：" + "；".join(errors)[:300]
     return {
         "message": msg,
         "platforms": synced,
         "stats": totals,
         "errors": errors,
+        "warnings": list(dict.fromkeys(warnings)),
+        "data_source": data_source,
+        "blocked_accounts": list(dict.fromkeys(blocked_accounts)),
         "comments_added": added,
         "comments_updated": updated,
     }
@@ -1557,16 +1713,35 @@ def run_daily_sync_all(db: Session) -> dict:
 
     # R-163：主博主 + 全部对标博主并发同步（每个博主独立 Session），全局 TikHub 令牌桶控速
     results = [r for _, r in gather(_sync_one, creator_ids, workers=pool_size("creator")) if isinstance(r, dict)]
-    creator_sync: dict = {"synced": 0, "errors": []}
+    creator_sync: dict = {"synced": 0, "errors": [], "skipped": 0, "backfill_started": 0}
     peer_plays: dict = {}
     try:
-        from .douyin_creator_sync import backfill_peer_plays, sync_account_creator_data
+        from .douyin_account_policy import resolve_data_policy
+        from .douyin_creator_sync import backfill_creator_worker, backfill_done, backfill_peer_plays, sync_account_creator_data
+        from ..tasks import find_running_task, start_task
 
         own_douyin = db.query(CreatorAccount).filter_by(creator_id=owner.id, platform="douyin", enabled=True).all()
         for account in own_douyin:
+            policy = resolve_data_policy(db, account)
+            if policy.is_blocked:
+                creator_sync["errors"].append(f"{account.nickname}: {policy.reason}")
+                continue
+            if not policy.is_creator:
+                creator_sync["skipped"] += 1
+                continue
             result = sync_account_creator_data(db, account, limit=30)
             creator_sync["synced"] += int(result["synced"])
             creator_sync["errors"].extend(result["errors"])
+            # R-239/R-238：首次自动回填历史作品当天统计（幂等，后台任务，6 小时内不重复）
+            if not backfill_done(db, account.id):
+                running = find_running_task("douyin_creator_backfill", {"account_id": account.id})
+                if not running:
+                    start_task(
+                        "douyin_creator_backfill",
+                        {"account_id": account.id, "owner_id": owner.id, "max_requests": 60},
+                        backfill_creator_worker,
+                    )
+                    creator_sync["backfill_started"] += 1
         # R-237：列表接口不返回其他账号播放量，同行爆款需要在每日同步后补采（6 小时内复用）
         peer_plays = backfill_peer_plays(db, owner, days=30, max_requests=120)
     except Exception as exc:

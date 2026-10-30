@@ -77,6 +77,18 @@ export function AccountRow({
             </a>
           )}
           {!account.enabled && <Badge variant="warning">已禁用</Badge>}
+          {account.platform === 'douyin' && account.douyin_credential && (() => {
+            const c = account.douyin_credential
+            if (c.status === 'valid') return <Badge variant="secondary">创作者可用</Badge>
+            if (c.status === 'invalid') return (
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild><Badge variant="destructive">Cookie 已失效</Badge></TooltipTrigger>
+                <TooltipContent>{c.last_error || '请在编辑账号更新 Cookie'}</TooltipContent>
+              </Tooltip>
+            )
+            if (c.status === 'disabled') return <Badge variant="outline">创作者已关闭</Badge>
+            return <Badge variant="outline">未配置创作者</Badge>
+          })()}
           {account.sync_status === 'failed' && (
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>

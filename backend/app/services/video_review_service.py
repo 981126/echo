@@ -15,7 +15,7 @@ from ..models.video_review import (
     VideoTopicRecommendation,
 )
 from .creator_service import get_current_creator
-from .douyin_creator_sync import sync_post_creator_data
+from .douyin_creator_sync import CredentialError, sync_post_creator_data
 from .douyin_references import refresh_references
 from .video_review_comparison import build_comparison, dumps, loads, low_fan_references, peer_references
 from .video_review_llm import enhance_findings
@@ -125,14 +125,42 @@ def list_videos(db: Session, owner: Creator, account_id: int | None, query: str,
             "latest_sync_at": latest.created_at if latest else post.updated_at,
             "running_task_id": latest.task_id if latest and latest.status == "running" else None,
         })
-    from .douyin_creator_sync import credential_out
+    from .douyin_account_policy import credential_summary, resolve_data_policy
 
+    policy = resolve_data_policy(db, account)
     return {
         "account": {"id": account.id, "nickname": account.nickname, "avatar": account.avatar},
         "items": items,
         "next_cursor": rows[limit - 1].id if len(rows) > limit else None,
-        "credential_status": credential_out(db, account.id)["status"],
+        "credential_status": policy.status,
+        "credential": credential_summary(db, account),
+        "data_source": policy.source,
     }
+
+
+
+def refresh_post_by_policy(db: Session, account: CreatorAccount, post: PlatformPost) -> str:
+    """按账号策略刷新一条作品指标（R-239）。
+
+    返回 "creator" / "public"；账号 Cookie 失效抛 CredentialError，不发起任何请求。
+    """
+    from .douyin_account_policy import resolve_data_policy
+
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        raise CredentialError(policy.reason)
+    if policy.is_creator:
+        sync_post_creator_data(db, account, post)
+        return "creator"
+    from .platform.budget import _charge
+    from .platform.tikhub import make_client
+    from .platform_sync import _write_stat
+
+    client = make_client()
+    stats = client.fetch_post_stats("douyin", post.platform_post_id, account)
+    _charge(db)
+    _write_stat(db, post, stats, source=str(stats.get("source") or "tikhub"))
+    return "public"
 
 
 def run_analysis(db: Session, payload: dict, update) -> dict:
@@ -149,9 +177,10 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         raise LookupError("主博主不存在")
     try:
         update(10, "检查账号和视频")
+        refresh_source = "creator"
         if payload.get("refresh"):
-            update(20, "更新抖音创作者数据")
-            sync_post_creator_data(db, account, post)
+            update(20, "更新抖音数据")
+            refresh_source = refresh_post_by_policy(db, account, post)
         update(40, "比较相近视频")
         comparison = build_comparison(db, post)
         comments = db.query(PlatformPostComment).filter_by(post_id=post.id).order_by(PlatformPostComment.likes.desc()).all()
@@ -209,6 +238,8 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         review.homepage_analysis = dumps(homepage_analysis(account, recent))
         review.new_topics = dumps(recommendations["new_topics"])
         warnings = comparison["warnings"] + ([llm_warning] if llm_warning else [])
+        if refresh_source == "public":
+            warnings.append("当前账号未启用创作者数据，播放量/完播等私有指标暂缺，已使用公开数据")
         if not transcript:
             warnings.append("这条视频暂无转写，暂时不能精细分析具体台词")
         if not primary:
@@ -423,7 +454,7 @@ def run_plan_check(db: Session, payload: dict, update) -> dict:
         raise LookupError("新视频账号不存在")
     update(25, "更新新视频数据")
     if payload.get("refresh"):
-        sync_post_creator_data(db, account, published)
+        refresh_post_by_policy(db, account, published)
     update(60, "比较修改前后数据")
     before_review = db.get(VideoReview, plan.review_id)
     if before_review is None:

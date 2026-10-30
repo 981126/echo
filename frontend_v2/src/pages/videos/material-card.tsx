@@ -69,6 +69,10 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
 ) {
   const stats = item.cloudPosts.map((p) => p.latest_stat).filter(Boolean)
   const likes = stats.reduce((m, s) => Math.max(m, Number(s?.likes || 0)), 0)
+  const knownPlays = stats.filter((s) => Boolean(s?.plays_known))
+  const playsSource = knownPlays.length ? knownPlays : stats
+  const plays = playsSource.reduce((m, s) => Math.max(m, Number(s?.plays || 0)), 0)
+  const showPlays = knownPlays.length > 0 || plays > 0
   const syncing = !!task && task.progress < 100
   // 大列表性能：前 40 张有入场动画，其余直接呈现（避免集体动画卡顿）；
   // 不再用 layout 动画（每次进度更新都会全量布局测量），改用 content-visibility 跳过屏外渲染。
@@ -200,6 +204,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
               <TooltipContent>{platformName(p)}</TooltipContent>
             </Tooltip>
           ))}
+          {showPlays && <span className="tnum text-[11px] text-muted-foreground">▶ {fmtNum(plays)}</span>}
           {likes > 0 && <span className="tnum text-[11px] text-muted-foreground">👍 {fmtNum(likes)}</span>}
           <span className="flex-1" />
           <span className="text-[11px] text-muted-foreground">{fmtDate(item.date)}</span>

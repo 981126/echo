@@ -12,8 +12,8 @@
   - 硅基流动 / 腾讯云（可选，二选一或都不用）：`ECHO_SILICONFLOW_API_KEY` / 腾讯云 `ECHO_TENCENT_ASR_SECRET_ID/SECRET_KEY`
   - QQ 邮箱 SMTP：`ECHO_SMTP_USER/AUTH_CODE/MAIL_TO`（可选，推送用）
   - 访问令牌：`ECHO_ACCESS_TOKEN`（登录用）
-  - 抖音创作者 Cookie 加密密钥：`ECHO_DOUYIN_COOKIE_KEY`（R-237；不是 Cookie 本身，可用 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 生成。Cookie 由「视频复盘 → 抖音数据设置」加密保存）
-    - 获取 Cookie：浏览器登录 `https://creator.douyin.com` → F12 Network → 任一 creator 请求 → 复制完整 Cookie 请求头（必须含 `sessionid`/`sid_tt`）→ 粘贴到页面保存并验证。Cookie 过期后重新复制保存即可。
+  - 抖音创作者 Cookie 加密密钥：`ECHO_DOUYIN_COOKIE_KEY`（R-237；不是 Cookie 本身，可用 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 生成。Cookie 在「博主管理 → 编辑账号」的抖音创作者数据区块加密保存；每个账号独立开关）
+    - 获取 Cookie：浏览器登录 `https://creator.douyin.com` → F12 Network → 任一 creator 请求 → 复制完整 Cookie 请求头（必须含 `sessionid`/`sid_tt`）→ 粘贴到「博主管理 → 编辑账号」的抖音创作者数据区块保存并验证。Cookie 过期后重新复制保存即可；失效账号会通知并停止该账号数据收集，直到更新 Cookie。
 
 ## 2. 目录与数据
 - 代码：本仓库；**运行时数据不在仓库 `data/`**，由 `.env` 决定（本项目当前 `ECHO_DATA_DIR=/Users/yeah/document/echo_resource`）

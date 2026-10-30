@@ -24,9 +24,47 @@ from ..services.creator_service import (
     list_creators_with_meta,
     switch_current,
 )
+from ..services.douyin_account_policy import credential_summary
+from ..services.douyin_creator_sync import CredentialError, save_credential, set_credential_enabled
 from ..services.platform.tikhub import parse_link
 
 router = APIRouter()
+
+
+class DouyinCredentialIn(BaseModel):
+    cookie: str | None = None
+    enabled: bool | None = None
+
+
+def _douyin_account(account_id: int, db: Session) -> CreatorAccount:
+    account = db.get(CreatorAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    if account.platform != "douyin":
+        raise HTTPException(status_code=400, detail="只有抖音账号支持创作者数据配置")
+    return account
+
+
+@router.get("/accounts/{account_id}/douyin-credential", response_model=dict)
+def get_douyin_credential(account_id: int, db: Session = Depends(get_db)):
+    account = _douyin_account(account_id, db)
+    return credential_summary(db, account)
+
+
+@router.put("/accounts/{account_id}/douyin-credential", response_model=dict)
+def put_douyin_credential(account_id: int, payload: DouyinCredentialIn, db: Session = Depends(get_db)):
+    account = _douyin_account(account_id, db)
+    cookie = (payload.cookie or "").strip()
+    try:
+        if cookie:
+            if len(cookie) > 30000:
+                raise HTTPException(status_code=400, detail="Cookie 过长（上限 30000 字符）")
+            return save_credential(db, account, cookie, enabled=payload.enabled)
+        if payload.enabled is None:
+            raise HTTPException(status_code=400, detail="请提供 cookie 或 enabled")
+        return set_credential_enabled(db, account, bool(payload.enabled))
+    except CredentialError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[dict])
@@ -159,7 +197,9 @@ def update_account(account_id: int, payload: AccountIn, db: Session = Depends(ge
     a.home_link = payload.home_link.strip()
     if user_id:
         a.platform_user_id = user_id
-    a.extra_config = json.dumps(payload.extra_config or {}, ensure_ascii=False)
+    merged_extra = a.extra()
+    merged_extra.update(payload.extra_config or {})
+    a.extra_config = json.dumps(merged_extra, ensure_ascii=False)
     a.enabled = payload.enabled
     a.sync_frequency = payload.sync_frequency
     db.commit()

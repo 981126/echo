@@ -180,6 +180,12 @@
   - 重试 `warning` / 最终失败 `error` 写日志（R-133 logger），错误消息保持 `TikHub 请求失败:` 前缀并追加「（已重试 N 次）」。
   - R-222：`TikHubClient` 复用 `httpx.Client`（线程安全），减少 TCP/TLS 握手；测试用例对应改为 mock `httpx.Client.get`。
 
+### 账号数据源策略（R-239）
+- `douyin_account_policy.resolve_data_policy(db, account)` 是唯一判定入口：非抖音→公开；无 Cookie/开关关闭→公开；开启+有效→创作者中心；开启+失效→`blocked`（该账号所有第三方调用停止，标记失效并只发一次通知，直到更新 Cookie）。
+- 抖音账号启用创作者数据时：平台同步的作品列表/指标走 `creator_v2.fetch_item_list`（时间窗分页），评论/媒体仍走公开接口；视频复盘刷新同样按策略选择创作者/公开/失败。
+- `_write_stat` 按来源优先级合并（`tikhub_creator > tikhub_statistics > tikhub`），公开接口的 0 不覆盖创作者真实播放。
+- 首次自动回填与每日保鲜：后台任务 `douyin_creator_backfill`（app_kv 幂等标记）；素材库卡片显示播放可信标记 `plays_known/plays_source`。
+
 ### 幂等与去重
 - 作品：`(platform, platform_post_id)` 唯一约束 + `_ensure_post` 先查后建/更新（含 title/cover/publish_time/raw/tags/cover_path）。
 - 指标：`(post_id, stat_date)` 唯一 upsert（当天多次同步覆盖成最新，历史保留）。

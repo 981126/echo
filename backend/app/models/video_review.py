@@ -15,6 +15,7 @@ class DouyinCreatorCredential(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("creator_accounts.id"), unique=True, index=True)
     cookie_value: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     status: Mapped[str] = mapped_column(String(20), default="missing")
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

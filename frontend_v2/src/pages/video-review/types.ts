@@ -120,7 +120,9 @@ export interface ReferenceItem {
 
 export interface Credential {
   account_id: number
-  status: string
+  enabled?: boolean
+  status: 'missing' | 'valid' | 'invalid' | 'disabled' | string
+  status_label?: string
   has_cookie: boolean
   last_validated_at?: string | null
   last_success_at?: string | null

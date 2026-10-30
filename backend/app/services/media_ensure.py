@@ -285,8 +285,13 @@ def _download_pick(
     settings = get_settings()
     settings.videos_dir.mkdir(parents=True, exist_ok=True)
     last_error = ""
+    from .douyin_account_policy import resolve_data_policy
+
     for post in _pick_source_posts(posts):
         account = db.get(CreatorAccount, post.account_id)
+        policy = resolve_data_policy(db, account) if account is not None else None
+        if policy is not None and policy.is_blocked:
+            raise MediaDownloadError(policy.reason)
         try:
             if on_try is not None:
                 on_try(post.platform)

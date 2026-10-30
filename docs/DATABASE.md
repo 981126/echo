@@ -39,7 +39,7 @@
 | `transcripts` | 转写稿：ASR 原文(transcript_text)、AI 校对稿(source_text)与状态；video_id 唯一。 |
 | `videos` | 本地素材：上传/导入视频元数据 + 封面 + 平台/赛道多选(JSON) + 发布状态/时间 + 绑定平台作品/合并作品。 |
 | `works` | 跨平台同作品：同一内容三平台自动/手动合并，title 规范化去重，承载素材库云端合并卡。 |
-| `douyin_creator_credentials` | 抖音创作者 Cookie 密文、可用状态、最近验证/成功同步时间与脱敏错误；密钥只在 `.env`。 |
+| `douyin_creator_credentials` | 抖音创作者 Cookie 密文、启用开关、可用状态、最近验证/成功同步时间与脱敏错误；密钥只在 `.env`。 |
 | `douyin_post_metrics` | 自己抖音作品创作者指标按天快照：跳出/完播/平均播放/封面点击/主页访问/单条涨粉/趋势/raw。 |
 | `douyin_reference_videos` | 抖音低粉榜和公开搜索参考：作者/公开互动/官方标签/类别关键词/分析/raw。 |
 | `video_reviews` | 每次视频复盘主记录：输入指纹、比较对象、指标快照、总结、主页分析、新话题、模型与警告。 |
@@ -791,7 +791,8 @@ R-237：本人或已授权抖音账号的创作者 Cookie。数据库只存 Fern
 | `id` | INTEGER | 主键 |
 | `account_id` | INTEGER | 对应 `creator_accounts.id`，唯一 |
 | `cookie_value` | TEXT | Cookie 密文，接口永不回显 |
-| `status` | VARCHAR(20) | `missing/valid/expired/invalid` |
+| `enabled` | BOOLEAN | R-239：是否启用创作者中心数据（默认 TRUE）；关闭时该账号走公开接口 |
+| `status` | VARCHAR(20) | `valid/invalid`（业务状态；无 Cookie 时接口按 `missing`、关闭时按 `disabled` 展示；历史 `expired` 按 invalid 处理） |
 | `last_validated_at` | DATETIME | 最近验证时间（可空） |
 | `last_success_at` | DATETIME | 最近成功获取数据时间（可空） |
 | `last_error` | TEXT | 脱敏失败原因 |

@@ -20,9 +20,13 @@ export interface VideoItem {
 }
 
 export interface LatestStat {
+  plays?: number | null
+  plays_known?: boolean
+  plays_source?: string
   likes?: number | null
   comments?: number | null
-  collects?: number | null
+  favorites?: number | null
+  shares?: number | null
 }
 
 export interface CloudPost {

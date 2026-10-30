@@ -1115,6 +1115,15 @@ List Creators
 - `x-access-token`（header）string
 **返回 200**：application/json → array
 
+### GET /api/creators/accounts/{account_id}/douyin-credential
+
+读取抖音账号的创作者数据配置（R-239，仅抖音账号）：`{account_id, enabled, has_cookie, status, status_label, last_validated_at, last_success_at, last_error}`。`status` 为 `missing/valid/invalid/disabled`；永不返回 Cookie。错误：404 账号不存在；400 非抖音账号。
+
+### PUT /api/creators/accounts/{account_id}/douyin-credential
+
+保存抖音创作者开关/Cookie（R-239）。Body：`{cookie?: str（1~30000 字符）, enabled?: bool}`。传 cookie 会加密保存并做一次最小真实校验（计 TikHub 额度），成功 `status=valid`，失败 400 且回显可读原因、不回显 Cookie；只传 `enabled=false` 可关闭（不校验）；只传 `enabled=true` 但无已保存 Cookie 返回 400；不传任何字段返回 400。
+
+
 ### POST /api/creators
 
 Create Creator
@@ -1939,11 +1948,11 @@ R-232：`feature_routes`（可选，`{组: model1|model2}`，`prompt_opt` 组可
 
 ### GET /api/douyin-review/videos
 
-当前主博主抖音视频选择列表。Query：`account_id`（可空）、`query`、`cursor`、`limit=20`（1～50）。返回账号、视频、最近复盘/同步状态和 Cookie 状态，不调用第三方。
+当前主博主抖音视频选择列表。Query：`account_id`（可空）、`query`、`cursor`、`limit=20`（1～50）。返回账号、视频、最近复盘/同步状态和账号创作者数据状态（`credential_status` + `credential` 摘要，只读），不调用第三方。
 
 ### POST /api/douyin-review/analyze
 
-发起视频复盘。Body：`post_id`（必填）、`refresh=false`（是否先更新创作者数据）、`force=false`。相同进行中任务复用；成功返回 `202 + task_id/review_id/reused`，相同输入已完成（`done` 或数据不足的 `partial`）时 `200` 直接返回复盘。`refresh=true` 走真实创作者接口，Cookie 未登录/过期时任务失败并返回明确中文原因，不写空指标、不覆盖旧复盘。
+发起视频复盘。Body：`post_id`（必填）、`refresh=false`（是否先更新数据）、`force=false`。`refresh=true` 时按账号策略取数：启用创作者数据→创作者中心；未启用/无 Cookie→公开接口（播放暂无）；Cookie 已失效→返回 400 并要求到博主管理更新。相同进行中任务复用；成功返回 `202 + task_id/review_id/reused`，相同输入已完成（`done` 或数据不足的 `partial`）时 `200` 直接返回复盘。`refresh=true` 走真实创作者接口，Cookie 未登录/过期时任务失败并返回明确中文原因，不写空指标、不覆盖旧复盘。
 
 ### GET /api/douyin-review/reviews/{review_id}
 
@@ -1961,13 +1970,9 @@ R-232：`feature_routes`（可选，`{组: model1|model2}`，`prompt_opt` 组可
 
 后台刷新低粉爆款并补齐同行作品播放量。Body：`category_id/keyword/date_window/duration_type/tags/limit`；时间窗口仅 1/24/72/168，duration_type 仅 0/1/6/7/8/9，tags 必须是 `[{value,children}]`，非法参数返回 400。返回 `202 + task_id`，同主博主进行中任务复用；任务结果含 `saved/warnings/peer_plays`（同行播放量补采统计，6 小时内复用）。
 
-### GET /api/douyin-review/credentials
+### 凭据配置已迁移
 
-读取 `account_id` 对应 Cookie 状态：`status/has_cookie/last_validated_at/last_success_at/last_error`，永不返回 Cookie。账号不属于当前主博主返回 400。
-
-### PUT /api/douyin-review/credentials
-
-保存并验证本人或已授权 Cookie。Body：`account_id/cookie`。Fernet 加密后存本地数据库，最小真实请求验证并计 TikHub 额度；失败返回 400（含"Cookie 未登录或已过期"可读原因）且不回显凭证。真实联调：creator_v2 在 Cookie 未登录时可能返回 HTTP 400 或 HTTP 200 + 业务码 `status_code=8`，两种情况都按 Cookie 失效处理。
+R-239 起视频复盘不再提供 Cookie 配置，`/api/douyin-review/credentials` 两个接口已删除；请使用 `GET/PUT /api/creators/accounts/{account_id}/douyin-credential`（见 creators 章节）。
 
 ### POST /api/douyin-review/recommendations/{recommendation_id}/adopt
 

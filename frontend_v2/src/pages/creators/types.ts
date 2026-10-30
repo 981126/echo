@@ -1,4 +1,15 @@
 // 博主管理数据类型
+export interface DouyinCredential {
+  account_id: number
+  enabled: boolean
+  has_cookie: boolean
+  status: 'missing' | 'valid' | 'invalid' | 'disabled'
+  status_label: string
+  last_validated_at?: string | null
+  last_success_at?: string | null
+  last_error: string
+}
+
 export interface AccountMeta {
   id: number
   creator_id: number
@@ -17,6 +28,7 @@ export interface AccountMeta {
   sync_status: string
   sync_message: string
   extra_config?: Record<string, unknown>
+  douyin_credential?: DouyinCredential | null
 }
 
 export interface CreatorMeta {

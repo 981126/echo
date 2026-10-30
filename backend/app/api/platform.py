@@ -252,6 +252,12 @@ def refresh_post_comments(post_id: int, limit: int = 50, db: Session = Depends(g
     if post is None:
         raise HTTPException(status_code=404, detail="云端作品不存在")
     acc = db.get(CreatorAccount, post.account_id)
+    if acc is not None:
+        from ..services.douyin_account_policy import resolve_data_policy
+
+        policy = resolve_data_policy(db, acc)
+        if policy.is_blocked:
+            raise HTTPException(status_code=400, detail=policy.reason)
     raw = {}
     try:
         raw = _json.loads(post.raw or "{}") if isinstance(post.raw, str) else (post.raw or {})
@@ -448,8 +454,12 @@ def sync_video_data(video_id: int, db: Session = Depends(get_db)):
     video = db.get(Video, video_id)
     if video is None:
         raise HTTPException(status_code=404, detail="素材不存在")
+    from ..services.douyin_creator_sync import CredentialError
+
     try:
         res = sync_local_video_metrics(db, video)
+    except CredentialError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         info = inspect_media(db, video_id=video.id)
         if info["action"] == "skip":  # 已完整则无需处理，维持原提示

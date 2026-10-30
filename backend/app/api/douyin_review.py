@@ -11,7 +11,6 @@ from ..models.platform import CreatorAccount, PlatformPost
 from ..models.video_review import VideoImprovementPlan, VideoReview, VideoTopicRecommendation
 from ..schemas.douyin_review import (
     AnalyzeIn,
-    CredentialIn,
     HomepageIn,
     PlanCheckIn,
     PlanIn,
@@ -20,7 +19,8 @@ from ..schemas.douyin_review import (
     ReferenceRefreshIn,
 )
 from ..services import video_review_service as service
-from ..services.douyin_creator_sync import CredentialError, credential_out, save_credential
+from ..services.douyin_account_policy import resolve_data_policy
+from ..services.douyin_creator_sync import CredentialError
 from ..tasks import find_running_task, start_task
 
 router = APIRouter()
@@ -54,7 +54,11 @@ def videos(
 def analyze(payload: AnalyzeIn, db: Session = Depends(get_db)):
     def run():
         owner = service.current_owner(db)
-        _, post = service.own_post(db, owner, payload.post_id)
+        account, post = service.own_post(db, owner, payload.post_id)
+        if payload.refresh:
+            policy = resolve_data_policy(db, account)
+            if policy.is_blocked:
+                raise CredentialError(policy.reason)
         existing_task = find_running_task("douyin_review_analyze", {"post_id": post.id})
         if existing_task:
             existing = db.query(VideoReview).filter_by(post_id=post.id, status="running").order_by(VideoReview.id.desc()).first()
@@ -164,17 +168,6 @@ def refresh_references(payload: ReferenceRefreshIn, db: Session = Depends(get_db
             service.refresh_reference_worker,
         )
     return JSONResponse(status_code=202, content={"task_id": task_id, "reused": reused})
-
-
-@router.get("/credentials", response_model=dict)
-def credentials(account_id: int, db: Session = Depends(get_db)):
-    return _call(lambda: credential_out(db, service.own_account(db, service.current_owner(db), account_id).id))
-
-
-@router.put("/credentials", response_model=dict)
-def save_credentials(payload: CredentialIn, db: Session = Depends(get_db)):
-    account = service.own_account(db, service.current_owner(db), payload.account_id)
-    return _call(lambda: save_credential(db, account, payload.cookie))
 
 
 @router.post("/recommendations/{recommendation_id}/adopt", response_model=dict)
