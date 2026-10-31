@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { RefreshCw, LoaderCircle, Pencil, Trash2, ExternalLink, ListVideo, ImagePlus } from 'lucide-react'
+import { coverThumb } from '@/lib/covers'
 import { platformName, fmtNum, fmtDate } from '@/lib/format'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -50,7 +51,7 @@ export function AccountRow({
     <div className={cn('flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors', disabled && 'opacity-55')}>
       <div className="relative">
         <Avatar className="h-10 w-10">
-          {avatarSrc ? <AvatarImage src={avatarSrc} alt={account.nickname} /> : null}
+          {avatarSrc ? <AvatarImage src={coverThumb(avatarSrc, 160)} alt={account.nickname} decoding="async" /> : null}
           <AvatarFallback>{(account.nickname || platformName(account.platform)).slice(0, 1)}</AvatarFallback>
         </Avatar>
         <Tooltip delayDuration={0}>

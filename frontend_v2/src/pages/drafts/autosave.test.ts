@@ -186,6 +186,24 @@ describe('createAutoSaver（R-212）', () => {
     expect(h.updated[0]).toMatchObject({ id: 7, body: { script: '正文一' } })
   })
 
+  it('自动建稿后 id 回填（对象引用变但内容相同）不重复写库，状态回到 saved（R-243）', async () => {
+    const h = harness()
+    h.set({ title: 'a' })
+    h.saver.schedule()
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY)
+    await flush()
+    expect(h.created).toHaveLength(1)
+    const createdBefore = h.created.length
+    // 父组件 onCreate 已把 id 写回编辑态（此时 state 对象引用变化），页面 effect 会再排一次期
+    h.saver.schedule()
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY)
+    await flush()
+    expect(h.created).toHaveLength(createdBefore)
+    expect(h.updated).toHaveLength(0) // 内容没变，不重复 PATCH
+    expect(h.statuses.at(-1)).toBe('saved') // dirty 后收回 saved，不显示「未保存」
+    expect(h.stored).toBeNull()
+  })
+
   it('保存进行中继续打字不漏字：这次完成后把最新内容接着写完', async () => {
     const h = harness()
     h.hold()
@@ -277,15 +295,17 @@ describe('createAutoSaver（R-212）', () => {
 })
 
 describe('断网本地兜底 + 退避重试（R-213）', () => {
-  it('改动先落本地副本（防抖之前），落库成功才清掉', async () => {
+  it('防抖窗口内不写盘，900ms 回调里先落本地副本，落库成功才清掉（R-243）', async () => {
     const h = harness()
     h.set({ script: '离线也不怕' })
     h.saver.schedule()
-    expect(h.stored?.state.script).toBe('离线也不怕') // 还没发请求就先留本地
+    expect(h.stored).toBeNull() // R-243：写盘与指纹计算移入 900ms 防抖回调，不再每键同步写
+    expect(h.copies).toHaveLength(0)
     expect(h.clears).toBe(0)
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY)
     await flush()
-    expect(h.clears).toBeGreaterThan(0)
+    expect(h.copies.length).toBeGreaterThan(0) // 防抖回调里先落本地副本（再发请求）
+    expect(h.clears).toBeGreaterThan(0) // 服务器确认落库后清副本
     expect(h.stored).toBeNull()
   })
 
@@ -358,16 +378,22 @@ describe('断网本地兜底 + 退避重试（R-213）', () => {
     expect(h.stored?.state.title).toBe('别丢')
   })
 
-  it('内容又改回服务器已有版本时不留无用副本', async () => {
+  it('内容又改回服务器已有版本时不留无用副本（R-243：指纹判断在防抖回调里）', async () => {
     const h = harness()
     h.set({ title: 'a' })
     h.saver.schedule()
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY) // 'a' 已落库
+    await flush()
+    const createdBefore = h.created.length
     h.set({ title: 'ab' })
-    h.saver.schedule() // 副本 = ab
-    expect(h.stored?.state.title).toBe('ab')
+    h.saver.schedule()
+    expect(h.stored).toBeNull() // 防抖窗口内还没写副本
     h.set({ title: 'a' })
-    h.saver.schedule() // 改回去 → 服务器已有 'a'
+    h.saver.schedule() // 改回去 → 900ms 回调里发现指纹等于已保存，清掉不留副本
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY)
+    await flush()
     expect(h.stored).toBeNull()
+    expect(h.updated).toHaveLength(0) // 不重复 PATCH
+    expect(h.created).toHaveLength(createdBefore) // 也不重复建稿
   })
 })

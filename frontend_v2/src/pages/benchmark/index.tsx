@@ -5,6 +5,7 @@ import { RefreshCw, LoaderCircle, Sparkles, PenLine, Target, CircleCheck, Circle
 import { apiJson } from '@/api/client'
 import { startTask } from '@/api/task'
 import { useActiveWork } from '@/hooks/use-active-work'
+import { coverThumb } from '@/lib/covers'
 import { platformName, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -282,9 +283,10 @@ export default function BenchmarkPage() {
                           <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-muted">
                             {it.cover ? (
                               <img
-                                src={it.cover}
+                                src={coverThumb(it.cover, 400)}
                                 alt=""
                                 loading="lazy"
+                                decoding="async"
                                 referrerPolicy="no-referrer"
                                 className="absolute inset-0 h-full w-full object-cover"
                               />
@@ -293,12 +295,12 @@ export default function BenchmarkPage() {
                             )}
                             <div className="absolute left-2 top-2 flex gap-1">
                               {it.platforms.map((p) => (
-                                <Badge key={p} variant="secondary" className="bg-black/45 text-white border-transparent backdrop-blur-sm">
+                                <Badge key={p} variant="secondary" className="bg-black/45 text-white border-transparent">
                                   {platformName(p)}
                                 </Badge>
                               ))}
                             </div>
-                            <span className="tnum absolute right-2 top-2 rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] text-white backdrop-blur-sm">
+                            <span className="tnum absolute right-2 top-2 rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] text-white">
                               互动分 {fmtNum(it.score)}
                             </span>
                           </div>

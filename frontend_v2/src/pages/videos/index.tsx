@@ -281,7 +281,7 @@ export default function VideosPage() {
           void fetchNextRef.current()
         }
       },
-      { rootMargin: '600px 0px' } // 约 1 屏提前量
+      { rootMargin: '1200px 0px' } // R-243：提前两屏预取，减少追加与视口位移重叠（请求仍按页触发）
     )
     io.observe(el)
     return () => io.disconnect()
@@ -617,19 +617,8 @@ export default function VideosPage() {
         </div>
       )}
 
-      {/* 触底哨兵 + 加载指示（只在真等的时候出现，一闪而过） */}
+      {/* 触底哨兵（R-243：加载提示/计数统一移到贴底栏，避免追加新卡时被顶出视口造成滚动 CLS） */}
       <div ref={sentinelRef} className="h-px w-full" aria-hidden />
-      {libQ.hasNextPage && (
-        <div className="flex h-10 items-center justify-center text-xs text-muted-foreground">
-          {libQ.isFetchingNextPage ? (
-            <span className="flex items-center gap-1.5">
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> 加载中…
-            </span>
-          ) : (
-            <span className="opacity-60">继续下滑加载更多</span>
-          )}
-        </div>
-      )}
 
       {/* 抽屉与弹窗 */}
       <EditDrawer
@@ -679,8 +668,19 @@ export default function VideosPage() {
         onConfirm={doSplit}
       />
 
-      {/* 底部计数 */}
-      <div className="pt-1 text-right">
+      {/* 底部提示 + 计数：贴底常显（height 稳定），无限滚动追加时不再被新卡顶出视口 */}
+      <div className="sticky bottom-0 z-10 -mx-1 flex h-9 items-center justify-between gap-2 rounded-md bg-background/85 px-2 text-xs text-muted-foreground backdrop-blur-sm">
+        {libQ.hasNextPage ? (
+          libQ.isFetchingNextPage ? (
+            <span className="flex items-center gap-1.5">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> 加载中…
+            </span>
+          ) : (
+            <span className="opacity-60">继续下滑加载更多</span>
+          )
+        ) : (
+          <span />
+        )}
         <Badge variant="secondary" className="tnum">{filtered.length} / {cards.length}</Badge>
       </div>
     </motion.div>

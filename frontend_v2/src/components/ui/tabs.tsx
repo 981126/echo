@@ -19,6 +19,8 @@ const Tabs = React.forwardRef<
   const id = React.useId()
   const [internal, setInternal] = React.useState(defaultValue)
   const current = value !== undefined ? value : internal
+  // R-243：context value 稳定化，避免每次 render 让全部 Trigger/Content 重渲染
+  const ctxValue = React.useMemo(() => ({ value: current, id }), [current, id])
   return (
     <TabsPrimitive.Root
       ref={ref}
@@ -30,7 +32,7 @@ const Tabs = React.forwardRef<
       }}
       {...props}
     >
-      <TabsCtx.Provider value={{ value: current, id }}>{children}</TabsCtx.Provider>
+      <TabsCtx.Provider value={ctxValue}>{children}</TabsCtx.Provider>
     </TabsPrimitive.Root>
   )
 })

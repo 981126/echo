@@ -15,6 +15,7 @@ import {
   Link2
 } from 'lucide-react'
 import { apiJson } from '@/api/client'
+import { coverThumb } from '@/lib/covers'
 import { platformName, fmtNum, fmtDate } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent } from '@/components/ui/card'
@@ -121,7 +122,7 @@ function CreatorBlock({
     <motion.div variants={itemVariants} className="space-y-2">
       <div className="flex flex-wrap items-center gap-2.5">
         <Avatar className="h-10 w-10">
-          {c.avatar ? <AvatarImage src={c.avatar} alt={c.name} /> : null}
+          {c.avatar ? <AvatarImage src={coverThumb(c.avatar, 160)} alt={c.name} decoding="async" /> : null}
           <AvatarFallback>{c.name.slice(0, 1) || '博'}</AvatarFallback>
         </Avatar>
         <div className="min-w-0">
@@ -232,10 +233,12 @@ export default function CreatorsPage() {
     queryFn: () => apiJson<{ limit: number; used: number; remaining: number }>('/api/platform/budget')
   })
   // R-219：拉最近全部状态任务（不再只筛 running），done/failed 条据此延迟淡出
+  // R-243：有 running 任务时保持 4s 轮询；空闲降到 15s（sync.job SSE 事件仍会即时 invalidate）。
   const jobsQ = useQuery({
     queryKey: ['sync-jobs', 'recent'],
     queryFn: () => apiJson<{ items: SyncJob[] }>('/api/platform/jobs?limit=50'),
-    refetchInterval: 4000
+    refetchInterval: (query) =>
+      (query.state.data?.items ?? []).some((j) => j.status === 'running') ? 4000 : 15_000
   })
 
   // 延迟淡出需要秒级重渲染：仅在存在窗口期内的 done/failed 条时开 1s 心跳，空闲零开销。
@@ -507,7 +510,7 @@ export default function CreatorsPage() {
             {current?.id ? (
               <span className="flex items-center gap-2 rounded-full bg-accent-soft py-1 pl-1 pr-3">
                 <Avatar className="h-6 w-6">
-                  {current.avatar ? <AvatarImage src={current.avatar} alt="" /> : null}
+                  {current.avatar ? <AvatarImage src={coverThumb(current.avatar, 160)} alt="" decoding="async" /> : null}
                   <AvatarFallback className="text-[10px]">{current.name.slice(0, 1)}</AvatarFallback>
                 </Avatar>
                 <b className="text-[13px]">{current.name}</b>

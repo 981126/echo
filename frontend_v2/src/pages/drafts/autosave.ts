@@ -9,7 +9,7 @@
 //
 // R-213（断网兜底）：改动**先落本地副本**再谈服务器；网络/5xx 失败按退避重试（`online` 时立刻重试），
 //   只有服务器确认落库才清副本；4xx 是请求本身有问题，重试没意义，直接报失败。
-import type { DraftEditState } from './edit-drawer'
+import type { DraftEditState } from './edit-state'
 import { localCopyStorage } from './local-copy'
 
 /** 距最后一次改动多久落库（短到几乎无感，长到不会一字一请求） */
@@ -103,6 +103,7 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
   let savedFp = '' // 最近一次确认已落库的内容指纹
   let pending: DraftEditState | null = null // 最新一份还没确认落库的内容（断网重试用它，不读已重置的编辑态）
   let queue: DraftEditState | null = null // 待落库内容（后写覆盖先写）
+  let lastSnapshot: DraftEditState | null = null // 最近一次排期/落库/基线的 state 对象（R-243：O(1) 变化判断）
   let pumping = false
   let discardOnCreate = false // 极端：建稿那一次还在飞，作者已清空并关了抽屉
 
@@ -126,6 +127,7 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
     createdId = 0
     savedFp = ''
     pending = null
+    lastSnapshot = null
     storage.clear()
     env.onDiscard(id)
   }
@@ -200,9 +202,10 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
     void pump()
   }
 
-  /** 记下「这份还没落库」并写本地副本（R-213：先留本地，再谈服务器） */
+  /** 记下「这份还没落库」并写本地副本（R-213：先留本地，再谈服务器；R-243：只在防抖回调/flush 调用） */
   function remember(snap: DraftEditState) {
     pending = snap
+    lastSnapshot = snap
     storage.write(snap, snap.id || createdId)
   }
 
@@ -213,20 +216,35 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
       // 空稿不留本地副本（关闭时会走「空稿自动删除」）
       if (!createdId) return
       pending = null
+      lastSnapshot = null
       storage.clear()
       return
     }
-    if (draftFingerprint(cur) === savedFp) {
-      // 服务器已经有了这份内容（例如改了又改回来），副本没用了
-      pending = null
-      storage.clear()
-      return
-    }
-    remember(cur)
+    // R-243：同一个 state 对象重复排期（父级 effect 的无关依赖变化）直接跳过——
+    // 保持原「内容没变就不报 dirty、不排期」行为（不需要算指纹）。
+    if (cur === lastSnapshot) return
+    // R-243：指纹计算与 localStorage 写副本都移到 900ms 防抖回调里（之前每个按键都同步做一次）；
+    // dirty 状态仍立即上报，关闭抽屉的 flush/closeOut 仍立即写副本（断网兜底不倒退）。
+    lastSnapshot = cur
     env.onStatus('dirty')
     timer = setTimeout(() => {
       timer = null
-      if (pending) enqueue(pending)
+      const snap = env.read()
+      if (isBlankDraft(snap)) {
+        pending = null
+        storage.clear()
+        return
+      }
+      if (draftFingerprint(snap) === savedFp) {
+        // 服务器已经有了这份内容（例如改回原内容 / 自动建稿后 id 回填只换了对象引用），副本没用了；
+        // 刚置的 dirty 收回 saved，保持状态条与「服务端已是最新」一致（不额外发请求）。
+        pending = null
+        storage.clear()
+        env.onStatus('saved')
+        return
+      }
+      remember(snap)
+      enqueue(snap)
     }, delay)
   }
 
@@ -267,6 +285,7 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
     clearRetry()
     queue = null
     pending = null
+    lastSnapshot = s
     attempt = 0
     savedFp = draftFingerprint(s)
     storage.clear()
@@ -277,6 +296,7 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
   function baseline(s: DraftEditState) {
     clearTimer()
     pending = null
+    lastSnapshot = s
     savedFp = draftFingerprint(s)
   }
 
@@ -292,6 +312,7 @@ export function createAutoSaver(env: AutoSaveEnv): AutoSaver {
     clearRetry()
     queue = null
     pending = null
+    lastSnapshot = null
     createdId = 0
     savedFp = ''
     attempt = 0

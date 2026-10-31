@@ -113,7 +113,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
       exit={{ opacity: 0, scale: listReplace.exit.scale, transition: baseTransition }}
       transition={enterTransition}
       whileHover={{ y: -4 }}
-      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 300px' } as React.CSSProperties}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 356px' } as React.CSSProperties}
       className={cn(
         'group relative overflow-hidden rounded-lg border bg-card shadow-[var(--shadow-card)] transition-colors',
         selected ? 'border-accent ring-2 ring-[var(--ring)]' : 'border-border'

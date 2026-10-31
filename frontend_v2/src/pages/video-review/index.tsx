@@ -93,8 +93,13 @@ export default function VideoReviewPage() {
         const selected = wanted && data.items.some((x) => x.post_id === wanted) ? wanted : data.items[0]?.post_id ?? 0
         activePost.current = selected
         setPostId(selected)
-        if (selected) await loadReview(selected)
-        await loadReferences('peer')
+        // R-243：review 与 references 无数据依赖 → 首屏并行请求（loadReferences 内部自行兜住错误，
+        // loadReview 失败仍由外层 catch 统一提示，错误语义不变）。
+        if (selected) {
+          await Promise.all([loadReview(selected), loadReferences('peer')])
+        } else {
+          await loadReferences('peer')
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '视频复盘加载失败')
       } finally {

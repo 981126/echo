@@ -40,6 +40,8 @@ export function Sidebar({
 }) {
   return (
     <motion.aside
+      // R-243：首帧不播放入场宽度动画（否则整页内容横向位移/CLS）；收起/展开交互 spring 不变
+      initial={false}
       animate={{ width: collapsed ? 64 : 216 }}
       transition={{ type: 'spring', stiffness: 320, damping: 32 }}
       className="hidden md:flex h-full flex-col border-r border-border bg-card/60 backdrop-blur"

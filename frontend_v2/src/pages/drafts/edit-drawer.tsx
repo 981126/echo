@@ -80,29 +80,11 @@ export function ModelChip({ label, tone }: { label: string; tone: 'gen' | 'criti
   )
 }
 
-export interface DraftEditState {
-  id: number
-  title: string
-  cover_text: string
-  script: string
-  video_id: number | null
-  tagsText: string
-  publish_platform: string
-  publish_url: string
-  published_at: string
-}
-
-export const EMPTY_DRAFT: DraftEditState = {
-  id: 0,
-  title: '',
-  cover_text: '',
-  script: '',
-  video_id: null,
-  tagsText: '',
-  publish_platform: '',
-  publish_url: '',
-  published_at: ''
-}
+// R-243：类型/空稿常量已抽到 `./edit-state`（列表页只依赖该文件，不再静态拉起本编辑器）；
+// 这里 re-export 保持既有 import 兼容（autosave/local-copy/测试等）。
+export type { DraftEditState } from './edit-state'
+export { EMPTY_DRAFT } from './edit-state'
+import type { DraftEditState } from './edit-state'
 
 interface CheckInfo {
   ok: boolean
@@ -113,6 +95,21 @@ interface VideoOpt {
   id: number
   title: string
   filename: string
+}
+
+/** R-243：关联素材下拉的模块级缓存（60s）——同一浏览器标签内多次开抽屉只拉一次；
+ *  失败不写缓存，下次打开照旧重试；语义仍等价于"打开时取一次列表"。 */
+const VIDEO_OPTIONS_TTL = 60_000
+let videoOptionsCache: { at: number; items: VideoOpt[] } | null = null
+
+function loadVideoOptions(): Promise<VideoOpt[]> {
+  if (videoOptionsCache && Date.now() - videoOptionsCache.at < VIDEO_OPTIONS_TTL) {
+    return Promise.resolve(videoOptionsCache.items)
+  }
+  return apiJson<{ items: VideoOpt[] }>('/api/videos?limit=500').then((r) => {
+    videoOptionsCache = { at: Date.now(), items: r.items ?? [] }
+    return videoOptionsCache.items
+  })
 }
 
 /** R-173：`/api/drafts/{id}/debate-status` 返回（status 为老字段=人类可读文案） */
@@ -334,12 +331,20 @@ export function DraftEditDrawer({
     }
   }
 
-  // 关联素材选项
+  // 关联素材选项（R-243：模块级 60s 缓存——之前每次打开抽屉都重复拉 /api/videos?limit=500 约 45KB）
   useEffect(() => {
     if (!open) return
-    apiJson<{ items: VideoOpt[] }>('/api/videos?limit=500')
-      .then((r) => setVideos(r.items ?? []))
-      .catch(() => setVideos([]))
+    let alive = true
+    loadVideoOptions()
+      .then((items) => {
+        if (alive) setVideos(items)
+      })
+      .catch(() => {
+        if (alive) setVideos([])
+      })
+    return () => {
+      alive = false
+    }
   }, [open])
 
   // 讨论/版本随 id 加载

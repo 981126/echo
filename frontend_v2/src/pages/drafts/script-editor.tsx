@@ -39,6 +39,9 @@ export function ScriptEditor({
   placeholder?: string
 }) {
   const imgInput = useRef<HTMLInputElement>(null)
+  // R-243：记住「自己 onUpdate 发出的 markdown」，外部 value 同步时先做 O(1) 比较，
+  // 避免每键再调一次 editor.getMarkdown()（原来每个按键全量序列化两次）。
+  const lastEmittedRef = useRef('')
   const [uploading, setUploading] = useState(false)
 
   const editor = useEditor({
@@ -72,14 +75,26 @@ export function ScriptEditor({
         return true
       }
     },
-    onUpdate: ({ editor }) => onChange(editor.getMarkdown())
+    onUpdate: ({ editor }) => {
+      const markdown = editor.getMarkdown()
+      lastEmittedRef.current = markdown
+      onChange(markdown)
+    }
   })
 
-  // 外部换稿（AI 回填/切换草稿）时同步；自己敲字触发的回写不重设，避免光标跳走
+  // 外部换稿（AI 回填/切换草稿）时同步；自己敲字触发的回写不重设，避免光标跳走。
+  // R-243：先用 lastEmittedRef 判断「这次 value 变化是否就是自己刚发出的」——是则直接返回，
+  // 不再为每个按键做第二次全量 getMarkdown()；外部改稿路径语义不变（仍比对内容后 setContent）。
   useEffect(() => {
     if (!editor) return
-    if ((value || '') === editor.getMarkdown()) return
-    editor.commands.setContent(value || '', { contentType: 'markdown', emitUpdate: false })
+    const next = value || ''
+    if (next === lastEmittedRef.current) return
+    if (next === editor.getMarkdown()) {
+      lastEmittedRef.current = next
+      return
+    }
+    editor.commands.setContent(next, { contentType: 'markdown', emitUpdate: false })
+    lastEmittedRef.current = next
   }, [editor, value])
 
   function firstImageFile(data?: DataTransfer | null): File | null {

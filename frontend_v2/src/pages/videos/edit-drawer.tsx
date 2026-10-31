@@ -125,9 +125,15 @@ export function EditDrawer({
     let cancelled = false
     setLoading(true)
     ;(async () => {
-      try {
-        const d = await apiJson<VideoDetail>(`/api/videos/${videoId}`)
-        if (cancelled) return
+      // R-243：详情与关联草稿无数据依赖，改为并行（原来第二个请求要等详情回来才发）；
+      // 失败互不影响：详情失败仍弹错误提示，草稿失败仍静默忽略（与旧语义一致）。
+      const [detailResult, draftsResult] = await Promise.allSettled([
+        apiJson<VideoDetail>(`/api/videos/${videoId}`),
+        apiJson<DraftLink[]>(`/api/drafts?video_id=${videoId}&limit=20`)
+      ])
+      if (cancelled) return
+      if (detailResult.status === 'fulfilled') {
+        const d = detailResult.value
         setDetail(d)
         const links: Record<string, string> = { douyin: '', bilibili: '', xiaohongshu: '' }
         ;(d.platform_links || []).forEach((x) => {
@@ -147,26 +153,23 @@ export function EditDrawer({
         }
         setState(st)
         setOrig(JSON.parse(JSON.stringify(st)))
-      } catch (e) {
-        toast.error((e as Error).message)
-      } finally {
-        if (!cancelled) setLoading(false)
+      } else {
+        toast.error((detailResult.reason as Error).message)
       }
-      try {
-        const ds = await apiJson<DraftLink[]>(`/api/drafts?video_id=${videoId}&limit=20`)
-        if (!cancelled) setDrafts(Array.isArray(ds) ? ds : [])
-      } catch {
-        /* 忽略 */
+      if (draftsResult.status === 'fulfilled') {
+        const ds = draftsResult.value
+        setDrafts(Array.isArray(ds) ? ds : [])
       }
+      setLoading(false)
     })()
     return () => {
       cancelled = true
     }
   }, [open, videoId])
 
-  // 转写轮询
+  // 转写轮询（R-243：仅在抽屉打开时轮询——关闭即停，重开继续；5s×120 语义不变）
   useEffect(() => {
-    if (!transcribing || !videoId) return
+    if (!transcribing || !videoId || !open) return
     let tries = 0
     const timer = setInterval(async () => {
       tries += 1
@@ -189,7 +192,7 @@ export function EditDrawer({
       }
     }, 5000)
     return () => clearInterval(timer)
-  }, [transcribing, videoId])
+  }, [transcribing, videoId, open])
 
   const commentPosts = useMemo(
     () => (detail?.platform_links || []).map((x) => ({ id: x.post_id, platform: x.platform })),

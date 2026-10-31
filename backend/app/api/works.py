@@ -161,9 +161,13 @@ def cloud_to_local(
 
 
 @router.get("", response_model=dict)
-def get_works(creator_id: int = 0, db: Session = Depends(get_db)):
+def get_works(creator_id: int = 0, slim: bool = False, db: Session = Depends(get_db)):
+    """云端作品列表。R-243：`slim=1` 时不返回每条作品的 posts 明细（时间线只用顶层字段），
+    默认行为逐字段不变。"""
     cid = creator_id or current_creator_id(db)
     items = list_works(db, cid)
+    if slim:
+        items = [{**item, "posts": []} for item in items]
     return {"total": len(items), "items": items}
 
 

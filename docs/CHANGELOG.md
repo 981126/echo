@@ -1,5 +1,16 @@
 # 变更记录
 
+## [R-243] 2026-10-31 — 前端性能优化（更快、更流畅、修闪屏/组件乱动）✅
+
+- **传输层（后端 1 个中间件 + 静态缓存）**：启用 `GZipMiddleware`（SSE `text/event-stream` 与图片/字体/视频由 Starlette 默认排除，SSE 实测保持逐事件心跳）；前端 hashed 资源 `Cache-Control: immutable` 1 年、`index.html` no-cache、封面/上传/媒体静态 1 天。实测生产构建：草稿页传输 1,143KB→257KB、博主管理 6,275KB→949KB、对标 5,370KB→1,280KB、首页 855KB→301KB；JS/CSS 响应均带 `content-encoding: gzip`。
+- **图片缩略**：新增共享 `lib/covers.ts`（`coverThumb`），对标封面 400、时间线/头像 160、帖子网格 400，全部 `decoding=async`；后端 `/covers/name?w=` 生成失败时回退已预热 w400（不回落原图）。实测对标页图片 4,253KB→1,156KB（-73%）、博主管理图片 ~3.6MB→901KB。同步去掉对标页徽标 `backdrop-blur`（90→2 个合成层，底色不变）。
+- **首屏不闪/不乱动**：侧栏 `motion.aside initial={false}`（首帧 width 动画消失，四页 CLS 0.045~0.056→0~0.008）；`persona TagRow` 提升为模块级稳定组件（不再每次父级渲染卸载重挂 46 行；「layout/入场动画」参数原样）；`Tabs` context value `useMemo`；素材库底部提示/计数改贴底栏（连续滚动 CLS 0.237→~0）。
+- **草稿工作台**：编辑器组件按需加载（进入页面不阻塞；空闲预取，点开秒开；`drawerMounted` 首次打开才挂载），tiptap/markdown 600KB 不再卡首屏；列表默认排除逻辑删除（`/api/drafts` 483KB→105KB，132→14 行，`include_deleted=true` 可查）；`script-editor` 每键只序列化一次 markdown；autosave 指纹/localStorage 写移到 900ms 防抖内（脏状态仍即时，flush 仍立即）；关联素材下拉 60s 缓存。
+- **聊天**：流式 chunk 用 rAF 合并为每帧最多一次刷新（最终文本逐字一致、打字机观感不变）；切会话 `history`+`actions` 并行 + 请求序号守卫；滚动跟随仅在近底时生效、每帧最多一次。
+- **其它**：视频复盘首屏 `latest-review`/`references` 并行；视频编辑抽屉详情+关联草稿并行、转写轮询仅抽屉打开时进行；博主管理 jobs 空闲轮询 4s→15s（进行中仍 4s）；`/api/works?slim=1` 时间线不取 posts 明细（1.64MB→122KB）。
+- 无表结构变更；新增后端回归 `tests/test_r243_frontend_perf.py`（6 例：gzip/小响应不压/静态缓存头/drafts 过滤/works slim/缩略图回退），前端既有 146 例全绿；`scripts/verify.sh` 全绿。
+- 明确保留：所有动画参数/曲线/时长/编排不变；页面转场 blur 淡入、侧栏收起 spring、卡片/列表动画、chat 消息动画均未改。
+
 ## [R-242] 2026-10-31 — 修复性能优化复核中发现的既有缺陷 ✅
 
 - **转写稿唯一化**：`transcripts.video_id` 由普通索引改 **UNIQUE**（新 migration `r242transcriptuniq`）；迁移按「有正文优先 → `asr_status=done` 优先 → 最新 id」清理历史重复（本机 600→595 行，5 组重复各留 1 条）；`Transcript.video_id` 模型声明对齐；自动转写落稿/失败落状态/manual 写入路径加视频行锁 + 唯一冲突兜底，杜绝并发重复行。修复 `Video.transcript uselist=False` 与 DB 非唯一不一致导致「可能读到错误转写稿」的隐患。

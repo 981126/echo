@@ -342,14 +342,19 @@ def list_drafts(
     status: str = "",
     video_id: int | None = None,
     limit: int = 100,
+    include_deleted: bool = False,
     db: Session = Depends(get_db),
 ):
+    """草稿列表。R-243：默认排除逻辑删除（status='deleted'）——工作台不展示，
+    旧行为下它们占响应约 79% 字节；需要排查时传 include_deleted=true 或 status=deleted。"""
     q = db.query(Draft)
     cid = current_creator_id(db)
     if cid:
         q = q.filter(Draft.creator_id == cid)
     if status:
         q = q.filter(Draft.status == status)
+    elif not include_deleted:
+        q = q.filter(Draft.status != "deleted")
     if video_id is not None:
         q = q.filter(Draft.video_id == video_id)
     rows = q.order_by(Draft.updated_at.desc()).limit(limit).all()

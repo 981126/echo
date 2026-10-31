@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -24,6 +24,9 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from '@/components/ui/toaster'
 
 const md = new MarkdownIt({ html: false, linkify: true })
+
+/** 距底部不超过这个像素数就认为「贴着最新」，流式输出时自动跟随（用户向上翻历史则不抢滚动条） */
+const NEAR_BOTTOM_PX = 80
 
 interface Conversation {
   id: number
@@ -94,38 +97,72 @@ export default function ChatPage() {
   const [renameText, setRenameText] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
   const keySeq = useRef(0)
+  const loadSeq = useRef(0) // R-243：会话加载序号，快速切换时丢弃过期响应
+  const scrollRaf = useRef(0) // R-243：scroll() 每帧最多一次
+  const flushRaf = useRef(0) // R-243：流式 chunk 合并到每帧最多一次 setState
+  const stickToBottom = useRef(true)
 
   const convsQ = useQuery({
     queryKey: ['chat', 'conversations'],
     queryFn: () => apiJson<Conversation[]>('/api/chat/conversations')
   })
 
-  const scroll = () => {
-    requestAnimationFrame(() => {
-      if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight
+  /** R-243：滚动合并到「每帧最多一次」，且仅在接近底部时跟随最新（向上翻历史不被拽回）。 */
+  const scroll = (force = false) => {
+    if (force) stickToBottom.current = true
+    if (scrollRaf.current) return
+    scrollRaf.current = requestAnimationFrame(() => {
+      scrollRaf.current = 0
+      const el = boxRef.current
+      if (!el || !stickToBottom.current) return
+      el.scrollTop = el.scrollHeight
     })
   }
 
+  const onMessagesScroll = () => {
+    const el = boxRef.current
+    if (!el) return
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX
+  }
+
+  useEffect(
+    () => () => {
+      if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current)
+      if (flushRaf.current) cancelAnimationFrame(flushRaf.current)
+    },
+    []
+  )
+
   async function loadHistory(id: number) {
+    const seq = ++loadSeq.current
     try {
-      const rows = await apiJson<{ role: string; content: string }[]>(`/api/chat/history?conversation_id=${id}&limit=200`)
+      // R-243：history 与 actions 无数据依赖 → 并行请求；快速切会话时用序号守卫丢弃过期响应，
+      // 不在响应回来前清空旧消息（避免视觉跳变/串会话）。
+      const [rows, acts] = await Promise.all([
+        apiJson<{ role: string; content: string }[]>(`/api/chat/history?conversation_id=${id}&limit=200`),
+        apiJson<AgentAction[]>(`/api/chat/actions?conversation_id=${id}`)
+      ])
+      if (seq !== loadSeq.current) return // 过期响应：保留当前会话的内容
       setMessages(rows.map((r) => ({ key: 'h' + (++keySeq.current), role: r.role as 'user' | 'assistant', content: r.content })))
-      const acts = await apiJson<AgentAction[]>(`/api/chat/actions?conversation_id=${id}`)
       setActions(acts)
     } catch (e) {
+      if (seq !== loadSeq.current) return
       toast.error((e as Error).message)
     }
-    scroll()
+    scroll(true)
   }
 
   async function selectConv(c: Conversation) {
     setCurrentId(c.id)
+    stickToBottom.current = true
     await loadHistory(c.id)
   }
 
   async function newConversation() {
     const c = await apiJson<Conversation>('/api/chat/conversations', { method: 'POST', body: '{}' })
     qc.invalidateQueries({ queryKey: ['chat', 'conversations'] })
+    loadSeq.current += 1 // 丢弃可能还在飞的旧会话加载
+    stickToBottom.current = true
     setCurrentId(c.id)
     setMessages([])
     setActions([])
@@ -144,6 +181,7 @@ export default function ChatPage() {
     await apiJson(`/api/chat/conversations/${deleteConv.id}`, { method: 'DELETE' })
     toast.success('已删除')
     if (currentId === deleteConv.id) {
+      loadSeq.current += 1 // 丢弃可能还在飞的旧会话加载
       setCurrentId(null)
       setMessages([])
     }
@@ -172,7 +210,32 @@ export default function ChatPage() {
     const userMsg: ChatMessage = { key: 'u' + (++keySeq.current), role: 'user', content: q }
     const asst: ChatMessage = { key: 'a' + (++keySeq.current), role: 'assistant', content: '', streaming: true, steps: [] }
     setMessages((prev) => [...prev, userMsg, asst])
-    scroll()
+    stickToBottom.current = true
+    scroll(true)
+    // R-243：后端 ~66 chunk/s；累积 delta/steps 后用 rAF 合并成「每帧最多一次 setState」，
+    // 最终文本逐字一致（流结束前会同步 flush 一次再落 streaming=false）。
+    let dirty = false
+    const flushPending = () => {
+      if (flushRaf.current) {
+        cancelAnimationFrame(flushRaf.current)
+        flushRaf.current = 0
+      }
+      if (!dirty) return
+      dirty = false
+      setMessages((prev) => prev.map((m) => (m.key === asst.key ? { ...asst, steps: [...(asst.steps || [])] } : m)))
+      scroll()
+    }
+    const scheduleFlush = () => {
+      dirty = true
+      if (flushRaf.current) return
+      flushRaf.current = requestAnimationFrame(() => {
+        flushRaf.current = 0
+        if (!dirty) return
+        dirty = false
+        setMessages((prev) => prev.map((m) => (m.key === asst.key ? { ...asst, steps: [...(asst.steps || [])] } : m)))
+        scroll()
+      })
+    }
     try {
       const resp = await apiFetch('/api/chat/stream', {
         method: 'POST',
@@ -211,11 +274,11 @@ export default function ChatPage() {
             } else if (data.delta) {
               asst.content += data.delta as string
             }
-            setMessages((prev) => prev.map((m) => (m.key === asst.key ? { ...asst, steps: [...asst.steps!] } : m)))
-            scroll()
+            scheduleFlush()
           }
         }
       }
+      flushPending()
       asst.streaming = false
       setMessages((prev) => prev.map((m) => (m.key === asst.key ? { ...asst } : m)))
       if (currentId) {
@@ -224,6 +287,7 @@ export default function ChatPage() {
       }
       qc.invalidateQueries({ queryKey: ['chat', 'conversations'] })
     } catch (e) {
+      flushPending() // 清掉未落地的 rAF，错误文本直接走终态 setState
       asst.content = '出错了：' + (e as Error).message
       asst.streaming = false
       setMessages((prev) => prev.map((m) => (m.key === asst.key ? { ...asst } : m)))
@@ -315,7 +379,7 @@ export default function ChatPage() {
           )}
         </AnimatePresence>
 
-        <div ref={boxRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div ref={boxRef} onScroll={onMessagesScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {currentId == null ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
               <motion.div

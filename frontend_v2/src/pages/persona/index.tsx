@@ -87,6 +87,77 @@ const LAYERS: { key: string; label: string; hint: string }[] = [
 const LAYER_LABEL: Record<string, string> = Object.fromEntries(LAYERS.map((l) => [l.key, l.label]))
 const layerOf = (t: PersonaTag) => t.layer || 'stance'
 
+// R-243：标签行原定义在 PersonaPage 内部，父级每次 render 都是新组件类型 → 46 行整列卸载重挂。
+// 提升为模块级稳定组件（motion layout/variants/exit 原样保留，动画不变）。
+function TagRow({
+  t,
+  picking,
+  selected,
+  onToggle,
+  onDecide,
+  onEdit,
+  onDelete
+}: {
+  t: PersonaTag
+  picking?: boolean
+  selected: Set<number>
+  onToggle: (t: PersonaTag) => void
+  onDecide: (t: PersonaTag, status: 'confirmed' | 'rejected') => void
+  onEdit: (t: PersonaTag) => void
+  onDelete: (t: PersonaTag) => void
+}) {
+const cat = CATEGORY[t.category] || CATEGORY.style
+const picked = selected.has(t.id)
+return (
+  <motion.div
+    layout
+    variants={itemVariants}
+    exit={{ opacity: 0, x: 12 }}
+    onClick={() => picking && onToggle(t)}
+    className={cn(
+      'flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors',
+      picking ? 'cursor-pointer' : '',
+      picked ? 'border-accent bg-accent-soft/50' : 'border-border bg-card'
+    )}
+  >
+    {picking && <Checkbox checked={picked} className="mt-0.5" />}
+    <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <b className="text-[13px]">{t.label}</b>
+        <Badge variant={cat.variant}>{cat.label}</Badge>
+        <Badge variant="secondary">{LAYER_LABEL[layerOf(t)] || layerOf(t)}</Badge>
+        {t.dimension && t.category !== 'redline' && <Badge variant="secondary">{t.dimension}</Badge>}
+        {t.confirm_strength === 1 && <Badge variant="outline">自动</Badge>}
+        {!!t.frequency && <span className="text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
+      </div>
+      {t.description && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.description}</p>}
+      {!!t.evidence && <p className="mt-0.5 text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
+    </div>
+    {!picking && (
+      <div className="flex shrink-0 gap-1">
+        {t.confirm_strength === 1 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground"
+            title="撤销自动确认（移回待确认，需人工）"
+            onClick={() => onDecide(t, 'rejected')}
+          >
+            <Undo2 className="h-3.5 w-3.5" /> 撤销
+          </Button>
+        )}
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(t)}>
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(t)}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    )}
+  </motion.div>
+)
+}
+
 export default function PersonaPage() {
   const qc = useQueryClient()
   const [running, setRunning] = useState(false)
@@ -328,64 +399,13 @@ export default function PersonaPage() {
     }
   }
 
-  function TagRow({ t, picking }: { t: PersonaTag; picking?: boolean }) {
-    const cat = CATEGORY[t.category] || CATEGORY.style
-    const picked = selected.has(t.id)
-    return (
-      <motion.div
-        layout
-        variants={itemVariants}
-        exit={{ opacity: 0, x: 12 }}
-        onClick={() => {
-          if (picking) {
-            const next = new Set(selected)
-            if (picked) next.delete(t.id)
-            else next.add(t.id)
-            setSelected(next)
-          }
-        }}
-        className={cn(
-          'flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors',
-          picking ? 'cursor-pointer' : '',
-          picked ? 'border-accent bg-accent-soft/50' : 'border-border bg-card'
-        )}
-      >
-        {picking && <Checkbox checked={picked} className="mt-0.5" />}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <b className="text-[13px]">{t.label}</b>
-            <Badge variant={cat.variant}>{cat.label}</Badge>
-            <Badge variant="secondary">{LAYER_LABEL[layerOf(t)] || layerOf(t)}</Badge>
-            {t.dimension && t.category !== 'redline' && <Badge variant="secondary">{t.dimension}</Badge>}
-            {t.confirm_strength === 1 && <Badge variant="outline">自动</Badge>}
-            {!!t.frequency && <span className="text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
-          </div>
-          {t.description && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.description}</p>}
-          {!!t.evidence && <p className="mt-0.5 text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
-        </div>
-        {!picking && (
-          <div className="flex shrink-0 gap-1">
-            {t.confirm_strength === 1 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs text-muted-foreground"
-                title="撤销自动确认（移回待确认，需人工）"
-                onClick={() => decide(t, 'rejected')}
-              >
-                <Undo2 className="h-3.5 w-3.5" /> 撤销
-              </Button>
-            )}
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditForm({ id: t.id, label: t.label, description: t.description, dimension: t.dimension, category: t.category, layer: layerOf(t), evidence: t.evidence || '' })}>
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteTag(t)}>
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        )}
-      </motion.div>
-    )
+
+  // R-243：多选切换（TagRow 提升后由父级传入；逻辑与原先一致）
+  function toggleSelect(t: PersonaTag) {
+    const next = new Set(selected)
+    if (next.has(t.id)) next.delete(t.id)
+    else next.add(t.id)
+    setSelected(next)
   }
 
   return (
@@ -678,7 +698,26 @@ export default function PersonaPage() {
                       <motion.div layout className="space-y-2">
                         <AnimatePresence initial={false}>
                           {items.map((t) => (
-                            <TagRow key={t.id} t={t} picking={multiMode} />
+                            <TagRow
+                              key={t.id}
+                              t={t}
+                              picking={multiMode}
+                              selected={selected}
+                              onToggle={toggleSelect}
+                              onDecide={decide}
+                              onEdit={(tag) =>
+                                setEditForm({
+                                  id: tag.id,
+                                  label: tag.label,
+                                  description: tag.description,
+                                  dimension: tag.dimension,
+                                  category: tag.category,
+                                  layer: layerOf(tag),
+                                  evidence: tag.evidence || ''
+                                })
+                              }
+                              onDelete={setDeleteTag}
+                            />
                           ))}
                         </AnimatePresence>
                       </motion.div>

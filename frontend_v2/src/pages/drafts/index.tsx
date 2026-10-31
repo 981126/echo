@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -13,8 +13,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from '@/components/ui/toaster'
 import { DraftAiStatus } from './draft-ai-status'
-import { DraftEditDrawer, EMPTY_DRAFT, type DraftEditState } from './edit-drawer'
+import { EMPTY_DRAFT, type DraftEditState } from './edit-state'
 import { modelInfo, srcLabel, srcTitle, type Draft } from './types'
+
+// R-243：编辑器（tiptap/markdown ~600KB chunk）按需加载——列表页首屏不再静态 import edit-drawer；
+// 用户点「新建草稿」/点卡片时才加载，页面挂载后用空闲时间预取，点开仍秒开。
+const DraftEditDrawer = lazy(() => import('./edit-drawer').then((m) => ({ default: m.DraftEditDrawer })))
 
 const STATUS_TABS = [
   { key: 'draft', label: '草稿' },
@@ -213,11 +217,29 @@ export default function DraftsPage() {
   const [params, setParams] = useSearchParams()
   const [tab, setTab] = useState<Status>('draft')
   const [editState, setEditState] = useState<DraftEditState | null>(null)
+  // R-243：编辑器 lazy 组件只有「第一次打开」后才挂载（否则 React.lazy 在页面首帧就会拉 chunk）；
+  // 挂载后常驻（open=false 时仍保留），关闭动画与原来一致。
+  const [drawerMounted, setDrawerMounted] = useState(false)
   const [editDraft, setEditDraft] = useState<Draft | null>(null)
   const [deleteDraft, setDeleteDraft] = useState<Draft | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [fbMap, setFbMap] = useState<Record<number, FeedbackUI>>({})
   const [busyId, setBusyId] = useState(0)
+
+  // R-243：空闲预取编辑器 chunk（不支持 requestIdleCallback 则 1.2s 后 setTimeout）。
+  // 只预取模块、不挂载组件；未打开编辑器前不阻塞首屏。
+  useEffect(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    if (typeof idleWindow.requestIdleCallback === 'function') {
+      const idleId = idleWindow.requestIdleCallback(() => void import('./edit-drawer'), { timeout: 2000 })
+      return () => idleWindow.cancelIdleCallback?.(idleId)
+    }
+    const timer = window.setTimeout(() => void import('./edit-drawer'), 1200)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const draftsQ = useQuery({
     queryKey: ['drafts'],
@@ -243,6 +265,7 @@ export default function DraftsPage() {
   }, [params, draftsQ.isLoading])
 
   function open(d: Draft) {
+    setDrawerMounted(true)
     setEditDraft(d)
     setEditState({
       id: d.id,
@@ -258,6 +281,7 @@ export default function DraftsPage() {
   }
 
   function createDraft() {
+    setDrawerMounted(true)
     setEditDraft(null)
     setEditState({ ...EMPTY_DRAFT })
   }
@@ -393,24 +417,28 @@ export default function DraftsPage() {
         </Tabs>
       </motion.div>
 
-      <DraftEditDrawer
-        draft={editDraft}
-        state={editState ?? EMPTY_DRAFT}
-        setState={(s) => setEditState(s)}
-        sourceRef={editDraft?.source_ref}
-        open={editState !== null}
-        onClose={() => {
-          setEditState(null)
-          setEditDraft(null)
-          qc.invalidateQueries({ queryKey: ['drafts'] })
-        }}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['drafts'] })}
-        onCreated={(id) => {
-          qc.invalidateQueries({ queryKey: ['drafts'] })
-          setEditState((prev) => (prev ? { ...prev, id } : prev))
-        }}
-        onDiscardEmpty={discardAutoDraft}
-      />
+      {drawerMounted && (
+        <Suspense fallback={null}>
+          <DraftEditDrawer
+            draft={editDraft}
+            state={editState ?? EMPTY_DRAFT}
+            setState={(s) => setEditState(s)}
+            sourceRef={editDraft?.source_ref}
+            open={editState !== null}
+            onClose={() => {
+              setEditState(null)
+              setEditDraft(null)
+              qc.invalidateQueries({ queryKey: ['drafts'] })
+            }}
+            onSaved={() => qc.invalidateQueries({ queryKey: ['drafts'] })}
+            onCreated={(id) => {
+              qc.invalidateQueries({ queryKey: ['drafts'] })
+              setEditState((prev) => (prev ? { ...prev, id } : prev))
+            }}
+            onDiscardEmpty={discardAutoDraft}
+          />
+        </Suspense>
+      )}
 
       <ConfirmDialog
         open={deleteDraft !== null}

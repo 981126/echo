@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .api import benchmark, chat, creators, douyin_review, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
@@ -60,6 +61,8 @@ app.add_middleware(
 
 app.add_middleware(RequestTimingMiddleware)
 install_sql_counter(engine)
+# R-243：全站响应压缩（SSE text/event-stream 与图片/字体等已被 starlette 默认排除）
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 def require_token(x_access_token: str = Header(default="")) -> None:
@@ -121,7 +124,13 @@ def cover_file(name: str, w: int | None = None):
     if width and src.suffix.lower() in thumbs.IMAGE_EXTS:
         thumb = thumbs.thumb_file(root, name, width)
         if not thumb.is_file():
-            thumbs.make_thumb(src, thumb, width)  # 失败/坏图 → 下面回落原图
+            thumbs.make_thumb(src, thumb, width)  # 失败/坏图 → 下面回退
+        if not thumb.is_file() and width != 400:
+            # R-243：目标宽度生成不可用（如运行环境无写权限）时，回退已预热的 w400 缩略图，
+            # 仍比原图小一个数量级；w400 也没有才回落原图。
+            fallback = thumbs.thumb_file(root, name, 400)
+            if fallback.is_file():
+                thumb = fallback
         if thumb.is_file():
             return FileResponse(
                 thumb,
@@ -131,13 +140,52 @@ def cover_file(name: str, w: int | None = None):
     return FileResponse(src, headers={"Cache-Control": "public, max-age=86400"})
 
 
-app.mount("/covers", StaticFiles(directory=str(_settings.covers_dir)), name="covers")
+class _CachedStaticFiles(StaticFiles):
+    """R-243：静态资源带缓存头；hashed 资源（assets/）可 immutable，html/入口保持回源校验。"""
+
+    def __init__(self, *args, cache_control: str, immutable_assets: bool = False, **kwargs):
+        self._cache_control = cache_control
+        self._immutable_assets = immutable_assets
+        super().__init__(*args, **kwargs)
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            if self._immutable_assets and str(path).startswith("assets/"):
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = self._cache_control
+        return response
+
+
+app.mount(
+    "/covers",
+    _CachedStaticFiles(directory=str(_settings.covers_dir), cache_control="public, max-age=86400"),
+    name="covers",
+)
 _settings.videos_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/media/videos", StaticFiles(directory=str(_settings.videos_dir)), name="media_videos")
-app.mount("/uploads", StaticFiles(directory=str(_settings.uploads_dir)), name="uploads")
+app.mount(
+    "/media/videos",
+    _CachedStaticFiles(directory=str(_settings.videos_dir), cache_control="public, max-age=86400"),
+    name="media_videos",
+)
+app.mount(
+    "/uploads",
+    _CachedStaticFiles(directory=str(_settings.uploads_dir), cache_control="public, max-age=86400"),
+    name="uploads",
+)
 
 # 托管前端构建产物（存在时挂载；/api 路由已先行注册，不受影响）
 # R-208：老前端 frontend/ 已下线，根路径直接托管 frontend_v2（React）
 _FRONTEND_V2_DIST = Path(__file__).resolve().parents[2] / "frontend_v2" / "dist"
 if _FRONTEND_V2_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(_FRONTEND_V2_DIST), html=True), name="static_v2")
+    app.mount(
+        "/",
+        _CachedStaticFiles(
+            directory=str(_FRONTEND_V2_DIST),
+            html=True,
+            cache_control="no-cache",
+            immutable_assets=True,
+        ),
+        name="static_v2",
+    )

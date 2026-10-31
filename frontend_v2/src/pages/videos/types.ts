@@ -152,12 +152,5 @@ export function buildLibraryQuery(f: Filters, cursor: string): string {
   return qs.toString()
 }
 
-/**
- * 封面缩略图 URL（R-179）：只对本地 `/covers/...` 生效（后端按需生成 ~25-40KB 的缩略图并落盘缓存），
- * 远端 CDN 图（如果以后有）原样返回。原图直出时首屏 20 张要 ~9MB，缩图后 ~0.6MB。
- */
-export function coverThumb(url: string | null | undefined, w = 400): string {
-  const u = url || ''
-  if (!u.startsWith('/covers/')) return u
-  return `${u}${u.includes('?') ? '&' : '?'}w=${w}`
-}
+// R-243：封面缩略图工具移出到 lib/covers（全站共用），此处 re-export 保持既有 import/测试兼容。
+export { coverThumb } from '@/lib/covers'

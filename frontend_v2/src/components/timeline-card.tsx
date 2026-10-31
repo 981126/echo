@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { CalendarDays } from 'lucide-react'
 import { apiJson } from '@/api/client'
+import { coverThumb } from '@/lib/covers'
 import { buildTimelineModel, type VideoLike, type WorkLike } from '@/lib/timeline'
 import { itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -18,7 +19,7 @@ export function TimelineCard() {
   })
   const worksQ = useQuery({
     queryKey: ['works', 'timeline'],
-    queryFn: () => apiJson<{ items: WorkLike[] }>('/api/works')
+    queryFn: () => apiJson<{ items: WorkLike[] }>('/api/works?slim=1')
   })
   const model = useMemo(
     () => buildTimelineModel(videosQ.data?.items ?? [], worksQ.data?.items ?? []),
@@ -65,9 +66,10 @@ export function TimelineCard() {
                   >
                     {e.coverUrl ? (
                       <img
-                        src={e.coverUrl}
+                        src={coverThumb(e.coverUrl, 160)}
                         alt=""
                         loading="lazy"
+                        decoding="async"
                         referrerPolicy="no-referrer"
                         className="h-12 w-12 rounded-md border border-border object-cover transition-transform duration-300 group-hover:scale-105"
                       />
