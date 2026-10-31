@@ -1,5 +1,14 @@
 # 变更记录
 
+## [R-242] 2026-10-31 — 修复性能优化复核中发现的既有缺陷 ✅
+
+- **转写稿唯一化**：`transcripts.video_id` 由普通索引改 **UNIQUE**（新 migration `r242transcriptuniq`）；迁移按「有正文优先 → `asr_status=done` 优先 → 最新 id」清理历史重复（本机 600→595 行，5 组重复各留 1 条）；`Transcript.video_id` 模型声明对齐；自动转写落稿/失败落状态/manual 写入路径加视频行锁 + 唯一冲突兜底，杜绝并发重复行。修复 `Video.transcript uselist=False` 与 DB 非唯一不一致导致「可能读到错误转写稿」的隐患。
+- **批量同步单条失败不再丢整批**：`platform_sync._ensure_post` 重排为「先取单条统计 → 再写库」；详情接口失败只记 warning、丢当天统计，作品仍正常入库，不再 `db.rollback()` 连带回滚同批未提交作品（`BudgetExceeded` 仍抛出并触发原有取消逻辑）；`budget._charge` 新增 `commit` 参数供批量模式把提交交给调用方（顺带减少批量中途 commit）。
+- **无主博主 plans 500 修复**：`GET /api/douyin-review/plans` 无当前主博主时返回 200 `{"items": []}`（新环境/空库不再 500），有主博主行为不变。
+- **创作者同步计费合并**：`douyin_creator_sync._charge_requests` 由「每请求一次 `_charge`（N 次事务）」合并为**一次** `_charge(db, n)`；超过剩余额度只计剩余并告警（净计费与旧循环一致，事务数 N→1）。
+- 表结构：`transcripts.ix_transcripts_video_id` 改为唯一索引；`docs/DATABASE.md` 已同步；表数量不变（38 张）。
+- 验证：`scripts/verify.sh` 全绿；新增 `tests/test_r242_fixes.py`（7 例：唯一约束/重复落稿只一行/并发落稿/批量同步失败隔离/单帖失败仍入库/无主博主空列表/计费合并）；适配 R-240 文案 map 测试（不再构造一视频多转写）。
+
 ## [R-241] 2026-10-30 — 后端性能优化收尾（批次 3：结构性优化 + 复核遗留项）✅
 
 - 卡片缓存精确失效：新增 `videos.updated_at` / `platform_post_stats.updated_at` 两列（Alembic `r241perf`），`cards_version` 纳入两列并按 creator 作用域统计 → 视频原地编辑/同日统计更新**下一次请求即生效**（不再等 20s TTL）、他人更新不再让本 creator 缓存失效；缓存过期单飞（6 并发只重建 1 次）；`/api/works/by-post/{id}` 204~213ms → **5~10ms**（直查，不再全量重建）；`/api/library` 冷构建 214→**114ms**（列瘦身不拉 `raw`）；`creator-summary` 703 SQL/364~380ms → **5 SQL/14~28ms**。

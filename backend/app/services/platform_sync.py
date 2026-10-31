@@ -177,6 +177,23 @@ def _ensure_post(
     批量模式下调用方负责在合适的时机统一 commit；封面下载仍由调用方在事务外处理。
     """
     key = (account.platform, post.platform_post_id)
+    # R-242：先在**不写库**的情况下拿单条统计；详情接口偶发失败只丢当天统计，绝不再 rollback
+    # （旧实现失败时 db.rollback() 会连同批量模式下同批未提交的其它作品一起回滚）。
+    stats = post.stats or None
+    if stats is None:
+        try:
+            stats = client.fetch_post_stats(account.platform, post.platform_post_id, account)
+            _charge(db, commit=False)  # 批量模式不提前提交，交给调用方统一 commit
+        except BudgetExceeded:
+            raise
+        except Exception as exc:  # noqa: BLE001 单条失败不中断，作品仍入库
+            log.warning(
+                "单条统计获取失败（不影响作品入库，留待下次同步补）：%s/%s %s",
+                account.platform,
+                post.platform_post_id,
+                type(exc).__name__,
+            )
+            stats = None
     row = existing.get(key) if existing else None
     if row is None:
         row = (
@@ -214,18 +231,8 @@ def _ensure_post(
             existing[key] = row
     if post.tags:
         row.tags = json.dumps(list(dict.fromkeys(post.tags))[:20], ensure_ascii=False)
-    # 单条统计：列表自带统计则不额外请求（省额度）；否则拉单作品详情
-    if post.stats:
-        _write_stat(db, row, post.stats, commit=False, source=str(post.stats.get("source") or "tikhub"))
-    else:
-        try:
-            stats = client.fetch_post_stats(account.platform, post.platform_post_id, account)
-            _charge(db)
-            _write_stat(db, row, stats, commit=False, source=str(stats.get("source") or "tikhub"))
-        except BudgetExceeded:
-            raise
-        except Exception:  # noqa: BLE001 单条失败不中断
-            db.rollback()
+    if stats:
+        _write_stat(db, row, stats, commit=False, source=str(stats.get("source") or "tikhub"))
     if commit:
         db.commit()  # 提交作品与统计，释放写锁
     return row

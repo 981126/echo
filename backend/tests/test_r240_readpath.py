@@ -166,8 +166,12 @@ def test_candidates_many_matches_single_benchmark(db):
     assert grouped["post"].platform_post_id == "w-douyin"  # 最新成员当主帖
 
 
-def test_unit_text_map_work_fallback_and_highest_transcript(db):
-    """文案 map：本地视频优先、同 work 其它平台视频兜底；一视频多转写取 transcript.id 最大一条。"""
+def test_unit_text_map_work_fallback(db):
+    """文案 map：本地视频优先、同 work 其它平台视频兜底。
+
+    R-242 起 transcripts.video_id 唯一（一视频最多一条转写），故不再构造「一视频多转写」场景；
+    旧实现取 id 最大一条的防御逻辑保留（历史脏数据已被迁移清理）。
+    """
     owner = _owner(db)
     bm, acc = _benchmark(db, owner, "对标A")
     work = Work(creator_id=bm.id, title="同作品")
@@ -179,9 +183,7 @@ def test_unit_text_map_work_fallback_and_highest_transcript(db):
     video_b = Video(filename="b.mp4", creator_id=bm.id, work_id=work.id)
     db.add(video_b)
     db.flush()
-    db.add(Transcript(video_id=video_b.id, transcript_text="旧文案", asr_status="done"))
-    db.flush()
-    db.add(Transcript(video_id=video_b.id, transcript_text="新文案", asr_status="done"))
+    db.add(Transcript(video_id=video_b.id, transcript_text="work 兜底文案", asr_status="done"))
     db.flush()
     p_work = _post(db, acc, "p-work", work_id=work.id)
     p_work.local_video_id = video_a.id
@@ -193,7 +195,7 @@ def test_unit_text_map_work_fallback_and_highest_transcript(db):
     unit_work = {"work_id": work.id, "post": p_work}
     unit_local = {"work_id": None, "post": p_local}
     text_map = benchmark_service.unit_text_map(db, [unit_work, unit_local])
-    assert text_map[p_work.id] == "新文案"  # 本地视频无转写 → 同 work 的其它视频兜底
+    assert text_map[p_work.id] == "work 兜底文案"  # 本地视频无转写 → 同 work 的其它视频兜底
     assert text_map[p_local.id] == "本地视频文案"
 
 

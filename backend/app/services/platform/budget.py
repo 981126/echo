@@ -46,7 +46,7 @@ def set_budget(db: Session, limit: int) -> dict:
     return get_budget(db)
 
 
-def _charge(db: Session, count: int = 1) -> None:
+def _charge(db: Session, count: int = 1, *, commit: bool = True) -> None:
     """计 count 次请求；超预算抛 BudgetExceeded（文案/语义与 R-163 一致）。
 
     R-241：由「多次 SELECT + ORM UPDATE + commit」改为**单条原子 SQL**：
@@ -56,7 +56,9 @@ def _charge(db: Session, count: int = 1) -> None:
         RETURNING value
     行不存在时直接写入 n（等价 0+n），行存在时在数据库内完成加法 → 并发不丢计数；
     `RETURNING` 拿回加后值做**超卖兜底**（预检可能读到同 Session 旧值），超过上限则回滚
-    本次增量并抛 BudgetExceeded → 硬保证「预算不超发」。每 count 1 事务。
+    本次增量并抛 BudgetExceeded → 硬保证「预算不超发」。
+
+    R-242：`commit=False` 供批量写库循环使用（把提交交给调用方统一 commit，避免中途提交）。
     """
     count = max(1, int(count))
     with _BUDGET_LOCK:
@@ -82,7 +84,8 @@ def _charge(db: Session, count: int = 1) -> None:
                     )
         except BudgetExceeded:
             raise
-        db.commit()
+        if commit:
+            db.commit()
 
 
 def ensure_budget(db: Session, count: int = 1) -> None:

@@ -688,7 +688,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `asr_status` | VARCHAR(20) |  | 否 | pending |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
-**索引**：`ix_transcripts_video_id`（video_id）
+**索引**：`ix_transcripts_video_id`（video_id，**唯一**：一个视频最多一条转写，R-242）
 
 **外键**：`video_id` → `videos.id`
 

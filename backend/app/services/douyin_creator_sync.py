@@ -59,15 +59,29 @@ PLAY_SOURCE_LABELS = {
 
 
 def _charge_requests(db: Session, client: TikHubClient, before: int) -> None:
-    """按真实请求数补记预算；预算异常不覆盖主流程错误。"""
+    """按真实请求数补记预算；预算异常不覆盖主流程错误。
+
+    R-242：由「逐请求循环 _charge（N 次事务）」合并为**一次** `_charge(db, n)`；
+    n 超过剩余额度时只计剩余并告警（与旧循环累计的净计费一致）。
+    """
     if client.mode != "real":
         return
-    for _ in range(max(0, client.requests_used - before)):
-        try:
-            _charge(db)
-        except Exception as exc:  # noqa: BLE001  预算超限不应覆盖真实业务错误
-            log.warning("TikHub 预算计费失败：%s", exc)
-            break
+    n = max(0, int(client.requests_used) - int(before))
+    if n <= 0:
+        return
+    try:
+        from .platform.budget import get_budget
+
+        budget = get_budget(db)
+        charge_n = min(n, max(0, int(budget["remaining"])))
+        if charge_n <= 0:
+            log.warning("TikHub 预算已用完，本次 %d 个请求未计入预算", n)
+            return
+        _charge(db, charge_n)
+        if charge_n < n:
+            log.warning("TikHub 预算剩余不足，仅计费 %d/%d 次", charge_n, n)
+    except Exception as exc:  # noqa: BLE001  预算超限不应覆盖真实业务错误
+        log.warning("TikHub 预算计费失败：%s", exc)
 
 
 class CredentialError(ValueError):

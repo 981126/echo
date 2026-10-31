@@ -119,6 +119,10 @@ def cloud_to_local(
 
     if (text or "").strip():
         if video.transcript is None:
+            # R-242：唯一约束下并发创建需串行：锁视频行后重读关系
+            db.query(Video.id).filter(Video.id == video.id).with_for_update().scalar()
+            db.expire(video, ["transcript"])
+        if video.transcript is None:
             video.transcript = Transcript(video_id=video.id)
             db.add(video.transcript)
         video.transcript.source_text = text.strip()

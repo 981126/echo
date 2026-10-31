@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
+
 from ..config import get_settings
 from ..core.timeutil import now as _app_now
 from ..core.transcript import normalize_text
@@ -299,7 +301,8 @@ def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
         s = SessionLocal()
         try:
             corrected = correct_transcript(text, db=s)
-            video = s.get(Video, video_id)
+            # R-242：transcripts.video_id 唯一 → 先锁视频行，串行化同视频并发落稿
+            video = s.get(Video, video_id, with_for_update=True)
             if video is None:
                 raise RuntimeError(f"素材不存在: {video_id}")
             transcript = video.transcript
@@ -320,7 +323,20 @@ def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
                 transcript.asr_status = "done"
                 transcript.asr_provider = provider
                 transcript.asr_model = model
-            s.commit()
+            try:
+                s.commit()
+            except IntegrityError:  # 唯一约束兜底：极端并发下别的写入者已建行 → 更新它
+                s.rollback()
+                video = s.get(Video, video_id)
+                transcript = video.transcript if video is not None else None
+                if transcript is None:
+                    raise
+                transcript.transcript_text = text
+                transcript.corrected_text = corrected
+                transcript.asr_status = "done"
+                transcript.asr_provider = provider
+                transcript.asr_model = model
+                s.commit()
         except Exception:
             s.rollback()
             raise
@@ -381,6 +397,10 @@ def import_video_task(db, payload: dict) -> None:
         except TranscriptionError as exc:
             # R-094：转写失败也落 asr_status=failed，并给可读原因
             model = asr["model"] if asr["mode"] in ("siliconflow", "tencent") else ""
+            if video.transcript is None:
+                # R-242：唯一约束下并发创建需串行：锁视频行后重读转写关系，仍无才创建
+                db.query(Video.id).filter(Video.id == video.id).with_for_update().scalar()
+                db.expire(video, ["transcript"])
             if video.transcript is None:
                 video.transcript = Transcript(video_id=video.id, asr_status="failed", asr_provider=asr["mode"], asr_model=model)
                 db.add(video.transcript)

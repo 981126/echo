@@ -53,7 +53,7 @@ class Transcript(Base):
     __tablename__ = "transcripts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"), index=True)
+    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"), unique=True, index=True)  # R-242：一视频一条转写
     source_text: Mapped[str] = mapped_column(Text, default="")  # 原始文案（可能与口播不一致）
     transcript_text: Mapped[str] = mapped_column(Text, default="")  # ASR 转写稿
     corrected_text: Mapped[str] = mapped_column(Text, default="")  # AI 校对后（分析以此为准）
