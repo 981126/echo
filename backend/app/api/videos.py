@@ -239,6 +239,10 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
         video.tags = json.dumps([str(t) for t in data["tags"]], ensure_ascii=False)
     if "source_text" in data or "corrected_text" in data:
         if video.transcript is None:
+            # R-242：唯一约束下并发创建需串行：锁视频行后重读关系（不 refresh 其它字段，避免覆盖本请求未提交修改）
+            db.query(Video.id).filter(Video.id == video.id).with_for_update().scalar()
+            db.expire(video, ["transcript"])
+        if video.transcript is None:
             video.transcript = Transcript(video_id=video.id)
             db.add(video.transcript)
         if "source_text" in data:

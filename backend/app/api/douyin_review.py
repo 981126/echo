@@ -225,7 +225,11 @@ def check_plan(plan_id: int, payload: PlanCheckIn, db: Session = Depends(get_db)
 
 @router.get("/plans", response_model=dict)
 def plans(post_id: int | None = None, limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)):
-    owner = service.current_owner(db)
+    try:
+        owner = service.current_owner(db)
+    except ValueError:
+        # R-242：无当前主博主（新环境/空库）时返回空列表，不再 500；有主博主行为不变
+        return {"items": []}
     query = db.query(VideoImprovementPlan).join(VideoReview, VideoImprovementPlan.review_id == VideoReview.id)
     if post_id:
         service.own_post(db, owner, post_id)
