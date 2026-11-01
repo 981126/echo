@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from ..core.timeutil import now as _app_now
 from ..models.kv import Kv
 from ..models.platform import CreatorAccount, CreatorAccountSnapshot, PlatformPost, PlatformPostComment, PlatformPostStat
+from ..models.video import Transcript, Video
 from ..models.video_review import DouyinPostMetric
 from .creator_service import get_current_creator
 from .douyin_account_policy import credential_summary, mark_invalid, mark_valid, resolve_data_policy
@@ -1268,6 +1269,40 @@ def comment_hot_words(comments: list[str], limit: int = 40) -> dict:
     }
 
 
+def _post_tags(post: PlatformPost) -> list[str]:
+    """视频话题标签：优先从原始 description 解析 #话题（标题里常被截断），其次标题。"""
+    raw_text = (post.raw or "").strip()
+    description = post.title or ""
+    if raw_text:
+        try:
+            raw = json.loads(raw_text)
+        except (TypeError, ValueError):
+            raw = None
+        if isinstance(raw, dict):
+            description = str(raw.get("description") or description)
+    tags = re.findall(r"#[^\s#]+", description)
+    seen: list[str] = []
+    for tag in tags:
+        if tag not in seen:
+            seen.append(tag)
+    return seen[:8]
+
+
+def _post_transcript(db: Session, post: PlatformPost) -> dict:
+    """本地 ASR 文案：作品关联了本地素材且有转写时返回文本，否则 available=false。"""
+    empty = {"available": False, "status": None, "text": ""}
+    if not post.local_video_id:
+        return empty
+    video = db.get(Video, post.local_video_id)
+    if video is None:
+        return empty
+    transcript = db.query(Transcript).filter_by(video_id=video.id).first()
+    if transcript is None:
+        return empty
+    text = (transcript.corrected_text or transcript.transcript_text or "").strip()
+    return {"available": bool(text), "status": transcript.asr_status, "text": text}
+
+
 def post_detail(db: Session, post_id: int) -> dict:
     ctx = _resolve(db)
     owner = ctx["owner"]
@@ -1308,6 +1343,7 @@ def post_detail(db: Session, post_id: int) -> dict:
             "duration_seconds": _duration_seconds(item),
             "status": status,
             "status_label": status_label,
+            "tags": _post_tags(post),
         },
         "data_time": _iso(row.captured_at) if row else (_iso(stat.updated_at) if stat else None),
         "cached": row is not None,
@@ -1336,6 +1372,7 @@ def post_detail(db: Session, post_id: int) -> dict:
         "diagnosis": _diagnosis_card(db, post, values),
         "flow": _flow_sections(row),
         "audience": _audience_sections(row, db, post.id, values),
+        "transcript": _post_transcript(db, post),
         "comment_words": comment_hot_words(texts),
         "comments": {"total": len(comment_rows), "items": _comment_out(comment_rows)},
         "updating_task_id": _running_task("douyin_dashboard_post", {"post_id": post.id}),

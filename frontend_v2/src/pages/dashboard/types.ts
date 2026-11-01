@@ -146,6 +146,8 @@ export interface PostBrief {
   duration_seconds: number | null
   status: string
   status_label: string
+  /** 视频话题标签（从标题/描述解析，形如 #赚钱） */
+  tags: string[]
 }
 
 /** 作品累计流量（null = 平台未返回，不是 0） */
@@ -290,6 +292,8 @@ export interface PostDetail {
   diagnosis: PostDiagnosis
   flow: PostFlow
   audience: PostAudience
+  /** 本地 ASR 文案（作品关联本地素材且已转写时 available=true） */
+  transcript: { available: boolean; status: string | null; text: string }
   comment_words: CommentWords
   comments: { total: number; items: CommentItem[] }
   updating_task_id: number | null

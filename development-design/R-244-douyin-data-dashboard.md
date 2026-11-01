@@ -744,6 +744,15 @@ limit/offset 分页，返回 has_more
 
 `VideoOverview` 从作品分析的 Tab 内部抽成导出组件（`post-analysis.tsx`），数据看板「视频总览」与「视频复盘」首屏共用同一份渲染与数据接口（`GET /api/douyin-dashboard/works/{id}`）；视频复盘只保留选择视频 + 复盘分析内容，不再重复维护第二套指标卡。
 
+### 5.44 2026-11-01 v31 详情头/文案脚本/视频复盘内嵌（作者第三十次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 去掉「通过」状态徽标 | `PostAnalysis` 头部不再渲染 `Badge`（列表内状态徽标保留）；`badge/statusTone` 导入一并移除 |
+| 头部三段式 | 标题（truncate）→ 话题标签行（`post.tags`，后端 `_post_tags` 从 `platform_posts.raw.description` 解析 `#话题` 去重取前 8 个，标题缺失时回退标题解析）→ 元信息（发布/时长/数据更新） |
+| 新增「文案脚本」tab | Tab 列表：视频总览 / 文案脚本 / 评论热词 / 评论管理；`post_detail` 新增 `transcript: {available,status,text}`（`local_video_id → videos → transcripts`，优先 corrected_text）；内容区固定 380px、正文内部滚动，无转写显示空状态 |
+| 整个作品分析卡片搬到视频复盘 | 视频复盘首屏由 `VideoOverview` 升级为完整 `PostAnalysis`（含头部/4 个 tab/工具按钮）；`showVideoReviewLink=false` 隐藏页面内「去视频复盘」；卡片「更新数据」调用 `POST /api/douyin-dashboard/works/{id}/refresh`（非强制）后重载；数据看板页面保留同一组件 |
+
 ---
 
 ## 6. 新增/修改表结构

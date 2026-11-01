@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
-import { VideoOverview } from '@/pages/dashboard/post-analysis'
+import { waitTaskResult } from '@/api/task'
+import { PostAnalysis } from '@/pages/dashboard/post-analysis'
 import type { PostDetail } from '@/pages/dashboard/types'
 import { BaselineBars, PlanComparisonCharts, SimpleBars, WatchTrendChart } from './charts'
 import { waitForReviewTask } from './use-review-task'
@@ -79,6 +80,22 @@ export default function VideoReviewPage() {
       setOverviewLoading(false)
     }
   }, [])
+
+  /** v30：内嵌数据看板卡片上的「更新数据」= 触发该作品数据刷新并重载 */
+  async function refreshOverviewData() {
+    if (!postId) return
+    try {
+      const response = await apiJson<{ task_id?: number; skipped?: boolean; reason?: string }>(
+        `/api/douyin-dashboard/works/${postId}/refresh`,
+        { method: 'POST', body: JSON.stringify({ force: false }) }
+      )
+      if (response.skipped) toast.info(response.reason || '数据已是最新')
+      else if (response.task_id) await waitTaskResult(response.task_id)
+      await loadOverview(postId)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '数据更新失败')
+    }
+  }
 
   const followTask = useCallback(async (taskId: number) => {
     controller.current?.abort()
@@ -290,15 +307,21 @@ export default function VideoReviewPage() {
       </div>}
       {/* v30：第一块直接用数据看板的「视频总览」（趋势 + 指标）替代旧对比卡片 */}
       {postId ? (
-        <section className="rounded-xl border border-border bg-card p-4">
-          {overview ? (
-            <VideoOverview detail={overview} />
-          ) : overviewLoading ? (
-            <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-          ) : (
-            <p className="py-6 text-center text-sm text-muted-foreground">数据看板暂无这条作品的数据{overviewError ? `：${overviewError}` : ''}</p>
-          )}
-        </section>
+        overview ? (
+          <PostAnalysis
+            detail={overview}
+            refreshing={overviewLoading}
+            refreshError={null}
+            onRefresh={() => void refreshOverviewData()}
+            onRefreshComments={() => void refreshOverviewData()}
+            onOpenVideoReview={() => {}}
+            showVideoReviewLink={false}
+          />
+        ) : overviewLoading ? (
+          <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        ) : (
+          <p className="py-6 text-center text-sm text-muted-foreground">数据看板暂无这条作品的数据{overviewError ? `：${overviewError}` : ''}</p>
+        )
       ) : null}
 
       {review ? (

@@ -16,7 +16,6 @@ import {
   Star,
   ThumbsUp
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -28,7 +27,6 @@ import {
   formatMonthDayTime,
   formatPercent,
   formatUnitValue,
-  statusTone
 } from './format'
 import type { PostDetail } from './types'
 
@@ -43,6 +41,8 @@ export interface PostAnalysisProps {
   /** 评论空状态里的「刷新评论」：走非强制刷新，遵守后端 6 小时缓存限制 */
   onRefreshComments: () => void
   onOpenVideoReview: () => void
+  /** 在视频复盘页内嵌时隐藏「去视频复盘」按钮（v30：整个作品分析卡片搬到视频复盘复用） */
+  showVideoReviewLink?: boolean
 }
 
 /** 逐日趋势卡：累计 / 新增切换（数据缺失时显示数据积累中，不补 0） */
@@ -119,6 +119,33 @@ function MetricTile({
 function localDateString(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+
+/** 从标题里解析 #话题 标签（抖音标题即描述，标签格式 #xxx） */
+function extractTags(title: string): string[] {
+  const matches = title.match(/#[^\s#]+/g) ?? []
+  return Array.from(new Set(matches))
+}
+
+function ScriptTab({ detail }: { detail: PostDetail }) {
+  const { transcript } = detail
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {transcript.available ? (
+        <>
+          <p className="text-[11px] text-muted-foreground">
+            ASR 转写文案（来自本地素材转写，可能有错别字；共 {transcript.text.length} 字）
+          </p>
+          <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-xs leading-6">
+            {transcript.text}
+          </div>
+        </>
+      ) : (
+        <Empty text="暂无文案脚本：这条作品还没有关联本地素材，或素材尚未完成 ASR 转写" />
+      )}
+    </div>
+  )
 }
 
 /** 视频总览（数据看板作品详情用，也被视频复盘页复用）：左趋势曲线 + 右 18 项指标 */
@@ -315,23 +342,31 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
   )
 }
 
-export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRefreshComments, onOpenVideoReview }: PostAnalysisProps) {
+export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRefreshComments, onOpenVideoReview, showVideoReviewLink = true }: PostAnalysisProps) {
   const { post } = detail
+  const postTags = post.tags?.length ? post.tags : extractTags(post.title || '')
   return (
     <section className="rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
       <header className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <Thumb url={post.cover_url} alt={post.title || '作品封面'} className="h-[72px] w-[54px] shrink-0 rounded-md border border-border" />
+          {/* v30：头像右侧分三段——标题 / 视频标签 / 发布时间·时长·更新时间（不再显示「通过」徽标） */}
           <div className="min-w-0 flex-1">
-            {/* v17：标题过长单行省略，避免撑高头部导致右侧按钮位置变化 */}
             <h2 className="min-w-0 truncate text-sm font-semibold leading-5" title={post.title}>{post.title || '无标题作品'}</h2>
+            {postTags.length ? (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {postTags.map((tag) => (
+                  <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <p className="mt-1 truncate text-[11px] text-muted-foreground">
               发布于 {formatMonthDayTime(post.publish_time)}
               {post.duration_seconds ? ` · 时长 ${post.duration_seconds} 秒` : ''}
               {' · '}数据更新至 {formatDateTime(detail.data_time)}
             </p>
-            {/* v25：状态徽标移到「发布于…」下方 */}
-            <Badge variant={statusTone(post.status)} className="mt-1">{post.status_label || '—'}</Badge>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -339,10 +374,12 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
             {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
             {refreshing ? '更新中…' : '更新数据'}
           </Button>
-          <Button variant="outline" size="sm" onClick={onOpenVideoReview}>
-            <BarChart3 className="mr-1.5 h-3.5 w-3.5" />
-            去视频复盘
-          </Button>
+          {showVideoReviewLink ? (
+            <Button variant="outline" size="sm" onClick={onOpenVideoReview}>
+              <BarChart3 className="mr-1.5 h-3.5 w-3.5" />
+              去视频复盘
+            </Button>
+          ) : null}
           {post.video_url ? (
             <Button variant="outline" size="sm" asChild>
               <a href={post.video_url} target="_blank" rel="noreferrer">
@@ -388,6 +425,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
         <div className="overflow-x-auto px-4 pt-3">
           <TabsList className="w-max">
             <TabsTrigger value="overview">视频总览</TabsTrigger>
+            <TabsTrigger value="script">文案脚本</TabsTrigger>
             <TabsTrigger value="words">评论热词</TabsTrigger>
             <TabsTrigger value="comments">评论管理</TabsTrigger>
           </TabsList>
@@ -396,6 +434,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
           {/* v21：三个 tab 内容区固定同高（约等于总览高度），切换不跳；内容超长内部滚动 */}
           <div className="h-[400px] overflow-y-auto pr-1">
             <TabsContent value="overview" className="h-[380px]"><VideoOverview detail={detail} /></TabsContent>
+            <TabsContent value="script" className="h-[380px]"><ScriptTab detail={detail} /></TabsContent>
             <TabsContent value="words" className="h-[380px]"><CommentWordsTab detail={detail} /></TabsContent>
             <TabsContent value="comments" className="h-[380px]"><CommentsTab detail={detail} refreshing={refreshing} onRefresh={onRefreshComments} /></TabsContent>
           </div>
