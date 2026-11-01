@@ -66,13 +66,13 @@ export interface PeriodInfo {
   label: string
 }
 
-/** 账号总览指标卡（7 个指标，一行 4 个；点击切换下方趋势曲线） */
+/** 账号总览指标卡（v29 共 9 个：6 个周期指标 + 完播率/互动率/投稿活跃度，一行 3 个；有 trend_key 的悬浮切换曲线） */
 export interface KpiCard {
   key: string
   label: string
   unit: string
-  /** 对应 series 的键（当前与 key 一致，保留字段便于以后扩展） */
-  trend_key: string
+  /** 对应 series 的键；null = 该卡无逐日曲线（诊断专属指标，不可切换曲线） */
+  trend_key: string | null
   value: number | null
   prev: number | null
   delta: number | null

@@ -580,7 +580,7 @@ def account_kpis(db: Session, account_id: int, days: int = 7, today: date | None
 
 
 def _kpi_cards(snapshot: dict, diagnosis: dict | None, days: int) -> list[dict]:
-    """7 个指标卡：播放量/主页访问量/作品点赞/作品分享/作品评论/净增粉丝/总粉丝量（一行 4 个显示）。"""
+    """指标卡（v29 共 9 个）：6 个周期指标 + 诊断专属 3 项（完播率/互动率/投稿活跃度，仅 7 日口径）。"""
     metrics = (diagnosis or {}).get("metrics") or {}
 
     def diag(key: str) -> dict:
@@ -640,6 +640,32 @@ def _kpi_cards(snapshot: dict, diagnosis: dict | None, days: int) -> list[dict]:
             )
         else:
             cards.append(snapshot_card(key, label, unit))
+
+    # 诊断专属 3 项：完播率 / 互动率 / 投稿活跃度（账号诊断固定近 7 日；无逐日曲线 → trend_key=null 不可切图）
+    for key, label, unit, diag_key in (
+        ("finish_rate", "完播率", "ratio", "finish_rate"),
+        ("interact", "互动率", "ratio", "interact"),
+        ("publish_count", "投稿活跃度", "条", "publish_count"),
+    ):
+        official = diag(diag_key) if days == 7 else {}
+        has_value = official.get("own") is not None
+        cards.append(
+            {
+                "key": key,
+                "label": label,
+                "unit": unit,
+                "trend_key": None,
+                "value": official.get("own") if has_value else None,
+                "prev": None,
+                "delta": None,
+                "source": "diagnosis",
+                "similar": official.get("similar") if has_value else None,
+                "rank": official.get("rank") if has_value else None,
+                "available": has_value,
+                "coverage": None,
+                "note": "",
+            }
+        )
 
     return cards
 
