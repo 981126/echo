@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
-from .api import benchmark, chat, creators, douyin_review, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
+from .api import benchmark, chat, creators, douyin_dashboard, douyin_review, drafts, events, inspiration, library, works, notifications, opportunities, persona, pipeline, platform, prompts, settings, tasks, topics, uploads, videos
 from .config import get_settings
 from .db import engine
 from .core.log import get_logger, setup_logging
@@ -93,6 +93,7 @@ app.include_router(library.router, prefix="/api/library", tags=["library"], depe
 app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opportunities"], dependencies=API_DEPENDENCIES)
 app.include_router(inspiration.router, prefix="/api/inspiration", tags=["inspiration"], dependencies=API_DEPENDENCIES)
 app.include_router(douyin_review.router, prefix="/api/douyin-review", tags=["douyin-review"], dependencies=API_DEPENDENCIES)
+app.include_router(douyin_dashboard.router, prefix="/api/douyin-dashboard", tags=["douyin-dashboard"], dependencies=API_DEPENDENCIES)
 
 
 @app.get("/health")

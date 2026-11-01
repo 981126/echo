@@ -12,6 +12,7 @@ import { pageVariants, pageTransition } from '@/lib/motion'
 
 const TITLES: Record<string, string> = {
   '/home': '主页',
+  '/dashboard': '数据看板',
   '/videos': '素材库',
   '/video-review': '视频复盘',
   '/drafts': '脚本工作台',

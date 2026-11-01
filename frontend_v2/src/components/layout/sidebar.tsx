@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard,
+  ChartNoAxesCombined,
   BarChart3,
   Clapperboard,
   PenLine,
@@ -20,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 const NAV = [
   { to: '/home', label: '主页', icon: LayoutDashboard },
+  { to: '/dashboard', label: '数据看板', icon: ChartNoAxesCombined },
   { to: '/videos', label: '素材库', icon: Clapperboard },
   { to: '/video-review', label: '视频复盘', icon: BarChart3 },
   { to: '/drafts', label: '脚本工作台', icon: PenLine },

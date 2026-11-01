@@ -822,6 +822,8 @@ R-237：本人或已授权抖音账号的创作者 Cookie。数据库只存 Fern
 | `retention_trend` / `like_trend` / `bounce_trend` | TEXT | 留存/点赞/跳出趋势 JSON |
 | `similar_author_trend` | TEXT | 平台同类作者趋势 JSON |
 | `trend_reliable` | BOOLEAN | 播放≥200且趋势非空 |
+| `audience_portrait` | TEXT | R-244：观众画像 JSON（性别/年龄/活跃分布/地域等，`fetch_item_audience_portrait` 归一化，缺失 `{}`） |
+| `audience_others` | TEXT | R-244：受众兴趣与关注热词 JSON（`fetch_item_audience_others` 归一化，缺失 `{}`） |
 | `raw` | TEXT | 创作者接口原始响应，不含 Cookie |
 | `created_at` | DATETIME | 创建时间 |
 

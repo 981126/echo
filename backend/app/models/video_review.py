@@ -46,6 +46,9 @@ class DouyinPostMetric(Base):
     bounce_trend: Mapped[str] = mapped_column(Text, default="[]")
     similar_author_trend: Mapped[str] = mapped_column(Text, default="{}")
     trend_reliable: Mapped[bool] = mapped_column(Boolean, default=False)
+    # R-244：数据看板观众分析——观众画像 / 受众兴趣与关注热词的原始归一化 JSON（按天快照）
+    audience_portrait: Mapped[str] = mapped_column(Text, default="{}")
+    audience_others: Mapped[str] = mapped_column(Text, default="{}")
     raw: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
 

@@ -486,6 +486,14 @@ class TikHubClient:
                             "homepage_visit_count": str(50 + seed % 1000),
                             "subscribe_count": str(seed % 300),
                             "unsubscribe_count": str(seed % 50),
+                            "subscribe_rate": f"{(seed % 30) / 10000:.6f}",
+                            "unsubscribe_rate": f"{(seed % 20) / 10000:.6f}",
+                            "dislike_count": str(seed % 10),
+                            "dislike_rate": f"{(seed % 8) / 10000:.6f}",
+                            "danmaku_count": "0",
+                            "avg_view_proportion": f"{0.12 + (seed % 20) / 100:.6f}",
+                            "favorite_rate": f"{0.002 + (seed % 10) / 1000:.6f}",
+                            "fan_view_proportion": f"{0.4 + (seed % 40) / 100:.6f}",
                         },
                     }],
                     "status_code": 0,
@@ -541,6 +549,162 @@ class TikHubClient:
         return self._post(
             "/douyin/creator_v2/fetch_item_watch_trend",
             {"cookie": cookie, "item_id": item_id, "analysis_type": analysis_type},
+        )
+
+    def fetch_douyin_author_diagnosis(self, *, cookie: str) -> dict:
+        """账号诊断（R-244）：固定近 7 日，5 指标 + 同类创作者对比。"""
+        if self.mode != "real":
+            # mock 对齐真实响应：外层 data 里再套一层 data（业务码 + 5 指标）
+            return {
+                "code": 200,
+                "data": {
+                    "code": 0,
+                    "data": {
+                        "Interact": {"OwnValue": 0.0287, "SimilarValue": 0.0204, "AuthorRank": 0.6316, "SimilarRank": 0.5, "SimilarCount": 1200},
+                        "NewFans": {"OwnValue": -63, "SimilarValue": 128, "AuthorRank": 0.0, "SimilarRank": 0.5, "SimilarCount": 1200},
+                        "PlayCnt": {"OwnValue": 88474, "SimilarValue": 32470, "AuthorRank": 0.6604, "SimilarRank": 0.5, "SimilarCount": 1200},
+                        "PlayFinishRatio": {"OwnValue": 0.1316, "SimilarValue": 0.1094, "AuthorRank": 0.5975, "SimilarRank": 0.5, "SimilarCount": 1200},
+                        "PublishActivation": {"OwnValue": 1, "SimilarValue": 4, "AuthorRank": 0.1962, "SimilarRank": 0.58, "SimilarCount": 1200},
+                    },
+                    "extra": {"now": 0},
+                    "message": "",
+                },
+            }
+        return self._post("/douyin/creator_v2/fetch_author_diagnosis", {"cookie": cookie})
+
+    def fetch_douyin_item_audience_portrait(self, *, cookie: str, item_id: str) -> dict:
+        """作品观众画像（R-244）：active/gender/age/province/city_level 等。"""
+        if self.mode != "real":
+            seed = int(hashlib.sha256(item_id.encode()).hexdigest()[:6], 16)
+            male = 0.7 + (seed % 25) / 100
+            return {
+                "data": {
+                    "active": [
+                        {"key": "2", "value": 0.02},
+                        {"key": "3", "value": 0.11},
+                        {"key": "4", "value": 0.80},
+                        {"key": "-1", "value": 0.04},
+                        {"key": "1", "value": 0.03},
+                    ],
+                    "age": {
+                        "ratio_list": [
+                            {"key": "18-23", "value": 0.42},
+                            {"key": "24-30", "value": 0.39},
+                            {"key": "31-40", "value": 0.14},
+                            {"key": "41-50", "value": 0.02},
+                            {"key": "50-", "value": 0.01},
+                            {"key": "-18", "value": 0.02},
+                        ],
+                        "tgi_list": [],
+                    },
+                    "career": [],
+                    "city_level": {
+                        "ratio_list": [
+                            {"key": "新一线", "value": 0.30},
+                            {"key": "一线", "value": 0.23},
+                            {"key": "二线", "value": 0.18},
+                        ],
+                        "tgi_list": [],
+                    },
+                    "gender": {
+                        "ratio_list": [
+                            {"key": "male", "value": round(male, 4)},
+                            {"key": "female", "value": round(1 - male, 4)},
+                        ],
+                        "tgi_list": [],
+                    },
+                    "new_user": [{"key": "新用户", "value": 0.1}, {"key": "老用户", "value": 0.9}],
+                    "province": {
+                        "ratio_list": [
+                            {"key": "广东", "value": 0.2462},
+                            {"key": "浙江", "value": 0.0943},
+                            {"key": "江苏", "value": 0.0903},
+                            {"key": "上海", "value": 0.0613},
+                            {"key": "北京", "value": 0.0265},
+                            {"key": "四川", "value": 0.0431},
+                        ],
+                        "tgi_list": [],
+                    },
+                    "status_code": 0,
+                    "status_msg": "",
+                }
+            }
+        return self._post("/douyin/creator_v2/fetch_item_audience_portrait", {"cookie": cookie, "item_id": item_id})
+
+    def fetch_douyin_item_audience_others(self, *, cookie: str, item_id: str) -> dict:
+        """作品受众兴趣与关注热词（R-244）。"""
+        if self.mode != "real":
+            return {
+                "data": {
+                    "audience_prefer_similar_authors": [
+                        {"nickname": "同类作者A", "follower_count": 2060264, "uid": "1"},
+                        {"nickname": "同类作者B", "follower_count": 679178, "uid": "2"},
+                    ],
+                    "audience_preference": {
+                        "total_data": {
+                            "ratio_data": [
+                                {"key": "随拍", "value": 0.25},
+                                {"key": "游戏", "value": 0.1667},
+                                {"key": "体育", "value": 0.125},
+                                {"key": "二次元", "value": 0.125},
+                                {"key": "美食", "value": 0.0833},
+                                {"key": "情感", "value": 0.0833},
+                                {"key": "未分类（投稿数不足）", "value": 0.1667},
+                            ],
+                            "tgi_data": [],
+                        },
+                        "fans_data": {"ratio_data": [], "tgi_data": []},
+                        "die_hard_fans_data": {"ratio_data": [], "tgi_data": []},
+                    },
+                    "audience_search_most_keywords": [
+                        {"keywords": "今日金价", "query_cnt_7d": "20382486", "query_7d_list": []},
+                        {"keywords": "姆巴佩", "query_cnt_7d": "38763479", "query_7d_list": []},
+                        {"keywords": "消费券", "query_cnt_7d": "15822677", "query_7d_list": []},
+                        {"keywords": "助眠", "query_cnt_7d": "6084602", "query_7d_list": []},
+                    ],
+                    "status_code": 0,
+                    "status_msg": "",
+                }
+            }
+        return self._post("/douyin/creator_v2/fetch_item_audience_others", {"cookie": cookie, "item_id": item_id})
+
+    def fetch_douyin_item_analysis_verticals(self, *, cookie: str, start_date: str, end_date: str) -> dict:
+        """投稿分析垂类标签（R-244）：调用 analysis_overview 前先取垂类。日期为 YYYYMMDD 字符串。"""
+        if self.mode != "real":
+            return {"data": {"primary_verticals": ["生活记录"], "status_code": 0, "status_msg": ""}}
+        return self._post(
+            "/douyin/creator_v2/fetch_item_analysis_involved_vertical",
+            {"cookie": cookie, "start_date": start_date, "end_date": end_date},
+        )
+
+    def fetch_douyin_item_analysis_overview(
+        self, *, cookie: str, start_date: str, end_date: str, primary_verticals: list[str]
+    ) -> dict:
+        """投稿分析概览（R-244）：条均指标。日期为 YYYYMMDD 字符串；垂类为空时传空数组。"""
+        if self.mode != "real":
+            return {
+                "data": {
+                    "average_comment_count_per_video": {"metric_name": "条均评论量", "metric_value": 25},
+                    "average_like_count_per_video": {"metric_name": "条均点赞数", "metric_value": 287},
+                    "average_play_duration": {"metric_name": "条均播放时长", "metric_value": 16.36},
+                    "average_share_count_per_video": {"metric_name": "条均分享量", "metric_value": 31},
+                    "bounce_rate_2s": {"metric_name": "条均2s跳出率", "metric_value": 0.3055},
+                    "completion_rate_5s": {"metric_name": "条均5s完播率", "metric_value": 0.4782},
+                    "cover_click_ratio": {"metric_name": "条均点击率", "metric_value": 0.2084},
+                    "median_play_count": {"metric_name": "播放量中位数", "metric_value": 11887},
+                    "submission_count": {"metric_name": "周期内投稿量", "metric_value": 1},
+                    "status_code": 0,
+                    "status_msg": "",
+                }
+            }
+        return self._post(
+            "/douyin/creator_v2/fetch_item_analysis_overview",
+            {
+                "cookie": cookie,
+                "start_date": start_date,
+                "end_date": end_date,
+                "primary_verticals": primary_verticals or [],
+            },
         )
 
     def fetch_douyin_low_fan(

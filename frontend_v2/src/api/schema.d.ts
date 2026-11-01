@@ -516,6 +516,7 @@ export interface paths {
          * @description 每个对标博主：最新15条里按互动分取前3 + 第四篇=该对标最新一篇（R-174，原 R-152 前2+最新）。
          *
          *     尚未转写的可先展示占位，需先 prepare；展示时仍「有文案优先」（R-106）。
+         *     R-240 S1：候选/文案/统计/分析各一次批量预取，SQL 数不随对标数增长（数据与排序口径不变）。
          */
         get: operations["benchmark_top_api_benchmark_top_get"];
         put?: never;
@@ -639,6 +640,9 @@ export interface paths {
         /**
          * Generate
          * @description 根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。
+         *
+         *     R-240 M7：**遗留同步接口**——请求线程同步跑完整生成链路（LLM 超时预算已由 M6 收紧），
+         *     前端请用 `/generate-async`；后续改为后台任务，本次不改返回结构。
          */
         post: operations["generate_api_drafts_generate_post"];
         delete?: never;
@@ -844,7 +848,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Drafts */
+        /**
+         * List Drafts
+         * @description 草稿列表。R-243：默认排除逻辑删除（status='deleted'）——工作台不展示，
+         *     旧行为下它们占响应约 79% 字节；需要排查时传 include_deleted=true 或 status=deleted。
+         */
         get: operations["list_drafts_api_drafts_get"];
         put?: never;
         /** Create Draft */
@@ -1164,6 +1172,10 @@ export interface paths {
         /**
          * Chat Stream
          * @description SSE 流式问答：先按非流式求解（含工具调用），再逐段下发结果（打字机式流式）。
+         *
+         *     R-241 F-03：改 async 生成器 + asyncio.Queue，worker 线程经 `loop.call_soon_threadsafe`
+         *     投递事件 —— 等待 LLM/打字机期间不再占用 anyio 线程池 token（原来整条流占 1 个线程）。
+         *     事件类型/顺序/JSON/文案与旧实现逐字一致。
          */
         post: operations["chat_stream_api_chat_stream_post"];
         delete?: never;
@@ -1600,6 +1612,24 @@ export interface paths {
         get: operations["get_rounds_api_settings_debate_rounds_get"];
         /** Set Rounds */
         put: operations["set_rounds_api_settings_debate_rounds_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/creators/accounts/{account_id}/douyin-credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Douyin Credential */
+        get: operations["get_douyin_credential_api_creators_accounts__account_id__douyin_credential_get"];
+        /** Put Douyin Credential */
+        put: operations["put_douyin_credential_api_creators_accounts__account_id__douyin_credential_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2083,6 +2113,9 @@ export interface paths {
         /**
          * Generate From Idea
          * @description 从选题池灵感生成草稿（人工挑选后触发；不自动推送）。
+         *
+         *     遗留同步接口（R-240 M7 仅标注，不改契约）：前端等待完整生成（分钟级），
+         *     后续应迁到 `/api/drafts/generate-async` 后台任务；本次不动返回结构，避免前端改动。
          */
         post: operations["generate_from_idea_api_platform_topic_pool__idea_id__generate_post"];
         delete?: never;
@@ -2118,6 +2151,10 @@ export interface paths {
         /**
          * Creator Summary
          * @description 复盘/博主页"我 vs 对标"汇总（粉丝/作品数/互动中位数/爆款率，基于最新快照与统计）。
+         *
+         *     R-241：原实现每 creator/账号/帖子逐条查询（实测 703 条 SQL / 380ms）→ 改为 5 条批量
+         *     SQL（创作者、账号、DISTINCT ON 最新快照、ROW_NUMBER 各账号最近 50 帖、DISTINCT ON
+         *     最新统计），Python 聚合算法与输出结构/排序完全不变。
          */
         get: operations["creator_summary_api_platform_creator_summary_get"];
         put?: never;
@@ -2152,7 +2189,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Works */
+        /**
+         * Get Works
+         * @description 云端作品列表。R-243：`slim=1` 时不返回每条作品的 posts 明细（时间线只用顶层字段），
+         *     默认行为逐字段不变。
+         */
         get: operations["get_works_api_works_get"];
         put?: never;
         post?: never;
@@ -2173,8 +2214,8 @@ export interface paths {
          * Get Work By Post
          * @description 按平台作品 id 返回其所属云端条目（可跨博主，素材库深链/来源素材跳转用，R-122）。
          *
-         *     与素材库列表同口径：按该作品所属博主取 list_works，命中即返回包含它的合并作品或单条；
-         *     找不到（已删除/账号禁用）返回 404，前端提示而不是静默打不开。
+         *     R-241：直接按 work_id/单帖查询其成员并复用批量 map（不再全量重建 list_works），
+         *     输出与旧实现逐字段一致；找不到（已删除/账号禁用）返回 404，前端提示而不是静默打不开。
          */
         get: operations["get_work_by_post_api_works_by_post__post_id__get"];
         put?: never;
@@ -2474,6 +2515,9 @@ export interface paths {
         /**
          * Develop Note
          * @description 把随手记提炼成选题并直接入队生成一篇草稿；标记该条已用。
+         *
+         *     R-240 M7：**遗留同步接口**——请求路径同步等 1 次 `refine_topic` LLM（M6 已收紧到 ideas 30s 预算），
+         *     后续应改为后台任务；本次不改返回结构/前端契约。
          */
         post: operations["develop_note_api_inspiration__note_id__develop_post"];
         delete?: never;
@@ -2601,24 +2645,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/douyin-review/credentials": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Credentials */
-        get: operations["credentials_api_douyin_review_credentials_get"];
-        /** Save Credentials */
-        put: operations["save_credentials_api_douyin_review_credentials_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/douyin-review/recommendations/{recommendation_id}/adopt": {
         parameters: {
             query?: never;
@@ -2715,6 +2741,106 @@ export interface paths {
         /** Homepage */
         put: operations["homepage_api_douyin_review_homepage_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-dashboard/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview
+         * @description 账号总览：诊断缓存 + 本地快照 KPI/趋势（无账号时返回 200 空状态）。
+         */
+        get: operations["overview_api_douyin_dashboard_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-dashboard/works": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Works
+         * @description 近期作品列表（按发布时间倒序，本地数据）。
+         */
+        get: operations["works_api_douyin_dashboard_works_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-dashboard/works/{post_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Work Detail
+         * @description 单条作品分析：总览/流量/观众/评论热词/评论管理数据（缓存，6h）。
+         */
+        get: operations["work_detail_api_douyin_dashboard_works__post_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-dashboard/overview/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Overview
+         * @description 账号「更新数据」后台任务（诊断 + 投稿概览 + 作品快照，5 次 TikHub 请求）。
+         */
+        post: operations["refresh_overview_api_douyin_dashboard_overview_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-dashboard/works/{post_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Work
+         * @description 作品「更新数据」后台任务（8 次 TikHub 请求）；6 小时内且非 force 直接返回 skipped。
+         */
+        post: operations["refresh_work_api_douyin_dashboard_works__post_id__refresh_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3053,12 +3179,12 @@ export interface components {
              */
             created_at: string;
         };
-        /** CredentialIn */
-        CredentialIn: {
-            /** Account Id */
-            account_id: number;
+        /** DouyinCredentialIn */
+        DouyinCredentialIn: {
             /** Cookie */
-            cookie: string;
+            cookie?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
         };
         /** DraftCreate */
         DraftCreate: {
@@ -3740,6 +3866,17 @@ export interface components {
              * @default 20
              */
             limit: number;
+        };
+        /**
+         * RefreshIn
+         * @description 作品「更新数据」：force=True 跳过 6 小时缓存检查。
+         */
+        RefreshIn: {
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
         };
         /** RewriteSourceIn */
         RewriteSourceIn: {
@@ -5741,6 +5878,7 @@ export interface operations {
                 status?: string;
                 video_id?: number | null;
                 limit?: number;
+                include_deleted?: boolean;
             };
             header?: {
                 "x-access-token"?: string;
@@ -7372,6 +7510,80 @@ export interface operations {
             };
         };
     };
+    get_douyin_credential_api_creators_accounts__account_id__douyin_credential_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_douyin_credential_api_creators_accounts__account_id__douyin_credential_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DouyinCredentialIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_creators_api_creators_get: {
         parameters: {
             query?: never;
@@ -8554,6 +8766,7 @@ export interface operations {
         parameters: {
             query?: {
                 creator_id?: number;
+                slim?: boolean;
             };
             header?: {
                 "x-access-token"?: string;
@@ -9459,78 +9672,6 @@ export interface operations {
             };
         };
     };
-    credentials_api_douyin_review_credentials_get: {
-        parameters: {
-            query: {
-                account_id: number;
-            };
-            header?: {
-                "x-access-token"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    save_credentials_api_douyin_review_credentials_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-access-token"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CredentialIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     adopt_api_douyin_review_recommendations__recommendation_id__adopt_post: {
         parameters: {
             query?: never;
@@ -9747,6 +9888,178 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_api_douyin_dashboard_overview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    works_api_douyin_dashboard_works_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    work_detail_api_douyin_dashboard_works__post_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                post_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_overview_api_douyin_dashboard_overview_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_work_api_douyin_dashboard_works__post_id__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                post_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RefreshIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

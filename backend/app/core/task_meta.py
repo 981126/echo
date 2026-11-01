@@ -44,6 +44,8 @@ KIND_LABELS = {
     "douyin_review_plan_check": "修改效果检查",
     "douyin_creator_backfill": "抖音历史作品数据补齐",
     "peer_plays_backfill": "同行播放量补齐",  # R-240：从日更主链路移出的独立补采任务
+    "douyin_dashboard_overview": "数据看板账号更新",
+    "douyin_dashboard_post": "数据看板作品更新",
 }
 
 
@@ -94,6 +96,8 @@ def target(kind: str, payload: dict | None = None, result=None) -> str:
         return "/prompts"
     if kind == "douyin_review_analyze":
         return f"/video-review?post={payload.get('post_id', '')}"
+    if kind in ("douyin_dashboard_overview", "douyin_dashboard_post"):
+        return "/dashboard"
     if kind in ("douyin_review_references", "douyin_review_plan_check"):
         return "/video-review"
     return "/home"

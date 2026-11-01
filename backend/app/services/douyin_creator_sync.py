@@ -415,7 +415,20 @@ def _apply_item_metrics(db: Session, post: PlatformPost, item: dict) -> tuple[Do
     row.cover_click_rate = stats["extra"]["cover_click_rate"]
     row.profile_visits = stats["extra"]["profile_visits"]
     row.follower_gain = stats["extra"]["follower_gain"]
-    row.raw = _json({"item": item, "source": "douyin_creator_v2"})
+    # R-244：overview 接口不返回 review/visibility（列表接口才返回），刷新时用旧 raw 补齐，
+    # 避免数据看板的「通过/私密」状态被详情刷新覆盖成空。
+    old_item: dict = {}
+    try:
+        old = json.loads(row.raw or "{}")
+        if isinstance(old, dict) and isinstance(old.get("item"), dict):
+            old_item = old["item"]
+    except (TypeError, ValueError):
+        old_item = {}
+    merged_item = dict(item)
+    for key in ("review", "visibility"):
+        if key not in merged_item and old_item.get(key) is not None:
+            merged_item[key] = old_item[key]
+    row.raw = _json({"item": merged_item, "source": "douyin_creator_v2"})
 
     public = db.query(PlatformPostStat).filter_by(post_id=post.id, stat_date=today).first()
     if public is None:
@@ -445,9 +458,18 @@ def _apply_item_metrics(db: Session, post: PlatformPost, item: dict) -> tuple[Do
 
 
 def sync_post_creator_data(
-    db: Session, account: CreatorAccount, post: PlatformPost, client: TikHubClient | None = None
+    db: Session,
+    account: CreatorAccount,
+    post: PlatformPost,
+    client: TikHubClient | None = None,
+    *,
+    with_audience: bool = False,
 ) -> dict:
-    """单条作品刷新（视频复盘/发布后检查用）：指标 + 流量来源 + 搜索词 + 观看/跳出趋势。"""
+    """单条作品刷新（视频复盘/发布后检查/数据看板用）：指标 + 流量来源 + 搜索词 + 观看/跳出趋势。
+
+    R-244：`with_audience=True` 时额外拉观众画像与受众兴趣/热词（+2 次请求），
+    落库到 `douyin_post_metrics.audience_portrait / audience_others`，供数据看板「观众分析」。
+    """
     policy = resolve_data_policy(db, account)
     if policy.is_blocked:
         raise CredentialError(policy.reason)
@@ -477,8 +499,18 @@ def sync_post_creator_data(
         row.like_trend = _json([])
         row.similar_author_trend = _json(similar)
         row.trend_reliable = bool((public.plays or 0) >= 200 and trends["retention"])
+        if with_audience:
+            portrait = _data(client.fetch_douyin_item_audience_portrait(cookie=cookie, item_id=post.platform_post_id))
+            others = _data(client.fetch_douyin_item_audience_others(cookie=cookie, item_id=post.platform_post_id))
+            row.audience_portrait = _json(portrait if isinstance(portrait, dict) else {})
+            row.audience_others = _json(others if isinstance(others, dict) else {})
         mark_valid(db, account)
-        return {"post_id": post.id, "metric_id": row.id, "trend_reliable": row.trend_reliable}
+        return {
+            "post_id": post.id,
+            "metric_id": row.id,
+            "trend_reliable": row.trend_reliable,
+            "with_audience": with_audience,
+        }
     except Exception as exc:
         db.rollback()
         auth = is_auth_failure(exc)
