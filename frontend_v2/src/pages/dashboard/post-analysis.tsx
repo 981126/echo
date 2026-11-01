@@ -175,7 +175,7 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
 
       <div className="min-w-0 lg:col-span-3">
         <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换左侧曲线">
-          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
             {METRIC_SPECS.map((item) => (
               <MetricTile
                 key={item.key}

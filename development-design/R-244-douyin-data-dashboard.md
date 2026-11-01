@@ -658,6 +658,12 @@ limit/offset 分页，返回 has_more
 | 评论正文加深、昵称变浅 | 昵称 `text-[11px] text-muted-foreground`，时间 `text-muted-foreground/80`；评论内容 `text-xs text-foreground`（深色正文）；点赞数保持浅色小字 |
 | 评论管理固定高度 + 滚动加载 | 列表放入 `ScrollArea h-[420px]`（与近期作品一致的内部滚动），每页 10 条；`IntersectionObserver` 的 **root 改为 ScrollArea viewport**（页面内嵌套滚动时 root:null 会因卡片不在视口内而不触发），rootMargin 80px；滚到底自动 +10，顶部「已展示 x/N」 |
 
+### 5.32 2026-11-01 v19 指标每行 4 个（作者第十八次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 右侧指标面板一行 4 个 | 内层网格 `sm:grid-cols-3 lg:grid-cols-5` → `lg:grid-cols-4`；18 项排 5 行（4+4+4+4+2）；左右比例（左 2/5、右 3/5）与悬浮切换不变 |
+
 ---
 
 ## 6. 新增/修改表结构
