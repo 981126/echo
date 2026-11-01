@@ -109,7 +109,18 @@ const LINE_TOP = 16
 const LINE_BOTTOM = 26
 
 /** 逐日趋势折线：null 断开、不插值；纵轴自动取整刻度。 */
-export function TrendLine({ points, ariaLabel, height = 190 }: { points: TrendLinePoint[]; ariaLabel: string; height?: number }) {
+export function TrendLine({
+  points,
+  ariaLabel,
+  height = 190,
+  fillArea = false
+}: {
+  points: TrendLinePoint[]
+  ariaLabel: string
+  height?: number
+  /** 抖音账号总览同款：折线下方浅色面积（默认关闭，作品详情趋势保持纯线） */
+  fillArea?: boolean
+}) {
   const reduce = useReducedMotion()
   const values = points.map((point) => point.value).filter((value): value is number => typeof value === 'number')
   if (!values.length) return <Empty />
@@ -146,6 +157,33 @@ export function TrendLine({ points, ariaLabel, height = 190 }: { points: TrendLi
           </g>
         )
       })}
+      {fillArea
+        ? segments.map((seg, index) => {
+            if (seg.length < 2) return null
+            const bottom = height - LINE_BOTTOM
+            const first = seg[0]
+            const last = seg[seg.length - 1]
+            const areaD = [
+              `M${xAt(first.index).toFixed(1)} ${bottom.toFixed(1)}`,
+              `L${xAt(first.index).toFixed(1)} ${yAt(first.value).toFixed(1)}`,
+              ...seg.slice(1).map((point) => `L${xAt(point.index).toFixed(1)} ${yAt(point.value).toFixed(1)}`),
+              `L${xAt(last.index).toFixed(1)} ${bottom.toFixed(1)}`,
+              'Z'
+            ].join(' ')
+            return (
+              <motion.path
+                key={`area-${index}`}
+                d={areaD}
+                fill="var(--accent)"
+                fillOpacity={0.1}
+                stroke="none"
+                initial={reduce ? false : { opacity: 0.7 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.4 }}
+              />
+            )
+          })
+        : null}
       {segments.map((seg, index) =>
         seg.length > 1 ? (
           <motion.path

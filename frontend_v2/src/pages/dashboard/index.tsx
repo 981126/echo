@@ -71,31 +71,25 @@ const DIAGNOSIS_ROWS: Array<{ key: DiagnosisKey; label: string; format: (value: 
 function KpiCardView({ kpi }: { kpi: KpiCardData }) {
   const valueText = kpi.value === null ? '暂无数据' : formatCount(kpi.value)
   const missingNote = kpi.source === 'diagnosis' ? '账号诊断暂无数据，可点「更新数据」获取' : kpi.note || '数据积累中：需要至少 2 天相邻快照'
-  const deltaText = kpi.delta !== null ? `较前 7 日 ${formatDelta(kpi.delta)}` : kpi.note || '较前 7 日：暂无对比（历史数据不足）'
+  const deltaText = kpi.delta !== null ? `较前 7 日 ${formatDelta(kpi.delta)}` : null
   const similarText =
     kpi.similar !== null && kpi.rank !== null ? `同类平均 ${formatCount(kpi.similar)} · 超过 ${formatRankPercent(kpi.rank)} 同类创作者` : null
   return (
-    <div className="rounded-lg border border-border bg-muted/30 p-2.5">
-      <div className="flex items-baseline justify-between gap-1 text-[11px] text-muted-foreground">
-        <span className="whitespace-nowrap">{kpi.label}</span>
-        <span
-          className="shrink-0 text-[10px]"
-          title={kpi.source === 'diagnosis' ? '账号诊断数据（近 7 日）' : '本地每日快照差值'}
-        >
-          {kpi.source === 'diagnosis'
-            ? '账号诊断'
-            : kpi.coverage?.dates.length
-              ? `快照 · ${formatMonthDay(kpi.coverage.dates[kpi.coverage.dates.length - 1])}`
-              : '快照'}
-        </span>
+    <div className="min-w-0">
+      <div className="text-xs text-muted-foreground">{kpi.label}</div>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="tnum text-2xl font-semibold tracking-tight">{valueText}</span>
+        {kpi.available ? (
+          deltaText ? (
+            <span className={cn('text-xs', deltaToneClass(kpi.delta))}>{deltaText}</span>
+          ) : kpi.note ? (
+            <span className="text-[11px] leading-4 text-muted-foreground">{kpi.note}</span>
+          ) : null
+        ) : (
+          <span className="text-[11px] leading-4 text-muted-foreground">{missingNote}</span>
+        )}
       </div>
-      <div className="tnum mt-1 text-xl font-semibold tracking-tight">{valueText}</div>
-      {kpi.available ? (
-        <div className={cn('mt-0.5 text-[11px] leading-4', deltaToneClass(kpi.delta))}>{deltaText}</div>
-      ) : (
-        <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{missingNote}</div>
-      )}
-      {kpi.available && similarText ? <div className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{similarText}</div> : null}
+      {kpi.available && similarText ? <div className="mt-1 text-[11px] text-muted-foreground">{similarText}</div> : null}
     </div>
   )
 }
@@ -215,31 +209,38 @@ function AccountOverview({ data, busy, onRefresh }: { data: DashboardOverview; b
           ) : null}
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3">
-          {data.kpis.map((kpi) => (
-            <KpiCardView key={kpi.key} kpi={kpi} />
-          ))}
-        </div>
-
-        <div className="border-t border-border pt-4">
+        <div>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-sm font-semibold">近 7 日每日播放量</h3>
-            <span className="text-[11px] text-muted-foreground">本地每日快照差值</span>
+            <h3 className="text-sm font-semibold">播放量趋势（近 7 日）</h3>
+            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
+              播放量
+            </span>
           </div>
           {data.trend.available ? (
-            <div className="mt-1">
+            <div className="mt-1.5">
               <TrendLine
                 points={data.trend.points.map((point) => ({ label: formatMonthDay(point.date), value: point.value }))}
                 ariaLabel="近 7 日每日播放量趋势"
+                fillArea
               />
             </div>
           ) : (
             <Empty className="mt-2" text={data.trend.note || '数据积累中：需要至少 2 天同步数据'} />
           )}
           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-            仅统计近 120 天发布且已同步的 {data.trend.coverage.posts} 条作品；缺口日期表示当天算不出增量（不补 0）。
+            本地每日快照差值，仅统计近 120 天发布且已同步的 {data.trend.coverage.posts} 条作品；缺口日期表示当天算不出增量（不补 0）。
           </p>
         </div>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-5 md:grid-cols-3">
+          {data.kpis.map((kpi) => (
+            <KpiCardView key={kpi.key} kpi={kpi} />
+          ))}
+        </div>
+        <p className="text-[11px] leading-4 text-muted-foreground">
+          播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；主页访问量/作品点赞/作品分享/作品评论取本地每日快照差值，历史不足时显示「暂无对比」。
+        </p>
 
         <div className="border-t border-border pt-4">
           <DiagnosisCompare diagnosis={diagnosis} />
