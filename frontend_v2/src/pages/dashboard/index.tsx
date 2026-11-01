@@ -261,6 +261,9 @@ function WarningBars({ data, onGoCreators }: { data: DashboardOverview; onGoCrea
   const blocked = data.credential?.status === 'invalid' || data.data_policy?.source === 'blocked'
   const policyReason = data.data_policy?.reason || ''
   const warnings = data.warnings.filter((warning) => !(blocked && warning === policyReason))
+  const hasNotice = blocked || !data.private_available || warnings.length > 0
+  // v22：没有提示时不要渲染空 wrapper（空 div 会让下方 margin 塌陷，页面顶部比其它页多出 16px）
+  if (!hasNotice) return null
   return (
     <div className="space-y-2">
       {blocked ? (

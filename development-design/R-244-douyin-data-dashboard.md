@@ -677,6 +677,15 @@ limit/offset 分页，返回 has_more
 | 三个 tab 高度一致、切换不跳 | Radix `<TabsContent>` 在项目里的 className 挂在**内层 motion.div**（外层 Content 高度 auto），所以给面板显式 `h-[380px]`，外层内容区 `h-[400px] overflow-y-auto`；实测三个 tab 内容区高度均 400px，切换无跳动；总览内容 367px 正常放下，超出时内容区内部滚动 |
 | 评论管理列表滚动 | `CommentsTab` 根容器 `flex h-full min-h-0 flex-col`，列表 `ScrollArea min-h-0 flex-1`（撑满剩余高度）；滚动加载从 IntersectionObserver 改为**监听 viewport scroll**（内容短时避免一次性自动加载全部）：滚到底 +10，实测 10/22 → 20/22 → 22/22 |
 
+### 5.35 2026-11-01 v22 视频总览与页面间距（作者第二十一次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 「总览」改名「视频总览」 | `TabsTrigger value="overview"` 文案改「视频总览」；需求文档同步 |
+| 视频总览加统计周期下拉（3/7/14） | 曲线 Panel 的 `extra` 放 `Select`（近 3/7/14 日，默认 7）；`OverviewTab` 用本地日期截断 `metric_trends[metricKey]`（`date >= today-(days-1)`），只影响曲线范围，右侧累计指标不变；曲线下方容器仍固定 380/400 高度，切换 tab 不跳 |
+| 数据看板顶部/左右间距与主页、素材库一致 | 根因：`WarningBars` 在没有提示时仍渲染空 `<div class="space-y-2">`，其后续兄弟的 `space-y-4` margin 透过空块+无 padding 的根容器发生 margin 塌陷，把整页下推 16px。改为**无提示时不渲染**（`if (!hasNotice) return null`）；实测 `/dashboard` 与 `/home` 内容根节点均为 x=276 / y=80 / width=1104，完全一致 |
+| 近 90 日播放量 < 近 7 日说明 | 7 日播放量来自 TikHub 账号诊断（官方口径 88,474）；14/30/90 日没有官方周期总量接口，只能本地快照差值求和（当前快照仅 10-30/10-31/11-01 三天 → 28,559），所以 90 日反而比 7 日小；属数据覆盖限制，非算法错误 |
+
 ---
 
 ## 6. 新增/修改表结构

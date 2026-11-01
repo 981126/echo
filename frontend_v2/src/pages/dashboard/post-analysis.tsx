@@ -19,6 +19,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Empty, Panel, Thumb, TrendLine } from './charts'
 import {
@@ -114,9 +115,17 @@ function MetricTile({
   )
 }
 
+/** 本地日期（YYYY-MM-DD），用于按统计周期截取趋势点 */
+function localDateString(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
 function OverviewTab({ detail }: { detail: PostDetail }) {
   const { overview, fans, diagnosis } = detail
   const [metricKey, setMetricKey] = useState('plays')
+  // v22：视频总览的统计周期（近 3 / 7 / 14 日），只影响左侧曲线范围
+  const [periodDays, setPeriodDays] = useState(7)
   const spec = METRIC_SPECS.find((item) => item.key === metricKey) ?? METRIC_SPECS[0]
   const audienceCards: Record<string, number | null> = Object.fromEntries(
     detail.audience.cards.map((card) => [card.key, card.value])
@@ -142,10 +151,12 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
     fan_view_proportion: fans.fan_view_proportion
   }
   // 播放量与涨粉量等指标趋势合并到同一张图（metric_trends），只展示指标本身的每日值（v16 去掉「新增」）
-  const points = (detail.metric_trends[metricKey] ?? []).map((point) => ({
-    label: formatMonthDay(point.date),
-    value: point.value
-  }))
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - (periodDays - 1))
+  const cutoffDate = localDateString(cutoff)
+  const points = (detail.metric_trends[metricKey] ?? [])
+    .filter((point) => point.date >= cutoffDate)
+    .map((point) => ({ label: formatMonthDay(point.date), value: point.value }))
   const available = points.filter((point) => point.value !== null).length >= 2
   return (
     <div className="grid gap-3 lg:grid-cols-10 lg:items-start">
@@ -153,6 +164,23 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
         <Panel
           title={`${spec.label}趋势`}
           hint="逐日数据（历史从系统开始每日同步后累积；TikHub 不提供单条作品的历史逐日数据）。悬浮右侧指标可切换曲线"
+          extra={
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">统计周期</span>
+              <Select value={String(periodDays)} onValueChange={(value) => setPeriodDays(Number(value))}>
+                <SelectTrigger className="h-7 w-[92px] text-xs" aria-label="统计周期">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {([3, 7, 14] as const).map((days) => (
+                    <SelectItem key={days} value={String(days)}>
+                      近 {days} 日
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          }
         >
           {available ? (
             <TrendLine
@@ -363,7 +391,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
       <Tabs defaultValue="overview">
         <div className="overflow-x-auto px-4 pt-3">
           <TabsList className="w-max">
-            <TabsTrigger value="overview">总览</TabsTrigger>
+            <TabsTrigger value="overview">视频总览</TabsTrigger>
             <TabsTrigger value="words">评论热词</TabsTrigger>
             <TabsTrigger value="comments">评论管理</TabsTrigger>
           </TabsList>
