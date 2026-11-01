@@ -1530,9 +1530,10 @@ def post_worker(db: Session, payload: dict, update) -> dict:
     from .platform_sync import sync_post_data
 
     update(5, "正在获取作品指标与评论")
+    force = bool(payload.get("force"))
     try:
-        force = bool(payload.get("force"))
-        result = sync_post_data(db, post.id, force=force, reuse_fresh_comments=not force)
+        # 手动「更新数据」与素材库单卡同步一致：数据 + 视频补齐（下载/转写）；自动刷新只更新数据
+        result = sync_post_data(db, post.id, force=force, reuse_fresh_comments=not force, with_media=force)
     except CredentialError:
         raise
     except (TikHubBusinessError, CredentialError) as exc:
@@ -1547,4 +1548,5 @@ def post_worker(db: Session, payload: dict, update) -> dict:
         "data_time": _iso(latest.captured_at) if latest else None,
         "warnings": warnings,
         "comments_skipped": bool(result.get("comments_skipped")),
+        "media": result.get("media"),
     }

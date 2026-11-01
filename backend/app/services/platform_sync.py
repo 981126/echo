@@ -1418,7 +1418,11 @@ def sync_post_data(
     if with_media:
         from .media_ensure import submit_media_task
 
-        payload["media"] = submit_media_task(db, post_id=post.id)
+        # 有本地素材 → 用 video_id 提交（素材库本地卡可认领动画）；否则用 post_id（云端卡认领）
+        if post.local_video_id:
+            payload["media"] = submit_media_task(db, video_id=post.local_video_id)
+        else:
+            payload["media"] = submit_media_task(db, post_id=post.id)
     return payload
 
 

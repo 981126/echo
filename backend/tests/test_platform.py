@@ -788,3 +788,17 @@ def test_sync_items_batch_updates_metrics_and_comments_once(db):
         ],
     )
     assert db.query(PlatformPostComment).filter_by(post_id=p1.id).count() == 50
+
+
+def test_sync_post_data_with_media_submits_media_task(db):
+    """v35：数据看板手动「更新数据」也补视频下载/转写（与素材库一致），返回 media 任务信息。"""
+    from app.services.platform_sync import sync_post_data
+
+    _owner, acc = _seed_owner(db)
+    post = _post(db, acc.id, "douyin", "dy-media-1", "媒体补齐测试")
+    db.commit()
+
+    result = sync_post_data(db, post.id, force=True, with_media=True)
+    assert result["ok"] is True
+    assert isinstance(result.get("media"), dict)
+    assert result["media"].get("status") in {"started", "duplicate", "skip"}
