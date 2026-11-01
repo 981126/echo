@@ -201,7 +201,7 @@ fetch_video_comments ────┴── sync_post_comments ───► platf
 | 作品首次选中 | 若该作品无 `douyin_post_metrics` 行或 >6h，自动触发详情刷新一次（同一作品 10 分钟内不重复自动触发） |
 | 手动「更新数据」 | 允许强制刷新；若已有同目标运行中任务 → 直接复用 task_id（202, reused=true） |
 | 刷新幂等 | `start_task(dedupe=True)` 默认按 kind+payload 去重 |
-| 预算预检 | `get_budget(db)`；overview 需 3 次（诊断 1 + 作品快照 2），post 需 8 次；剩余不足 → 400「今日 TikHub 请求额度不足（剩余 X 次，本次需要 Y 次）」 |
+| 预算预检 | `get_budget(db)`；overview 需 3 次（诊断 1 + 作品快照 2），post 需 **2 次**（v33：单作品 overview 1 + 评论 1）；剩余不足 → 400「今日 TikHub 请求额度不足（剩余 X 次，本次需要 Y 次）」 |
 | 失败保留旧数据 | 任务失败不回滚已成功写入的部分；页面显示旧数据 + 任务错误；`sync_post_creator_data` 内部 `db.rollback()` 只影响本次事务 |
 | 返回体状态 | GET 响应含 `needs_refresh`、`stale`、`updating_task_id`（查询运行中任务，供前端显示进行中） |
 
@@ -763,6 +763,24 @@ limit/offset 分页，返回 has_more
 | 缺文案提示 | Tab 栏右侧新增「暂无文案，分析结果可能不准」（仅 `transcript.available=false` 时） |
 | 文案脚本 ASR 转写按钮 | 后端 `prepare_transcribe` + `POST /works/{id}/transcribe`：校验 `local_video_id`/`videos.filename`/文件存在，复用 `import_video` 任务（同素材运行中则返回 reused）；`transcript` 新增 `has_video` 区分「有视频未转写」与「无本地素材」；前端按钮转写中显示旋转圈 + 呼吸文字动画，完成后重新拉详情、文案渐显 |
 
+### 5.46 2026-11-01 v33 第三方请求去重（作者第三十二次反馈）
+
+**同步入口对照（实测量级）**
+
+| 入口 | 接口 | 第三方请求 | 写入 | 与数据看板的关系 |
+|---|---|---|---|---|
+| 数据看板·账号「更新数据」 | `POST /douyin-dashboard/overview/refresh` | **3**：账号诊断 1 + 创作者作品列表 ≤2 | 诊断 KV、最近 60 条作品的 `douyin_post_metrics`/`platform_post_stats` | 账号卡全部数据；最近 60 条作品详情的核心指标 |
+| 数据看板·作品「更新数据」 | `POST /works/{id}/refresh` | **2**（v33 起）：单作品 overview 1 + 公开评论 Top50 1 | `douyin_post_metrics` + `platform_post_stats` + `platform_post_comments` | 该作品全部页面数据 |
+| 素材库·本地视频「同步数据」 | `POST /videos/{id}/sync` | **2/绑定帖**：创作者 overview 1 + 公开评论 1（媒体/转写任务不计 API） | 同上（同一组表） | **同步后数据看板即可看到该作品指标/评论**（写同一组表） |
+| 素材库·云端作品/单帖「同步数据」 | `POST /works/{id}/sync`、`/posts/{id}/sync` | 2/平台帖（同上） | 同上 | 同上 |
+| 博主管理·「同步」 | `POST /platform/sync` | 每账号 ≈ 主页快照 1 + 创作者作品列表 ≤2 + 最近 10 条评论 10 = ≤13 | `platform_posts/stats/comments`、账号快照 | 近期作品列表/公开指标；账号诊断不含（需看板账号更新） |
+
+**去重结论**
+- 作品「更新数据」原来 8 次请求，其中 6 次（流量来源/搜索词/观看趋势×2/观众画像/受众兴趣）对应 tab 已在 v13 移除且不再渲染 → v33 删除这些请求，降为 **2 次**，实测 budget 增量 = 2。
+- 数据看板作品刷新与素材库单帖同步**共用同一个轻量函数 `creator_stats_for_post`（1 次 overview）并写同一组表**：先点素材库同步，再点看板作品更新时，6 小时内会因 TTL 返回 skipped，不会重复调用。
+- 反向（先看板刷新、再点素材库同步）素材库仍会重新拉 1 次 overview + 1 次评论（保留原逻辑，未加 TTL）；如需要可再优化为 5 分钟内跳过。
+- 可进一步优化（未做）：TikHub `fetch_item_overview_data` 支持 `ids` 批量，素材库「批量同步」N 条视频时可合并为 1 次 overview（评论仍需 N 次）。
+
 ---
 
 ## 6. 新增/修改表结构
@@ -1109,7 +1127,7 @@ cd frontend_v2 && npm run gen:api   # 后端在 8000 起来后生成 schema
 | 活跃分布映射误标 | 已在设计留证据；若作者核对抖音页面发现不一致，只改一张映射表 |
 | 快照覆盖不足导致数字与官方不一致 | 页面始终显示「覆盖 N 条作品」+「数据积累中」；播放量/净增粉丝大数字用官方诊断口径 |
 | 额度被误刷 | 6h/24h 缓存 + 自动刷新每会话一次 + 预算预检 + 任务去重 |
-| 详情刷新耗时（8 次请求） | 后台任务 + 进度 + 切页恢复；限速 10req/s 下约 1~2 秒 |
+| 详情刷新耗时（v33 起 2 次请求） | 后台任务 + 进度 + 切页恢复；限速 10req/s 下约 1 秒内 |
 | 评论区写操作诉求 | 明确只读，说明去抖音操作；后续若 TikHub 支持再立项 |
 
 回滚：只新增 2 列与 2 张表的读取逻辑不被其他功能依赖；回滚 `scripts/verify.sh` 通过后 revert 本需求 commit 并 downgrade Alembic 即可，不影响既有功能。

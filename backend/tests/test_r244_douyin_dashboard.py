@@ -469,8 +469,9 @@ def test_post_worker_mock_and_detail_audience(db):
     assert result["ok"] is True
     detail = service.post_detail(db, post.id)
     assert detail["overview"]["plays"] is not None
-    assert detail["audience"]["gender"]  # mock 观众画像已落库
-    assert detail["flow"]["sources"]
+    # v33：只拉核心指标 + 评论；流量来源/观看趋势/观众画像/受众兴趣不再请求（对应 tab 已移除）
+    assert detail["audience"]["gender"] == []
+    assert detail["flow"]["sources"] == []
     assert detail["comment_words"]["total_comments"] >= 0
 
 

@@ -35,7 +35,6 @@ from .douyin_creator_sync import (
     is_auth_failure,
     make_client,
     sync_account_creator_data,
-    sync_post_creator_data,
 )
 from .platform.budget import get_budget
 from .platform.tikhub import TikHubBusinessError
@@ -44,7 +43,7 @@ OVERVIEW_KV = "douyin_dashboard:overview:{account_id}"
 OVERVIEW_TTL_HOURS = 24
 DETAIL_TTL_HOURS = 6
 OVERVIEW_REQUESTS = 3  # 诊断 1 + 作品快照 2（投稿概览已不展示，2026-11-01 起不再请求）
-POST_REQUESTS = 8  # 作品私有指标 5 + 观众画像 1 + 受众兴趣 1 + 评论 1
+POST_REQUESTS = 2  # 作品核心指标（创作者 overview 1 次）+ 评论 Top50（公开 1 次）
 
 # 状态映射（证据见设计 5.6：真实响应 review.status=2/visibility.status=1 为通过，
 # review.status=4 + visibility.status=3 为私密/不适宜公开）
@@ -1506,7 +1505,11 @@ def overview_worker(db: Session, payload: dict, update) -> dict:
 
 
 def post_worker(db: Session, payload: dict, update) -> dict:
-    """作品「更新数据」后台任务：私有指标 5 + 观众画像 1 + 受众兴趣 1 + 评论 1 = 8 次请求。"""
+    """作品「更新数据」后台任务：核心指标（创作者 overview 1 次）+ 评论 Top50（1 次）= 2 次请求。
+
+    R-244 v33：流量来源/搜索词/观看趋势/观众画像/受众兴趣对应的 tab 已在 v13 移除，
+    这些请求不再发起（省 6 次第三方调用）；若以后恢复相关 tab，再按需加回。
+    """
     account = db.get(CreatorAccount, int(payload.get("account_id") or 0))
     post = db.get(PlatformPost, int(payload.get("post_id") or 0))
     if account is None or post is None:
@@ -1526,7 +1529,10 @@ def post_worker(db: Session, payload: dict, update) -> dict:
     warnings: list[str] = []
     update(5, "正在获取作品指标")
     try:
-        sync_post_creator_data(db, account, post, with_audience=True)
+        # 素材库单帖同步用的是同一个轻量函数（1 次 overview），两处写同一组表
+        from .douyin_creator_sync import creator_stats_for_post
+
+        creator_stats_for_post(db, account, post)
     except CredentialError:
         raise
     except (TikHubBusinessError, CredentialError) as exc:
