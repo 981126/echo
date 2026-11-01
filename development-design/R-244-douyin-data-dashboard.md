@@ -650,6 +650,14 @@ limit/offset 分页，返回 has_more
 | 视频详情头部标题过长时省略、按钮位置不动 | `h2` 改 `min-w-0 flex-1 truncate`（单行省略，`title` 悬停看全）；标题行 `flex min-w-0 items-center`，徽标 `shrink-0`；元信息行也 `truncate`；右侧按钮组加 `shrink-0`。实测长短标题两种情况下 header 高度（105px）与三个按钮坐标完全一致 |
 | 账号播放量趋势为何从 10-30 开始 | 说明见 5.19/需求文档：10-30 前公开同步行的 `plays` 恒为 0（清洗剔除），10-30 创作者接口回填真实累计值后才可算增量；TikHub 无历史逐日回填，只能每日累积（代码无改动） |
 
+### 5.31 2026-11-01 v18 布局与评论区（作者第十七次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 作品总览改左右布局 | `grid lg:grid-cols-5`：左 `lg:col-span-2` 趋势曲线（`height=300`），右 `lg:col-span-3` 指标面板 `grid-cols-5`（一行 5 个，18 项 4 行）；标题/hint 指向右侧悬浮切换 |
+| 评论正文加深、昵称变浅 | 昵称 `text-[11px] text-muted-foreground`，时间 `text-muted-foreground/80`；评论内容 `text-xs text-foreground`（深色正文）；点赞数保持浅色小字 |
+| 评论管理固定高度 + 滚动加载 | 列表放入 `ScrollArea h-[420px]`（与近期作品一致的内部滚动），每页 10 条；`IntersectionObserver` 的 **root 改为 ScrollArea viewport**（页面内嵌套滚动时 root:null 会因卡片不在视口内而不触发），rootMargin 80px；滚到底自动 +10，顶部「已展示 x/N」 |
+
 ---
 
 ## 6. 新增/修改表结构

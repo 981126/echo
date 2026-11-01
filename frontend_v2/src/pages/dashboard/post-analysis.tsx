@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Empty, Panel, Thumb, TrendLine } from './charts'
 import {
@@ -147,15 +148,17 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
   }))
   const available = points.filter((point) => point.value !== null).length >= 2
   return (
-    <div className="space-y-3">
-      <Panel
-        title={`${spec.label}趋势`}
-        hint="逐日数据（历史从系统开始每日同步后累积；TikHub 不提供单条作品的历史逐日数据）。悬浮下方指标可切换曲线"
-      >
+    <div className="grid gap-3 lg:grid-cols-5 lg:items-start">
+      <div className="min-w-0 lg:col-span-2">
+        <Panel
+          title={`${spec.label}趋势`}
+          hint="逐日数据（历史从系统开始每日同步后累积；TikHub 不提供单条作品的历史逐日数据）。悬浮右侧指标可切换曲线"
+        >
           {available ? (
             <TrendLine
               points={points}
               ariaLabel={`${spec.label}趋势`}
+              height={300}
               axisFormat={
                 spec.unit === 'ratio'
                   ? (value) => `${(value * 100).toFixed(0)}%`
@@ -168,21 +171,23 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
             <Empty text="该指标暂无足够趋势数据（需要至少 2 天同步快照）" />
           )}
         </Panel>
+      </div>
 
-      <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换上方曲线">
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-6">
-          {METRIC_SPECS.map((item) => (
-            <MetricTile
-              key={item.key}
-              spec={item}
-              value={values[item.key]}
-              active={item.key === metricKey}
-              onHover={() => setMetricKey(item.key)}
-            />
-          ))}
-        </div>
-      </Panel>
-
+      <div className="min-w-0 lg:col-span-3">
+        <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换左侧曲线">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
+            {METRIC_SPECS.map((item) => (
+              <MetricTile
+                key={item.key}
+                spec={item}
+                value={values[item.key]}
+                active={item.key === metricKey}
+                onHover={() => setMetricKey(item.key)}
+              />
+            ))}
+          </div>
+        </Panel>
+      </div>
     </div>
   )
 }
@@ -215,6 +220,7 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
   const PAGE_SIZE = 10
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
   }, [detail.post.post_id])
@@ -227,7 +233,7 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
           setVisibleCount((count) => Math.min(count + PAGE_SIZE, comments.items.length))
         }
       },
-      { rootMargin: '120px' }
+      { root: viewportRef.current, rootMargin: '80px' }
     )
     observer.observe(node)
     return () => observer.disconnect()
@@ -252,26 +258,28 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
           <p className="text-[11px] text-muted-foreground">
             已同步 {comments.total} 条公开评论（按点赞排序，最多 50 条；同步时间为本地保存时间）· 已展示 {visibleComments.length}/{comments.items.length} 条
           </p>
-          <ul className="divide-y divide-border rounded-lg border border-border">
-            {visibleComments.map((comment) => (
-              <li key={comment.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-xs font-medium">{comment.user || '抖音用户'}</span>
-                    <span className="text-[10px] text-muted-foreground">同步于 {formatDateTime(comment.synced_at)}</span>
+          <ScrollArea viewportRef={viewportRef} className="h-[420px] rounded-lg border border-border">
+            <ul className="divide-y divide-border">
+              {visibleComments.map((comment) => (
+                <li key={comment.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-[11px] font-medium text-muted-foreground">{comment.user || '抖音用户'}</span>
+                      <span className="text-[10px] text-muted-foreground/80">同步于 {formatDateTime(comment.synced_at)}</span>
+                    </div>
+                    <p className="mt-1 break-words text-xs leading-5 text-foreground">{comment.text}</p>
                   </div>
-                  <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{comment.text}</p>
-                </div>
-                <span className="tnum mt-1 flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground sm:mt-0">
-                  <ThumbsUp className="h-3 w-3" />
-                  {comment.likes}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <div ref={sentinelRef} className="h-px w-full" aria-hidden />
+                  <span className="tnum mt-1 flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground sm:mt-0">
+                    <ThumbsUp className="h-3 w-3" />
+                    {comment.likes}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div ref={sentinelRef} className="h-px w-full" aria-hidden />
+          </ScrollArea>
           <p className="text-center text-[11px] text-muted-foreground">
-            {visibleCount < comments.items.length ? '向下滑动自动加载更多' : '已展示全部已同步评论'}
+            {visibleCount < comments.items.length ? '向下滚动自动加载更多' : '已展示全部已同步评论'}
           </p>
         </>
       ) : (
