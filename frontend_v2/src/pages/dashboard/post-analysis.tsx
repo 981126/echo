@@ -321,7 +321,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
   const { post } = detail
   return (
     <section className="rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
-      <header className="flex flex-col gap-3 border-b border-border p-4 md:flex-row md:items-start md:justify-between">
+      <header className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <Thumb url={post.cover_url} alt={post.title || '作品封面'} className="h-[72px] w-[54px] shrink-0 rounded-md border border-border" />
           <div className="min-w-0 flex-1">

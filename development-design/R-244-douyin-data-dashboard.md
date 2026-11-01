@@ -693,6 +693,13 @@ limit/offset 分页，返回 has_more
 | 账号卡与近期作品卡头部对齐 | 两卡头部统一 `h-16`（64px）+ `items-center`：账号卡头部从内层 `p-4 sm:p-5` 中拆出为独立 `<header className="flex h-16 items-center justify-between gap-2 border-b border-border px-4">`；近期作品卡头部 `flex items-start ... py-3` → `flex h-16 items-center ... px-4`。实测两卡顶部均 y=80、头部均 64px、更新按钮中心均 y=113 |
 | 视频总览去掉曲线说明文字 | 曲线 Panel 不再传 `hint`（「逐日数据（历史…）」整段移除），标题行只保留「××趋势」+ 右上统计周期下拉 |
 
+### 5.37 2026-11-01 v24 去掉分隔线与滚动提示（作者第二十三次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 去掉框出的浅色分隔线 | 账号卡头部去掉 `border-b border-border`（v23 对齐时加的）；视频详情 `<header>` 去掉 `border-b border-border`；两处 header 高度/对齐不变 |
+| 近期作品去掉「向下滑动自动加载更多」 | WorksList 删除底部状态栏（含 `border-t` 与「向下滑动自动加载更多 / 已加载全部」文字）；哨兵仍在列表末尾，滚动到底自动加载逻辑不变；列表自然露出第 4 条一部分，暗示可滚动 |
+
 ---
 
 ## 6. 新增/修改表结构

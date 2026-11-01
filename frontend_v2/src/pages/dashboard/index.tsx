@@ -138,7 +138,7 @@ function AccountOverview({
   }
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
-      <header className="flex h-16 items-center justify-between gap-2 border-b border-border px-4">
+      <header className="flex h-16 items-center justify-between gap-2 px-4">
           <div className="flex min-w-0 items-center gap-2.5">
             <Avatar className="h-9 w-9">
               {account?.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}

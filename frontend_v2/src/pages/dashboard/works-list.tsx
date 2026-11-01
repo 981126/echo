@@ -164,20 +164,7 @@ export function WorksList({
         </ScrollArea>
       )}
 
-      {!loading && !error ? (
-        <div className="border-t border-border p-2.5 text-center text-[11px] text-muted-foreground">
-          {loadingMore ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              加载中…
-            </span>
-          ) : hasMore ? (
-            '向下滑动自动加载更多'
-          ) : (
-            '已加载全部'
-          )}
-        </div>
-      ) : null}
+
     </section>
   )
 }
