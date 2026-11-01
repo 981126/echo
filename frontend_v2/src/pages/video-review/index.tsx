@@ -252,7 +252,17 @@ export default function VideoReviewPage() {
         <label className="text-xs font-medium text-muted-foreground" htmlFor="review-video">选择要复盘的视频</label>
         <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-center">
           <select id="review-video" value={postId} onChange={(e) => void selectVideo(Number(e.target.value))} className="h-10 min-w-0 flex-1 rounded-md border border-input bg-card px-3 text-sm">
-            {videos.map((video) => <option key={video.post_id} value={video.post_id}>{video.title || `视频 ${video.post_id}`}</option>)}
+            {videos.map((video) => (
+              <option key={video.post_id} value={video.post_id}>
+                {[
+                  video.title || `视频 ${video.post_id}`,
+                  video.status_label && video.status_label !== '—' ? video.status_label : null,
+                  video.publish_time ? video.publish_time.slice(0, 10) : null
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </option>
+            ))}
           </select>
           {review?.post.video_url && <a href={review.post.video_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-indigo-500 hover:underline">查看原视频<ExternalLink className="h-3 w-3" /></a>}
         </div>

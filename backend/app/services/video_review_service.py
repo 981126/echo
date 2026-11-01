@@ -114,9 +114,29 @@ def list_videos(db: Session, owner: Creator, account_id: int | None, query: str,
         q = q.filter(PlatformPost.title.contains(query))
     if cursor:
         q = q.filter(PlatformPost.id < cursor)
-    rows = q.order_by(PlatformPost.id.desc()).limit(limit + 1).all()
+    # v30：按发布时间倒序（与数据看板一致，默认选中最新一条，避免默认落到同名的私密旧视频）
+    rows = q.order_by(PlatformPost.publish_time.desc().nulls_last(), PlatformPost.id.desc()).limit(limit + 1).all()
     page = rows[:limit]
     latest_map: dict[int, VideoReview] = {}
+    status_map: dict[int, tuple[str, str]] = {}
+    if page:
+        from sqlalchemy import and_, func
+
+        from ..models.video_review import DouyinPostMetric
+        from .douyin_dashboard import post_status
+
+        sub = (
+            db.query(DouyinPostMetric.post_id, func.max(DouyinPostMetric.snapshot_date).label("d"))
+            .filter(DouyinPostMetric.post_id.in_([post.id for post in page]))
+            .group_by(DouyinPostMetric.post_id)
+            .subquery()
+        )
+        for metric in (
+            db.query(DouyinPostMetric)
+            .join(sub, and_(DouyinPostMetric.post_id == sub.c.post_id, DouyinPostMetric.snapshot_date == sub.c.d))
+            .all()
+        ):
+            status_map[metric.post_id] = post_status(metric)
     if page:
         # R-240 S6：一次批量取每帖最新 review（按 id 升序覆盖 → 最大 id 即最新）
         for review in (
@@ -129,8 +149,11 @@ def list_videos(db: Session, owner: Creator, account_id: int | None, query: str,
     items = []
     for post in page:
         latest = latest_map.get(post.id)
+        status, status_label = status_map.get(post.id, ("unknown", "—"))
         items.append({
             **_post_out(post),
+            "status": status,
+            "status_label": status_label,
             "latest_review_id": latest.id if latest else None,
             "review_status": latest.status if latest else None,
             "latest_sync_at": latest.created_at if latest else post.updated_at,

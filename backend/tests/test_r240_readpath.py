@@ -446,7 +446,8 @@ def test_list_videos_latest_review_and_follower_topics_batch(db):
     owner, acc, _target = _review_seed(db, posts=5)
     posts = db.query(PlatformPost).filter_by(account_id=acc.id).order_by(PlatformPost.id.desc()).all()
     candidate_posts = [post for post in posts if post.platform_post_id != "target"]
-    first = posts[0]  # list_videos 按 id 倒序，第一帖就是 id 最大的候选
+    # v30：list_videos 改为按发布时间倒序（与数据看板一致），第一帖 = 发布时间最新的作品
+    first = sorted(posts, key=lambda post: (post.publish_time, post.id), reverse=True)[0]
     db.add(VideoReview(account_id=acc.id, post_id=first.id, status="done", input_fingerprint="a"))
     db.commit()
     latest = VideoReview(account_id=acc.id, post_id=first.id, status="running", input_fingerprint="b")

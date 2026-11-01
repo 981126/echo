@@ -5,6 +5,9 @@ export interface VideoItem {
   publish_time?: string | null
   video_url?: string | null
   duration_seconds?: number | null
+  /** 作品状态（v30：来自平台作品指标，approved/private/rejected/published/unknown） */
+  status?: string | null
+  status_label?: string | null
   latest_review_id?: number | null
   review_status?: string | null
   latest_sync_at?: string | null

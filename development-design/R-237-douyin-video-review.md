@@ -709,6 +709,7 @@ current owner
 | 首屏数据区替换 | 移除「历史数据还比较少」总结条、`MetricCards`（8 张平时对比卡）与 `review.warnings` 提示条；改为复用数据看板导出的 `VideoOverview` 组件（`@/pages/dashboard/post-analysis`），数据来自 `GET /api/douyin-dashboard/works/{post_id}`，回该作品最新快照 + `metric_trends`（趋势可切近 3/7/14 日、悬停指标切换曲线） |
 | 数据获取 | 页面新增 `overview` state + `loadOverview(postId)`：首屏与 `selectVideo` 时加载；「更新数据并分析」完成后重新加载；加载中显示 spinner，无数据显示「数据看板暂无这条作品的数据」 |
 | 按钮精简 | 移除「开始分析 / 重新分析」按钮（`analyze(false)` 入口），只保留「更新数据并分析」（`analyze(true)`） |
+| 选错同名视频导致「数据看板有、复盘没数据」 | 原 `/api/douyin-review/videos` 按 `PlatformPost.id.desc()` 排序，默认落到同名的私密旧视频（1953，播放 0）；改为按 `publish_time desc nulls_last, id desc`（与数据看板一致），并在返回项中补充 `status/status_label`（来自最新 `douyin_post_metrics` 的 `post_status` 映射）；前端下拉选项显示「标题 · 状态 · 发布日期」 |
 
 
 ### 6.6 `video_review_findings`
