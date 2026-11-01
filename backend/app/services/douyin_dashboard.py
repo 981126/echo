@@ -1527,23 +1527,18 @@ def post_worker(db: Session, payload: dict, update) -> dict:
             return {"ok": True, "skipped": True, "post_id": post.id, "data_time": _iso(latest.captured_at)}
 
     warnings: list[str] = []
-    update(5, "正在获取作品指标")
-    try:
-        # 素材库单帖同步用的是同一个轻量函数（1 次 overview），两处写同一组表
-        from .douyin_creator_sync import creator_stats_for_post
+    from .platform_sync import sync_post_data
 
-        creator_stats_for_post(db, account, post)
+    update(5, "正在获取作品指标与评论")
+    try:
+        force = bool(payload.get("force"))
+        result = sync_post_data(db, post.id, force=force, reuse_fresh_comments=not force)
     except CredentialError:
         raise
     except (TikHubBusinessError, CredentialError) as exc:
         raise CredentialError(_credential_message(exc)) from exc
-    update(75, "正在同步评论")
-    try:
-        from .platform_sync import sync_post_comments
-
-        sync_post_comments(db, post, limit=50, account=account, pool=False)
-    except Exception as exc:  # noqa: BLE001 评论失败不影响私有指标
-        warnings.append(f"评论同步失败：{_safe_error(exc)}")
+    except Exception as exc:  # noqa: BLE001
+        raise CredentialError(f"作品数据更新失败：{_safe_error(exc)}") from exc
     update(100, "完成")
     latest = _latest_metric(db, post.id)
     return {
@@ -1551,4 +1546,5 @@ def post_worker(db: Session, payload: dict, update) -> dict:
         "post_id": post.id,
         "data_time": _iso(latest.captured_at) if latest else None,
         "warnings": warnings,
+        "comments_skipped": bool(result.get("comments_skipped")),
     }

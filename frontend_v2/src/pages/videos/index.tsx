@@ -345,10 +345,28 @@ export default function VideosPage() {
         await apiJson('/api/works/merge', { method: 'POST', body: JSON.stringify({ platform_post_ids: ids }) })
         toast.success('已合并所选')
       } else if (action === 'sync') {
+        // R-244 v33：批量同步走统一接口——同账号抖音作品合并 overview（ids 批量），评论 6h 复用
+        const items = selectedCards.map((c) => ({ key: c.key, kind: c.kind, type: c.type ?? null, id: c.id }))
         for (const c of selectedCards) {
-           
-          await onSyncCb(c).catch(() => undefined)
+          if (!hasTask(c.key)) begin(c.key)
         }
+        const res = await apiJson<{
+          items: Array<{ key: string; ok: boolean; message?: string; media?: { task_id?: number; status?: string } }>
+        }>('/api/platform/posts/sync-batch', {
+          method: 'POST',
+          body: JSON.stringify({ items })
+        })
+        for (const row of res.items) {
+          const taskId = row.media?.task_id
+          if (taskId) {
+            claim(row.key, taskId)
+          } else if (row.media?.status === 'skip') {
+            finish(row.key, true, '已是最新，无需补齐')
+          } else {
+            finish(row.key, row.ok, row.message || (row.ok ? '同步完成' : '同步失败'))
+          }
+        }
+        await refreshActive()
       } else {
         for (const c of selectedCards) {
            

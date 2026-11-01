@@ -598,7 +598,7 @@ export function EditDrawer({
       <DrawerFooter>
         <Button variant="outline" size="sm" onClick={syncNow} disabled={syncing || loading}>
           {syncing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          同步数据
+          数据同步
         </Button>
         <span className="flex-1" />
         <Button variant="ghost" size="sm" onClick={onClose}>

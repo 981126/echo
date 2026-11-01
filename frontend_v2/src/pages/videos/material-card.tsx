@@ -230,7 +230,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>同步数据</TooltipContent>
+            <TooltipContent>数据同步</TooltipContent>
           </Tooltip>
           {item.kind === 'local' && item.tags_confirmed === false && (
             <Tooltip delayDuration={0}>

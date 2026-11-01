@@ -29,6 +29,7 @@ from ..services.platform_sync import (
     all_top15_worker,
     enqueue_all_top15_sync,
     run_sync,
+    sync_items_batch,
     sync_local_video_metrics,
     sync_single_post,
     sync_work_posts,
@@ -202,6 +203,19 @@ def sync_post(post_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     res["media"] = submit_media_task(db, post_id=post_id)  # R-077
     return res
+
+
+@router.post("/posts/sync-batch", response_model=dict)
+def sync_posts_batch(payload: dict, db: Session = Depends(get_db)):
+    """素材库「批量数据同步」（R-244 v33）：多卡片一次请求。
+
+    同账号抖音创作者作品合并成一次 overview（ids 批量 ≤20/次），评论 6 小时内复用；
+    每张卡片仍按原逻辑提交媒体补齐任务。items: [{key, kind, type?, id}]
+    """
+    try:
+        return sync_items_batch(db, list(payload.get("items") or []))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/posts/{post_id}/to-material", response_model=dict)

@@ -781,6 +781,26 @@ limit/offset 分页，返回 has_more
 - 反向（先看板刷新、再点素材库同步）素材库仍会重新拉 1 次 overview + 1 次评论（保留原逻辑，未加 TTL）；如需要可再优化为 5 分钟内跳过。
 - 可进一步优化（未做）：TikHub `fetch_item_overview_data` 支持 `ids` 批量，素材库「批量同步」N 条视频时可合并为 1 次 overview（评论仍需 N 次）。
 
+### 5.47 2026-11-01 v34 统一作品更新入口 + 批量同步 + 评论 TTL（作者第三十三次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 作品数据更新只有一个入口 | 新增 `platform_sync.sync_post_data(db, post_id, *, force=True, reuse_fresh_comments=False, with_media=False)`：素材库单卡（`/api/platform/videos/{id}/sync`、`/api/platform/works/{id}/sync`、`/api/platform/posts/{id}/sync`）、博主管理单帖、数据看板作品更新（`/api/douyin-dashboard/works/{id}/refresh` 的后台 worker）**全部改为调用它**；HTTP 路由只保留「同步/异步（进度+跨页恢复）」两种包装，不再各写一套更新逻辑 |
+| 素材库批量同步合并请求 | 新增 `POST /api/platform/posts/sync-batch`（`sync_items_batch`）：素材库「批量数据同步」一次请求提交所选卡片；同账号抖音创作者作品按 **20 条/次** 合并调用 `fetch_item_overview_data`（`ids` 批量，N 条 → ⌈N/20⌉ 次），评论逐帖但 6h 内复用，媒体补齐任务仍按卡片提交 |
+| 评论 6h TTL 复用 | `_comments_synced_recently()`：博主管理 daily 的最近 10 条评论同步、批量同步里均已接入——同帖评论 6 小时内已同步过则跳过请求（省最多 10 次/账号/天） |
+| 按钮文案 | 素材库「同步数据」→**「数据同步」**（列表 tooltip + 编辑抽屉按钮） |
+
+**请求量（统一后）**
+
+| 场景 | 第三方请求 |
+|---|---|
+| 数据看板·作品更新 | 2（overview 1 + 评论 1；force 时评论照拉） |
+| 素材库·单卡数据同步 | 2/绑定帖（同上）+ 媒体任务（不计 API） |
+| 素材库·批量同步 N 张卡（同账号抖音创作者） | ⌈N/20⌉ 次 overview + 评论（新鲜则复用，最多 N 次）+ 媒体任务 |
+| 博主管理·daily 同步 | 主页 1 + 作品列表 ≤2 + 评论（6h 内已同步的帖跳过，最多 10） |
+
+**平台范围**：数据看板/视频复盘作品更新只处理**抖音**作品；素材库「数据同步」按该素材绑定的平台帖逐个更新（**包含小红书/B 站**，保留原逻辑——素材库卡片需要展示它们）。
+
 ---
 
 ## 6. 新增/修改表结构

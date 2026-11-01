@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from ..core.timeutil import now as _app_now
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -22,6 +22,7 @@ from ..core.log import get_logger
 from ..core.pipeline import today_key
 from ..models.hot_topic import TopicIdea
 from ..models.task import BackgroundTask
+from ..models.video_review import DouyinPostMetric
 from ..models.platform import (
     Creator,
     CreatorAccount,
@@ -683,6 +684,10 @@ def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, 
     R-140：进池逻辑统一走 `pool_ideas_from_comments`（限量），本函数只负责抓取与入库。
     R-222：对最近 10 条作品的评论抓取改为并发，写入仍由主 Session 批量完成。
     """
+    # v33：同一帖评论 6 小时内已同步 → 复用，不再打评论接口（博主管理 daily 限量请求）
+    posts = [post for post in posts if not _comments_synced_recently(db, post.id)]
+    if not posts:
+        return 0
     # 预加载当天已有灵感池，避免循环内 N+1
     date_key = today_key()
     existing_ideas = {
@@ -1260,7 +1265,37 @@ def _fetch_post_comments_isolated(s: Session, primitive: dict) -> dict:
     )
 
 
-def _sync_one_post(db: Session, post: PlatformPost) -> dict:
+POST_SYNC_COMMENT_TTL_HOURS = 6
+POST_SYNC_METRIC_TTL_HOURS = 6
+
+
+def _metric_updated_recently(db: Session, post_id: int, hours: float = POST_SYNC_METRIC_TTL_HOURS) -> bool:
+    """该帖指标是否在 N 小时内更新过（用于 force=False 时跳过重复请求）。"""
+    from datetime import timedelta
+
+    from ..core.timeutil import now as _now
+
+    latest = db.query(func.max(DouyinPostMetric.captured_at)).filter(DouyinPostMetric.post_id == post_id).scalar()
+    if latest is None:
+        latest = db.query(func.max(PlatformPostStat.updated_at)).filter(PlatformPostStat.post_id == post_id).scalar()
+    if latest is None:
+        return False
+    return (_now() - latest) < timedelta(hours=hours)
+
+
+def _comments_synced_recently(db: Session, post_id: int, hours: float = POST_SYNC_COMMENT_TTL_HOURS) -> bool:
+    """该帖评论最近已同步过（默认 6 小时内）→ 复用之，不再打第三方接口。"""
+    from datetime import timedelta
+
+    from ..core.timeutil import now as _now
+
+    latest = db.query(func.max(PlatformPostComment.created_at)).filter(PlatformPostComment.post_id == post_id).scalar()
+    if latest is None:
+        return False
+    return (_now() - latest) < timedelta(hours=hours)
+
+
+def _sync_one_post(db: Session, post: PlatformPost, *, reuse_fresh_comments: bool = False) -> dict:
     """同步单条平台帖：最新指标 + 评论（点赞 Top50）入库。失败抛错。
 
     R-240 M3：指标与评论是两个**互不依赖**的请求 → 各自独立 Session 并发执行；
@@ -1296,10 +1331,17 @@ def _sync_one_post(db: Session, post: PlatformPost) -> dict:
 
     stats: dict = {}
     comments: dict = {"added": 0, "updated": 0, "pool_added": 0}
+    if reuse_fresh_comments and _comments_synced_recently(db, post.id):
+        # 评论已新鲜：只更新指标，不再请求评论接口
+        results = list(gather(_run, [(0, "stats")], workers=1))
+        comments_skipped = True
+    else:
+        results = list(gather(_run, [(0, "stats"), (1, "comments")], workers=2))
+        comments_skipped = False
     stats_error: Exception | None = None
     # 复用 sync_pool.gather（并发+异常收集；每个任务自建 Session）
     # gather 返回 [((key, kind), result)]，_run 的 result 自身是 (key, payload) 元组，需先拆 item 再拆 result。
-    for item, res in gather(_run, [(0, "stats"), (1, "comments")], workers=2):
+    for item, res in results:
         key = int(item[0])
         if isinstance(res, Exception):
             if key == 0:  # 指标失败向上抛（与串行版一致）；评论失败不影响主同步
@@ -1323,7 +1365,196 @@ def _sync_one_post(db: Session, post: PlatformPost) -> dict:
         "comments_added": int(comments.get("added") or 0),
         "comments_updated": int(comments.get("updated") or 0),
         "pool_added": int(comments.get("pool_added") or 0),  # R-140：本次进灵感池条数
+        "comments_skipped": comments_skipped,
     }
+
+
+def sync_post_data(
+    db: Session,
+    post_id: int,
+    *,
+    force: bool = True,
+    reuse_fresh_comments: bool = False,
+    with_media: bool = False,
+) -> dict:
+    """统一的作品数据更新入口：素材库同步 / 博主管理单帖同步 / 数据看板作品更新都走这里。
+
+    - 指标：创作者账号 → `creator_stats_for_post`（1 次 overview）；否则公开接口
+    - 评论 Top50：同一帖 6 小时内已同步过则复用（省 1 次请求）
+    - force=False 且指标 6 小时内更新过 → 返回 skipped，不再请求
+    - with_media=True：额外提交缺视频/缺转写的媒体补齐任务（素材库按钮原逻辑）
+
+    v33：统一后不再各写一套「更新作品数据」逻辑；接口层的同步/异步只是包装方式不同。
+    """
+    post = db.get(PlatformPost, post_id)
+    if post is None:
+        raise ValueError("云端作品不存在")
+    account = db.get(CreatorAccount, post.account_id)
+    if account is None:
+        raise ValueError("平台账号不存在")
+    policy = resolve_data_policy(db, account)
+    if policy.is_blocked:
+        raise CredentialError(policy.reason)
+    if not force and _metric_updated_recently(db, post.id):
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": f"数据已是最新（{POST_SYNC_METRIC_TTL_HOURS} 小时内）",
+            "post_id": post.id,
+            "message": "数据已是最新",
+        }
+    result = _sync_one_post(db, post, reuse_fresh_comments=reuse_fresh_comments or not force)
+    payload: dict = {
+        "ok": True,
+        "skipped": False,
+        "post_id": post.id,
+        "message": "单条同步完成（评论 6 小时内已同步，已复用）" if result["comments_skipped"] else "单条同步完成",
+        "platforms": [post.platform],
+        "stats": result["stats"],
+        "comments_added": int(result["comments_added"]),
+        "comments_updated": int(result["comments_updated"]),
+        "comments_skipped": bool(result["comments_skipped"]),
+    }
+    if with_media:
+        from .media_ensure import submit_media_task
+
+        payload["media"] = submit_media_task(db, post_id=post.id)
+    return payload
+
+
+def sync_items_batch(db: Session, items: list[dict]) -> dict:
+    """素材库「批量数据同步」：一次请求同步多张卡片（R-244 v33）。
+
+    items: [{key, kind: 'local'|'cloud', type?: 'work'|'post', id}]
+    - 指标：同账号的抖音创作者作品合并成一次 `fetch_item_overview_data`（ids 批量，最多 20 条/次）；
+      非创作者/其它平台逐帖走公开接口（与原来一致）
+    - 评论：同帖 6 小时内已同步 → 复用，不再请求
+    - 媒体：每张卡片仍按原逻辑提交缺视频/缺转写的补齐任务
+    """
+    from ..models.video import Video
+    from ..models.work import Work
+    from .media_ensure import submit_media_task
+
+    results: list[dict] = []
+    resolved: list[dict] = []
+    for item in items:
+        key = str(item.get("key") or "")
+        kind = str(item.get("kind") or "")
+        ident = int(item.get("id") or 0)
+        try:
+            posts: list[PlatformPost] = []
+            if kind == "local":
+                video = db.get(Video, ident)
+                if video is None:
+                    raise ValueError("素材不存在")
+                posts = db.query(PlatformPost).filter(PlatformPost.local_video_id == video.id).all()
+                media = submit_media_task(db, video_id=video.id)
+            elif kind == "cloud" and str(item.get("type") or "") == "work":
+                work = db.get(Work, ident)
+                if work is None:
+                    raise ValueError("云端作品不存在")
+                posts = db.query(PlatformPost).filter(PlatformPost.work_id == work.id).all()
+                media = submit_media_task(db, work_id=work.id)
+            else:
+                post = db.get(PlatformPost, ident)
+                if post is None:
+                    raise ValueError("云端作品不存在")
+                posts = [post]
+                media = submit_media_task(db, post_id=post.id)
+        except Exception as exc:  # noqa: BLE001 单卡片失败不中断
+            results.append({"key": key, "ok": False, "message": str(exc)[:200], "media": None})
+            continue
+        resolved.append({"key": key, "posts": posts, "media": media})
+
+    # ---------- 指标：同账号抖音创作者作品合并批量取 ----------
+    posts_by_account: dict[int, list[PlatformPost]] = {}
+    for entry in resolved:
+        for post in entry["posts"]:
+            posts_by_account.setdefault(int(post.account_id or 0), []).append(post)
+    metrics_done: set[int] = set()
+    from .douyin_creator_sync import _apply_item_metrics, _creator_item_id
+    from .platform.tikhub import make_client
+
+    for account_id, posts in posts_by_account.items():
+        account = db.get(CreatorAccount, account_id) if account_id else None
+        if account is None:
+            continue
+        policy = resolve_data_policy(db, account)
+        if policy.is_blocked:
+            continue
+        unique = {int(post.id): post for post in posts}
+        chunk: list[PlatformPost] = list(unique.values())
+        if policy.is_creator and account.platform == "douyin":
+            client = make_client()
+            if client.mode == "real":
+                from .douyin_creator_sync import _charge_requests, _cookie
+
+                before = client.requests_used
+                try:
+                    cookie = _cookie(db, account.id, client)
+                    for start in range(0, len(chunk), 20):
+                        part = chunk[start:start + 20]
+                        ids = ",".join(str(post.platform_post_id) for post in part)
+                        overview = client.fetch_douyin_creator_overview(cookie=cookie, item_id=ids)
+                        raw_data = overview.get("data") if isinstance(overview, dict) else None
+                        raw_items = raw_data.get("items") if isinstance(raw_data, dict) else None
+                        index = {
+                            _creator_item_id(item): item
+                            for item in (raw_items if isinstance(raw_items, list) else [])
+                            if isinstance(item, dict) and _creator_item_id(item)
+                        }
+                        for post in part:
+                            found_item = index.get(str(post.platform_post_id))
+                            if found_item is None:
+                                continue
+                            try:
+                                _apply_item_metrics(db, post, found_item)
+                                metrics_done.add(int(post.id))
+                            except Exception:  # noqa: BLE001
+                                continue
+                        db.commit()
+                finally:
+                    _charge_requests(db, client, before)
+        # 兜底：批量没覆盖到的（mock / 非创作者 / 接口缺失）逐帖更新
+        for post in chunk:
+            if int(post.id) in metrics_done:
+                continue
+            try:
+                _fetch_post_stats_isolated(db, {
+                    "post_id": int(post.id),
+                    "account_id": int(post.account_id or 0),
+                    "platform": str(post.platform),
+                    "platform_post_id": str(post.platform_post_id),
+                    "use_creator": bool(policy.is_creator and account.platform == "douyin"),
+                })
+                metrics_done.add(int(post.id))
+            except Exception:  # noqa: BLE001
+                continue
+
+    # ---------- 评论（6h 内复用）----------
+    for post in {int(p.id): p for entry in resolved for p in entry["posts"]}.values():
+        if int(post.id) not in metrics_done:
+            continue
+        if _comments_synced_recently(db, post.id):
+            continue
+        try:
+            account = db.get(CreatorAccount, post.account_id) if post.account_id else None
+            sync_post_comments(db, post, limit=50, client=make_source(post.platform), account=account, charge=True)
+        except BudgetExceeded:
+            raise
+        except Exception:  # noqa: BLE001 评论失败不影响指标
+            continue
+
+    for entry in resolved:
+        ok = bool(entry["posts"]) and all(int(post.id) in metrics_done for post in entry["posts"])
+        results.append({
+            "key": entry["key"],
+            "ok": ok,
+            "message": "同步完成" if ok else "部分作品指标同步失败",
+            "media": entry["media"],
+            "posts": [int(post.id) for post in entry["posts"]],
+        })
+    return {"items": results}
 
 
 def sync_single_post(db: Session, post_id: int) -> dict:
@@ -1334,22 +1565,15 @@ def sync_single_post(db: Session, post_id: int) -> dict:
     account = db.get(CreatorAccount, post.account_id)
     job = _log_job(db, "single", "post", creator_id=account.creator_id if account else None, account_id=post.account_id, post_id=post.id)
     try:
-        res = _sync_one_post(db, post)
-        stats = res["stats"]
-        added = int(res["comments_added"])
+        result = sync_post_data(db, post_id)
+        stats = result["stats"]
+        added = int(result["comments_added"])
         _finish_job(
             db, job,
             f"单条同步完成（评论新增 {added} 条）",
-            {"post_id": post.id, "stats": stats, "comments_added": added, "comments_updated": res["comments_updated"]},
+            {"post_id": post.id, "stats": stats, "comments_added": added, "comments_updated": result["comments_updated"]},
         )
-        return {
-            "job_id": job.id,
-            "message": "单条同步完成",
-            "platforms": [post.platform],
-            "stats": stats,
-            "comments_added": added,
-            "comments_updated": res["comments_updated"],
-        }
+        return {**result, "job_id": job.id, "message": result["message"]}
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         _finish_job(db, job, str(exc), failed=True)

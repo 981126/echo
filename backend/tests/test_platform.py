@@ -732,3 +732,59 @@ def test_run_sync_daily_with_media_mock_leaves_no_video(db):
     assert db.query(Video).count() == 0
     # R-094：非正常结果必须走通知
     assert db.query(Notification).filter(Notification.kind == "card_sync", Notification.status == "failed").count() >= 1
+
+
+# ---------- R-244 v33：统一作品更新入口 + 批量同步 ----------
+
+
+def test_sync_post_data_unified_ttl_and_comment_reuse(db):
+    """统一作品更新：force=False 时 6h 内已更新 → skipped；评论新鲜时复用不再请求。"""
+    from app.services.platform_sync import sync_post_data
+
+    _owner, acc = _seed_owner(db)
+    post = _post(db, acc.id, "douyin", "dy-unified-1", "统一入口测试")
+    db.commit()
+
+    first = sync_post_data(db, post.id)
+    assert first["ok"] is True and first["skipped"] is False
+    assert first["comments_added"] == 50
+
+    skipped = sync_post_data(db, post.id, force=False)
+    assert skipped["skipped"] is True
+
+    reused = sync_post_data(db, post.id, reuse_fresh_comments=True)
+    assert reused["comments_added"] == 0
+    assert reused["comments_skipped"] is True
+
+
+def test_sync_items_batch_updates_metrics_and_comments_once(db):
+    """素材库批量同步：一次调用更新多张卡片，评论 6h 内复用，数据看板能读到指标。"""
+    from app.models.platform import PlatformPostComment, PlatformPostStat
+    from app.services.platform_sync import sync_items_batch
+
+    _owner, acc = _seed_owner(db)
+    p1 = _post(db, acc.id, "douyin", "dy-batch-1", "批量一")
+    p2 = _post(db, acc.id, "douyin", "dy-batch-2", "批量二")
+    db.commit()
+
+    res = sync_items_batch(
+        db,
+        [
+            {"key": "cloud-1", "kind": "cloud", "type": "post", "id": p1.id},
+            {"key": "cloud-2", "kind": "cloud", "type": "post", "id": p2.id},
+        ],
+    )
+    assert [row["ok"] for row in res["items"]] == [True, True]
+    assert db.query(PlatformPostStat).filter_by(post_id=p1.id).count() >= 1
+    assert db.query(PlatformPostComment).filter_by(post_id=p1.id).count() == 50
+    assert db.query(PlatformPostComment).filter_by(post_id=p2.id).count() == 50
+
+    # 再跑一次：评论已新鲜 → 复用，不重复入库
+    sync_items_batch(
+        db,
+        [
+            {"key": "cloud-1", "kind": "cloud", "type": "post", "id": p1.id},
+            {"key": "cloud-2", "kind": "cloud", "type": "post", "id": p2.id},
+        ],
+    )
+    assert db.query(PlatformPostComment).filter_by(post_id=p1.id).count() == 50
