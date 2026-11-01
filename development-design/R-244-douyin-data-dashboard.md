@@ -740,14 +740,6 @@ limit/offset 分页，返回 has_more
 | 两处曲线接入 | 账号总览 key=`metricKey-dataUpdatedAt`：指标切换立即过渡，周期切换等新数据返回后再过渡，避免 keepPreviousData 期间旧数据自切一次；作品分析 key=`metricKey-periodDays`，指标与周期都覆盖 |
 | 回归测试 | `charts.test.tsx` 4 例：首次无旧层；A→B 旧层首帧 1/新层首帧 0；连续 A→B→C 旧层为 B；reduced-motion 直接替换 |
 
-### 5.42 2026-11-01 v29 账号卡 9 指标（作者第二十八次反馈）
-
-| 改动 | 实现 |
-|---|---|
-| 完播率 / 互动率 / 投稿活跃度加入账号总览 | 后端 `_kpi_cards` 新增 3 张诊断卡：`finish_rate`（PlayFinishRatio）、`interact`（Interact）、`publish_count`（PublishActivation），`source=diagnosis`、`unit=ratio/ratio/条`、**`trend_key=null`**（诊断只给 7 日值，无逐日曲线）；14/30/90 日无值显示「暂无数据」 |
-| 每行 3 条 | KPI 网格 `grid-cols-2` → `grid-cols-3`；为容纳 3 列，账号总览内部左右比例 2:1 → 1.2:1（曲线约 55%、指标约 45%），卡片 padding 收紧、label/数值 `whitespace-nowrap` |
-| 不可切换曲线的卡片 | `KpiCardView`：`trend_key === null` 时渲染为静态 div（无 hover 激活、点击无效）；数值按 `unit === 'ratio'` 格式化为百分比（13.2% / 2.9%） |
-
 ---
 
 ## 6. 新增/修改表结构

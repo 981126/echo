@@ -18,7 +18,7 @@ import { coverThumb } from '@/lib/covers'
 import { EASE_OUT_EXPO, itemVariants, listVariants, softIn } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { CrossfadeTrendLine } from './charts'
-import { deltaToneClass, formatCount, formatDateTime, formatDelta, formatMonthDay, formatPercent } from './format'
+import { deltaToneClass, formatCount, formatDateTime, formatDelta, formatMonthDay } from './format'
 import { PostAnalysis } from './post-analysis'
 import { WorksList } from './works-list'
 import type {
@@ -59,7 +59,7 @@ function KpiCardView({
   active: boolean
   onSelect: () => void
 }) {
-  const valueText = kpi.value === null ? '暂无数据' : kpi.unit === 'ratio' ? formatPercent(kpi.value) : formatCount(kpi.value)
+  const valueText = kpi.value === null ? '暂无数据' : formatCount(kpi.value)
   const deltaText = kpi.delta !== null ? formatDelta(kpi.delta) : null
   const hoverTimer = useRef<number | null>(null)
   // v7：鼠标悬浮即激活该指标（80ms 防抖，避免快速划过时曲线反复重绘）；点击同样生效
@@ -73,23 +73,6 @@ function KpiCardView({
     hoverTimer.current = null
   }
   useEffect(() => () => onLeave(), [])
-  const content = (
-    <>
-      {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
-      <div className={cn('truncate whitespace-nowrap text-[10px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
-      <div className="tnum mt-0.5 whitespace-nowrap text-lg font-semibold leading-6 tracking-tight">{valueText}</div>
-      <div
-        className={cn('mt-0.5 min-h-3.5 text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}
-        title={deltaText ? `较前 ${days} 日对比：${deltaText}` : undefined}
-      >
-        {deltaText}
-      </div>
-    </>
-  )
-  // 诊断专属指标（完播率/互动率/投稿活跃度）没有逐日曲线 → 只做展示，不可点击/悬浮切换
-  if (kpi.trend_key === null) {
-    return <div className="flex h-full min-w-0 flex-col rounded-lg px-2.5 py-2">{content}</div>
-  }
   return (
     <button
       type="button"
@@ -100,11 +83,19 @@ function KpiCardView({
       aria-pressed={active}
       title={`悬浮/点击查看「${kpi.label}」在近 ${days} 日的趋势`}
       className={cn(
-        'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-lg px-2.5 py-2 text-left transition-colors',
+        'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-lg px-3 py-2.5 text-left transition-colors',
         active ? 'bg-muted' : 'bg-transparent hover:bg-muted/40'
       )}
     >
-      {content}
+      {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
+      <div className={cn('text-[10px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
+      <div className="tnum mt-0.5 text-lg font-semibold leading-6 tracking-tight">{valueText}</div>
+      <div
+        className={cn('mt-0.5 min-h-3.5 text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}
+        title={deltaText ? `较前 ${days} 日对比：${deltaText}` : undefined}
+      >
+        {deltaText}
+      </div>
     </button>
   )
 }
@@ -202,7 +193,7 @@ function AccountOverview({
           </span>
         </div>
 
-        <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-start">
+        <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start">
           {/* 左：曲线 */}
           <div className="min-w-0">
             <div className="flex flex-wrap items-baseline justify-end gap-2">
@@ -229,17 +220,15 @@ function AccountOverview({
             initial={reduce ? false : { opacity: 0.85, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={softIn}
-            className="grid grid-cols-3 items-stretch gap-x-3 gap-y-2"
+            className="grid grid-cols-2 items-stretch gap-x-3 gap-y-2"
           >
             {data.kpis.map((kpi) => (
               <KpiCardView
                 key={kpi.key}
                 kpi={kpi}
                 days={periodDays}
-                active={kpi.trend_key !== null && metricKey === kpi.trend_key}
-                onSelect={() => {
-                  if (kpi.trend_key) onMetricChange(kpi.trend_key)
-                }}
+                active={metricKey === (kpi.trend_key ?? kpi.key)}
+                onSelect={() => onMetricChange(kpi.trend_key ?? kpi.key)}
               />
             ))}
           </motion.div>

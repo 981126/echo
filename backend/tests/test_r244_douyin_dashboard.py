@@ -542,17 +542,9 @@ def test_overview_fans_kpis_and_series(db):
         "shares",
         "comments",
         "net_fans",
-        "finish_rate",
-        "interact",
-        "publish_count",
     ]
     assert "total_fans" not in cards
     assert cards["net_fans"]["value"] == -63  # 7 日周期用账号诊断
-    # 诊断专属 3 项：7 日口径有值，且没有对应逐日曲线（不可切换）
-    assert cards["finish_rate"]["value"] == 0.1316
-    assert cards["interact"]["value"] == 0.0287
-    assert cards["publish_count"]["value"] == 1
-    assert cards["finish_rate"]["trend_key"] is None
     # 净增粉丝曲线仍来自账号每日粉丝快照
     net_series = body["series"]["net_fans"]
     assert net_series["points"][-1]["value"] == -13  # 59063 - 59076
