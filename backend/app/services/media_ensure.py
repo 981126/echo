@@ -309,9 +309,19 @@ def _download_pick(
             title = post.title or post.platform_post_id
             stem = media_stem(post.platform, title, "视频")
             if source:
-                dest = unique_path(settings.videos_dir, stem, ".mp4")
-                download_platform_video(source, post.platform, dest)
-                return dest.name, post
+                for attempt in range(2):
+                    dest = unique_path(settings.videos_dir, stem, ".mp4")
+                    try:
+                        download_platform_video(source, post.platform, dest)
+                        return dest.name, post
+                    except MediaDownloadError as exc:
+                        last_error = f"{post.platform}: {str(exc)[:160]}"
+                        if attempt == 1:
+                            raise
+                        # URL 可能过期/卡住：重新解析一次最新地址再试
+                        source = fetch(
+                            post.platform, post.platform_post_id, account=account, prefer_url=""
+                        )
             # B站：TikHub 当前拿不到流（404）→ yt-dlp 直连兜底（R-078，低清视频+音频）
             if post.platform == "bilibili":
                 bvid = _bvid_of(post)

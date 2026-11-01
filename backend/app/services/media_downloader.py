@@ -41,9 +41,10 @@ def _headers(platform: str) -> dict:
 
 def _stream_to(url: str, headers: dict, dest: Path) -> None:
     """R-094：单文件整体超时兜底，卡住不再无限等待。"""
-    deadline = time.monotonic() + 480  # 8 分钟无整体进展视为卡住
+    deadline = time.monotonic() + 180  # 单 URL 最长 3 分钟；CDN 卡住交给 read timeout 切下一个地址
     try:
-        with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(connect=20, read=300, write=60, pool=20)) as client:
+        # read=45：CDN 卡住不吐数据时 45s 内抛 ReadTimeout → 切换下一个备用地址（之前 300s 会长时间卡住）
+        with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(connect=20, read=45, write=60, pool=20)) as client:
             with client.stream("GET", url, headers=headers) as resp:
                 if resp.status_code not in (200, 206):
                     raise MediaDownloadError(f"HTTP {resp.status_code} 下载失败: {url[:140]}")
