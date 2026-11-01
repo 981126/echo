@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { ImageOff } from 'lucide-react'
 import { coverThumb } from '@/lib/covers'
 import { cn } from '@/lib/utils'
-import { formatCount, formatPercent } from './format'
+import { formatPercent } from './format'
 import type { WatchPoint } from './types'
 
 const CHART_COLORS = ['var(--accent)', '#a78bfa', 'var(--warning)', 'var(--success)', '#f472b6', '#38bdf8']
@@ -108,23 +108,48 @@ const LINE_RIGHT = 14
 const LINE_TOP = 16
 const LINE_BOTTOM = 26
 
-/** 逐日趋势折线：null 断开、不插值；纵轴自动取整刻度。 */
+/** Catmull-Rom → 三次贝塞尔平滑路径（缺口处直接跨过，用平滑线过渡，不画孤立点） */
+function smoothPath(points: Array<[number, number]>): string {
+  if (points.length === 0) return ''
+  if (points.length === 1) return `M${points[0][0].toFixed(1)} ${points[0][1].toFixed(1)}`
+  const tension = 0.9
+  let d = `M${points[0][0].toFixed(1)} ${points[0][1].toFixed(1)}`
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[index - 1] ?? points[index]
+    const p1 = points[index]
+    const p2 = points[index + 1]
+    const p3 = points[index + 2] ?? p2
+    const c1x = p1[0] + ((p2[0] - p0[0]) / 6) * tension
+    const c1y = p1[1] + ((p2[1] - p0[1]) / 6) * tension
+    const c2x = p2[0] - ((p3[0] - p1[0]) / 6) * tension
+    const c2y = p2[1] - ((p3[1] - p1[1]) / 6) * tension
+    d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`
+  }
+  return d
+}
+
+/** 趋势曲线：跳过空值、用平滑线连接有效点（不在缺口处断开、不画孤立点）。 */
 export function TrendLine({
   points,
   ariaLabel,
   height = 190,
-  fillArea = false
+  fillArea = false,
+  emptyText = '暂无可绘制的数据点'
 }: {
   points: TrendLinePoint[]
   ariaLabel: string
   height?: number
   /** 抖音账号总览同款：折线下方浅色面积（默认关闭，作品详情趋势保持纯线） */
   fillArea?: boolean
+  emptyText?: string
 }) {
   const reduce = useReducedMotion()
-  const values = points.map((point) => point.value).filter((value): value is number => typeof value === 'number')
-  if (!values.length) return <Empty />
+  const valid = points
+    .map((point, index) => ({ index, value: point.value }))
+    .filter((point): point is { index: number; value: number } => typeof point.value === 'number')
+  if (valid.length < 2) return <Empty text={emptyText} />
   // 支持负值（如「净增粉丝」逐日可负数）：纵轴域 = [min, max]，0 不在底部时画零参考线
+  const values = valid.map((point) => point.value)
   const rawMax = Math.max(...values)
   const rawMin = Math.min(...values)
   const max = niceMax(Math.max(rawMax, 1))
@@ -135,19 +160,10 @@ export function TrendLine({
   const xAt = (index: number) => LINE_LEFT + (points.length <= 1 ? innerW / 2 : (index / (points.length - 1)) * innerW)
   const yAt = (value: number) => LINE_TOP + ((max - value) / span) * innerH
   const ticks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4)
-
-  // 连续有值的点连成一段，遇到 null 断开
-  const segments: Array<Array<{ index: number; value: number }>> = []
-  let segment: Array<{ index: number; value: number }> = []
-  points.forEach((point, index) => {
-    if (typeof point.value === 'number') {
-      segment.push({ index, value: point.value })
-    } else if (segment.length) {
-      segments.push(segment)
-      segment = []
-    }
-  })
-  if (segment.length) segments.push(segment)
+  const coords = valid.map((point) => [xAt(point.index), yAt(point.value)] as [number, number])
+  const linePath = smoothPath(coords)
+  const zeroY = yAt(0)
+  const areaPath = `${linePath} L${coords[coords.length - 1][0].toFixed(1)} ${zeroY.toFixed(1)} L${coords[0][0].toFixed(1)} ${zeroY.toFixed(1)} Z`
 
   return (
     <svg viewBox={`0 0 ${LINE_W} ${height}`} className="w-full" role="img" aria-label={ariaLabel}>
@@ -170,57 +186,29 @@ export function TrendLine({
           </g>
         )
       })}
-      {min < 0 ? <line x1={LINE_LEFT} x2={LINE_W - LINE_RIGHT} y1={yAt(0)} y2={yAt(0)} stroke="var(--muted-foreground)" strokeOpacity={0.55} /> : null}
-      {fillArea
-        ? segments.map((seg, index) => {
-            if (seg.length < 2) return null
-            const bottom = yAt(Math.max(0, min))
-            const first = seg[0]
-            const last = seg[seg.length - 1]
-            const areaD = [
-              `M${xAt(first.index).toFixed(1)} ${bottom.toFixed(1)}`,
-              `L${xAt(first.index).toFixed(1)} ${yAt(first.value).toFixed(1)}`,
-              ...seg.slice(1).map((point) => `L${xAt(point.index).toFixed(1)} ${yAt(point.value).toFixed(1)}`),
-              `L${xAt(last.index).toFixed(1)} ${bottom.toFixed(1)}`,
-              'Z'
-            ].join(' ')
-            return (
-              <motion.path
-                key={`area-${index}`}
-                d={areaD}
-                fill="var(--accent)"
-                fillOpacity={0.1}
-                stroke="none"
-                initial={reduce ? false : { opacity: 0.7 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.4 }}
-              />
-            )
-          })
-        : null}
-      {segments.map((seg, index) =>
-        seg.length > 1 ? (
-          <motion.path
-            key={`line-${index}`}
-            d={seg.map((point, i) => `${i ? 'L' : 'M'}${xAt(point.index).toFixed(1)} ${yAt(point.value).toFixed(1)}`).join(' ')}
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            initial={reduce ? false : { opacity: 0.65 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3 }}
-          />
-        ) : null
-      )}
-      {segments.map((seg) =>
-        seg.map((point) => (
-          <circle key={`dot-${point.index}`} cx={xAt(point.index)} cy={yAt(point.value)} r={2.6} fill="var(--accent)">
-            <title>{`${points[point.index].label}：${formatCount(point.value)}`}</title>
-          </circle>
-        ))
-      )}
+      {min < 0 ? <line x1={LINE_LEFT} x2={LINE_W - LINE_RIGHT} y1={zeroY} y2={zeroY} stroke="var(--muted-foreground)" strokeOpacity={0.55} /> : null}
+      {fillArea ? (
+        <motion.path
+          d={areaPath}
+          fill="var(--accent)"
+          fillOpacity={0.1}
+          stroke="none"
+          initial={reduce ? false : { opacity: 0.7 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
+        />
+      ) : null}
+      <motion.path
+        d={linePath}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        initial={reduce ? false : { opacity: 0.65 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.3 }}
+      />
       {points.map((point, index) => {
         // 长周期（14/30/90 天）横轴只显示约 7 个日期，避免标签重叠
         const step = Math.max(1, Math.ceil(points.length / 7))

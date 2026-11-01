@@ -76,25 +76,22 @@ function KpiCardView({
         active && 'bg-accent-soft/40'
       )}
     >
-      <div className={cn('flex items-center justify-between gap-1 text-xs text-muted-foreground', active && 'text-foreground')}>
-        <span>{kpi.label}</span>
-        <span className={cn('text-[10px] text-accent opacity-0 transition-opacity group-hover:opacity-100', active && 'opacity-100')}>
-          看趋势
-        </span>
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className={cn('tnum text-2xl font-semibold tracking-tight', active && 'text-accent')}>{valueText}</span>
-        {kpi.available ? (
-          deltaText ? (
-            <span className={cn('text-xs', deltaToneClass(kpi.delta))}>{deltaText}</span>
-          ) : kpi.note ? (
-            <span className="text-[11px] leading-4 text-muted-foreground">{kpi.note}</span>
-          ) : null
-        ) : (
-          <span className="text-[11px] leading-4 text-muted-foreground">{missingNote}</span>
+      {/* 上：指标名 / 中：数字 / 下：较前 N 日对比 */}
+      <div className={cn('text-xs text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
+      <div className={cn('tnum mt-1.5 text-2xl font-semibold leading-8 tracking-tight', active && 'text-accent')}>{valueText}</div>
+      <div
+        className={cn(
+          'mt-1 text-xs leading-4',
+          kpi.available ? (deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground') : 'text-muted-foreground'
         )}
+      >
+        {kpi.available ? deltaText || kpi.note || '\u00a0' : missingNote}
       </div>
-      {kpi.available && similarText ? <div className="mt-1 text-[11px] text-muted-foreground">{similarText}</div> : null}
+      {kpi.available && similarText ? (
+        <div className="mt-0.5 text-[10px] leading-4 text-muted-foreground" title={similarText}>
+          {similarText}
+        </div>
+      ) : null}
       <span className={cn('mt-2 block h-0.5 rounded-full transition-colors', active ? 'bg-accent' : 'bg-transparent')} />
     </button>
   )
@@ -126,8 +123,39 @@ function AccountOverview({
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
       <div className="space-y-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold">数据中心</h2>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Avatar className="h-9 w-9">
+              {account?.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}
+              <AvatarFallback>{account?.nickname.slice(0, 1) ?? '?'}</AvatarFallback>
+            </Avatar>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="max-w-[280px] truncate text-base font-semibold">{account?.nickname ?? '未绑定抖音账号'}</span>
+              <Badge variant={data.private_available ? 'success' : 'secondary'} className="shrink-0">
+                {data.private_available ? '创作者数据可用' : '仅公开数据'}
+              </Badge>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" disabled={busy} onClick={onRefresh}>
+            {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+            {busy ? '更新中…' : '更新数据'}
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <span>统计周期</span>
+            <Select value={String(periodDays)} onValueChange={(value) => onPeriodChange(Number(value) as PeriodDays)}>
+              <SelectTrigger className="h-8 w-[104px] text-xs" aria-label="统计周期">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {([7, 14, 30, 90] as const).map((days) => (
+                  <SelectItem key={days} value={String(days)}>
+                    近 {days} 日
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -142,44 +170,10 @@ function AccountOverview({
                 数据来自 TikHub 抖音创作者接口。统计周期可选 7/14/30/90 天：播放量/粉丝净增只在 7 日周期用官方账号诊断口径，其它周期与其它指标取本地每日快照差值（只覆盖近 120 天发布且已同步的作品，与抖音官方全账号口径可能不同）。点击任一指标可切换下方趋势曲线。
               </TooltipContent>
             </Tooltip>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">统计周期</span>
-              <Select value={String(periodDays)} onValueChange={(value) => onPeriodChange(Number(value) as PeriodDays)}>
-                <SelectTrigger className="h-8 w-[104px] text-xs" aria-label="统计周期">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {([7, 14, 30, 90] as const).map((days) => (
-                    <SelectItem key={days} value={String(days)}>
-                      近 {days} 日
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
-          <Button variant="outline" size="sm" disabled={busy} onClick={onRefresh}>
-            {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-            {busy ? '更新中…' : '更新数据'}
-          </Button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <span>
             数据更新至：<span className="text-foreground">{formatDateTime(diagnosis?.captured_at)}</span>
           </span>
-          {account ? (
-            <span className="flex min-w-0 items-center gap-1.5">
-              <Avatar className="h-6 w-6">
-                {account.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}
-                <AvatarFallback>{account.nickname.slice(0, 1)}</AvatarFallback>
-              </Avatar>
-              <span className="max-w-[220px] truncate font-medium text-foreground">{account.nickname}</span>
-              <Badge variant={data.private_available ? 'success' : 'secondary'} className="shrink-0">
-                {data.private_available ? '创作者数据可用' : '仅公开数据'}
-              </Badge>
-            </span>
-          ) : null}
         </div>
 
         <div>
@@ -189,17 +183,20 @@ function AccountOverview({
               {chartLabel}
             </span>
           </div>
-          {series && points.some((point) => point.value !== null) ? (
+          {series && points.filter((point) => point.value !== null).length >= 2 ? (
             <div className="mt-1">
               <TrendLine points={points} ariaLabel={`${chartLabel}趋势`} fillArea />
             </div>
           ) : (
-            <Empty className="mt-2" text="该指标在当前统计周期暂无快照数据：需要至少 2 天同步记录" />
+            <Empty
+              className="mt-2"
+              text={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
+            />
           )}
           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
             {series?.mode === 'cumulative'
               ? '总粉丝量：账号每日快照的累计值。'
-              : '每日新增：由相邻两次同步快照的差值计算；缺口日期表示当天算不出增量（不补 0）。'}
+              : '每日新增：由相邻两次同步快照的差值计算；中间缺口直接平滑连线跨过（不补 0、不画孤立点）。'}
           </p>
         </div>
 

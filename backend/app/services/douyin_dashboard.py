@@ -472,8 +472,19 @@ def _fan_window_delta(fan_series: list[tuple[str, int]], start: date, end: date)
     return values[-1][1] - values[0][1], 1, [day for day, _ in values]
 
 
+def _is_next_day(before_day: str, day: str) -> bool:
+    try:
+        return (date.fromisoformat(day) - date.fromisoformat(before_day)).days == 1
+    except ValueError:
+        return False
+
+
 def _post_trend_buckets(series: dict[int, dict[str, dict]], field: str, start: date, end: date) -> dict[str, int]:
-    """把每条作品「相邻两次快照的增量」记到后一天，得到某指标的逐日新增。"""
+    """某指标的逐日新增：只统计「相邻两天」都有快照的差值。
+
+    跨天缺口（历史同步不是每天都有）不把多天增量摊到某一天，避免「一天涨 2,000」这类虚高；
+    缺口在曲线上表现为无点，由前端平滑连线跨过。
+    """
     start_s, end_s = start.isoformat(), end.isoformat()
     buckets: dict[str, int] = {}
     for post_series in series.values():
@@ -483,19 +494,19 @@ def _post_trend_buckets(series: dict[int, dict[str, dict]], field: str, start: d
             if value.get(field) is not None
         ]
         for (before_day, before), (day, after) in zip(values, values[1:]):
-            # 两端都落在统计周期内才算「本周期新增」，保证曲线逐日之和 = 指标卡合计
-            if before_day < start_s or day > end_s:
+            # 两端都落在统计周期内、且是相邻两天，才算「当日新增」
+            if before_day < start_s or day > end_s or not _is_next_day(before_day, day):
                 continue
             buckets[day] = buckets.get(day, 0) + max(0, int(after) - int(before))
     return buckets
 
 
 def _fan_net_buckets(fan_series: list[tuple[str, int]], start: date, end: date) -> dict[str, int]:
-    """粉丝逐日净增（可为负，记到后一天）。"""
+    """粉丝逐日净增（可为负）：只统计相邻两天的快照差值，跨天缺口不摊到单日。"""
     start_s, end_s = start.isoformat(), end.isoformat()
     buckets: dict[str, int] = {}
     for (before_day, before), (day, after) in zip(fan_series, fan_series[1:]):
-        if before_day < start_s or day > end_s:
+        if before_day < start_s or day > end_s or not _is_next_day(before_day, day):
             continue
         buckets[day] = after - before
     return buckets
@@ -656,7 +667,7 @@ def _kpi_cards(snapshot: dict, diagnosis: dict | None, days: int) -> list[dict]:
                     "rank": official.get("rank"),
                     "available": True,
                     "coverage": None,
-                    "note": f"较前 {days} 日：TikHub 诊断接口不返回上期数据",
+                    "note": f"较前 {days} 日：诊断接口无上期数据",
                 }
             )
         else:
