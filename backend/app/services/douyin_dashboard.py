@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta
 from math import ceil
 from typing import Any
@@ -41,7 +42,7 @@ from .platform.tikhub import TikHubBusinessError
 OVERVIEW_KV = "douyin_dashboard:overview:{account_id}"
 OVERVIEW_TTL_HOURS = 24
 DETAIL_TTL_HOURS = 6
-OVERVIEW_REQUESTS = 5  # 诊断 1 + 垂类 1 + 投稿概览 1 + 作品快照 2
+OVERVIEW_REQUESTS = 3  # 诊断 1 + 作品快照 2（投稿概览已不展示，2026-11-01 起不再请求）
 POST_REQUESTS = 8  # 作品私有指标 5 + 观众画像 1 + 受众兴趣 1 + 评论 1
 
 # 状态映射（证据见设计 5.6：真实响应 review.status=2/visibility.status=1 为通过，
@@ -80,17 +81,7 @@ DIAGNOSIS_FIELDS = {
     "publish_count": "PublishActivation",
 }
 
-ANALYSIS_FIELDS = [
-    ("median_plays", "条均播放量（中位数）", "median_play_count", "次", "int"),
-    ("avg_like", "条均点赞", "average_like_count_per_video", "次", "int"),
-    ("avg_comment", "条均评论", "average_comment_count_per_video", "条", "int"),
-    ("avg_share", "条均分享", "average_share_count_per_video", "次", "int"),
-    ("avg_play_seconds", "条均播放时长", "average_play_duration", "秒", "num"),
-    ("bounce_2s_rate", "条均 2s 跳出率", "bounce_rate_2s", "ratio", "rate"),
-    ("finish_5s_rate", "条均 5s 完播率", "completion_rate_5s", "ratio", "rate"),
-    ("cover_click_rate", "条均点击率", "cover_click_ratio", "ratio", "rate"),
-    ("submission_count", "周期投稿量", "submission_count", "篇", "int"),
-]
+
 
 _CJK = re.compile(r"[\u4e00-\u9fff]+")
 _URL_RE = re.compile(r"https?://\S+")
@@ -353,43 +344,6 @@ def normalize_diagnosis(body: dict) -> dict | None:
     return {"metrics": metrics, "similar_count": similar_count}
 
 
-def normalize_analysis(body: dict) -> dict | None:
-    """fetch_item_analysis_overview → {items: [{key,label,value,unit}]}。"""
-    if not isinstance(body, dict):
-        return None
-    data = body.get("data")
-    if not isinstance(data, dict):
-        return None
-    items: list[dict] = []
-    for key, label, raw_key, unit, kind in ANALYSIS_FIELDS:
-        node = data.get(raw_key)
-        if not isinstance(node, dict):
-            continue
-        value = node.get("metric_value")
-        parsed = _rate(value) if kind == "rate" else (_int(value) if kind == "int" else _num(value))
-        if parsed is None:
-            continue
-        items.append({"key": key, "label": label, "value": parsed, "unit": unit})
-    if not items:
-        return None
-    return {"items": items}
-
-
-def _verticals(body: dict) -> list[str]:
-    if not isinstance(body, dict):
-        return []
-    data = body.get("data")
-    if not isinstance(data, dict):
-        return []
-    values = data.get("primary_verticals")
-    if not isinstance(values, list):
-        return []
-    return [str(x) for x in values if isinstance(x, str) and x.strip()]
-
-
-# ---------- 账号 7 日 KPI 与逐日趋势 ----------
-
-
 _COUNTER_FIELDS = ("plays", "likes", "comments", "shares", "profile_visits")
 
 
@@ -409,9 +363,27 @@ def _clean_counter_series(series: dict[int, dict[str, dict]]) -> None:
                     del day[field]
 
 
-def _account_series(db: Session, account_id: int, days: int = 14) -> dict[int, dict[str, dict]]:
-    """{post_id: {date: {field: value}}}，仅取最近 days 天的快照。"""
-    start = (_app_now().date() - timedelta(days=days)).isoformat()
+PERIOD_DAYS = (7, 14, 30, 90)
+PERIOD_LABELS = {7: "近 7 日", 14: "近 14 日", 30: "近 30 日", 90: "近 90 日"}
+
+# 指标卡与曲线共用：作品维度指标（本地快照差值） + 账号维度粉丝指标
+METRIC_SPECS: list[tuple[str, str, str, str]] = [
+    # (key, label, 快照字段, 单位)
+    ("plays", "播放量", "plays", "次"),
+    ("homepage_visits", "主页访问量", "profile_visits", "次"),
+    ("likes", "作品点赞", "likes", "次"),
+    ("shares", "作品分享", "shares", "次"),
+    ("comments", "作品评论", "comments", "条"),
+    ("net_fans", "净增粉丝", "net_fans", "人"),
+    ("total_fans", "总粉丝量", "followers", "人"),
+]
+METRIC_MAP = {key: (label, field, unit) for key, label, field, unit in METRIC_SPECS}
+POST_METRIC_KEYS = ("plays", "homepage_visits", "likes", "shares", "comments")
+
+
+def _account_series(db: Session, account_id: int, start: date) -> dict[int, dict[str, dict]]:
+    """{post_id: {date: {field: value}}}，取 start 起（含之前周期）的作品快照。"""
+    start_s = start.isoformat()
     series: dict[int, dict[str, dict]] = {}
     stat_rows = (
         db.query(
@@ -426,13 +398,11 @@ def _account_series(db: Session, account_id: int, days: int = 14) -> dict[int, d
         .filter(
             PlatformPost.account_id == account_id,
             PlatformPost.platform == "douyin",
-            PlatformPostStat.stat_date >= start,
+            PlatformPostStat.stat_date >= start_s,
         )
         .all()
     )
-    # 快照有效性：某天公开统计全为 0（plays/likes/comments/shares）视为无效快照。
-    # 历史数据里出现过「同步失败写 0」的行（如 2026-10-29 的 15 条），若把 0 当基线会产生
-    # 几十万级别的假增量；这里直接丢弃该天，同天创作者指标（主页访问量）一并不参与差值。
+    # 快照有效性：某天公开统计全为 0 视为无效快照（历史同步失败写 0），不参与差值。
     invalid: set[tuple[int, str]] = set()
     for post_id, stat_date, plays, likes, comments, shares in stat_rows:
         values = {
@@ -449,7 +419,7 @@ def _account_series(db: Session, account_id: int, days: int = 14) -> dict[int, d
     metric_rows = (
         db.query(DouyinPostMetric.post_id, DouyinPostMetric.snapshot_date, DouyinPostMetric.profile_visits)
         .join(PlatformPost, PlatformPost.id == DouyinPostMetric.post_id)
-        .filter(PlatformPost.account_id == account_id, PlatformPost.platform == "douyin", DouyinPostMetric.snapshot_date >= start)
+        .filter(PlatformPost.account_id == account_id, PlatformPost.platform == "douyin", DouyinPostMetric.snapshot_date >= start_s)
         .all()
     )
     for post_id, snapshot_date, profile_visits in metric_rows:
@@ -460,6 +430,17 @@ def _account_series(db: Session, account_id: int, days: int = 14) -> dict[int, d
         )
     _clean_counter_series(series)
     return series
+
+
+def _fan_series(db: Session, account_id: int, start: date) -> list[tuple[str, int]]:
+    """账号粉丝数每日快照（总粉丝量曲线 / 净增粉丝曲线的数据源）。"""
+    rows = (
+        db.query(CreatorAccountSnapshot.snapshot_date, CreatorAccountSnapshot.followers)
+        .filter(CreatorAccountSnapshot.account_id == account_id, CreatorAccountSnapshot.snapshot_date >= start.isoformat())
+        .order_by(CreatorAccountSnapshot.snapshot_date)
+        .all()
+    )
+    return [(str(snapshot_date), int(followers or 0)) for snapshot_date, followers in rows]
 
 
 def _window_delta(series: dict[int, dict[str, dict]], field: str, start: date, end: date) -> tuple[int, int, list[str]]:
@@ -482,35 +463,66 @@ def _window_delta(series: dict[int, dict[str, dict]], field: str, start: date, e
     return total, covered, sorted(dates)
 
 
-def _daily_added(series: dict[int, dict[str, dict]], field: str, today: date) -> list[dict]:
-    points: list[dict] = []
-    for offset in range(6, -1, -1):
-        day = today - timedelta(days=offset)
-        prev = day - timedelta(days=1)
-        total = 0
-        covered = 0
-        for post_series in series.values():
-            current = post_series.get(day.isoformat(), {}).get(field)
-            previous = post_series.get(prev.isoformat(), {}).get(field)
-            if current is None or previous is None:
+def _fan_window_delta(fan_series: list[tuple[str, int]], start: date, end: date) -> tuple[int, int, list[str]]:
+    """区间粉丝净增（可为负）；返回 (净增, 是否有可比数据(0/1), 覆盖日期)。"""
+    start_s, end_s = start.isoformat(), end.isoformat()
+    values = [(day, followers) for day, followers in fan_series if start_s <= day <= end_s]
+    if len(values) < 2:
+        return 0, 0, [day for day, _ in values]
+    return values[-1][1] - values[0][1], 1, [day for day, _ in values]
+
+
+def _post_trend_buckets(series: dict[int, dict[str, dict]], field: str, start: date, end: date) -> dict[str, int]:
+    """把每条作品「相邻两次快照的增量」记到后一天，得到某指标的逐日新增。"""
+    start_s, end_s = start.isoformat(), end.isoformat()
+    buckets: dict[str, int] = {}
+    for post_series in series.values():
+        values = [
+            (stat_date, value[field])
+            for stat_date, value in sorted(post_series.items())
+            if value.get(field) is not None
+        ]
+        for (before_day, before), (day, after) in zip(values, values[1:]):
+            # 两端都落在统计周期内才算「本周期新增」，保证曲线逐日之和 = 指标卡合计
+            if before_day < start_s or day > end_s:
                 continue
-            total += max(0, int(current) - int(previous))
-            covered += 1
-        points.append({"date": day.isoformat(), "value": total if covered else None})
-    return points
+            buckets[day] = buckets.get(day, 0) + max(0, int(after) - int(before))
+    return buckets
 
 
-def account_kpis(db: Session, account_id: int, today: date | None = None) -> dict:
-    """近 7 日快照 KPI（主页访问量/点赞/分享/评论）+ 逐日播放趋势。"""
+def _fan_net_buckets(fan_series: list[tuple[str, int]], start: date, end: date) -> dict[str, int]:
+    """粉丝逐日净增（可为负，记到后一天）。"""
+    start_s, end_s = start.isoformat(), end.isoformat()
+    buckets: dict[str, int] = {}
+    for (before_day, before), (day, after) in zip(fan_series, fan_series[1:]):
+        if before_day < start_s or day > end_s:
+            continue
+        buckets[day] = after - before
+    return buckets
+
+
+def _period_days(days: int, today: date) -> list[date]:
+    return [today - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+
+
+def _series_points(days: list[date], values: Mapping[str, int | None]) -> list[dict]:
+    return [{"date": day.isoformat(), "value": values.get(day.isoformat())} for day in days]
+
+
+def account_kpis(db: Session, account_id: int, days: int = 7, today: date | None = None) -> dict:
+    """账号总览：任意统计周期（7/14/30/90 天）的 KPI 合计、较前周期对比与逐日曲线序列。"""
     today = today or _app_now().date()
-    series = _account_series(db, account_id)
-    cur_start, cur_end = today - timedelta(days=6), today
-    prev_start, prev_end = today - timedelta(days=13), today - timedelta(days=7)
+    days = days if days in PERIOD_DAYS else 7
+    start = today - timedelta(days=days - 1)
+    fetch_start = today - timedelta(days=2 * days - 1)
+    prev_start, prev_end = fetch_start, today - timedelta(days=days)
+    series = _account_series(db, account_id, fetch_start)
+    fan_series = _fan_series(db, account_id, fetch_start)
 
     fields: dict[str, dict] = {}
-    for key in ("homepage_visits", "likes", "shares", "comments"):
-        field = "profile_visits" if key == "homepage_visits" else key
-        total, covered, dates = _window_delta(series, field, cur_start, cur_end)
+    for key in POST_METRIC_KEYS:
+        field = METRIC_MAP[key][1]
+        total, covered, dates = _window_delta(series, field, start, today)
         prev_total, prev_covered, prev_dates = _window_delta(series, field, prev_start, prev_end)
         delta = None
         if covered and prev_covered and prev_covered >= ceil(covered * 0.5):
@@ -525,41 +537,86 @@ def account_kpis(db: Session, account_id: int, today: date | None = None) -> dic
             "prev_dates": prev_dates,
         }
 
-    trend_points = _daily_added(series, "plays", today)
-    trend_dates = sorted({day for post_series in series.values() for day in post_series})
-    trend_covered = 0
-    for post_series in series.values():
-        keys = [day for day in post_series if (today - timedelta(days=7)).isoformat() <= day <= today.isoformat()]
-        if len(keys) >= 2:
-            trend_covered += 1
-    trend_available = sum(1 for point in trend_points if point["value"] is not None) >= 2
+    net, net_covered, net_dates = _fan_window_delta(fan_series, start, today)
+    prev_net, prev_net_covered, prev_net_dates = _fan_window_delta(fan_series, prev_start, prev_end)
+    fields["net_fans"] = {
+        "value": net if net_covered else None,
+        "prev": prev_net if prev_net_covered else None,
+        "delta": (net - prev_net) if (net_covered and prev_net_covered) else None,
+        "covered": net_covered,
+        "prev_covered": prev_net_covered,
+        "dates": net_dates,
+        "prev_dates": prev_net_dates,
+    }
+
+    latest = (
+        db.query(CreatorAccountSnapshot)
+        .filter_by(account_id=account_id)
+        .order_by(CreatorAccountSnapshot.snapshot_date.desc())
+        .first()
+    )
+    fields["total_fans"] = {
+        "value": int(latest.followers) if latest is not None else None,
+        "prev": None,
+        "delta": None,
+        "covered": 1 if latest is not None else 0,
+        "prev_covered": 0,
+        "dates": [latest.snapshot_date] if latest is not None else [],
+        "prev_dates": [],
+    }
+
+    days_list = _period_days(days, today)
+    series_out: dict[str, dict] = {}
+    for key in POST_METRIC_KEYS:
+        label, field, unit = METRIC_MAP[key]
+        buckets = _post_trend_buckets(series, field, start, today)
+        series_out[key] = {
+            "key": key,
+            "label": label,
+            "unit": unit,
+            "mode": "daily",
+            "points": _series_points(days_list, buckets),
+        }
+    net_buckets = _fan_net_buckets(fan_series, start, today)
+    series_out["net_fans"] = {
+        "key": "net_fans",
+        "label": "净增粉丝",
+        "unit": "人",
+        "mode": "daily",
+        "points": _series_points(days_list, net_buckets),
+    }
+    fan_map = {day: followers for day, followers in fan_series if start.isoformat() <= day <= today.isoformat()}
+    series_out["total_fans"] = {
+        "key": "total_fans",
+        "label": "总粉丝量",
+        "unit": "人",
+        "mode": "cumulative",
+        "points": _series_points(days_list, fan_map),
+    }
     return {
+        "period": {"start": start.isoformat(), "end": today.isoformat(), "days": days, "label": PERIOD_LABELS[days]},
         "fields": fields,
-        "trend": {
-            "available": trend_available,
-            "points": trend_points,
-            "note": ""
-            if trend_available
-            else f"数据积累中：需要至少 2 天相邻快照，当前已有 {len(trend_dates)} 天",
-            "coverage": {"posts": trend_covered, "dates": trend_dates},
-        },
+        "series": series_out,
     }
 
 
-def _kpi_cards(snapshot: dict, diagnosis: dict | None) -> list[dict]:
+def _kpi_cards(snapshot: dict, diagnosis: dict | None, days: int) -> list[dict]:
+    """7 个指标卡：播放量/主页访问量/作品点赞/作品分享/作品评论/净增粉丝/总粉丝量（一行 4 个显示）。"""
     metrics = (diagnosis or {}).get("metrics") or {}
 
     def diag(key: str) -> dict:
         value = metrics.get(key)
         return value if isinstance(value, dict) else {}
 
-    def snapshot_card(key: str, label: str) -> dict:
+    def snapshot_card(key: str, label: str, unit: str) -> dict:
         item = snapshot["fields"].get(key) or {}
         covered = int(item.get("covered") or 0)
         dates = item.get("dates") or []
         return {
             "key": key,
             "label": label,
+            "unit": unit,
+            "trend_key": key,
             "value": item.get("value"),
             "prev": item.get("prev"),
             "delta": item.get("delta"),
@@ -573,40 +630,58 @@ def _kpi_cards(snapshot: dict, diagnosis: dict | None) -> list[dict]:
             else f"数据积累中（已有 {len(dates)} 天快照，至少需要 2 天）",
         }
 
-    plays = diag("plays")
-    new_fans = diag("new_fans")
-    return [
+    cards: list[dict] = []
+    # 播放量/净增粉丝：仅 7 日周期有官方诊断口径；其它周期用本地快照
+    for key, label, unit, diag_key in (
+        ("plays", "播放量", "次", "plays"),
+        ("homepage_visits", "主页访问量", "次", None),
+        ("likes", "作品点赞", "次", None),
+        ("shares", "作品分享", "次", None),
+        ("comments", "作品评论", "条", None),
+        ("net_fans", "净增粉丝", "人", "new_fans"),
+    ):
+        official = diag(diag_key) if (diag_key and days == 7) else {}
+        if official.get("own") is not None:
+            cards.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "unit": unit,
+                    "trend_key": key,
+                    "value": official.get("own"),
+                    "prev": None,
+                    "delta": None,
+                    "source": "diagnosis",
+                    "similar": official.get("similar"),
+                    "rank": official.get("rank"),
+                    "available": True,
+                    "coverage": None,
+                    "note": f"较前 {days} 日：TikHub 诊断接口不返回上期数据",
+                }
+            )
+        else:
+            cards.append(snapshot_card(key, label, unit))
+
+    total_item = snapshot["fields"].get("total_fans") or {}
+    total_dates = total_item.get("dates") or []
+    cards.append(
         {
-            "key": "plays",
-            "label": "播放量",
-            "value": plays.get("own"),
+            "key": "total_fans",
+            "label": "总粉丝量",
+            "unit": "人",
+            "trend_key": "total_fans",
+            "value": total_item.get("value"),
             "prev": None,
             "delta": None,
-            "source": "diagnosis",
-            "similar": plays.get("similar"),
-            "rank": plays.get("rank"),
-            "available": plays.get("own") is not None,
-            "coverage": None,
-            "note": "较前 7 日：TikHub 诊断接口不返回上期数据",
-        },
-        snapshot_card("homepage_visits", "主页访问量"),
-        snapshot_card("likes", "作品点赞"),
-        snapshot_card("shares", "作品分享"),
-        snapshot_card("comments", "作品评论"),
-        {
-            "key": "new_fans",
-            "label": "净增粉丝",
-            "value": new_fans.get("own"),
-            "prev": None,
-            "delta": None,
-            "source": "diagnosis",
-            "similar": new_fans.get("similar"),
-            "rank": new_fans.get("rank"),
-            "available": new_fans.get("own") is not None,
-            "coverage": None,
-            "note": "较前 7 日：TikHub 诊断接口不返回上期数据",
-        },
-    ]
+            "source": "snapshot",
+            "similar": None,
+            "rank": None,
+            "available": total_item.get("value") is not None,
+            "coverage": {"posts": 0, "dates": total_dates},
+            "note": f"快照 {total_dates[0]}" if total_dates else "暂无数据",
+        }
+    )
+    return cards
 
 
 # ---------- 账号总览缓存 ----------
@@ -628,43 +703,13 @@ def _write_overview_cache(db: Session, account_id: int, payload: dict) -> None:
     db.commit()
 
 
-def _fans_block(db: Session, account_id: int, diagnosis: dict | None) -> dict:
-    """粉丝数据（与播放数据同一区块）：总粉丝量 = 本地账号每日快照；净增 = 账号诊断 NewFans。
-
-    吸粉量/脱粉量/回访粉丝量：TikHub 创作者接口不提供账号级粉丝流水，明确返回 null，
-    由页面显示「暂无数据」，不用作品维度的涨粉/脱粉去凑（口径不同会与净增对不上）。
-    """
-    snapshot = (
-        db.query(CreatorAccountSnapshot)
-        .filter_by(account_id=account_id)
-        .order_by(CreatorAccountSnapshot.snapshot_date.desc())
-        .first()
-    )
-    metrics = (diagnosis or {}).get("metrics") or {}
-    raw_new_fans = metrics.get("new_fans")
-    new_fans = raw_new_fans if isinstance(raw_new_fans, dict) else {}
-    return {
-        "total": {
-            "value": int(snapshot.followers) if snapshot is not None else None,
-            "date": snapshot.snapshot_date if snapshot is not None else None,
-        },
-        "net": {
-            "value": new_fans.get("own"),
-            "similar": new_fans.get("similar"),
-            "rank": new_fans.get("rank"),
-        },
-        "acquired": None,
-        "lost": None,
-        "returning": None,
-        "unavailable": ["吸粉量", "脱粉量", "回访粉丝量"],
-        "note": "总粉丝量取本地账号每日快照；粉丝净增取账号诊断。吸粉量/脱粉量/回访粉丝量：TikHub 未提供账号级粉丝流水接口，暂无数据。",
-    }
-
-
 # ---------- 账号总览 ----------
 
 
-def overview(db: Session) -> dict:
+def overview(db: Session, period_days: int = 7) -> dict:
+    """账号总览（period_days ∈ 7/14/30/90）：诊断缓存 + 本地快照 KPI/各指标逐日曲线。"""
+    if period_days not in PERIOD_DAYS:
+        raise ValueError(f"统计周期只支持 {'/'.join(str(x) for x in PERIOD_DAYS)} 天")
     ctx = _resolve(db)
     account: CreatorAccount | None = ctx["account"]
     policy = ctx["policy"]
@@ -676,10 +721,8 @@ def overview(db: Session) -> dict:
         "blocked_reason": ctx["blocked_reason"],
         "period": None,
         "diagnosis": None,
-        "analysis": None,
         "kpis": [],
-        "fans": None,
-        "trend": {"available": False, "points": [], "note": "", "coverage": {"posts": 0, "dates": []}},
+        "series": {},
         "needs_refresh": True,
         "stale": True,
         "updating_task_id": None,
@@ -692,34 +735,22 @@ def overview(db: Session) -> dict:
     today = now.date()
     cache = _read_overview_cache(db, account.id)
     diagnosis = cache.get("diagnosis") if isinstance(cache.get("diagnosis"), dict) else None
-    analysis = cache.get("analysis") if isinstance(cache.get("analysis"), dict) else None
     diagnosis_at = _parse_dt(cache.get("diagnosis_at"))
-    analysis_at = _parse_dt(cache.get("analysis_at"))
     stale = diagnosis_at is None or (now - diagnosis_at) > timedelta(hours=OVERVIEW_TTL_HOURS)
 
-    snapshot = account_kpis(db, account.id, today=today)
+    snapshot = account_kpis(db, account.id, days=period_days, today=today)
     warnings = [str(x) for x in (cache.get("warnings") or []) if isinstance(x, str)]
     result.update(
         {
-            "period": {
-                "start": (today - timedelta(days=6)).isoformat(),
-                "end": today.isoformat(),
-                "label": "近 7 日",
-            },
+            "period": snapshot["period"],
             "diagnosis": {
                 "available": bool(diagnosis and diagnosis.get("metrics")),
                 "captured_at": _iso(diagnosis_at),
                 "similar_count": (diagnosis or {}).get("similar_count"),
                 **(diagnosis or {}).get("metrics", {}),
             },
-            "analysis": {
-                "available": bool(analysis and analysis.get("items")),
-                "captured_at": _iso(analysis_at),
-                "items": (analysis or {}).get("items", []),
-            },
-            "kpis": _kpi_cards(snapshot, diagnosis),
-            "fans": _fans_block(db, account.id, diagnosis),
-            "trend": snapshot["trend"],
+            "kpis": _kpi_cards(snapshot, diagnosis, period_days),
+            "series": snapshot["series"],
             "needs_refresh": stale,
             "stale": stale,
             "updating_task_id": _running_task("douyin_dashboard_overview", {"account_id": account.id}),
@@ -1302,39 +1333,12 @@ def overview_worker(db: Session, payload: dict, update) -> dict:
     before = client.requests_used
     warnings: list[str] = []
     diagnosis = None
-    analysis = None
-    verticals: list[str] = []
-    period_start = _app_now().date() - timedelta(days=6)
-    period_end = _app_now().date()
     try:
         cookie = _cookie(db, account.id, client)
         update(10, "正在获取账号诊断")
         diagnosis = normalize_diagnosis(client.fetch_douyin_author_diagnosis(cookie=cookie))
         if diagnosis is None:
             warnings.append("账号诊断返回为空，保留上次数据")
-        update(30, "正在获取投稿概览")
-        try:
-            verticals = _verticals(
-                client.fetch_douyin_item_analysis_verticals(
-                    cookie=cookie,
-                    start_date=period_start.strftime("%Y%m%d"),
-                    end_date=period_end.strftime("%Y%m%d"),
-                )
-            )
-            analysis = normalize_analysis(
-                client.fetch_douyin_item_analysis_overview(
-                    cookie=cookie,
-                    start_date=period_start.strftime("%Y%m%d"),
-                    end_date=period_end.strftime("%Y%m%d"),
-                    primary_verticals=verticals,
-                )
-            )
-        except (TikHubBusinessError, CredentialError) as exc:
-            if is_auth_failure(exc):
-                raise
-            warnings.append(f"投稿概览获取失败：{_safe_error(exc)}")
-        except Exception as exc:  # noqa: BLE001 投稿概览失败不阻断账号诊断
-            warnings.append(f"投稿概览获取失败：{_safe_error(exc)}")
     except Exception as exc:
         auth = is_auth_failure(exc)
         message = _credential_message(exc) if isinstance(exc, (TikHubBusinessError, CredentialError)) else str(exc)
@@ -1360,11 +1364,7 @@ def overview_worker(db: Session, payload: dict, update) -> dict:
         account.id,
         {
             "diagnosis": diagnosis if diagnosis is not None else cache.get("diagnosis"),
-            "analysis": analysis if analysis is not None else cache.get("analysis"),
             "diagnosis_at": now_iso if diagnosis is not None else cache.get("diagnosis_at"),
-            "analysis_at": now_iso if analysis is not None else cache.get("analysis_at"),
-            "period": {"start": period_start.isoformat(), "end": period_end.isoformat()},
-            "verticals": verticals,
             "warnings": warnings,
         },
     )

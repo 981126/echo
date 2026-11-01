@@ -124,11 +124,17 @@ export function TrendLine({
   const reduce = useReducedMotion()
   const values = points.map((point) => point.value).filter((value): value is number => typeof value === 'number')
   if (!values.length) return <Empty />
-  const max = niceMax(Math.max(...values))
+  // 支持负值（如「净增粉丝」逐日可负数）：纵轴域 = [min, max]，0 不在底部时画零参考线
+  const rawMax = Math.max(...values)
+  const rawMin = Math.min(...values)
+  const max = niceMax(Math.max(rawMax, 1))
+  const min = rawMin < 0 ? -niceMax(-rawMin) : 0
+  const span = max - min || 1
   const innerW = LINE_W - LINE_LEFT - LINE_RIGHT
   const innerH = height - LINE_TOP - LINE_BOTTOM
   const xAt = (index: number) => LINE_LEFT + (points.length <= 1 ? innerW / 2 : (index / (points.length - 1)) * innerW)
-  const yAt = (value: number) => LINE_TOP + (1 - value / max) * innerH
+  const yAt = (value: number) => LINE_TOP + ((max - value) / span) * innerH
+  const ticks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4)
 
   // 连续有值的点连成一段，遇到 null 断开
   const segments: Array<Array<{ index: number; value: number }>> = []
@@ -146,21 +152,29 @@ export function TrendLine({
   return (
     <svg viewBox={`0 0 ${LINE_W} ${height}`} className="w-full" role="img" aria-label={ariaLabel}>
       <title>{ariaLabel}</title>
-      {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-        const y = LINE_TOP + (1 - ratio) * innerH
+      {ticks.map((tick, index) => {
+        const y = yAt(tick)
         return (
-          <g key={ratio}>
-            <line x1={LINE_LEFT} x2={LINE_W - LINE_RIGHT} y1={y} y2={y} stroke="var(--border)" strokeDasharray={ratio === 0 ? undefined : '3 4'} />
+          <g key={index}>
+            <line
+              x1={LINE_LEFT}
+              x2={LINE_W - LINE_RIGHT}
+              y1={y}
+              y2={y}
+              stroke="var(--border)"
+              strokeDasharray={index === ticks.length - 1 || (min < 0 && Math.abs(tick) < 1e-9) ? undefined : '3 4'}
+            />
             <text x={LINE_LEFT - 6} y={y + 3.5} textAnchor="end" fill="var(--muted-foreground)" fontSize="10">
-              {axisText(max * ratio)}
+              {axisText(tick)}
             </text>
           </g>
         )
       })}
+      {min < 0 ? <line x1={LINE_LEFT} x2={LINE_W - LINE_RIGHT} y1={yAt(0)} y2={yAt(0)} stroke="var(--muted-foreground)" strokeOpacity={0.55} /> : null}
       {fillArea
         ? segments.map((seg, index) => {
             if (seg.length < 2) return null
-            const bottom = height - LINE_BOTTOM
+            const bottom = yAt(Math.max(0, min))
             const first = seg[0]
             const last = seg[seg.length - 1]
             const areaD = [
@@ -207,11 +221,17 @@ export function TrendLine({
           </circle>
         ))
       )}
-      {points.map((point, index) => (
-        <text key={`x-${index}`} x={xAt(index)} y={height - 8} textAnchor="middle" fill="var(--muted-foreground)" fontSize="10">
-          {point.label}
-        </text>
-      ))}
+      {points.map((point, index) => {
+        // 长周期（14/30/90 天）横轴只显示约 7 个日期，避免标签重叠
+        const step = Math.max(1, Math.ceil(points.length / 7))
+        const visible = index === 0 || index === points.length - 1 || index % step === 0
+        if (!visible) return null
+        return (
+          <text key={`x-${index}`} x={xAt(index)} y={height - 8} textAnchor="middle" fill="var(--muted-foreground)" fontSize="10">
+            {point.label}
+          </text>
+        )
+      })}
     </svg>
   )
 }

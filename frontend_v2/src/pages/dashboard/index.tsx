@@ -11,6 +11,7 @@ import { useTaskScope } from '@/hooks/use-task-scope'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toaster'
@@ -18,26 +19,13 @@ import { coverThumb } from '@/lib/covers'
 import { EASE_OUT_EXPO, softIn } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { Empty, TrendLine } from './charts'
-import {
-  deltaToneClass,
-  formatCount,
-  formatDateTime,
-  formatDelta,
-  formatMonthDay,
-  formatPercent,
-  formatRankPercent,
-  formatUnitValue
-} from './format'
+import { deltaToneClass, formatCount, formatDateTime, formatDelta, formatMonthDay, formatRankPercent } from './format'
 import { PostAnalysis } from './post-analysis'
 import { WorksList } from './works-list'
 import type {
-  AccountAnalysis,
-  AccountDiagnosis,
   DashboardOverview,
-  DiagnosisKey,
-  FansBlock,
-  DiagnosisMetric,
   KpiCard as KpiCardData,
+  PeriodDays,
   PostDetail,
   RefreshResponse,
   WorkItem,
@@ -61,25 +49,41 @@ function allowAutoRefresh(name: string): boolean {
   return true
 }
 
-const DIAGNOSIS_ROWS: Array<{ key: DiagnosisKey; label: string; format: (value: number) => string }> = [
-  { key: 'plays', label: '播放量', format: (value) => formatCount(value) },
-  { key: 'finish_rate', label: '完播率', format: (value) => formatPercent(value) },
-  { key: 'interact', label: '互动指数', format: (value) => value.toFixed(4) },
-  { key: 'new_fans', label: '净增粉丝', format: (value) => formatCount(value) },
-  { key: 'publish_count', label: '投稿数', format: (value) => `${value} 篇` }
-]
-
-function KpiCardView({ kpi }: { kpi: KpiCardData }) {
+function KpiCardView({
+  kpi,
+  days,
+  active,
+  onSelect
+}: {
+  kpi: KpiCardData
+  days: PeriodDays
+  active: boolean
+  onSelect: () => void
+}) {
   const valueText = kpi.value === null ? '暂无数据' : formatCount(kpi.value)
   const missingNote = kpi.source === 'diagnosis' ? '账号诊断暂无数据，可点「更新数据」获取' : kpi.note || '数据积累中：需要至少 2 天相邻快照'
-  const deltaText = kpi.delta !== null ? `较前 7 日 ${formatDelta(kpi.delta)}` : null
+  const deltaText = kpi.delta !== null ? `较前 ${days} 日 ${formatDelta(kpi.delta)}` : null
   const similarText =
     kpi.similar !== null && kpi.rank !== null ? `同类平均 ${formatCount(kpi.similar)} · 超过 ${formatRankPercent(kpi.rank)} 同类创作者` : null
   return (
-    <div className="min-w-0">
-      <div className="text-xs text-muted-foreground">{kpi.label}</div>
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      title={`点击查看「${kpi.label}」在近 ${days} 日的趋势`}
+      className={cn(
+        'group min-w-0 cursor-pointer rounded-md px-1 pb-2 text-left transition-colors hover:bg-muted/40',
+        active && 'bg-accent-soft/40'
+      )}
+    >
+      <div className={cn('flex items-center justify-between gap-1 text-xs text-muted-foreground', active && 'text-foreground')}>
+        <span>{kpi.label}</span>
+        <span className={cn('text-[10px] text-accent opacity-0 transition-opacity group-hover:opacity-100', active && 'opacity-100')}>
+          看趋势
+        </span>
+      </div>
       <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="tnum text-2xl font-semibold tracking-tight">{valueText}</span>
+        <span className={cn('tnum text-2xl font-semibold tracking-tight', active && 'text-accent')}>{valueText}</span>
         {kpi.available ? (
           deltaText ? (
             <span className={cn('text-xs', deltaToneClass(kpi.delta))}>{deltaText}</span>
@@ -91,126 +95,38 @@ function KpiCardView({ kpi }: { kpi: KpiCardData }) {
         )}
       </div>
       {kpi.available && similarText ? <div className="mt-1 text-[11px] text-muted-foreground">{similarText}</div> : null}
-    </div>
+      <span className={cn('mt-2 block h-0.5 rounded-full transition-colors', active ? 'bg-accent' : 'bg-transparent')} />
+    </button>
   )
 }
 
-function DiagnosisCompare({ diagnosis }: { diagnosis: AccountDiagnosis | null }) {
-  const available = Boolean(diagnosis?.available)
-  return (
-    <div>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">同类创作者对比</h3>
-        {available && diagnosis?.similar_count ? (
-          <span className="text-[11px] text-muted-foreground">同类创作者 {formatCount(diagnosis.similar_count)} 位</span>
-        ) : null}
-      </div>
-      {available && diagnosis ? (
-        <div className="mt-2">
-          <div className="grid grid-cols-[56px_minmax(0,1fr)_minmax(0,1fr)_44px] items-center gap-1.5 border-b border-border pb-1.5 text-[10px] text-muted-foreground">
-            <span>指标</span>
-            <span>本账号</span>
-            <span>同类平均</span>
-            <span className="text-right">排名</span>
-          </div>
-          {DIAGNOSIS_ROWS.map((row) => {
-            const metric: DiagnosisMetric | undefined = diagnosis[row.key]
-            return (
-              <div
-                key={row.key}
-                className="grid grid-cols-[56px_minmax(0,1fr)_minmax(0,1fr)_44px] items-center gap-1.5 border-b border-border/60 py-1.5 text-xs last:border-0"
-              >
-                <span className="truncate text-muted-foreground">{row.label}</span>
-                <span className="tnum truncate font-medium">{metric?.own !== null && metric?.own !== undefined ? row.format(metric.own) : '—'}</span>
-                <span className="tnum truncate text-muted-foreground">
-                  {metric?.similar !== null && metric?.similar !== undefined ? row.format(metric.similar) : '—'}
-                </span>
-                <span className="tnum text-right text-muted-foreground">{formatRankPercent(metric?.rank)}</span>
-              </div>
-            )
-          })}
-        </div>
-      ) : (
-        <Empty className="mt-2" text="暂无数据：账号诊断尚未成功获取，可点右上角「更新数据」" />
-      )}
-    </div>
-  )
-}
-
-function AverageMetrics({ analysis }: { analysis: AccountAnalysis | null }) {
-  const available = Boolean(analysis?.available && analysis.items.length)
-  return (
-    <div>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">条均指标（近 7 日投稿）</h3>
-        {available ? <span className="text-[11px] text-muted-foreground">数据更新至 {formatDateTime(analysis?.captured_at)}</span> : null}
-      </div>
-      {available && analysis ? (
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {analysis.items.map((item) => (
-            <div key={item.key} className="rounded-lg border border-border px-2.5 py-2">
-              <div className="truncate text-[11px] text-muted-foreground" title={item.label}>{item.label}</div>
-              <div className="tnum mt-0.5 text-sm font-medium">{formatUnitValue(item.value, item.unit)}</div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Empty className="mt-2" text="暂无数据：投稿条均指标尚未成功获取，可点右上角「更新数据」" />
-      )}
-    </div>
-  )
-}
-
-function FanRow({ fans }: { fans: FansBlock }) {
-  const missing = '暂无数据'
-  const items: Array<{ key: string; label: string; value: string; hint?: string; tone?: string }> = [
-    {
-      key: 'total',
-      label: '总粉丝量',
-      value: fans.total.value === null ? missing : formatCount(fans.total.value),
-      hint: fans.total.date ? `快照 ${formatMonthDay(fans.total.date)}` : undefined
-    },
-    {
-      key: 'net',
-      label: '粉丝净增',
-      value: fans.net.value === null ? missing : formatCount(fans.net.value),
-      hint: fans.net.similar !== null && fans.net.rank !== null ? `同类平均 ${formatCount(fans.net.similar)} · 超过 ${formatRankPercent(fans.net.rank)}` : undefined,
-      tone: fans.net.value === null ? undefined : fans.net.value < 0 ? 'text-destructive' : 'text-success'
-    },
-    { key: 'acquired', label: '吸粉量', value: missing, hint: 'TikHub 未提供' },
-    { key: 'lost', label: '脱粉量', value: missing, hint: 'TikHub 未提供' },
-    { key: 'returning', label: '回访粉丝量', value: missing, hint: 'TikHub 未提供' }
-  ]
-  return (
-    <div className="border-t border-border pt-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">粉丝数据</h3>
-        <span className="text-[11px] text-muted-foreground">
-          总粉丝量：本地账号每日快照 · 粉丝净增：账号诊断
-        </span>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-4 md:grid-cols-5">
-        {items.map((item) => (
-          <div key={item.key} className="min-w-0">
-            <div className="text-xs text-muted-foreground">{item.label}</div>
-            <div className={cn('tnum mt-1.5 text-2xl font-semibold tracking-tight', item.tone)}>{item.value}</div>
-            {item.hint ? <div className="mt-1 text-[11px] text-muted-foreground">{item.hint}</div> : null}
-          </div>
-        ))}
-      </div>
-      <p className="mt-3 text-[11px] leading-4 text-muted-foreground">{fans.note}</p>
-    </div>
-  )
-}
-
-function AccountOverview({ data, busy, onRefresh }: { data: DashboardOverview; busy: boolean; onRefresh: () => void }) {
+function AccountOverview({
+  data,
+  busy,
+  onRefresh,
+  periodDays,
+  onPeriodChange,
+  metricKey,
+  onMetricChange
+}: {
+  data: DashboardOverview
+  busy: boolean
+  onRefresh: () => void
+  periodDays: PeriodDays
+  onPeriodChange: (days: PeriodDays) => void
+  metricKey: string
+  onMetricChange: (key: string) => void
+}) {
   const account = data.account
   const diagnosis = data.diagnosis
+  const series = data.series[metricKey] ?? null
+  const points = (series?.points ?? []).map((point) => ({ label: formatMonthDay(point.date), value: point.value }))
+  const chartLabel = series ? `${series.label}${series.mode === 'daily' ? '（每日新增）' : ''}` : '播放量'
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
       <div className="space-y-4 p-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold">数据中心</h2>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -223,10 +139,24 @@ function AccountOverview({ data, busy, onRefresh }: { data: DashboardOverview; b
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs text-pretty">
-                数据来自 TikHub 抖音创作者接口；账号诊断统计近 7 日；本地趋势只覆盖近 120 天发布且已同步的作品，与抖音官方全账号口径可能不同。
+                数据来自 TikHub 抖音创作者接口。统计周期可选 7/14/30/90 天：播放量/粉丝净增只在 7 日周期用官方账号诊断口径，其它周期与其它指标取本地每日快照差值（只覆盖近 120 天发布且已同步的作品，与抖音官方全账号口径可能不同）。点击任一指标可切换下方趋势曲线。
               </TooltipContent>
             </Tooltip>
-            <span className="text-xs text-muted-foreground">统计周期：{data.period?.label ?? '近 7 日'}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">统计周期</span>
+              <Select value={String(periodDays)} onValueChange={(value) => onPeriodChange(Number(value) as PeriodDays)}>
+                <SelectTrigger className="h-8 w-[104px] text-xs" aria-label="统计周期">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {([7, 14, 30, 90] as const).map((days) => (
+                    <SelectItem key={days} value={String(days)}>
+                      近 {days} 日
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <Button variant="outline" size="sm" disabled={busy} onClick={onRefresh}>
             {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
@@ -253,47 +183,43 @@ function AccountOverview({ data, busy, onRefresh }: { data: DashboardOverview; b
         </div>
 
         <div>
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-sm font-semibold">播放量趋势（近 7 日）</h3>
+          <div className="flex flex-wrap items-baseline justify-end gap-2">
             <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
-              播放量
+              {chartLabel}
             </span>
           </div>
-          {data.trend.available ? (
-            <div className="mt-1.5">
-              <TrendLine
-                points={data.trend.points.map((point) => ({ label: formatMonthDay(point.date), value: point.value }))}
-                ariaLabel="近 7 日每日播放量趋势"
-                fillArea
-              />
+          {series && points.some((point) => point.value !== null) ? (
+            <div className="mt-1">
+              <TrendLine points={points} ariaLabel={`${chartLabel}趋势`} fillArea />
             </div>
           ) : (
-            <Empty className="mt-2" text={data.trend.note || '数据积累中：需要至少 2 天同步数据'} />
+            <Empty className="mt-2" text="该指标在当前统计周期暂无快照数据：需要至少 2 天同步记录" />
           )}
           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-            本地每日快照差值，仅统计近 120 天发布且已同步的 {data.trend.coverage.posts} 条作品；缺口日期表示当天算不出增量（不补 0）。
+            {series?.mode === 'cumulative'
+              ? '总粉丝量：账号每日快照的累计值。'
+              : '每日新增：由相邻两次同步快照的差值计算；缺口日期表示当天算不出增量（不补 0）。'}
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-5 md:grid-cols-3">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-5 md:grid-cols-4">
           {data.kpis.map((kpi) => (
-            <KpiCardView key={kpi.key} kpi={kpi} />
+            <KpiCardView
+              key={kpi.key}
+              kpi={kpi}
+              days={periodDays}
+              active={metricKey === (kpi.trend_key ?? kpi.key)}
+              onSelect={() => onMetricChange(kpi.trend_key ?? kpi.key)}
+            />
           ))}
         </div>
         <p className="text-[11px] leading-4 text-muted-foreground">
-          播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；主页访问量/作品点赞/作品分享/作品评论取本地每日快照差值，历史不足时显示「暂无对比」。
+          {periodDays === 7
+            ? '近 7 日：播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；其余指标取本地每日快照差值，历史不足时显示「暂无对比」。'
+            : `近 ${periodDays} 日：全部指标取本地每日快照差值（账号诊断只提供近 7 日口径）；历史不足时显示「暂无对比」。`}
+          点击指标卡可切换上方趋势曲线。
         </p>
-
-        {data.fans ? <FanRow fans={data.fans} /> : null}
-
-        <div className="border-t border-border pt-4">
-          <DiagnosisCompare diagnosis={diagnosis} />
-        </div>
-
-        <div className="border-t border-border pt-4">
-          <AverageMetrics analysis={data.analysis} />
-        </div>
       </div>
     </section>
   )
@@ -411,6 +337,8 @@ export default function DashboardPage() {
   const qc = useQueryClient()
   const reduce = useReducedMotion()
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [periodDays, setPeriodDays] = useState<PeriodDays>(7)
+  const [metricKey, setMetricKey] = useState('plays')
   const [morePages, setMorePages] = useState<{ items: WorkItem[]; hasMore: boolean }>({ items: [], hasMore: false })
   const [loadingMore, setLoadingMore] = useState(false)
   const [overviewRunning, setOverviewRunning] = useState(false)
@@ -420,8 +348,8 @@ export default function DashboardPage() {
   const errorToasted = useRef(false)
 
   const overviewQ = useQuery({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: () => apiJson<DashboardOverview>('/api/douyin-dashboard/overview'),
+    queryKey: ['dashboard', 'overview', periodDays],
+    queryFn: () => apiJson<DashboardOverview>(`/api/douyin-dashboard/overview?period=${periodDays}`),
     refetchInterval: (query) => (query.state.data?.updating_task_id ? 2500 : false)
   })
   const worksQ = useQuery({
@@ -613,7 +541,15 @@ export default function DashboardPage() {
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-3">
         <div className="min-w-0 lg:col-span-2">
-          <AccountOverview data={data} busy={overviewBusy} onRefresh={() => void refreshOverview()} />
+          <AccountOverview
+            data={data}
+            busy={overviewBusy}
+            onRefresh={() => void refreshOverview()}
+            periodDays={periodDays}
+            onPeriodChange={setPeriodDays}
+            metricKey={metricKey}
+            onMetricChange={setMetricKey}
+          />
         </div>
         {/* 桌面端让近期作品卡与左侧卡片等高（absolute 填充行高，避免 20 条列表把右列撑高），列表内部滚动 */}
         <div className="relative min-w-0 lg:col-span-1">

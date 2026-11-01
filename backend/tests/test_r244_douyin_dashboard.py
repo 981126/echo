@@ -157,10 +157,10 @@ def test_apply_item_metrics_keeps_review_visibility(db):
     assert payload["item"]["visibility"]["status"] == 1
 
 
-# ---------- 账号诊断 / 投稿概览归一化 ----------
+# ---------- 账号诊断归一化 ----------
 
 
-def test_normalize_diagnosis_and_analysis():
+def test_normalize_diagnosis():
     diagnosis = service.normalize_diagnosis(
         {
             "data": {
@@ -180,21 +180,6 @@ def test_normalize_diagnosis_and_analysis():
     assert diagnosis["metrics"]["new_fans"]["own"] == -63
     assert diagnosis["metrics"]["finish_rate"]["own"] == pytest.approx(0.1316)
 
-    analysis = service.normalize_analysis(
-        {
-            "data": {
-                "median_play_count": {"metric_value": 11887},
-                "average_play_duration": {"metric_value": 16.36},
-                "cover_click_ratio": {"metric_value": 0.2084},
-                "bounce_rate_2s": {"metric_value": 0.3055},
-                "submission_count": {"metric_value": 1},
-            }
-        }
-    )
-    assert analysis is not None
-    keys = [item["key"] for item in analysis["items"]]
-    assert keys == ["median_plays", "avg_play_seconds", "bounce_2s_rate", "cover_click_rate", "submission_count"]
-    assert analysis["items"][1]["value"] == pytest.approx(16.36)
 
 
 # ---------- 账号 7 日 KPI 与逐日趋势 ----------
@@ -217,21 +202,22 @@ def test_account_kpis_and_trend(db):
     _metric(db, post, (today - timedelta(days=6)).isoformat(), profile_visits=10)
     _metric(db, post, today.isoformat(), profile_visits=35)
 
-    snapshot = service.account_kpis(db, account.id, today=today)
+    snapshot = service.account_kpis(db, account.id, days=7, today=today)
     fields = snapshot["fields"]
+    assert snapshot["period"]["days"] == 7
     assert fields["likes"]["value"] == 210 // 10 - 100 // 10
     assert fields["likes"]["covered"] == 1
     # 前 7 日也有两天快照（likes 5→9），所以能算出对比：11 - 4 = 7
     assert fields["likes"]["delta"] == 7
     assert fields["homepage_visits"]["value"] == 25
     assert fields["comments"]["value"] == 1  # plays//100: 1→2
-    trend = snapshot["trend"]
-    assert trend["available"] is True
-    assert len(trend["points"]) == 7
+    series = snapshot["series"]["plays"]
+    assert series["mode"] == "daily"
+    assert len(series["points"]) == 7
     # 今天新增 = 210 - 200 = 10
-    assert trend["points"][-1]["value"] == 10
+    assert series["points"][-1]["value"] == 10
     # 第一天没有前一天快照 → 空缺不补 0
-    assert trend["points"][0]["value"] is None
+    assert series["points"][0]["value"] is None
 
 
 def test_account_kpis_prev_delta_and_coverage(db):
@@ -244,13 +230,13 @@ def test_account_kpis_prev_delta_and_coverage(db):
     for offset, likes in enumerate((3, 5)):
         day = (today - timedelta(days=13 - offset)).isoformat()
         _stat(db, post, day, likes=likes, plays=50 + offset)
-    snapshot = service.account_kpis(db, account.id, today=today)
+    snapshot = service.account_kpis(db, account.id, days=7, today=today)
     likes = snapshot["fields"]["likes"]
     assert likes["prev"] == 2  # 5 - 3
     assert likes["delta"] == likes["value"] - 2
 
     # 没有前 7 日数据时返回 None（不显示假对比）
-    empty = service.account_kpis(db, account.id, today=today - timedelta(days=30))
+    empty = service.account_kpis(db, account.id, days=7, today=today - timedelta(days=30))
     assert empty["fields"]["likes"]["value"] is None
     assert empty["fields"]["likes"]["delta"] is None
 
@@ -468,7 +454,6 @@ def test_overview_worker_mock_and_cache(db):
     body = service.overview(db)
     assert body["diagnosis"]["available"] is True
     assert body["diagnosis"]["plays"]["own"] == 88474
-    assert body["analysis"]["available"] is True
     assert body["needs_refresh"] is False
     assert body["account"]["id"] == account.id
 
@@ -504,11 +489,11 @@ def test_account_kpis_ignores_zero_snapshot(db):
     _metric(db, post, today.isoformat(), profile_visits=95)
     db.commit()
 
-    snapshot = service.account_kpis(db, account.id, today=today)
+    snapshot = service.account_kpis(db, account.id, days=7, today=today)
     assert snapshot["fields"]["likes"]["value"] == 50  # 150 - 100，不是 150 - 0
     assert snapshot["fields"]["homepage_visits"]["value"] == 25  # 95 - 70，不是 95
     # 逐日新增只从两条有效快照开始算：day-2→day-1 = 200，day-1→today = 300；1000-0 的假增量不出现
-    values = [point["value"] for point in snapshot["trend"]["points"] if point["value"] is not None]
+    values = [point["value"] for point in snapshot["series"]["plays"]["points"] if point["value"] is not None]
     assert values == [200, 300]
 
 
@@ -530,10 +515,18 @@ def test_play_trend_ignores_public_zero_plays(db):
     assert detail["play_trend"]["available"] is True
 
 
-def test_overview_fans_block(db):
-    """粉丝数据：总粉丝量取本地账号快照、净增取诊断；吸粉/脱粉/回访无接口返回 null。"""
+def test_overview_fans_kpis_and_series(db):
+    """粉丝数据合并进指标卡：总粉丝量/净增粉丝与播放指标同一行；粉丝曲线来自账号每日快照。"""
     _, account = _owner_account(db)
-    db.add(CreatorAccountSnapshot(account_id=account.id, snapshot_date="2026-10-31", followers=59063))
+    today = now().date()
+    for offset, followers in enumerate((59076, 59063)):
+        db.add(
+            CreatorAccountSnapshot(
+                account_id=account.id,
+                snapshot_date=(today - timedelta(days=1 - offset)).isoformat(),
+                followers=followers,
+            )
+        )
     db.commit()
 
     def update(pct, note):
@@ -541,11 +534,49 @@ def test_overview_fans_block(db):
 
     service.overview_worker(db, {"account_id": account.id}, update)
     body = service.overview(db)
-    fans = body["fans"]
-    assert fans["total"]["value"] == 59063
-    assert fans["total"]["date"] == "2026-10-31"
-    assert fans["net"]["value"] == -63
-    assert fans["acquired"] is None
-    assert fans["lost"] is None
-    assert fans["returning"] is None
-    assert fans["unavailable"] == ["吸粉量", "脱粉量", "回访粉丝量"]
+    cards = {card["key"]: card for card in body["kpis"]}
+    assert [card["key"] for card in body["kpis"]] == [
+        "plays",
+        "homepage_visits",
+        "likes",
+        "shares",
+        "comments",
+        "net_fans",
+        "total_fans",
+    ]
+    assert cards["total_fans"]["value"] == 59063
+    assert cards["total_fans"]["label"] == "总粉丝量"
+    assert cards["net_fans"]["value"] == -63  # 7 日周期用账号诊断
+    # 总粉丝量/净增粉丝曲线
+    total_series = body["series"]["total_fans"]
+    assert total_series["mode"] == "cumulative"
+    assert total_series["points"][-1]["value"] == 59063
+    net_series = body["series"]["net_fans"]
+    assert net_series["points"][-1]["value"] == -13  # 59063 - 59076
+
+
+def test_overview_period_and_metric_series(db):
+    """统计周期 7/14/30/90 天：KPI 窗口、较前周期与各指标逐日曲线。"""
+    _, account = _owner_account(db)
+    post = _post(db, account)
+    today = now().date()
+    for offset in range(30):
+        day = (today - timedelta(days=29 - offset)).isoformat()
+        _stat(db, post, day, plays=100 + offset * 10, likes=10 + offset, comments=offset, shares=offset)
+    db.commit()
+
+    for days in (7, 14, 30):
+        snapshot = service.account_kpis(db, account.id, days=days, today=today)
+        assert snapshot["period"]["days"] == days
+        assert len(snapshot["series"]["plays"]["points"]) == days
+        # 每个指标都有独立曲线
+        for key in ("plays", "homepage_visits", "likes", "shares", "comments", "net_fans", "total_fans"):
+            assert key in snapshot["series"]
+
+    body = service.overview(db, 30)
+    assert body["period"]["days"] == 30
+    cards = {card["key"]: card for card in body["kpis"]}
+    # 30 日周期没有账号诊断口径 → 播放量用本地快照
+    assert cards["plays"]["source"] == "snapshot"
+    with pytest.raises(ValueError):
+        service.overview(db, 5)

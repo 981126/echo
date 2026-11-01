@@ -29,9 +29,12 @@ def _call(fn):
 
 
 @router.get("/overview", response_model=dict)
-def overview(db: Session = Depends(get_db)):
-    """账号总览：诊断缓存 + 本地快照 KPI/趋势（无账号时返回 200 空状态）。"""
-    return _call(lambda: service.overview(db))
+def overview(
+    period: int = Query(default=7, description="统计周期天数：7/14/30/90"),
+    db: Session = Depends(get_db),
+):
+    """账号总览：诊断缓存 + 本地快照 KPI/各指标逐日曲线（无账号时返回 200 空状态）。"""
+    return _call(lambda: service.overview(db, period))
 
 
 @router.get("/works", response_model=dict)

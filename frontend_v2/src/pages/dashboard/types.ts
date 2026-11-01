@@ -52,29 +52,27 @@ export interface AccountDiagnosis {
   publish_count?: DiagnosisMetric
 }
 
-/** 投稿条均指标（TikHub fetch_item_analysis_overview） */
-export interface AnalysisItem {
-  key: string
+/** 统计周期（作者 2026-11-01 要求：7/14/30/90 天可下拉） */
+export type PeriodDays = 7 | 14 | 30 | 90
+
+export interface PeriodInfo {
+  start: string
+  end: string
+  days: number
   label: string
-  value: number
-  /** ratio 表示 0~1 比率；其余为中文单位（次/条/秒/篇） */
-  unit: string
 }
 
-export interface AccountAnalysis {
-  available: boolean
-  captured_at: string | null
-  items: AnalysisItem[]
-}
-
-/** 账号总览 6 个数字卡 */
+/** 账号总览指标卡（7 个指标，一行 4 个；点击切换下方趋势曲线） */
 export interface KpiCard {
   key: string
   label: string
+  unit: string
+  /** 对应 series 的键（当前与 key 一致，保留字段便于以后扩展） */
+  trend_key: string
   value: number | null
   prev: number | null
   delta: number | null
-  /** diagnosis = 账号诊断口径；snapshot = 本地每日快照差值 */
+  /** diagnosis = 账号诊断口径（仅 7 日周期）；snapshot = 本地每日快照差值 */
   source: string
   similar: number | null
   rank: number | null
@@ -83,30 +81,14 @@ export interface KpiCard {
   note: string
 }
 
-/** 逐日趋势点：value=null 表示当天算不出增量（图表断开，不补 0） */
-export interface TrendPoint {
-  date: string
-  value: number | null
-}
-
-export interface AccountTrend {
-  available: boolean
-  points: TrendPoint[]
-  note: string
-  coverage: { posts: number; dates: string[] }
-}
-
-/** 账号粉丝数据（与播放数据同一区块；吸粉/脱粉/回访 TikHub 无接口 → null） */
-export interface FansBlock {
-  /** 总粉丝量：本地账号每日快照 */
-  total: { value: number | null; date: string | null }
-  /** 粉丝净增：账号诊断 NewFans（同 6 指标里的净增粉丝） */
-  net: { value: number | null; similar: number | null; rank: number | null }
-  acquired: number | null
-  lost: number | null
-  returning: number | null
-  unavailable: string[]
-  note: string
+/** 指标趋势曲线：mode=daily 表示逐日新增，cumulative 表示累计值（总粉丝量） */
+export interface MetricSeries {
+  key: string
+  label: string
+  unit: string
+  mode: 'daily' | 'cumulative'
+  /** value=null 表示当天无快照（图表断开，不补 0） */
+  points: Array<{ date: string; value: number | null }>
 }
 
 export interface DashboardOverview {
@@ -116,12 +98,11 @@ export interface DashboardOverview {
   private_available: boolean
   /** 无主博主/无抖音账号时的整页空状态文案 */
   blocked_reason: string
-  period: { start: string; end: string; label: string } | null
+  period: PeriodInfo | null
   diagnosis: AccountDiagnosis | null
-  analysis: AccountAnalysis | null
   kpis: KpiCard[]
-  fans: FansBlock | null
-  trend: AccountTrend
+  /** key = plays/homepage_visits/likes/shares/comments/net_fans/total_fans */
+  series: Record<string, MetricSeries>
   needs_refresh: boolean
   stale: boolean
   updating_task_id: number | null

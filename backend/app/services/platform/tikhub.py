@@ -668,45 +668,6 @@ class TikHubClient:
             }
         return self._post("/douyin/creator_v2/fetch_item_audience_others", {"cookie": cookie, "item_id": item_id})
 
-    def fetch_douyin_item_analysis_verticals(self, *, cookie: str, start_date: str, end_date: str) -> dict:
-        """投稿分析垂类标签（R-244）：调用 analysis_overview 前先取垂类。日期为 YYYYMMDD 字符串。"""
-        if self.mode != "real":
-            return {"data": {"primary_verticals": ["生活记录"], "status_code": 0, "status_msg": ""}}
-        return self._post(
-            "/douyin/creator_v2/fetch_item_analysis_involved_vertical",
-            {"cookie": cookie, "start_date": start_date, "end_date": end_date},
-        )
-
-    def fetch_douyin_item_analysis_overview(
-        self, *, cookie: str, start_date: str, end_date: str, primary_verticals: list[str]
-    ) -> dict:
-        """投稿分析概览（R-244）：条均指标。日期为 YYYYMMDD 字符串；垂类为空时传空数组。"""
-        if self.mode != "real":
-            return {
-                "data": {
-                    "average_comment_count_per_video": {"metric_name": "条均评论量", "metric_value": 25},
-                    "average_like_count_per_video": {"metric_name": "条均点赞数", "metric_value": 287},
-                    "average_play_duration": {"metric_name": "条均播放时长", "metric_value": 16.36},
-                    "average_share_count_per_video": {"metric_name": "条均分享量", "metric_value": 31},
-                    "bounce_rate_2s": {"metric_name": "条均2s跳出率", "metric_value": 0.3055},
-                    "completion_rate_5s": {"metric_name": "条均5s完播率", "metric_value": 0.4782},
-                    "cover_click_ratio": {"metric_name": "条均点击率", "metric_value": 0.2084},
-                    "median_play_count": {"metric_name": "播放量中位数", "metric_value": 11887},
-                    "submission_count": {"metric_name": "周期内投稿量", "metric_value": 1},
-                    "status_code": 0,
-                    "status_msg": "",
-                }
-            }
-        return self._post(
-            "/douyin/creator_v2/fetch_item_analysis_overview",
-            {
-                "cookie": cookie,
-                "start_date": start_date,
-                "end_date": end_date,
-                "primary_verticals": primary_verticals or [],
-            },
-        )
-
     def fetch_douyin_low_fan(
         self, *, page: int = 1, page_size: int = 20, date_window: int = 168, keyword: str = "", tags: list | None = None
     ) -> dict:

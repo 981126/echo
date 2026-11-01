@@ -3,7 +3,7 @@
 - **对应需求**：`requirements/R-244-douyin-data-dashboard.md`
 - **日期**：2026-11-01
 - **状态**：已实现（2026-11-01，代码与本文一致；verify 全绿 + 真实 TikHub 联调 + 浏览器点检完成）
-- **重要说明**：本文中的新字段、新接口、阈值、映射均为实施前设计；2026-11-01 已用作者真实抖音创作者 Cookie 实测 `fetch_author_diagnosis` / `fetch_item_analysis_involved_vertical` / `fetch_item_analysis_overview` / `fetch_item_audience_portrait` / `fetch_item_audience_others`，真实响应样例存于 `.tmp/dashboard/*.json`。设计里的字段名与口径以真实响应为准；开发时按本文实现并补测试。
+- **重要说明**：2026-11-01 作者两次反馈后布局与统计能力有改版（v2 曲线在数据上方；v3 统计周期下拉 7/14/30/90、指标卡可点击切换曲线、移除粉丝独立栏/同类创作者/条均指标，详见 §5.16），本文其余章节保留原始设计，**以 §5.16 与代码为准**。本文中的新字段、新接口、阈值、映射均为实施前设计；2026-11-01 已用作者真实抖音创作者 Cookie 实测 `fetch_author_diagnosis` / `fetch_item_analysis_involved_vertical` / `fetch_item_analysis_overview` / `fetch_item_audience_portrait` / `fetch_item_audience_others`，真实响应样例存于 `.tmp/dashboard/*.json`。设计里的字段名与口径以真实响应为准；开发时按本文实现并补测试。
 
 ## 1. 开发背景
 
@@ -124,7 +124,7 @@
 ```
 ┌──────────────────────────── 打开数据看板 ────────────────────────────┐
 │ 1) GET /api/douyin-dashboard/overview                                │
-│    └─ 读 Kv 缓存（账号诊断/投稿概览）+ 本地快照算 KPI/趋势             │
+│    └─ 读 Kv 缓存（账号诊断）+ 本地快照算周期 KPI/各指标曲线           │
 │       ├─ 缓存不存在或 >24h → needs_refresh=true                       │
 │       └─ 返回 200（含 credential/data_policy/warnings，不报错）       │
 │ 2) GET /api/douyin-dashboard/works?limit=20&offset=0                 │
@@ -147,7 +147,7 @@
                  「更新数据」按钮（账号/作品）
                                 ▼
 ┌──────────────────────── 后台任务（线程） ────────────────────────┐
-│ overview: 预算预检 → diagnosis(1) → verticals(1) → analysis(1)    │
+│ overview: 预算预检 → diagnosis(1) → 作品快照(2) → 写 Kv            │
 │           → 作品快照同步(2) → 写 Kv → mark_valid                  │
 │ post:     预算预检 → 缓存<6h 且非 force → skipped                 │
 │           → sync_post_creator_data(5) → audience_portrait(1)      │
@@ -162,7 +162,7 @@
 TikHub Creator V2                     本地数据库                         前端
 ─────────────────                     ─────────────────────────────     ─────────────────────────
 fetch_author_diagnosis ──┐
-fetch_item_analysis_* ───┤  刷新任务归一化    app_kv                       GET /overview
+                         ├── 刷新任务归一化 ──► app_kv                     GET /overview
                          ├──────────────────► douyin_dashboard:overview:◄── 账号总览
                          │                    {account_id} (JSON)
 fetch_item_list ─────────┤                    platform_posts / platform_post_stats
@@ -195,13 +195,13 @@ fetch_video_comments ────┴── sync_post_comments ───► platf
 
 | 项 | 规则 |
 |---|---|
-| 账号总览缓存 | `app_kv` 键 `douyin_dashboard:overview:{account_id}`，值 JSON：`{diagnosis, analysis, diagnosis_at, analysis_at, period, verticals, warnings}`；TTL 24h |
+| 账号总览缓存 | `app_kv` 键 `douyin_dashboard:overview:{account_id}`，值 JSON：`{diagnosis, diagnosis_at, warnings}`；TTL 24h（v3 起不再缓存投稿概览） |
 | 作品详情缓存 | 最近一条 `douyin_post_metrics`（含 `captured_at`），TTL 6h；`platform_post_stats` 当天行同步刷新 |
 | 打开页面自动刷新 | 仅当 overview 缓存不存在或 >24h，前端在**本会话**自动触发一次（sessionStorage 记录时间戳，10 分钟内不重复），随后按钮转「更新中」 |
 | 作品首次选中 | 若该作品无 `douyin_post_metrics` 行或 >6h，自动触发详情刷新一次（同一作品 10 分钟内不重复自动触发） |
 | 手动「更新数据」 | 允许强制刷新；若已有同目标运行中任务 → 直接复用 task_id（202, reused=true） |
 | 刷新幂等 | `start_task(dedupe=True)` 默认按 kind+payload 去重 |
-| 预算预检 | `get_budget(db)`；overview 需 5 次，post 需 8 次；剩余不足 → 400「今日 TikHub 请求额度不足（剩余 X 次，本次需要 Y 次）」 |
+| 预算预检 | `get_budget(db)`；overview 需 3 次（诊断 1 + 作品快照 2），post 需 8 次；剩余不足 → 400「今日 TikHub 请求额度不足（剩余 X 次，本次需要 Y 次）」 |
 | 失败保留旧数据 | 任务失败不回滚已成功写入的部分；页面显示旧数据 + 任务错误；`sync_post_creator_data` 内部 `db.rollback()` 只影响本次事务 |
 | 返回体状态 | GET 响应含 `needs_refresh`、`stale`、`updating_task_id`（查询运行中任务，供前端显示进行中） |
 
@@ -209,10 +209,12 @@ fetch_video_comments ────┴── sync_post_comments ───► platf
 
 | 任务 | 接口 | 次数 |
 |---|---|---|
-| 账号「更新数据」 | `fetch_author_diagnosis` + `fetch_item_analysis_involved_vertical` + `fetch_item_analysis_overview` + `fetch_item_list`（`sync_account_creator_data` 内 2 页） | **5** |
+| 账号「更新数据」 | `fetch_author_diagnosis` + `fetch_item_list`（`sync_account_creator_data` 内 2 页）；v3 起不再请求投稿概览 | **3** |
 | 作品「更新数据」 | `fetch_item_overview_data` + `fetch_item_play_source` + `fetch_item_search_keyword` + `fetch_item_watch_trend`×2（`sync_post_creator_data` 内 5 次）+ `fetch_item_audience_portrait` + `fetch_item_audience_others` + 评论 1 次 | **8** |
 
 ### 5.3 账号诊断（`fetch_author_diagnosis`）
+
+> v3 起：诊断只用于「近 7 日」周期的播放量/净增粉丝（官方口径）；14/30/90 日周期这两个指标改用本地快照差值。
 
 请求：`POST /douyin/creator_v2/fetch_author_diagnosis`，body `{"cookie": "..."}`，无日期参数（固定最近 7 天）。
 
@@ -288,7 +290,9 @@ fetch_video_comments ────┴── sync_post_comments ───► platf
 
 **测试点**：新增作品当天（首日快照）不计入增量；缺日期断开；负增量按 0；前 7 日覆盖不足返回 null；跨 14 天窗口边界正确。
 
-### 5.5 投稿条均指标（`fetch_item_analysis_*`）
+### 5.5 投稿条均指标（`fetch_item_analysis_*`，v3 起已移除）
+
+> 2026-11-01 v3：作者要求删除「条均指标」栏 → 页面不展示、账号「更新数据」不再请求这两个接口（overview 请求数 5→3），`TikHubClient` 中对应方法与 mock 已删除；以下内容仅保留为历史设计记录。
 
 请求（2 次）：
 
@@ -518,6 +522,20 @@ limit/offset 分页，返回 has_more
 | 平台返回 0 | 原样 0 | 显示 0（不当成缺失） |
 | 未知字段/未知枚举 | 映射为「未知」并记 warning | 显示「未知」，「数据来源说明」可查 |
 
+### 5.16 2026-11-01 v3 改版（作者最终确认，覆盖以上相关描述）
+
+| 改动 | 实现 |
+|---|---|
+| 统计周期可下拉 7/14/30/90 天 | `GET /overview?period=N`；`account_kpis(days=N)`：当前窗口 `[today-N+1, today]`、前窗口 `[today-2N+1, today-N]`；前窗口覆盖作品数 ≥ 当前周期一半才显示「较前 N 日」 |
+| 删除「播放量趋势（近 7 日）」标题 | 曲线区不再渲染标题，右上角仅显示图例「● 指标名（每日新增）」/「● 总粉丝量」 |
+| 指标卡可点击切换曲线 | 后端返回 7 个指标各自的 `series`（daily 新增 / cumulative 累计）；前端 `metricKey` 状态控制 `TrendLine`，选中卡高亮（主色数字 + 底部粗线），默认播放量；切周期不重置已选指标 |
+| 粉丝数据独立栏删除，总粉丝量/净增粉丝并入指标网格（一行 4 个） | 指标卡 7 个：播放量/主页访问量/作品点赞/作品分享/作品评论/净增粉丝/总粉丝量；`grid-cols-2 md:grid-cols-4`；吸粉量/脱粉量/回访粉丝量仍无接口，直接不展示 |
+| 删除同类创作者对比、条均指标两栏 | 前端移除两个区块；后端 overview 不再返回 `analysis`，账号「更新数据」不再请求投稿概览两接口（5→3 次），`TikHubClient` 对应 2 个方法与 mock 删除 |
+| 净增粉丝曲线可为负数 | `TrendLine` 纵轴域支持 `[min,max]`、画零参考线、面积从 0 线起；横轴长周期自动稀疏为约 7 个日期刻度 |
+| 数据口径 | 7 日周期：播放量/净增粉丝用账号诊断，其余用本地快照；14/30/90 日：全部用本地快照（页面脚注动态说明）；总粉丝量取账号每日快照最近值并显示快照日期 |
+
+---
+
 ## 6. 新增/修改表结构
 
 ### 6.1 `douyin_post_metrics` 新增 2 列（唯一表结构改动）
@@ -552,7 +570,9 @@ limit/offset 分页，返回 has_more
 
 ### 7.1 `GET /api/douyin-dashboard/overview`
 
-请求参数：无（固定当前主博主账号）。
+请求参数：`period` 可选，取值 7/14/30/90，默认 7（其它值返回 400）。
+
+> **v3 响应结构（以代码为准）**：`period:{start,end,days,label}`、`kpis:[7 项：播放量/主页访问量/作品点赞/作品分享/作品评论/净增粉丝/总粉丝量]`、`series:{plays,homepage_visits,likes,shares,comments,net_fans,total_fans}`（每项 `{key,label,unit,mode:daily|cumulative,points:[{date,value|null}]}`）、`diagnosis`、`needs_refresh/stale/updating_task_id/warnings`；**不再返回** `analysis/fans/trend`。指标卡含 `trend_key` 供前端点击切换曲线；`net_fans` 与 7 日周期诊断一致，总粉丝量为累计曲线。以下旧示例仅保留以对照字段演进。
 
 响应 200：
 
@@ -695,8 +715,8 @@ limit/offset 分页，返回 has_more
 - 请求体：无（`{}`）。
 - 响应 202：`{"task_id": 123, "reused": false}`；运行中已存在 → `{"task_id": 123, "reused": true}`（仍 202）。
 - 错误 400（文案）：无主博主 / 抖音账号未绑定 / 创作者数据未开启 / Cookie 失效（`policy.is_blocked`）/ 额度不足。
-- 任务 kind：`douyin_dashboard_overview`，payload `{"account_id": 1}`，进度 10/35/60/90/100，note：获取账号诊断/获取投稿概览/同步作品快照/写入缓存/完成。
-- 任务 result：`{"ok": true, "diagnosis_at": "...", "analysis_at": "...", "warnings": []}`。
+- 任务 kind：`douyin_dashboard_overview`，payload `{"account_id": 1}`，进度 10/60/90/100，note：获取账号诊断/同步作品快照/写入缓存/完成（v3 起无投稿概览步骤）。
+- 任务 result：`{"ok": true, "diagnosis_at": "...", "warnings": []}`。
 
 ### 7.5 `POST /api/douyin-dashboard/works/{post_id}/refresh`
 
