@@ -1,9 +1,12 @@
 // R-244 数据看板「作品分析」区：总览 / 评论热词 / 评论管理（只读）3 个 tab。
 // v13：流量分析、观众分析 tab 移除，指标并入总览右侧；悬浮指标切换左侧趋势曲线。
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { motion } from 'framer-motion'
 import {
   BarChart3,
+  ChevronDown,
   CircleAlert,
+  Mic,
   ExternalLink,
   Heart,
   Loader2,
@@ -22,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CrossfadeTrendLine, Empty, Panel, Thumb } from './charts'
 import {
+  formatCount,
   formatDateTime,
   formatMonthDay,
   formatMonthDayTime,
@@ -43,6 +47,21 @@ export interface PostAnalysisProps {
   onOpenVideoReview: () => void
   /** 在视频复盘页内嵌时隐藏「去视频复盘」按钮（v30：整个作品分析卡片搬到视频复盘复用） */
   showVideoReviewLink?: boolean
+  /** v32：点击头部可下拉切换视频（视频复盘页使用），每项带封面/播放/点赞/收藏/分享 */
+  videoOptions?: Array<{
+    post_id: number
+    title: string
+    cover_url?: string | null
+    plays?: number | null
+    likes?: number | null
+    favorites?: number | null
+    shares?: number | null
+    status_label?: string | null
+  }>
+  onSelectVideo?: (postId: number) => void
+  /** 文案脚本为空时展示「ASR 转写」按钮 */
+  onTranscribe?: () => void
+  transcribing?: boolean
 }
 
 /** 逐日趋势卡：累计 / 新增切换（数据缺失时显示数据积累中，不补 0） */
@@ -128,7 +147,7 @@ function extractTags(title: string): string[] {
   return Array.from(new Set(matches))
 }
 
-function ScriptTab({ detail }: { detail: PostDetail }) {
+function ScriptTab({ detail, onTranscribe, transcribing }: { detail: PostDetail; onTranscribe?: () => void; transcribing?: boolean }) {
   const { transcript } = detail
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
@@ -137,12 +156,48 @@ function ScriptTab({ detail }: { detail: PostDetail }) {
           <p className="text-[11px] text-muted-foreground">
             ASR 转写文案（来自本地素材转写，可能有错别字；共 {transcript.text.length} 字）
           </p>
-          <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-xs leading-6">
+          <motion.div
+            initial={{ opacity: 0.6 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-xs leading-6"
+          >
             {transcript.text}
-          </div>
+          </motion.div>
         </>
       ) : (
-        <Empty text="暂无文案脚本：这条作品还没有关联本地素材，或素材尚未完成 ASR 转写" />
+        <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+          {transcript.has_video && onTranscribe ? (
+            <motion.div initial={{ opacity: 0.7, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.25 }}>
+              <Button size="sm" disabled={Boolean(transcribing)} onClick={onTranscribe}>
+                {transcribing ? (
+                  <>
+                    <motion.span
+                      className="mr-1.5 inline-block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
+                      animate={{ rotate: 360 }}
+                      transition={{ repeat: Number.POSITIVE_INFINITY, duration: 0.9, ease: 'linear' }}
+                    />
+                    <motion.span animate={{ opacity: [0.5, 1, 0.5] }} transition={{ repeat: Number.POSITIVE_INFINITY, duration: 1.4 }}>
+                      转写中…
+                    </motion.span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="mr-1.5 h-3.5 w-3.5" />
+                    ASR 转写
+                  </>
+                )}
+              </Button>
+            </motion.div>
+          ) : null}
+          <Empty
+            text={
+              transcript.has_video
+                ? '暂无文案脚本：素材尚未完成 ASR 转写，点上方「ASR 转写」开始'
+                : '暂无文案脚本：这条作品还没有关联本地素材，无法转写'
+            }
+          />
+        </div>
       )}
     </div>
   )
@@ -342,13 +397,53 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
   )
 }
 
-export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRefreshComments, onOpenVideoReview, showVideoReviewLink = true }: PostAnalysisProps) {
+export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRefreshComments, onOpenVideoReview, showVideoReviewLink = true, videoOptions, onSelectVideo, onTranscribe, transcribing = false }: PostAnalysisProps) {
   const { post } = detail
   const postTags = post.tags?.length ? post.tags : extractTags(post.title || '')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const pickerRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!pickerOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) setPickerOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [pickerOpen])
   return (
     <section className="rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
-      <header className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
+      <header ref={pickerRef} className="relative flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
         <div className="flex min-w-0 items-start gap-3">
+          {onSelectVideo ? (
+            <button
+              type="button"
+              onClick={() => setPickerOpen((open) => !open)}
+              aria-expanded={pickerOpen}
+              aria-label="切换要查看的作品"
+              className="flex min-w-0 cursor-pointer items-start gap-3 rounded-lg text-left transition-colors hover:bg-muted/40"
+            >
+              <Thumb url={post.cover_url} alt={post.title || '作品封面'} className="h-[72px] w-[54px] shrink-0 rounded-md border border-border" />
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <h2 className="min-w-0 truncate text-sm font-semibold leading-5" title={post.title}>{post.title || '无标题作品'}</h2>
+                  <ChevronDown className={pickerOpen ? 'h-3.5 w-3.5 shrink-0 rotate-180 text-muted-foreground transition-transform' : 'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform'} />
+                </div>
+                {postTags.length ? (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {postTags.map((tag) => (
+                      <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">{tag}</span>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                  发布于 {formatMonthDayTime(post.publish_time)}
+                  {post.duration_seconds ? ` · 时长 ${post.duration_seconds} 秒` : ''}
+                  {' · '}数据更新至 {formatDateTime(detail.data_time)}
+                </p>
+              </div>
+            </button>
+          ) : (
+            <>
           <Thumb url={post.cover_url} alt={post.title || '作品封面'} className="h-[72px] w-[54px] shrink-0 rounded-md border border-border" />
           {/* v30：头像右侧分三段——标题 / 视频标签 / 发布时间·时长·更新时间（不再显示「通过」徽标） */}
           <div className="min-w-0 flex-1">
@@ -368,6 +463,8 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
               {' · '}数据更新至 {formatDateTime(detail.data_time)}
             </p>
           </div>
+            </>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
@@ -394,6 +491,39 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
             </Button>
           )}
         </div>
+        {onSelectVideo && videoOptions && pickerOpen ? (
+          <div className="absolute left-4 right-4 top-full z-30 max-h-80 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-[var(--shadow-card)] md:left-4 md:right-4">
+            {videoOptions.map((option) => (
+              <button
+                key={option.post_id}
+                type="button"
+                onClick={() => {
+                  setPickerOpen(false)
+                  onSelectVideo(option.post_id)
+                }}
+                className={
+                  option.post_id === post.post_id
+                    ? 'flex w-full cursor-pointer items-center gap-3 rounded-md bg-muted/60 px-2 py-2 text-left'
+                    : 'flex w-full cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted/40'
+                }
+              >
+                <Thumb url={option.cover_url ?? null} alt={option.title || '作品封面'} className="h-10 w-7 shrink-0 rounded border border-border" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium">{option.title || '无标题作品'}</span>
+                    {option.status_label ? <span className="shrink-0 text-[10px] text-muted-foreground">{option.status_label}</span> : null}
+                  </span>
+                  <span className="tnum mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] text-muted-foreground">
+                    <span>播放 {formatCount(option.plays)}</span>
+                    <span>点赞 {formatCount(option.likes)}</span>
+                    <span>收藏 {formatCount(option.favorites)}</span>
+                    <span>分享 {formatCount(option.shares)}</span>
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
       </header>
 
       {detail.warnings.length ? (
@@ -417,24 +547,32 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
       ) : null}
       {detail.stale ? (
         <p className="px-4 pt-3 text-[11px] text-muted-foreground">
-          数据已超过 6 小时未更新，{detail.private_available ? '正在自动获取最新数据…' : '可点「更新数据」获取最新数据'}
+          数据已超过 6 小时未更新，可点「更新数据」获取最新数据
         </p>
       ) : null}
 
       <Tabs defaultValue="overview">
-        <div className="overflow-x-auto px-4 pt-3">
+        <div className="flex items-center justify-between gap-3 px-4 pt-3">
+          {!detail.transcript.available ? (
+            <p className="order-2 flex shrink-0 items-center gap-1 text-[11px] text-warning">
+              <CircleAlert className="h-3 w-3 shrink-0" />
+              暂无文案，分析结果可能不准
+            </p>
+          ) : null}
+          <div className="order-1 min-w-0 overflow-x-auto">
           <TabsList className="w-max">
             <TabsTrigger value="overview">视频总览</TabsTrigger>
             <TabsTrigger value="script">文案脚本</TabsTrigger>
             <TabsTrigger value="words">评论热词</TabsTrigger>
             <TabsTrigger value="comments">评论管理</TabsTrigger>
           </TabsList>
+          </div>
         </div>
         <div className="p-4">
           {/* v21：三个 tab 内容区固定同高（约等于总览高度），切换不跳；内容超长内部滚动 */}
           <div className="h-[400px] overflow-y-auto pr-1">
             <TabsContent value="overview" className="h-[380px]"><VideoOverview detail={detail} /></TabsContent>
-            <TabsContent value="script" className="h-[380px]"><ScriptTab detail={detail} /></TabsContent>
+            <TabsContent value="script" className="h-[380px]"><ScriptTab detail={detail} onTranscribe={onTranscribe} transcribing={transcribing} /></TabsContent>
             <TabsContent value="words" className="h-[380px]"><CommentWordsTab detail={detail} /></TabsContent>
             <TabsContent value="comments" className="h-[380px]"><CommentsTab detail={detail} refreshing={refreshing} onRefresh={onRefreshComments} /></TabsContent>
           </div>

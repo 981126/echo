@@ -12,7 +12,7 @@ import { PostAnalysis } from '@/pages/dashboard/post-analysis'
 import type { PostDetail } from '@/pages/dashboard/types'
 import { BaselineBars, PlanComparisonCharts, SimpleBars, WatchTrendChart } from './charts'
 import { waitForReviewTask } from './use-review-task'
-import type { Credential, FailedReview, ReferenceItem, Review, Topic, VideoItem } from './types'
+import type { FailedReview, ReferenceItem, Review, Topic, VideoItem } from './types'
 
 const judgementLabels = { fact: '数据直接显示', hypothesis: '结合内容推测', unknown: '目前无法判断' }
 
@@ -25,10 +25,10 @@ export default function VideoReviewPage() {
   const [overview, setOverview] = useState<PostDetail | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
+  const [transcribing, setTranscribing] = useState(false)
   const [failedReview, setFailedReview] = useState<FailedReview | null>(null)
   const [loading, setLoading] = useState(true)
   const [task, setTask] = useState<{ id: number; progress: number; note: string } | null>(null)
-  const [credential, setCredential] = useState<Credential | null>(null)
   const [kind, setKind] = useState<'peer' | 'low_fan'>('peer')
   const [references, setReferences] = useState<ReferenceItem[]>([])
   const [referenceLoading, setReferenceLoading] = useState(false)
@@ -80,6 +80,22 @@ export default function VideoReviewPage() {
       setOverviewLoading(false)
     }
   }, [])
+
+  /** v32：文案脚本为空时的 ASR 转写（复用素材库转写任务） */
+  async function transcribeOverview() {
+    if (!postId) return
+    setTranscribing(true)
+    try {
+      const response = await apiJson<{ task_id?: number }>(`/api/douyin-dashboard/works/${postId}/transcribe`, { method: 'POST' })
+      if (response.task_id) await waitTaskResult(response.task_id)
+      await loadOverview(postId)
+      toast.success('转写完成')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '转写失败')
+    } finally {
+      setTranscribing(false)
+    }
+  }
 
   /** v30：内嵌数据看板卡片上的「更新数据」= 触发该作品数据刷新并重载 */
   async function refreshOverviewData() {
@@ -134,7 +150,6 @@ export default function VideoReviewPage() {
         const data = await apiJson<{ account: { id: number; nickname: string; avatar?: string }; items: VideoItem[]; credential_status: string; credential?: Credential | null }>('/api/douyin-review/videos?limit=50')
         setAccount(data.account)
         setVideos(data.items)
-        setCredential(data.credential ?? null)
         const selected = wanted && data.items.some((x) => x.post_id === wanted) ? wanted : data.items[0]?.post_id ?? 0
         activePost.current = selected
         setPostId(selected)
@@ -265,42 +280,6 @@ export default function VideoReviewPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
-        <label className="text-xs font-medium text-muted-foreground" htmlFor="review-video">选择要复盘的视频</label>
-        <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-center">
-          <select id="review-video" value={postId} onChange={(e) => void selectVideo(Number(e.target.value))} className="h-10 min-w-0 flex-1 rounded-md border border-input bg-card px-3 text-sm">
-            {videos.map((video) => (
-              <option key={video.post_id} value={video.post_id}>
-                {[
-                  video.title || `视频 ${video.post_id}`,
-                  video.status_label && video.status_label !== '—' ? video.status_label : null,
-                  video.publish_time ? video.publish_time.slice(0, 10) : null
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </option>
-            ))}
-          </select>
-          {review?.post.video_url && <a href={review.post.video_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-indigo-500 hover:underline">查看原视频<ExternalLink className="h-3 w-3" /></a>}
-        </div>
-        <div className="mt-2 text-xs text-muted-foreground">
-          最近成功数据时间：{review?.data_time ? new Date(review.data_time).toLocaleString('zh-CN') : '尚未分析'} ·{' '}
-          {credential?.status === 'valid'
-            ? '创作者数据可用'
-            : credential?.status === 'invalid'
-              ? '创作者 Cookie 已失效，数据收集已停止'
-              : credential?.status === 'disabled'
-                ? '创作者数据已关闭，当前使用公开数据'
-                : '未配置创作者数据，当前使用公开数据'}
-        </div>
-        {credential?.status === 'invalid' && (
-          <p className="mt-1 text-xs text-destructive">请到「博主管理 → 编辑账号」更新该账号的抖音创作者 Cookie，更新前不会发起第三方请求。</p>
-        )}
-        {credential && credential.status !== 'valid' && (
-          <p className="mt-1 text-xs text-muted-foreground">创作者数据在「博主管理 → 编辑账号」配置；视频复盘不再提供 Cookie 设置入口。</p>
-        )}
-      </div>
-
       {task && <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 dark:border-indigo-900 dark:bg-indigo-950/30"><div className="mb-2 flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 animate-spin" />{task.note}</div><Progress value={task.progress} /></div>}
       {failedReview && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
         最近一次刷新分析失败：{failedReview.error || '未知错误'}。当前展示的是上一次成功的复盘，旧数据没有被清空。
@@ -316,6 +295,19 @@ export default function VideoReviewPage() {
             onRefreshComments={() => void refreshOverviewData()}
             onOpenVideoReview={() => {}}
             showVideoReviewLink={false}
+            videoOptions={videos.map((video) => ({
+              post_id: video.post_id,
+              title: video.title,
+              cover_url: video.cover_url ?? null,
+              plays: video.plays ?? null,
+              likes: video.likes ?? null,
+              favorites: video.favorites ?? null,
+              shares: video.shares ?? null,
+              status_label: video.status_label ?? null
+            }))}
+            onSelectVideo={(id) => void selectVideo(id)}
+            onTranscribe={() => void transcribeOverview()}
+            transcribing={transcribing}
           />
         ) : overviewLoading ? (
           <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>

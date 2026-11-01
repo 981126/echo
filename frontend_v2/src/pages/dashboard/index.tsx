@@ -360,6 +360,7 @@ export default function DashboardPage() {
   const [overviewRunning, setOverviewRunning] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
   const [postRunningId, setPostRunningId] = useState<number | null>(null)
+  const [transcribing, setTranscribing] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const errorToasted = useRef(false)
 
@@ -422,6 +423,25 @@ export default function DashboardPage() {
       }
     },
     [invalidateOverview]
+  )
+
+  const transcribePost = useCallback(
+    async (postId: number) => {
+      setTranscribing(true)
+      try {
+        const response = await apiJson<{ task_id?: number; reused?: boolean }>(`/api/douyin-dashboard/works/${postId}/transcribe`, {
+          method: 'POST'
+        })
+        if (response.task_id) await waitTaskResult(response.task_id)
+        invalidatePost(postId)
+        toast.success('转写完成')
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '转写失败')
+      } finally {
+        setTranscribing(false)
+      }
+    },
+    [invalidatePost]
   )
 
   const refreshPost = useCallback(
@@ -624,6 +644,8 @@ export default function DashboardPage() {
                   refreshError={postError}
                   onRefresh={() => void refreshPost(selectedId, true)}
                   onRefreshComments={() => void refreshPost(selectedId, false)}
+                  onTranscribe={() => void transcribePost(selectedId)}
+                  transcribing={transcribing}
                   onOpenVideoReview={() => navigate(`/video-review?post=${selectedId}`)}
                 />
               </motion.div>

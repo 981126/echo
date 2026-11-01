@@ -8,6 +8,11 @@ export interface VideoItem {
   /** 作品状态（v30：来自平台作品指标，approved/private/rejected/published/unknown） */
   status?: string | null
   status_label?: string | null
+  /** v32：最新统计（视频切换下拉展示用） */
+  plays?: number | null
+  likes?: number | null
+  favorites?: number | null
+  shares?: number | null
   latest_review_id?: number | null
   review_status?: string | null
   latest_sync_at?: string | null

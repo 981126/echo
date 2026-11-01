@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..schemas.douyin_dashboard import RefreshIn
 from ..services import douyin_dashboard as service
+from ..services.ingest import import_video_task
 from ..services.douyin_creator_sync import CredentialError
 from ..tasks import find_running_task, start_task
 
@@ -63,6 +64,21 @@ def refresh_overview(db: Session = Depends(get_db)):
             return JSONResponse(status_code=202, content={"task_id": running, "reused": True})
         plan = service.prepare_overview_refresh(db)
         task_id = start_task("douyin_dashboard_overview", plan, service.overview_worker)
+        return JSONResponse(status_code=202, content={"task_id": task_id, "reused": False})
+
+    return _call(run)
+
+
+@router.post("/works/{post_id}/transcribe")
+def transcribe_work(post_id: int, db: Session = Depends(get_db)):
+    """作品「ASR 转写」后台任务：复用素材库的 import_video 转写任务（需有关联本地视频）。"""
+
+    def run():
+        plan = service.prepare_transcribe(db, post_id)
+        running = find_running_task("import_video", {"video_id": plan["video_id"]})
+        if running:
+            return JSONResponse(status_code=202, content={"task_id": running, "reused": True})
+        task_id = start_task("import_video", plan, import_video_task)
         return JSONResponse(status_code=202, content={"task_id": task_id, "reused": False})
 
     return _call(run)

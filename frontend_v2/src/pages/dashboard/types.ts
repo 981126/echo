@@ -293,7 +293,7 @@ export interface PostDetail {
   flow: PostFlow
   audience: PostAudience
   /** 本地 ASR 文案（作品关联本地素材且已转写时 available=true） */
-  transcript: { available: boolean; status: string | null; text: string }
+  transcript: { available: boolean; status: string | null; text: string; has_video: boolean }
   comment_words: CommentWords
   comments: { total: number; items: CommentItem[] }
   updating_task_id: number | null

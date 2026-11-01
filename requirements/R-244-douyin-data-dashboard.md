@@ -280,8 +280,9 @@ v12：底部对比**只显示数字（如 -1,243 / +48）**，去掉「较前 N 
 | 字段 | 意思 | 来源与规则 |
 |---|---|---|
 | 说明 | 「ASR 转写文案（来自本地素材转写，可能有错别字；共 N 字）」 | 作品关联的本地素材已完成 ASR 转写时显示 |
-| 正文 | 转写文案全文（可滚动） | `GET /api/douyin-dashboard/works/{id}` 新增 `transcript` 字段：`platform_posts.local_video_id` → `videos` → `transcripts`（优先 `corrected_text`，否则 `transcript_text`） |
-| 空状态 | 「暂无文案脚本：这条作品还没有关联本地素材，或素材尚未完成 ASR 转写」 | 无本地素材/未转写时 |
+| 正文 | 转写文案全文（可滚动） | `GET /api/douyin-dashboard/works/{id}` 的 `transcript` 字段：`platform_posts.local_video_id` → `videos` → `transcripts`（优先 `corrected_text`，否则 `transcript_text`）；含 `has_video`（是否有本地视频文件） |
+| 空状态 | 有本地视频未转写：显示 **「ASR 转写」按钮**（点击后台转写，转写中按钮有旋转/呼吸动画，完成后自动刷新出文案）；无本地视频：提示「还没有关联本地素材，无法转写」 | `POST /api/douyin-dashboard/works/{id}/transcribe`（复用素材库 `import_video` 转写任务，返回 `task_id`）；无本地素材时报错不发起任务 |
+| 缺文案提示 | Tab 栏右侧显示「暂无文案，分析结果可能不准」 | `transcript.available=false` 时（v32） |
 
 #### 4.5.3 评论热词 tab
 

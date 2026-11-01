@@ -119,6 +119,7 @@ def list_videos(db: Session, owner: Creator, account_id: int | None, query: str,
     page = rows[:limit]
     latest_map: dict[int, VideoReview] = {}
     status_map: dict[int, tuple[str, str]] = {}
+    stat_map: dict[int, PlatformPostStat] = {}
     if page:
         from sqlalchemy import and_, func
 
@@ -137,6 +138,19 @@ def list_videos(db: Session, owner: Creator, account_id: int | None, query: str,
             .all()
         ):
             status_map[metric.post_id] = post_status(metric)
+
+        stat_sub = (
+            db.query(PlatformPostStat.post_id, func.max(PlatformPostStat.stat_date).label("d"))
+            .filter(PlatformPostStat.post_id.in_([post.id for post in page]))
+            .group_by(PlatformPostStat.post_id)
+            .subquery()
+        )
+        for stat_row in (
+            db.query(PlatformPostStat)
+            .join(stat_sub, and_(PlatformPostStat.post_id == stat_sub.c.post_id, PlatformPostStat.stat_date == stat_sub.c.d))
+            .all()
+        ):
+            stat_map[stat_row.post_id] = stat_row
     if page:
         # R-240 S6：一次批量取每帖最新 review（按 id 升序覆盖 → 最大 id 即最新）
         for review in (
@@ -150,10 +164,15 @@ def list_videos(db: Session, owner: Creator, account_id: int | None, query: str,
     for post in page:
         latest = latest_map.get(post.id)
         status, status_label = status_map.get(post.id, ("unknown", "—"))
+        latest_stat = stat_map.get(post.id)
         items.append({
             **_post_out(post),
             "status": status,
             "status_label": status_label,
+            "plays": latest_stat.plays if latest_stat else None,
+            "likes": latest_stat.likes if latest_stat else None,
+            "favorites": latest_stat.favorites if latest_stat else None,
+            "shares": latest_stat.shares if latest_stat else None,
             "latest_review_id": latest.id if latest else None,
             "review_status": latest.status if latest else None,
             "latest_sync_at": latest.created_at if latest else post.updated_at,

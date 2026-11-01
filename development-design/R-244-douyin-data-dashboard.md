@@ -753,6 +753,16 @@ limit/offset 分页，返回 has_more
 | 新增「文案脚本」tab | Tab 列表：视频总览 / 文案脚本 / 评论热词 / 评论管理；`post_detail` 新增 `transcript: {available,status,text}`（`local_video_id → videos → transcripts`，优先 corrected_text）；内容区固定 380px、正文内部滚动，无转写显示空状态 |
 | 整个作品分析卡片搬到视频复盘 | 视频复盘首屏由 `VideoOverview` 升级为完整 `PostAnalysis`（含头部/4 个 tab/工具按钮）；`showVideoReviewLink=false` 隐藏页面内「去视频复盘」；卡片「更新数据」调用 `POST /api/douyin-dashboard/works/{id}/refresh`（非强制）后重载；数据看板页面保留同一组件 |
 
+### 5.45 2026-11-01 v32 视频切换下拉 + ASR 转写入口（作者第三十一次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 视频复盘去掉顶部「选择要复盘的视频」卡片 | `video-review/index.tsx` 删除选择卡片（下拉/查看原视频/数据时间/凭据提示），页面仅保留标题区 + 内嵌作品分析卡片 |
+| 点击卡片头部下拉切换视频 | `PostAnalysis` 新增 `videoOptions`/`onSelectVideo` props：头部封面+标题区域变成按钮（带 ChevronDown），点开绝对定位下拉（max-h-80 内部滚动），每行显示封面、标题、状态、**播放/点赞/收藏/分享**；点击切换并关闭；外部点击关闭（mousedown 监听） |
+| 视频列表补统计 | `GET /api/douyin-review/videos` 每项新增 `plays/likes/favorites/shares`（最新 `platform_post_stats`，与状态同一批批量查询） |
+| 缺文案提示 | Tab 栏右侧新增「暂无文案，分析结果可能不准」（仅 `transcript.available=false` 时） |
+| 文案脚本 ASR 转写按钮 | 后端 `prepare_transcribe` + `POST /works/{id}/transcribe`：校验 `local_video_id`/`videos.filename`/文件存在，复用 `import_video` 任务（同素材运行中则返回 reused）；`transcript` 新增 `has_video` 区分「有视频未转写」与「无本地素材」；前端按钮转写中显示旋转圈 + 呼吸文字动画，完成后重新拉详情、文案渐显 |
+
 ---
 
 ## 6. 新增/修改表结构

@@ -1290,7 +1290,7 @@ def _post_tags(post: PlatformPost) -> list[str]:
 
 def _post_transcript(db: Session, post: PlatformPost) -> dict:
     """本地 ASR 文案：作品关联了本地素材且有转写时返回文本，否则 available=false。"""
-    empty = {"available": False, "status": None, "text": ""}
+    empty = {"available": False, "status": None, "text": "", "has_video": False}
     if not post.local_video_id:
         return empty
     video = db.get(Video, post.local_video_id)
@@ -1300,7 +1300,7 @@ def _post_transcript(db: Session, post: PlatformPost) -> dict:
     if transcript is None:
         return empty
     text = (transcript.corrected_text or transcript.transcript_text or "").strip()
-    return {"available": bool(text), "status": transcript.asr_status, "text": text}
+    return {"available": bool(text), "status": transcript.asr_status, "text": text, "has_video": bool(video.filename)}
 
 
 def post_detail(db: Session, post_id: int) -> dict:
@@ -1396,6 +1396,30 @@ def prepare_overview_refresh(db: Session) -> dict:
         raise CredentialError("当前账号未开启创作者数据，暂时无法获取私有指标")
     _ensure_budget(db, OVERVIEW_REQUESTS)
     return {"account_id": account.id}
+
+
+def prepare_transcribe(db: Session, post_id: int) -> dict:
+    """作品「ASR 转写」准备：校验关联本地素材与文件存在，返回后台任务 payload。"""
+    from ..config import get_settings
+
+    ctx = _resolve(db)
+    owner = ctx["owner"]
+    if owner is None:
+        raise ValueError(ctx["blocked_reason"] or "请先创建并切换主博主")
+    _account, post = _own_post(db, owner, post_id)
+    if not post.local_video_id:
+        raise ValueError("该作品没有关联本地视频素材，无法转写")
+    video = db.get(Video, post.local_video_id)
+    if video is None:
+        raise ValueError("关联的本地素材不存在，无法转写")
+    if not video.filename:
+        raise ValueError("该素材没有本地视频文件，无法转写")
+    if not (get_settings().videos_dir / video.filename).is_file():
+        raise ValueError("本地视频文件缺失，请先重新上传素材")
+    transcript = db.query(Transcript).filter_by(video_id=video.id).first()
+    if transcript is not None and transcript.asr_status == "done" and (transcript.transcript_text or transcript.corrected_text):
+        raise RuntimeError("该作品已有转写文案")
+    return {"video_id": video.id}
 
 
 def prepare_post_refresh(db: Session, post_id: int, force: bool) -> dict:
