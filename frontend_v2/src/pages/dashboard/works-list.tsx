@@ -1,4 +1,5 @@
 // R-244 数据看板右侧「近期作品」：可滚动列表 + 加载更多 + 选中高亮（替代原通知/活动管理）。
+import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -63,6 +64,20 @@ export function WorksList({
   onRetry
 }: WorksListProps) {
   const reduce = useReducedMotion()
+  // v14：滑动到底部自动加载下一页（去掉「加载更多」按钮）
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const node = sentinelRef.current
+    if (!node || !hasMore || loadingMore) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onLoadMore()
+      },
+      { rootMargin: '120px' }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [hasMore, loadingMore, items.length, onLoadMore])
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)] lg:h-full">
       <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
@@ -145,15 +160,22 @@ export function WorksList({
               )
             })}
           </ul>
+          <div ref={sentinelRef} className="h-px w-full" aria-hidden />
         </ScrollArea>
       )}
 
-      {!loading && !error && hasMore ? (
-        <div className="border-t border-border p-3">
-          <Button variant="outline" size="sm" className="w-full" disabled={loadingMore} onClick={onLoadMore}>
-            {loadingMore ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-            {loadingMore ? '加载中…' : '加载更多'}
-          </Button>
+      {!loading && !error ? (
+        <div className="border-t border-border p-2.5 text-center text-[11px] text-muted-foreground">
+          {loadingMore ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              加载中…
+            </span>
+          ) : hasMore ? (
+            '向下滑动自动加载更多'
+          ) : (
+            '已加载全部'
+          )}
         </div>
       ) : null}
     </section>

@@ -619,6 +619,15 @@ limit/offset 分页，返回 has_more
 | 播放量趋势与涨粉量趋势合并 | 后端新增 `metric_trends`（`_metric_trends`）：从 `douyin_post_metrics.raw.item.metrics` + `platform_post_stats` 逐日提取 18 个指标序列；前端统一用 `metric_trends[key]` 绘制，选中哪个指标就画哪条，不再有两张固定趋势图 |
 | 悬浮切换曲线 | 右侧指标块 `onMouseEnter`/`onFocus` → `setMetricKey(key)`；左图标题/单位/曲线随选中指标变化；比率指标纵轴显示百分数（`TrendLine` 新增 `axisFormat`） |
 
+### 5.27 2026-11-01 v14 布局与分页（作者第十三次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 作品总览改上下布局 | `OverviewTab`：上 `Panel(指标趋势)`（全宽，高度固定），下 `Panel(数据)`（`grid-cols-2 sm:grid-cols-3 xl:grid-cols-4` 全宽），最后作品诊断；悬浮切换逻辑不变 |
+| 单条作品趋势为什么只有几天 | 单条作品趋势 = 本地每日快照（`douyin_post_metrics`/`platform_post_stats` 按天写入）。TikHub 单条作品接口只返回「当前累计值」，没有起止日期参数也不提供历史逐日回填，所以历史只能从系统开始每日同步后累积（该作品 10-29 发布、10-30 首次入库，当前 3 个点）；账号总览的 7/14/30/90 天周期是账号级口径，不适用于单条作品。曲线 hint 已注明 |
+| 近期作品去按钮改自动翻页 | `works-list.tsx` 删除「加载更多」按钮；列表末尾放哨兵 `IntersectionObserver`（rootMargin 120px），滚到底自动 `onLoadMore()`；底部提示「向下滑动自动加载更多 / 加载中… / 已加载全部」 |
+| 评论管理一页 10 条 + 自动加载 | `CommentsTab` 增加本地分页：`PAGE_SIZE=10`、`visibleCount` 切页；列表末尾哨兵 `IntersectionObserver` 滚动加载下一批；标题显示「已展示 x/N 条」；后端仍一次返回最多 50 条（不新增接口参数） |
+
 ---
 
 ## 6. 新增/修改表结构

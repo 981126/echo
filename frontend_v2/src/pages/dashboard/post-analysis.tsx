@@ -1,6 +1,6 @@
 // R-244 数据看板「作品分析」区：总览 / 评论热词 / 评论管理（只读）3 个 tab。
 // v13：流量分析、观众分析 tab 移除，指标并入总览右侧；悬浮指标切换左侧趋势曲线。
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   BarChart3,
   CircleAlert,
@@ -152,10 +152,9 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
   const available = points.filter((point) => point.value !== null).length >= 2
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-        <Panel
-          title={`${spec.label}趋势`}
-          hint="逐日数据；逐小时趋势 TikHub 未提供。悬浮右侧指标可切换曲线"
+      <Panel
+        title={`${spec.label}趋势`}
+        hint="逐日数据（历史从系统开始每日同步后累积；TikHub 不提供单条作品的历史逐日数据）。悬浮下方指标可切换曲线"
           extra={
             spec.kind === 'count' ? (
               <Tabs value={mode} onValueChange={(value) => setMode(value as 'total' | 'added')}>
@@ -184,20 +183,19 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
           )}
         </Panel>
 
-        <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换左侧曲线">
-          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
-            {METRIC_SPECS.map((item) => (
-              <MetricTile
-                key={item.key}
-                spec={item}
-                value={values[item.key]}
-                active={item.key === metricKey}
-                onHover={() => setMetricKey(item.key)}
-              />
-            ))}
-          </div>
-        </Panel>
-      </div>
+      <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换上方曲线">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3 xl:grid-cols-4">
+          {METRIC_SPECS.map((item) => (
+            <MetricTile
+              key={item.key}
+              spec={item}
+              value={values[item.key]}
+              active={item.key === metricKey}
+              onHover={() => setMetricKey(item.key)}
+            />
+          ))}
+        </div>
+      </Panel>
 
       <Panel title="作品诊断" hint="只对比本账号近 30 条相近作品在相同发布天数的播放中位数，不做因果推断">
         <p className="text-sm font-medium">{diagnosis.conclusion || '暂无数据'}</p>
@@ -236,6 +234,28 @@ function CommentWordsTab({ detail }: { detail: PostDetail }) {
 
 function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; refreshing: boolean; onRefresh: () => void }) {
   const { comments } = detail
+  // v14：一页最多 10 条，滑动到底部自动加载下一页（数据一次取回最多 50 条，本地分页）
+  const PAGE_SIZE = 10
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [detail.post.post_id])
+  useEffect(() => {
+    const node = sentinelRef.current
+    if (!node || visibleCount >= comments.items.length) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleCount((count) => Math.min(count + PAGE_SIZE, comments.items.length))
+        }
+      },
+      { rootMargin: '120px' }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [visibleCount, comments.items.length])
+  const visibleComments = comments.items.slice(0, visibleCount)
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
@@ -252,9 +272,11 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
       </div>
       {comments.items.length ? (
         <>
-          <p className="text-[11px] text-muted-foreground">已同步 {comments.total} 条公开评论（按点赞排序，最多 50 条；同步时间为本地保存时间）</p>
+          <p className="text-[11px] text-muted-foreground">
+            已同步 {comments.total} 条公开评论（按点赞排序，最多 50 条；同步时间为本地保存时间）· 已展示 {visibleComments.length}/{comments.items.length} 条
+          </p>
           <ul className="divide-y divide-border rounded-lg border border-border">
-            {comments.items.map((comment) => (
+            {visibleComments.map((comment) => (
               <li key={comment.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -270,6 +292,10 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
               </li>
             ))}
           </ul>
+          <div ref={sentinelRef} className="h-px w-full" aria-hidden />
+          <p className="text-center text-[11px] text-muted-foreground">
+            {visibleCount < comments.items.length ? '向下滑动自动加载更多' : '已展示全部已同步评论'}
+          </p>
         </>
       ) : (
         <Empty text="还没有同步到这条作品的评论">
