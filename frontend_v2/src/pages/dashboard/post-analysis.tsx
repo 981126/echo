@@ -62,6 +62,10 @@ export interface PostAnalysisProps {
   /** 文案脚本为空时展示「ASR 转写」按钮 */
   onTranscribe?: () => void
   transcribing?: boolean
+  /** 是否显示头部「更新数据」按钮（视频复盘页隐藏，用页面顶部「更新数据并分析」） */
+  showRefreshButton?: boolean
+  /** 是否显示「暂无文案，分析结果可能不准」提示（仅视频复盘页需要） */
+  showTranscriptHint?: boolean
 }
 
 /** 逐日趋势卡：累计 / 新增切换（数据缺失时显示数据积累中，不补 0） */
@@ -397,7 +401,7 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
   )
 }
 
-export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRefreshComments, onOpenVideoReview, showVideoReviewLink = true, videoOptions, onSelectVideo, onTranscribe, transcribing = false }: PostAnalysisProps) {
+export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRefreshComments, onOpenVideoReview, showVideoReviewLink = true, videoOptions, onSelectVideo, onTranscribe, transcribing = false, showRefreshButton = true, showTranscriptHint = false }: PostAnalysisProps) {
   const { post } = detail
   const postTags = post.tags?.length ? post.tags : extractTags(post.title || '')
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -467,10 +471,12 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
           )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
-            {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-            {refreshing ? '更新中…' : '更新数据'}
-          </Button>
+          {showRefreshButton ? (
+            <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
+              {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+              {refreshing ? '更新中…' : '更新数据'}
+            </Button>
+          ) : null}
           {showVideoReviewLink ? (
             <Button variant="outline" size="sm" onClick={onOpenVideoReview}>
               <BarChart3 className="mr-1.5 h-3.5 w-3.5" />
@@ -553,7 +559,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
 
       <Tabs defaultValue="overview">
         <div className="flex items-center justify-between gap-3 px-4 pt-3">
-          {!detail.transcript.available ? (
+          {showTranscriptHint && !detail.transcript.available ? (
             <p className="order-2 flex shrink-0 items-center gap-1 text-[11px] text-warning">
               <CircleAlert className="h-3 w-3 shrink-0" />
               暂无文案，分析结果可能不准

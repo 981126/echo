@@ -809,6 +809,13 @@ limit/offset 分页，返回 has_more
 | 切到素材库，正在更新的作品卡片没有动画 | 素材库卡片动画由 `platform_media` / `card_sync` 任务认领（`/api/tasks` 轮询 + SSE）；数据看板此前不提交媒体任务，也没注册卡片任务 → 没有可认领任务 | 修复后数据看板手动更新会生成 `platform_media` 任务（payload `video_id`/`post_id`），素材库卡片按 key 认领并显示同步动画；任务完成自动刷新卡片 |
 | 自动刷新是否也下载 | 不希望选中视频就静默下载/转写（浪费额度） | 仅手动（`force=true`）触发媒体补齐；自动刷新（`force=false`）仍只更新数据 |
 
+### 5.49 2026-11-01 v37 页面级按钮/提示拆分（作者第三十六次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 「暂无文案，分析结果可能不准」只在视频复盘显示 | `PostAnalysis` 新增 `showTranscriptHint=false` 默认值；数据看板不传（不显示），视频复盘传 `showTranscriptHint`（显示） |
+| 视频复盘不显示卡片「更新数据」按钮 | `PostAnalysis` 新增 `showRefreshButton=true` 默认值；视频复盘内嵌时传 `false`，刷新统一用页面顶部「更新数据并分析」（会同时补视频/转写并自动重分析） |
+
 ---
 
 ## 6. 新增/修改表结构

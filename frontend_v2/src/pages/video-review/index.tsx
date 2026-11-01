@@ -318,6 +318,8 @@ export default function VideoReviewPage() {
             onRefreshComments={() => void refreshOverviewData()}
             onOpenVideoReview={() => {}}
             showVideoReviewLink={false}
+            showRefreshButton={false}
+            showTranscriptHint
             videoOptions={videos.map((video) => ({
               post_id: video.post_id,
               title: video.title,
