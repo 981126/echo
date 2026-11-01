@@ -116,7 +116,6 @@ function MetricTile({
 function OverviewTab({ detail }: { detail: PostDetail }) {
   const { overview, fans, diagnosis } = detail
   const [metricKey, setMetricKey] = useState('plays')
-  const [mode, setMode] = useState<'total' | 'added'>('total')
   const spec = METRIC_SPECS.find((item) => item.key === metricKey) ?? METRIC_SPECS[0]
   const audienceCards: Record<string, number | null> = Object.fromEntries(
     detail.audience.cards.map((card) => [card.key, card.value])
@@ -141,31 +140,18 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
     dislike_rate: audienceCards.dislike_rate,
     fan_view_proportion: fans.fan_view_proportion
   }
-  // 播放量与涨粉量等累计指标的按天趋势已合并到同一张图（metric_trends），可切累计/新增
-  const rawPoints = detail.metric_trends[metricKey] ?? []
-  const points = rawPoints.map((point, index) => {
-    const label = formatMonthDay(point.date)
-    if (spec.kind !== 'count' || mode === 'total') return { label, value: point.value }
-    const previous = index > 0 ? rawPoints[index - 1].value : null
-    return { label, value: previous === null ? null : Math.max(0, point.value - previous) }
-  })
+  // 播放量与涨粉量等指标趋势合并到同一张图（metric_trends），只展示指标本身的每日值（v16 去掉「新增」）
+  const points = (detail.metric_trends[metricKey] ?? []).map((point) => ({
+    label: formatMonthDay(point.date),
+    value: point.value
+  }))
   const available = points.filter((point) => point.value !== null).length >= 2
   return (
     <div className="space-y-3">
       <Panel
         title={`${spec.label}趋势`}
         hint="逐日数据（历史从系统开始每日同步后累积；TikHub 不提供单条作品的历史逐日数据）。悬浮下方指标可切换曲线"
-          extra={
-            spec.kind === 'count' ? (
-              <Tabs value={mode} onValueChange={(value) => setMode(value as 'total' | 'added')}>
-                <TabsList className="h-8">
-                  <TabsTrigger value="total" className="h-6 px-2.5 text-xs">累计</TabsTrigger>
-                  <TabsTrigger value="added" className="h-6 px-2.5 text-xs">新增</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            ) : null
-          }
-        >
+      >
           {available ? (
             <TrendLine
               points={points}
@@ -184,7 +170,7 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
         </Panel>
 
       <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换上方曲线">
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-6">
           {METRIC_SPECS.map((item) => (
             <MetricTile
               key={item.key}

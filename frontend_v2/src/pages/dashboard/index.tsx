@@ -568,7 +568,7 @@ export default function DashboardPage() {
       initial={reduce ? false : { opacity: 0.85, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={softIn}
-      className="space-y-4 pb-10"
+      className="space-y-4 pb-2"
     >
       <WarningBars data={data} onGoCreators={() => navigate('/creators')} />
       {overviewError ? (

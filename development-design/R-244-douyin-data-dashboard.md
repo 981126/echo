@@ -635,6 +635,14 @@ limit/offset 分页，返回 has_more
 | 移除「作品诊断」面板 | `OverviewTab` 删除作品诊断 `Panel`（结论/说明/平均播放占比/收藏率/note 不再渲染）；后端 `diagnosis` 字段保留（其中 `avg_view_proportion` 仍作为「平均播放占比」指标的兜底值），页面不展示 |
 | 数据面板一行 5 个指标 | 指标网格 `grid-cols-2 sm:grid-cols-3 xl:grid-cols-4` → `grid-cols-2 gap-y-2 sm:grid-cols-3 lg:grid-cols-5`；18 项排成 5+5+5+3 行 |
 
+### 5.29 2026-11-01 v16 总览微调（作者第十五次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 数据栏一行 6 个指标 | 指标网格 `lg:grid-cols-5` → `lg:grid-cols-6`；18 项正好 3 行（窄屏 2/3 列） |
+| 底部留白过多 | 页面根容器 `pb-10`（40px）→ `pb-2`（8px），滚到底时详情卡与页面底边总留白从约 64px 降到 32px（含 main 自身 24px 内边距） |
+| 去掉趋势「新增」曲线 | OverviewTab 删除累计/新增 Tabs 切换与 diff 逻辑，`points` 直接取 `metric_trends[key]` 原始每日值；`MetricSpec.kind` 仅保留作语义标注 |
+
 ---
 
 ## 6. 新增/修改表结构
