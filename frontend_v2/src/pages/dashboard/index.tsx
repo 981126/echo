@@ -138,8 +138,7 @@ function AccountOverview({
   }
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
-      <div className="space-y-4 p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <header className="flex h-16 items-center justify-between gap-2 border-b border-border px-4">
           <div className="flex min-w-0 items-center gap-2.5">
             <Avatar className="h-9 w-9">
               {account?.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}
@@ -156,8 +155,9 @@ function AccountOverview({
             {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
             {busy ? '更新中…' : '更新数据'}
           </Button>
-        </div>
+      </header>
 
+      <div className="space-y-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span>统计周期</span>

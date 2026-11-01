@@ -163,7 +163,6 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
       <div className="min-w-0 lg:col-span-6">
         <Panel
           title={`${spec.label}趋势`}
-          hint="逐日数据（历史从系统开始每日同步后累积；TikHub 不提供单条作品的历史逐日数据）。悬浮右侧指标可切换曲线"
           extra={
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">统计周期</span>

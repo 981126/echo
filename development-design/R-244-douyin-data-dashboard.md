@@ -686,6 +686,13 @@ limit/offset 分页，返回 has_more
 | 数据看板顶部/左右间距与主页、素材库一致 | 根因：`WarningBars` 在没有提示时仍渲染空 `<div class="space-y-2">`，其后续兄弟的 `space-y-4` margin 透过空块+无 padding 的根容器发生 margin 塌陷，把整页下推 16px。改为**无提示时不渲染**（`if (!hasNotice) return null`）；实测 `/dashboard` 与 `/home` 内容根节点均为 x=276 / y=80 / width=1104，完全一致 |
 | 近 90 日播放量 < 近 7 日说明 | 7 日播放量来自 TikHub 账号诊断（官方口径 88,474）；14/30/90 日没有官方周期总量接口，只能本地快照差值求和（当前快照仅 10-30/10-31/11-01 三天 → 28,559），所以 90 日反而比 7 日小；属数据覆盖限制，非算法错误 |
 
+### 5.36 2026-11-01 v23 头部对齐与说明精简（作者第二十二次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 账号卡与近期作品卡头部对齐 | 两卡头部统一 `h-16`（64px）+ `items-center`：账号卡头部从内层 `p-4 sm:p-5` 中拆出为独立 `<header className="flex h-16 items-center justify-between gap-2 border-b border-border px-4">`；近期作品卡头部 `flex items-start ... py-3` → `flex h-16 items-center ... px-4`。实测两卡顶部均 y=80、头部均 64px、更新按钮中心均 y=113 |
+| 视频总览去掉曲线说明文字 | 曲线 Panel 不再传 `hint`（「逐日数据（历史…）」整段移除），标题行只保留「××趋势」+ 右上统计周期下拉 |
+
 ---
 
 ## 6. 新增/修改表结构

@@ -80,7 +80,7 @@ export function WorksList({
   }, [hasMore, loadingMore, items.length, onLoadMore])
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)] lg:h-full">
-      <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
+      <div className="flex h-16 items-center justify-between gap-2 border-b border-border px-4">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2">
             <h2 className="text-sm font-semibold">近期作品</h2>
