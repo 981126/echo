@@ -375,7 +375,6 @@ METRIC_SPECS: list[tuple[str, str, str, str]] = [
     ("shares", "作品分享", "shares", "次"),
     ("comments", "作品评论", "comments", "条"),
     ("net_fans", "净增粉丝", "net_fans", "人"),
-    ("total_fans", "总粉丝量", "followers", "人"),
 ]
 METRIC_MAP = {key: (label, field, unit) for key, label, field, unit in METRIC_SPECS}
 POST_METRIC_KEYS = ("plays", "homepage_visits", "likes", "shares", "comments")
@@ -553,22 +552,6 @@ def account_kpis(db: Session, account_id: int, days: int = 7, today: date | None
         "prev_dates": prev_net_dates,
     }
 
-    latest = (
-        db.query(CreatorAccountSnapshot)
-        .filter_by(account_id=account_id)
-        .order_by(CreatorAccountSnapshot.snapshot_date.desc())
-        .first()
-    )
-    fields["total_fans"] = {
-        "value": int(latest.followers) if latest is not None else None,
-        "prev": None,
-        "delta": None,
-        "covered": 1 if latest is not None else 0,
-        "prev_covered": 0,
-        "dates": [latest.snapshot_date] if latest is not None else [],
-        "prev_dates": [],
-    }
-
     days_list = _period_days(days, today)
     series_out: dict[str, dict] = {}
     for key in POST_METRIC_KEYS:
@@ -588,14 +571,6 @@ def account_kpis(db: Session, account_id: int, days: int = 7, today: date | None
         "unit": "人",
         "mode": "daily",
         "points": _series_points(days_list, net_buckets),
-    }
-    fan_map = {day: followers for day, followers in fan_series if start.isoformat() <= day <= today.isoformat()}
-    series_out["total_fans"] = {
-        "key": "total_fans",
-        "label": "总粉丝量",
-        "unit": "人",
-        "mode": "cumulative",
-        "points": _series_points(days_list, fan_map),
     }
     return {
         "period": {"start": start.isoformat(), "end": today.isoformat(), "days": days, "label": PERIOD_LABELS[days]},
@@ -666,25 +641,6 @@ def _kpi_cards(snapshot: dict, diagnosis: dict | None, days: int) -> list[dict]:
         else:
             cards.append(snapshot_card(key, label, unit))
 
-    total_item = snapshot["fields"].get("total_fans") or {}
-    total_dates = total_item.get("dates") or []
-    cards.append(
-        {
-            "key": "total_fans",
-            "label": "总粉丝量",
-            "unit": "人",
-            "trend_key": "total_fans",
-            "value": total_item.get("value"),
-            "prev": None,
-            "delta": None,
-            "source": "snapshot",
-            "similar": None,
-            "rank": None,
-            "available": total_item.get("value") is not None,
-            "coverage": {"posts": 0, "dates": total_dates},
-            "note": f"快照 {total_dates[0]}" if total_dates else "暂无数据",
-        }
-    )
     return cards
 
 

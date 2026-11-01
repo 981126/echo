@@ -89,9 +89,9 @@ function KpiCardView({
       )}
     >
       {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
-      <div className={cn('text-xs text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
-      <div className="tnum mt-1.5 text-2xl font-semibold leading-8 tracking-tight">{valueText}</div>
-      <div className={cn('mt-1 min-h-4 text-xs leading-4', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}>
+      <div className={cn('text-[11px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
+      <div className="tnum mt-1 text-xl font-semibold leading-7 tracking-tight">{valueText}</div>
+      <div className={cn('mt-0.5 min-h-4 text-[11px] leading-4', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}>
         {deltaText}
       </div>
     </button>
@@ -254,12 +254,6 @@ function AccountOverview({
             ))}
           </motion.div>
         </div>
-        <p className="text-[11px] leading-4 text-muted-foreground">
-          {periodDays === 7
-            ? '近 7 日：播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；其余指标取本地每日快照差值。'
-            : `近 ${periodDays} 日：全部指标取本地每日快照差值（账号诊断只提供近 7 日口径）。`}
-          鼠标悬浮或点击指标卡可切换上方趋势曲线；较前 N 日对比只在历史数据足够时显示。
-        </p>
       </div>
     </section>
   )

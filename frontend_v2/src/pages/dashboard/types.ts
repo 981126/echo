@@ -101,7 +101,7 @@ export interface DashboardOverview {
   period: PeriodInfo | null
   diagnosis: AccountDiagnosis | null
   kpis: KpiCard[]
-  /** key = plays/homepage_visits/likes/shares/comments/net_fans/total_fans */
+  /** key = plays/homepage_visits/likes/shares/comments/net_fans */
   series: Record<string, MetricSeries>
   needs_refresh: boolean
   stale: boolean

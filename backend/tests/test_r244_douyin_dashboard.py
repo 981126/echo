@@ -516,7 +516,7 @@ def test_play_trend_ignores_public_zero_plays(db):
 
 
 def test_overview_fans_kpis_and_series(db):
-    """粉丝数据合并进指标卡：总粉丝量/净增粉丝与播放指标同一行；粉丝曲线来自账号每日快照。"""
+    """粉丝数据合并进指标卡：净增粉丝与播放指标同一行（总粉丝量卡已按 v9 移除）；粉丝曲线来自账号每日快照。"""
     _, account = _owner_account(db)
     today = now().date()
     for offset, followers in enumerate((59076, 59063)):
@@ -542,15 +542,10 @@ def test_overview_fans_kpis_and_series(db):
         "shares",
         "comments",
         "net_fans",
-        "total_fans",
     ]
-    assert cards["total_fans"]["value"] == 59063
-    assert cards["total_fans"]["label"] == "总粉丝量"
+    assert "total_fans" not in cards
     assert cards["net_fans"]["value"] == -63  # 7 日周期用账号诊断
-    # 总粉丝量/净增粉丝曲线
-    total_series = body["series"]["total_fans"]
-    assert total_series["mode"] == "cumulative"
-    assert total_series["points"][-1]["value"] == 59063
+    # 净增粉丝曲线仍来自账号每日粉丝快照
     net_series = body["series"]["net_fans"]
     assert net_series["points"][-1]["value"] == -13  # 59063 - 59076
 
@@ -570,8 +565,9 @@ def test_overview_period_and_metric_series(db):
         assert snapshot["period"]["days"] == days
         assert len(snapshot["series"]["plays"]["points"]) == days
         # 每个指标都有独立曲线
-        for key in ("plays", "homepage_visits", "likes", "shares", "comments", "net_fans", "total_fans"):
+        for key in ("plays", "homepage_visits", "likes", "shares", "comments", "net_fans"):
             assert key in snapshot["series"]
+        assert "total_fans" not in snapshot["series"]
 
     body = service.overview(db, 30)
     assert body["period"]["days"] == 30

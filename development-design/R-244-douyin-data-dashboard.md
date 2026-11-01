@@ -580,6 +580,14 @@ limit/offset 分页，返回 has_more
 | 切换指标曲线闪一下 | 不再用 `initial opacity` 重挂闪烁；改为**交叉过渡**：`switchMetric` 时把当前曲线存 `fadeFrom`，旧曲线绝对定位原处 `animate opacity 1→0`（0.26s），新曲线 `opacity 0→1` 同时淡入，280ms 后移除旧层；容器 `min-h` 固定高度不跳版 |
 | 交互保留 | 悬浮 80ms 防抖激活、点击/键盘聚焦同样生效；`keepPreviousData` 保证切周期不闪骨架 |
 
+### 5.22 2026-11-01 v9 精简（作者第八次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 移除「总粉丝量」指标卡 | 后端 `_kpi_cards` 删除 total_fans 卡、`account_kpis` 删除 `fields.total_fans`、`series.total_fans`（账号粉丝每日快照 `creator_account_snapshots` 仍保留，用于「净增粉丝」卡片与曲线）；前端指标卡自动变为 6 个（播放量/主页访问量/作品点赞/作品分享/作品评论/净增粉丝），右栏 2 列共 3 行 |
+| 删除底部口径说明整段文字 | 移除 AccountOverview 底部 `<p>` 口径段（近 7 日/14/30/90 日说明 + 悬浮提示）；数据来源说明保留在统计周期旁的 ⓘ 悬浮提示中 |
+| 指标数字字号调小 | 标签 `text-xs(12px)` → `text-[11px]`；数字 `text-2xl(24px)` → `text-xl(20px)`；较前对比 `text-xs` → `text-[11px]`，卡片间距略收紧 |
+
 ---
 
 ## 6. 新增/修改表结构
