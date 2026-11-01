@@ -20,12 +20,12 @@ describe('数据看板格式化：万/亿与缺失值', () => {
     expect(formatCount(0)).toBe('0')
     expect(formatCount(999)).toBe('999')
     expect(formatCount(1234)).toBe('1,234')
-    expect(formatCount(10_000)).toBe('1.0万')
-    expect(formatCount(88_474)).toBe('8.8万')
+    expect(formatCount(10_000)).toBe('1.00万')
+    expect(formatCount(88_474)).toBe('8.85万')
     expect(formatCount(6_642_434)).toBe('664.2万')
     expect(formatCount(100_000_000)).toBe('1.0亿')
     expect(formatCount(-63)).toBe('-63')
-    expect(formatCount(-63_000)).toBe('-6.3万')
+    expect(formatCount(-63_000)).toBe('-6.30万')
   })
 
   it('热度同样走万/亿口径', () => {
@@ -56,7 +56,7 @@ describe('数据看板格式化：百分比/排名/增减', () => {
     expect(formatDelta(0)).toBe('0')
     expect(formatDelta(12)).toBe('+12')
     expect(formatDelta(-63)).toBe('-63')
-    expect(formatDelta(12_000)).toBe('+1.2万')
+    expect(formatDelta(12_000)).toBe('+1.20万')
     expect(deltaToneClass(12)).toBe('text-success')
     expect(deltaToneClass(-1)).toBe('text-destructive')
     expect(deltaToneClass(0)).toBe('text-muted-foreground')
@@ -87,7 +87,7 @@ describe('数据看板格式化：时间与状态', () => {
   it('单位格式化：ratio/秒/中文单位', () => {
     expect(formatUnitValue(0.305, 'ratio')).toBe('30.5%')
     expect(formatUnitValue(16.4, '秒')).toBe('16.4秒')
-    expect(formatUnitValue(11_887, '次')).toBe('1.2万次')
+    expect(formatUnitValue(11_887, '次')).toBe('1.19万次')
     expect(formatUnitValue(0, '人')).toBe('0人')
     expect(formatUnitValue(null, '人')).toBe('暂无数据')
   })

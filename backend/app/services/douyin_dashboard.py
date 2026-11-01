@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..core.timeutil import now as _app_now
 from ..models.kv import Kv
-from ..models.platform import CreatorAccount, PlatformPost, PlatformPostComment, PlatformPostStat
+from ..models.platform import CreatorAccount, CreatorAccountSnapshot, PlatformPost, PlatformPostComment, PlatformPostStat
 from ..models.video_review import DouyinPostMetric
 from .creator_service import get_current_creator
 from .douyin_account_policy import credential_summary, mark_invalid, mark_valid, resolve_data_policy
@@ -628,6 +628,39 @@ def _write_overview_cache(db: Session, account_id: int, payload: dict) -> None:
     db.commit()
 
 
+def _fans_block(db: Session, account_id: int, diagnosis: dict | None) -> dict:
+    """粉丝数据（与播放数据同一区块）：总粉丝量 = 本地账号每日快照；净增 = 账号诊断 NewFans。
+
+    吸粉量/脱粉量/回访粉丝量：TikHub 创作者接口不提供账号级粉丝流水，明确返回 null，
+    由页面显示「暂无数据」，不用作品维度的涨粉/脱粉去凑（口径不同会与净增对不上）。
+    """
+    snapshot = (
+        db.query(CreatorAccountSnapshot)
+        .filter_by(account_id=account_id)
+        .order_by(CreatorAccountSnapshot.snapshot_date.desc())
+        .first()
+    )
+    metrics = (diagnosis or {}).get("metrics") or {}
+    raw_new_fans = metrics.get("new_fans")
+    new_fans = raw_new_fans if isinstance(raw_new_fans, dict) else {}
+    return {
+        "total": {
+            "value": int(snapshot.followers) if snapshot is not None else None,
+            "date": snapshot.snapshot_date if snapshot is not None else None,
+        },
+        "net": {
+            "value": new_fans.get("own"),
+            "similar": new_fans.get("similar"),
+            "rank": new_fans.get("rank"),
+        },
+        "acquired": None,
+        "lost": None,
+        "returning": None,
+        "unavailable": ["吸粉量", "脱粉量", "回访粉丝量"],
+        "note": "总粉丝量取本地账号每日快照；粉丝净增取账号诊断。吸粉量/脱粉量/回访粉丝量：TikHub 未提供账号级粉丝流水接口，暂无数据。",
+    }
+
+
 # ---------- 账号总览 ----------
 
 
@@ -645,6 +678,7 @@ def overview(db: Session) -> dict:
         "diagnosis": None,
         "analysis": None,
         "kpis": [],
+        "fans": None,
         "trend": {"available": False, "points": [], "note": "", "coverage": {"posts": 0, "dates": []}},
         "needs_refresh": True,
         "stale": True,
@@ -684,6 +718,7 @@ def overview(db: Session) -> dict:
                 "items": (analysis or {}).get("items", []),
             },
             "kpis": _kpi_cards(snapshot, diagnosis),
+            "fans": _fans_block(db, account.id, diagnosis),
             "trend": snapshot["trend"],
             "needs_refresh": stale,
             "stale": stale,

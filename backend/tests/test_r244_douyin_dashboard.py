@@ -18,7 +18,7 @@ from app.api import douyin_dashboard
 from app.core.timeutil import now
 from app.db import get_db
 from app.models.kv import Kv
-from app.models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostComment, PlatformPostStat
+from app.models.platform import Creator, CreatorAccount, CreatorAccountSnapshot, PlatformPost, PlatformPostComment, PlatformPostStat
 from app.models.video_review import DouyinCreatorCredential, DouyinPostMetric
 from app.services import douyin_dashboard as service
 from app.services import douyin_creator_sync as sync_mod
@@ -528,3 +528,24 @@ def test_play_trend_ignores_public_zero_plays(db):
     assert values == [27]  # 有效基线从 10-30 的 170573 开始，today 新增 27
     detail = service.post_detail(db, post.id)
     assert detail["play_trend"]["available"] is True
+
+
+def test_overview_fans_block(db):
+    """粉丝数据：总粉丝量取本地账号快照、净增取诊断；吸粉/脱粉/回访无接口返回 null。"""
+    _, account = _owner_account(db)
+    db.add(CreatorAccountSnapshot(account_id=account.id, snapshot_date="2026-10-31", followers=59063))
+    db.commit()
+
+    def update(pct, note):
+        return None
+
+    service.overview_worker(db, {"account_id": account.id}, update)
+    body = service.overview(db)
+    fans = body["fans"]
+    assert fans["total"]["value"] == 59063
+    assert fans["total"]["date"] == "2026-10-31"
+    assert fans["net"]["value"] == -63
+    assert fans["acquired"] is None
+    assert fans["lost"] is None
+    assert fans["returning"] is None
+    assert fans["unavailable"] == ["吸粉量", "脱粉量", "回访粉丝量"]

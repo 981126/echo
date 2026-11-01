@@ -242,6 +242,17 @@ fetch_video_comments ────┴── sync_post_comments ───► platf
 
 归一化后存 Kv：`{"plays": {"own": 88474, "similar": 32470, "rank": 0.6604}, ...}`，避免页面直接依赖第三方字段名。
 
+
+**粉丝数据（与播放数据同一区块，作者 2026-11-01 追加）**：
+
+| 字段 | 接口/来源 | 说明 |
+|---|---|---|
+| 总粉丝量 | 本地 `creator_account_snapshots.followers`（TikHub 公开主页接口每日同步） | 实测 59,063 = 抖音「5.91 万」；页面显示快照日期 |
+| 粉丝净增 | `fetch_author_diagnosis` `NewFans.OwnValue` | 实测 -63，与抖音一致；附同类平均/排名 |
+| 吸粉量 / 脱粉量 / 回访粉丝量 | **TikHub 无接口**（已核对 creator_v2 全部 14 个接口与公开接口） | 固定返回 null，页面「暂无数据（TikHub 未提供）」；不用作品维度涨粉/脱粉凑，避免与净增对不上 |
+
+接口返回 `fans` 块：`{total:{value,date}, net:{value,similar,rank}, acquired:null, lost:null, returning:null, unavailable:[...], note}`；总粉丝量不额外消耗请求（复用每日快照）。
+
 ### 5.4 账号 7 日 KPI 与逐日播放趋势（本地快照差值）
 
 **输入**：`platform_post_stats`（`post_id, stat_date, plays, likes, comments, shares, favorites`）+ `douyin_post_metrics`（`post_id, snapshot_date, profile_visits, follower_gain`），限定当前账号作品、`stat_date ∈ [today-13, today]`。
@@ -572,6 +583,13 @@ limit/offset 分页，返回 has_more
     {"key": "cover_click_rate", "label": "条均点击率", "value": 0.2084, "unit": "ratio"},
     {"key": "submission_count", "label": "周期投稿量", "value": 1, "unit": "篇"}
   ]},
+  "fans": {
+    "total": {"value": 59063, "date": "2026-10-31"},
+    "net": {"value": -63, "similar": 128, "rank": 0.0},
+    "acquired": null, "lost": null, "returning": null,
+    "unavailable": ["吸粉量", "脱粉量", "回访粉丝量"],
+    "note": "总粉丝量取本地账号每日快照；粉丝净增取账号诊断。吸粉量/脱粉量/回访粉丝量：TikHub 未提供账号级粉丝流水接口，暂无数据。"
+  },
   "kpis": [
     {"key": "plays", "label": "播放量", "value": 88474, "prev": null, "delta": null, "source": "diagnosis", "available": true, "note": "较前 7 日：诊断接口不返回上期"},
     {"key": "homepage_visits", "label": "主页访问量", "value": null, "prev": null, "delta": null, "source": "snapshot", "available": false, "note": "数据积累中（已有 2 天）"},

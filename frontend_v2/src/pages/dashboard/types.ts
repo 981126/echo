@@ -96,6 +96,19 @@ export interface AccountTrend {
   coverage: { posts: number; dates: string[] }
 }
 
+/** 账号粉丝数据（与播放数据同一区块；吸粉/脱粉/回访 TikHub 无接口 → null） */
+export interface FansBlock {
+  /** 总粉丝量：本地账号每日快照 */
+  total: { value: number | null; date: string | null }
+  /** 粉丝净增：账号诊断 NewFans（同 6 指标里的净增粉丝） */
+  net: { value: number | null; similar: number | null; rank: number | null }
+  acquired: number | null
+  lost: number | null
+  returning: number | null
+  unavailable: string[]
+  note: string
+}
+
 export interface DashboardOverview {
   account: DashboardAccount | null
   credential: DashboardCredential | null
@@ -107,6 +120,7 @@ export interface DashboardOverview {
   diagnosis: AccountDiagnosis | null
   analysis: AccountAnalysis | null
   kpis: KpiCard[]
+  fans: FansBlock | null
   trend: AccountTrend
   needs_refresh: boolean
   stale: boolean

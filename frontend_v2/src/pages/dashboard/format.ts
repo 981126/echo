@@ -10,14 +10,22 @@ export function isMissing(value: number | null | undefined): boolean {
   return value === null || value === undefined || Number.isNaN(value)
 }
 
-/** 大数字：≥1 亿 →「x.x 亿」；≥1 万 →「x.x 万」；否则整数（千分位）。null → 暂无数据，0 → 0。 */
+/**
+ * 大数字（对齐抖音创作者中心展示口径）：
+ * - ≥1 亿 →「x.x 亿」
+ * - 1 万～10 万 →「x.xx 万」（如 8.85 万 / 5.91 万 / 1.37 万）
+ * - 10 万～1 亿 →「x.x 万」（如 18.0 万 / 198.7 万 / 3876.3 万）
+ * - <1 万 → 整数（千分位）
+ * null → 暂无数据，0 → 0。
+ */
 export function formatCount(value: number | null | undefined): string {
   if (isMissing(value)) return MISSING_TEXT
   const v = value as number
   const sign = v < 0 ? '-' : ''
   const abs = Math.abs(v)
   if (abs >= 100_000_000) return `${sign}${(abs / 100_000_000).toFixed(1)}亿`
-  if (abs >= 10_000) return `${sign}${(abs / 10_000).toFixed(1)}万`
+  if (abs >= 100_000) return `${sign}${(abs / 10_000).toFixed(1)}万`
+  if (abs >= 10_000) return `${sign}${(abs / 10_000).toFixed(2)}万`
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(v)
 }
 

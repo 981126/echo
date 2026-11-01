@@ -35,6 +35,7 @@ import type {
   AccountDiagnosis,
   DashboardOverview,
   DiagnosisKey,
+  FansBlock,
   DiagnosisMetric,
   KpiCard as KpiCardData,
   PostDetail,
@@ -160,6 +161,48 @@ function AverageMetrics({ analysis }: { analysis: AccountAnalysis | null }) {
   )
 }
 
+function FanRow({ fans }: { fans: FansBlock }) {
+  const missing = '暂无数据'
+  const items: Array<{ key: string; label: string; value: string; hint?: string; tone?: string }> = [
+    {
+      key: 'total',
+      label: '总粉丝量',
+      value: fans.total.value === null ? missing : formatCount(fans.total.value),
+      hint: fans.total.date ? `快照 ${formatMonthDay(fans.total.date)}` : undefined
+    },
+    {
+      key: 'net',
+      label: '粉丝净增',
+      value: fans.net.value === null ? missing : formatCount(fans.net.value),
+      hint: fans.net.similar !== null && fans.net.rank !== null ? `同类平均 ${formatCount(fans.net.similar)} · 超过 ${formatRankPercent(fans.net.rank)}` : undefined,
+      tone: fans.net.value === null ? undefined : fans.net.value < 0 ? 'text-destructive' : 'text-success'
+    },
+    { key: 'acquired', label: '吸粉量', value: missing, hint: 'TikHub 未提供' },
+    { key: 'lost', label: '脱粉量', value: missing, hint: 'TikHub 未提供' },
+    { key: 'returning', label: '回访粉丝量', value: missing, hint: 'TikHub 未提供' }
+  ]
+  return (
+    <div className="border-t border-border pt-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">粉丝数据</h3>
+        <span className="text-[11px] text-muted-foreground">
+          总粉丝量：本地账号每日快照 · 粉丝净增：账号诊断
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-4 md:grid-cols-5">
+        {items.map((item) => (
+          <div key={item.key} className="min-w-0">
+            <div className="text-xs text-muted-foreground">{item.label}</div>
+            <div className={cn('tnum mt-1.5 text-2xl font-semibold tracking-tight', item.tone)}>{item.value}</div>
+            {item.hint ? <div className="mt-1 text-[11px] text-muted-foreground">{item.hint}</div> : null}
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] leading-4 text-muted-foreground">{fans.note}</p>
+    </div>
+  )
+}
+
 function AccountOverview({ data, busy, onRefresh }: { data: DashboardOverview; busy: boolean; onRefresh: () => void }) {
   const account = data.account
   const diagnosis = data.diagnosis
@@ -241,6 +284,8 @@ function AccountOverview({ data, busy, onRefresh }: { data: DashboardOverview; b
         <p className="text-[11px] leading-4 text-muted-foreground">
           播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；主页访问量/作品点赞/作品分享/作品评论取本地每日快照差值，历史不足时显示「暂无对比」。
         </p>
+
+        {data.fans ? <FanRow fans={data.fans} /> : null}
 
         <div className="border-t border-border pt-4">
           <DiagnosisCompare diagnosis={diagnosis} />
