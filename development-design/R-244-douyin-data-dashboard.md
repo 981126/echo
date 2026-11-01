@@ -544,6 +544,15 @@ limit/offset 分页，返回 has_more
 | 逐日新增只按相邻两天差值 | `_post_trend_buckets` / `_fan_net_buckets` 增加 `_is_next_day` 校验：跨天缺口的增量不再摊到后一天（避免 30/90 日曲线出现「一天涨几千」的虚高）；缺口在曲线上由平滑线跨过 |
 | 30/90 日曲线点少的原因 | 本地每日快照只在实际同步日存在（历史同步非每日），TikHub 不提供历史逐日回填；因此长周期只能展示已有快照日的增量，页面小字说明 |
 
+### 5.18 2026-11-01 v5 改版（作者第四次反馈，覆盖以上相关描述）
+
+| 改动 | 实现 |
+|---|---|
+| 去掉「同类平均 xxx · 超过 xx% 同类创作者」文字 | `KpiCardView` 不再渲染 similar/rank 行，卡片只保留「指标名 / 数字 / 较前 N 日」三段；后端响应字段保留（不展示、不新增请求） |
+| 激活线固定在指标卡区域底部 | 卡片 `<button>` 改 `relative flex h-full flex-col`，网格 `items-stretch`；选中时渲染 `motion.span layoutId="kpi-active-line"` 绝对定位在 `bottom-0`、`inset-x-1`，切换指标时用 spring 在卡片间平滑移动 |
+| 切换数据有动画（图表/曲线/指标区） | 曲线容器以 `key={chart-${metricKey}-${periodDays}}` 重挂，`initial={{opacity:.55,y:8}} → animate={{opacity:1,y:0}}`（softIn，0.24s），不闪白、`min-h` 固定高度不跳；指标区以 `key={kpis-${periodDays}}` 在切换周期时淡入 |
+| 右侧近期作品切换有动画 | 选中行高亮用 `motion.span animate={{opacity}}` 淡入；左侧竖条 `layoutId="works-selected-bar"` 在行间平滑滑动；行内容 `relative z-10` 保证在遮罩之上；列表加载仍逐条 stagger 入场 |
+
 ---
 
 ## 6. 新增/修改表结构

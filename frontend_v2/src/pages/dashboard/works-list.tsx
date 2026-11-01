@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
 import { Thumb } from './charts'
 import { formatCount, formatDateTime, formatMonthDayTime, statusTone } from './format'
 import type { WorkItem } from './types'
@@ -104,15 +103,31 @@ export function WorksList({
                     initial={reduce ? false : { opacity: 0.85 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.2, delay: reduce ? 0 : Math.min(index, 8) * 0.02 }}
-                    className={cn(
-                      'relative flex w-full cursor-pointer gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/60',
-                      selected && 'bg-accent-soft/50 hover:bg-accent-soft/50'
-                    )}
+                    className="relative flex w-full cursor-pointer gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/60"
                     aria-pressed={selected}
                   >
-                    {selected ? <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-accent" /> : null}
-                    <Thumb url={item.cover_url} alt={item.title || '作品封面'} className="h-[72px] w-[54px] shrink-0 rounded-md border border-border" />
-                    <div className="min-w-0 flex-1">
+                    {/* 选中态动画：整行淡入高亮 + 左侧竖条在行间平滑滑动 */}
+                    <motion.span
+                      aria-hidden
+                      initial={false}
+                      animate={{ opacity: selected ? 1 : 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="pointer-events-none absolute inset-0 bg-accent-soft/50"
+                    />
+                    {selected ? (
+                      <motion.span
+                        aria-hidden
+                        layoutId="works-selected-bar"
+                        transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                        className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-accent"
+                      />
+                    ) : null}
+                    <Thumb
+                      url={item.cover_url}
+                      alt={item.title || '作品封面'}
+                      className="relative z-10 h-[72px] w-[54px] shrink-0 rounded-md border border-border"
+                    />
+                    <div className="relative z-10 min-w-0 flex-1">
                       <div className="flex items-start gap-2">
                         <p className="line-clamp-2 min-w-0 flex-1 text-xs font-medium leading-5" title={item.title}>{item.title || '无标题作品'}</p>
                         <Badge variant={statusTone(item.status)} className="shrink-0">{item.status_label || '—'}</Badge>

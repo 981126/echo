@@ -19,7 +19,7 @@ import { coverThumb } from '@/lib/covers'
 import { EASE_OUT_EXPO, softIn } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { Empty, TrendLine } from './charts'
-import { deltaToneClass, formatCount, formatDateTime, formatDelta, formatMonthDay, formatRankPercent } from './format'
+import { deltaToneClass, formatCount, formatDateTime, formatDelta, formatMonthDay } from './format'
 import { PostAnalysis } from './post-analysis'
 import { WorksList } from './works-list'
 import type {
@@ -63,8 +63,6 @@ function KpiCardView({
   const valueText = kpi.value === null ? '暂无数据' : formatCount(kpi.value)
   const missingNote = kpi.source === 'diagnosis' ? '账号诊断暂无数据，可点「更新数据」获取' : kpi.note || '数据积累中：需要至少 2 天相邻快照'
   const deltaText = kpi.delta !== null ? `较前 ${days} 日 ${formatDelta(kpi.delta)}` : null
-  const similarText =
-    kpi.similar !== null && kpi.rank !== null ? `同类平均 ${formatCount(kpi.similar)} · 超过 ${formatRankPercent(kpi.rank)} 同类创作者` : null
   return (
     <button
       type="button"
@@ -72,7 +70,7 @@ function KpiCardView({
       aria-pressed={active}
       title={`点击查看「${kpi.label}」在近 ${days} 日的趋势`}
       className={cn(
-        'group min-w-0 cursor-pointer rounded-md px-1 pb-2 text-left transition-colors hover:bg-muted/40',
+        'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-md px-2 pb-3 pt-1 text-left transition-colors hover:bg-muted/40',
         active && 'bg-accent-soft/40'
       )}
     >
@@ -87,12 +85,14 @@ function KpiCardView({
       >
         {kpi.available ? deltaText || kpi.note || '\u00a0' : missingNote}
       </div>
-      {kpi.available && similarText ? (
-        <div className="mt-0.5 text-[10px] leading-4 text-muted-foreground" title={similarText}>
-          {similarText}
-        </div>
+      {/* 激活线固定在整张卡片区域的底部（切换时平滑移动） */}
+      {active ? (
+        <motion.span
+          layoutId="kpi-active-line"
+          className="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-accent"
+          transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+        />
       ) : null}
-      <span className={cn('mt-2 block h-0.5 rounded-full transition-colors', active ? 'bg-accent' : 'bg-transparent')} />
     </button>
   )
 }
@@ -114,6 +114,7 @@ function AccountOverview({
   metricKey: string
   onMetricChange: (key: string) => void
 }) {
+  const reduce = useReducedMotion()
   const account = data.account
   const diagnosis = data.diagnosis
   const series = data.series[metricKey] ?? null
@@ -183,16 +184,22 @@ function AccountOverview({
               {chartLabel}
             </span>
           </div>
-          {series && points.filter((point) => point.value !== null).length >= 2 ? (
-            <div className="mt-1">
+          <motion.div
+            key={`chart-${metricKey}-${periodDays}`}
+            initial={reduce ? false : { opacity: 0.55, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={softIn}
+            className="mt-1 min-h-[190px]"
+          >
+            {series && points.filter((point) => point.value !== null).length >= 2 ? (
               <TrendLine points={points} ariaLabel={`${chartLabel}趋势`} fillArea />
-            </div>
-          ) : (
-            <Empty
-              className="mt-2"
-              text={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
-            />
-          )}
+            ) : (
+              <Empty
+                className="mt-2"
+                text={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
+              />
+            )}
+          </motion.div>
           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
             {series?.mode === 'cumulative'
               ? '总粉丝量：账号每日快照的累计值。'
@@ -200,7 +207,13 @@ function AccountOverview({
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-5 md:grid-cols-4">
+        <motion.div
+          key={`kpis-${periodDays}`}
+          initial={reduce ? false : { opacity: 0.7, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={softIn}
+          className="grid grid-cols-2 items-stretch gap-x-4 gap-y-5 md:grid-cols-4"
+        >
           {data.kpis.map((kpi) => (
             <KpiCardView
               key={kpi.key}
@@ -210,7 +223,7 @@ function AccountOverview({
               onSelect={() => onMetricChange(kpi.trend_key ?? kpi.key)}
             />
           ))}
-        </div>
+        </motion.div>
         <p className="text-[11px] leading-4 text-muted-foreground">
           {periodDays === 7
             ? '近 7 日：播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；其余指标取本地每日快照差值，历史不足时显示「暂无对比」。'
