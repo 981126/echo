@@ -19,7 +19,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Empty, Panel, StatTile, Thumb, TrendLine } from './charts'
+import { Empty, Panel, Thumb, TrendLine } from './charts'
 import {
   formatDateTime,
   formatMonthDay,
@@ -184,7 +184,7 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
         </Panel>
 
       <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换上方曲线">
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
           {METRIC_SPECS.map((item) => (
             <MetricTile
               key={item.key}
@@ -197,15 +197,6 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
         </div>
       </Panel>
 
-      <Panel title="作品诊断" hint="只对比本账号近 30 条相近作品在相同发布天数的播放中位数，不做因果推断">
-        <p className="text-sm font-medium">{diagnosis.conclusion || '暂无数据'}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{diagnosis.detail || '暂无可比较的历史作品。'}</p>
-        <div className="mt-3 grid grid-cols-2 gap-2.5">
-          <StatTile label="平均播放占比" value={formatPercent(diagnosis.avg_view_proportion)} />
-          <StatTile label="收藏率" value={formatPercent(diagnosis.favorite_rate)} />
-        </div>
-        {diagnosis.note ? <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{diagnosis.note}</p> : null}
-      </Panel>
     </div>
   )
 }

@@ -628,6 +628,13 @@ limit/offset 分页，返回 has_more
 | 近期作品去按钮改自动翻页 | `works-list.tsx` 删除「加载更多」按钮；列表末尾放哨兵 `IntersectionObserver`（rootMargin 120px），滚到底自动 `onLoadMore()`；底部提示「向下滑动自动加载更多 / 加载中… / 已加载全部」 |
 | 评论管理一页 10 条 + 自动加载 | `CommentsTab` 增加本地分页：`PAGE_SIZE=10`、`visibleCount` 切页；列表末尾哨兵 `IntersectionObserver` 滚动加载下一批；标题显示「已展示 x/N 条」；后端仍一次返回最多 50 条（不新增接口参数） |
 
+### 5.28 2026-11-01 v15 精简（作者第十四次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 移除「作品诊断」面板 | `OverviewTab` 删除作品诊断 `Panel`（结论/说明/平均播放占比/收藏率/note 不再渲染）；后端 `diagnosis` 字段保留（其中 `avg_view_proportion` 仍作为「平均播放占比」指标的兜底值），页面不展示 |
+| 数据面板一行 5 个指标 | 指标网格 `grid-cols-2 sm:grid-cols-3 xl:grid-cols-4` → `grid-cols-2 gap-y-2 sm:grid-cols-3 lg:grid-cols-5`；18 项排成 5+5+5+3 行 |
+
 ---
 
 ## 6. 新增/修改表结构
