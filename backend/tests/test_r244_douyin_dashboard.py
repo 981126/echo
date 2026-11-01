@@ -580,3 +580,30 @@ def test_overview_period_and_metric_series(db):
     assert cards["plays"]["source"] == "snapshot"
     with pytest.raises(ValueError):
         service.overview(db, 5)
+
+
+def test_trend_uses_last_available_snapshot(db):
+    """作者确认口径：今天抓的 - 上一次可用快照（昨天没抓就用最近一日），该点含间隔累计。"""
+    _, account = _owner_account(db)
+    post = _post(db, account)
+    today = now().date()
+    # 窗口内有 day-3、day-1、今天，day-2 没抓
+    _stat(db, post, (today - timedelta(days=3)).isoformat(), plays=100, likes=10, comments=1, shares=1)
+    _stat(db, post, (today - timedelta(days=1)).isoformat(), plays=250, likes=25, comments=2, shares=2)
+    _stat(db, post, today.isoformat(), plays=300, likes=30, comments=3, shares=3)
+    db.add_all(
+        [
+            CreatorAccountSnapshot(account_id=account.id, snapshot_date=(today - timedelta(days=3)).isoformat(), followers=1000),
+            CreatorAccountSnapshot(account_id=account.id, snapshot_date=(today - timedelta(days=1)).isoformat(), followers=1060),
+            CreatorAccountSnapshot(account_id=account.id, snapshot_date=today.isoformat(), followers=1075),
+        ]
+    )
+    db.commit()
+
+    snapshot = service.account_kpis(db, account.id, days=7, today=today)
+    points = {point["date"]: point["value"] for point in snapshot["series"]["plays"]["points"]}
+    assert points[(today - timedelta(days=1)).isoformat()] == 150  # 250 - 100（含 day-2 间隔）
+    assert points[today.isoformat()] == 50  # 300 - 250
+    fan_points = {point["date"]: point["value"] for point in snapshot["series"]["net_fans"]["points"]}
+    assert fan_points[(today - timedelta(days=1)).isoformat()] == 60  # 1060 - 1000
+    assert fan_points[today.isoformat()] == 15  # 1075 - 1060

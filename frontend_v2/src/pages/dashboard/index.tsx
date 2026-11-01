@@ -119,7 +119,7 @@ function AccountOverview({
   const diagnosis = data.diagnosis
   const series = data.series[metricKey] ?? null
   const points = (series?.points ?? []).map((point) => ({ label: formatMonthDay(point.date), value: point.value }))
-  const chartLabel = series ? `${series.label}${series.mode === 'daily' ? '（每日新增）' : ''}` : '播放量'
+  const chartLabel = series ? `${series.label}${series.mode === 'daily' ? '（较上次同步增量）' : ''}` : '播放量'
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
       <div className="space-y-4 p-4 sm:p-5">
@@ -203,7 +203,7 @@ function AccountOverview({
           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
             {series?.mode === 'cumulative'
               ? '总粉丝量：账号每日快照的累计值。'
-              : '每日新增：由相邻两次同步快照的差值计算；中间缺口直接平滑连线跨过（不补 0、不画孤立点）。'}
+              : '增量：本次抓取值 - 上一次可用快照值（昨天没抓时用非今天的最近一日做基线，该点含这段间隔的累计）；缺口直接平滑连线跨过，不补 0。'}
           </p>
         </div>
 

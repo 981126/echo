@@ -472,18 +472,12 @@ def _fan_window_delta(fan_series: list[tuple[str, int]], start: date, end: date)
     return values[-1][1] - values[0][1], 1, [day for day, _ in values]
 
 
-def _is_next_day(before_day: str, day: str) -> bool:
-    try:
-        return (date.fromisoformat(day) - date.fromisoformat(before_day)).days == 1
-    except ValueError:
-        return False
-
-
 def _post_trend_buckets(series: dict[int, dict[str, dict]], field: str, start: date, end: date) -> dict[str, int]:
-    """某指标的逐日新增：只统计「相邻两天」都有快照的差值。
+    """某指标的「新增」曲线：本次抓取值 - 上一次可用快照值（作者 2026-11-01 确认口径）。
 
-    跨天缺口（历史同步不是每天都有）不把多天增量摊到某一天，避免「一天涨 2,000」这类虚高；
-    缺口在曲线上表现为无点，由前端平滑连线跨过。
+    - 上一次快照就是昨天 → 等于当日新增；
+    - 昨天没抓 → 用「非今天的最近一日」快照做基线（可能是几天前），该点包含这几天的累计增量；
+    - 起点必须落在统计周期内（先按周期整体算，不引入窗口外基线），这样曲线各点之和 = 周期首末快照差值。
     """
     start_s, end_s = start.isoformat(), end.isoformat()
     buckets: dict[str, int] = {}
@@ -494,19 +488,18 @@ def _post_trend_buckets(series: dict[int, dict[str, dict]], field: str, start: d
             if value.get(field) is not None
         ]
         for (before_day, before), (day, after) in zip(values, values[1:]):
-            # 两端都落在统计周期内、且是相邻两天，才算「当日新增」
-            if before_day < start_s or day > end_s or not _is_next_day(before_day, day):
+            if before_day < start_s or day > end_s:
                 continue
             buckets[day] = buckets.get(day, 0) + max(0, int(after) - int(before))
     return buckets
 
 
 def _fan_net_buckets(fan_series: list[tuple[str, int]], start: date, end: date) -> dict[str, int]:
-    """粉丝逐日净增（可为负）：只统计相邻两天的快照差值，跨天缺口不摊到单日。"""
+    """粉丝净增曲线（可为负）：本次快照 - 上一次可用快照；断档时该点包含这几天累计净增。"""
     start_s, end_s = start.isoformat(), end.isoformat()
     buckets: dict[str, int] = {}
     for (before_day, before), (day, after) in zip(fan_series, fan_series[1:]):
-        if before_day < start_s or day > end_s or not _is_next_day(before_day, day):
+        if before_day < start_s or day > end_s:
             continue
         buckets[day] = after - before
     return buckets

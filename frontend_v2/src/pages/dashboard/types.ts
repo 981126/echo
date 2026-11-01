@@ -81,7 +81,7 @@ export interface KpiCard {
   note: string
 }
 
-/** 指标趋势曲线：mode=daily 表示逐日新增，cumulative 表示累计值（总粉丝量） */
+/** 指标趋势曲线：mode=daily 表示「较上次同步增量」（断档时含间隔累计），cumulative 表示累计值（总粉丝量） */
 export interface MetricSeries {
   key: string
   label: string
