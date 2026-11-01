@@ -144,9 +144,15 @@ function AccountOverview({
               {account?.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}
               <AvatarFallback>{account?.nickname.slice(0, 1) ?? '?'}</AvatarFallback>
             </Avatar>
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="max-w-[280px] truncate text-base font-semibold">{account?.nickname ?? '未绑定抖音账号'}</span>
-              <Badge variant={data.private_available ? 'success' : 'secondary'} className="shrink-0">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="max-w-[280px] truncate text-base font-semibold">{account?.nickname ?? '未绑定抖音账号'}</span>
+                {/* v25：原徽标位置改显示当前博主抖音粉丝量 */}
+                {account?.followers !== null && account?.followers !== undefined ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">粉丝 {formatCount(account.followers)}</span>
+                ) : null}
+              </div>
+              <Badge variant={data.private_available ? 'success' : 'secondary'} className="mt-1">
                 {data.private_available ? '创作者数据可用' : '仅公开数据'}
               </Badge>
             </div>

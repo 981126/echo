@@ -326,15 +326,14 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
           <Thumb url={post.cover_url} alt={post.title || '作品封面'} className="h-[72px] w-[54px] shrink-0 rounded-md border border-border" />
           <div className="min-w-0 flex-1">
             {/* v17：标题过长单行省略，避免撑高头部导致右侧按钮位置变化 */}
-            <div className="flex min-w-0 items-center gap-2">
-              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold leading-5" title={post.title}>{post.title || '无标题作品'}</h2>
-              <Badge variant={statusTone(post.status)} className="shrink-0">{post.status_label || '—'}</Badge>
-            </div>
+            <h2 className="min-w-0 truncate text-sm font-semibold leading-5" title={post.title}>{post.title || '无标题作品'}</h2>
             <p className="mt-1 truncate text-[11px] text-muted-foreground">
               发布于 {formatMonthDayTime(post.publish_time)}
               {post.duration_seconds ? ` · 时长 ${post.duration_seconds} 秒` : ''}
               {' · '}数据更新至 {formatDateTime(detail.data_time)}
             </p>
+            {/* v25：状态徽标移到「发布于…」下方 */}
+            <Badge variant={statusTone(post.status)} className="mt-1">{post.status_label || '—'}</Badge>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">

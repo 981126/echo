@@ -673,8 +673,19 @@ def overview(db: Session, period_days: int = 7) -> dict:
     ctx = _resolve(db)
     account: CreatorAccount | None = ctx["account"]
     policy = ctx["policy"]
+    followers = None
+    if account is not None:
+        latest_followers = (
+            db.query(CreatorAccountSnapshot.followers)
+            .filter_by(account_id=account.id)
+            .order_by(CreatorAccountSnapshot.snapshot_date.desc())
+            .first()
+        )
+        followers = int(latest_followers[0]) if latest_followers is not None else None
     result: dict = {
-        "account": {"id": account.id, "nickname": account.nickname, "avatar": account.avatar} if account else None,
+        "account": {"id": account.id, "nickname": account.nickname, "avatar": account.avatar, "followers": followers}
+        if account
+        else None,
         "credential": ctx["credential"],
         "data_policy": policy.as_dict() if policy is not None else None,
         "private_available": bool(account is not None and policy is not None and policy.is_creator),
