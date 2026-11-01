@@ -6,8 +6,10 @@ export interface DashboardAccount {
   id: number
   nickname: string
   avatar: string | null
-  /** 最近一次账号快照的抖音粉丝量（v25：显示在博主名称右侧） */
+  /** 最近一次账号快照指标（v25/v26：粉丝/关注/获赞总量，显示在博主名称右侧） */
   followers: number | null
+  following: number | null
+  likes_total: number | null
 }
 
 /** 创作者 Cookie 摘要（只读，不含 Cookie 明文） */

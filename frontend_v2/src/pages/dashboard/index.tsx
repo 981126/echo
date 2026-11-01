@@ -144,17 +144,22 @@ function AccountOverview({
               {account?.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}
               <AvatarFallback>{account?.nickname.slice(0, 1) ?? '?'}</AvatarFallback>
             </Avatar>
-            <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="max-w-[280px] truncate text-base font-semibold">{account?.nickname ?? '未绑定抖音账号'}</span>
-                {/* v25：原徽标位置改显示当前博主抖音粉丝量 */}
-                {account?.followers !== null && account?.followers !== undefined ? (
-                  <span className="shrink-0 text-xs text-muted-foreground">粉丝 {formatCount(account.followers)}</span>
-                ) : null}
-              </div>
-              <Badge variant={data.private_available ? 'success' : 'secondary'} className="mt-1">
-                {data.private_available ? '创作者数据可用' : '仅公开数据'}
-              </Badge>
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+              <span className="max-w-[280px] truncate text-base font-semibold">{account?.nickname ?? '未绑定抖音账号'}</span>
+              {/* v26：粉丝 / 关注 / 获赞 总量 */}
+              {account ? (
+                <span className="flex flex-wrap items-baseline gap-x-2.5 text-xs text-muted-foreground">
+                  <span>
+                    粉丝 <span className="tnum text-foreground">{account.followers === null ? '—' : formatCount(account.followers)}</span>
+                  </span>
+                  <span>
+                    关注 <span className="tnum text-foreground">{account.following === null ? '—' : formatCount(account.following)}</span>
+                  </span>
+                  <span>
+                    获赞 <span className="tnum text-foreground">{account.likes_total === null ? '—' : formatCount(account.likes_total)}</span>
+                  </span>
+                </span>
+              ) : null}
             </div>
           </div>
           <Button variant="outline" size="sm" disabled={busy} onClick={onRefresh}>
@@ -163,7 +168,13 @@ function AccountOverview({
           </Button>
       </header>
 
-      <div className="space-y-4 p-4 sm:p-5">
+      <div className="space-y-3 p-4 sm:p-5">
+        <div>
+          <Badge variant={data.private_available ? 'success' : 'secondary'}>
+            {data.private_available ? '创作者数据可用' : '仅公开数据'}
+          </Badge>
+        </div>
+
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span>统计周期</span>
@@ -615,8 +626,6 @@ export default function DashboardPage() {
               loading={worksQ.isPending}
               loadingMore={loadingMore}
               onLoadMore={() => void loadMoreWorks()}
-              onRefresh={() => void refreshOverview()}
-              refreshing={overviewBusy}
               error={worksQ.isError ? (worksQ.error instanceof Error ? worksQ.error.message : '未知错误') : null}
               onRetry={() => void worksQ.refetch()}
             />

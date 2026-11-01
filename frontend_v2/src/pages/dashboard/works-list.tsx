@@ -1,7 +1,6 @@
 // R-244 数据看板右侧「近期作品」：可滚动列表 + 加载更多 + 选中高亮（替代原通知/活动管理）。
 import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { Loader2, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -20,8 +19,6 @@ export interface WorksListProps {
   loading: boolean
   loadingMore: boolean
   onLoadMore: () => void
-  onRefresh: () => void
-  refreshing: boolean
   error: string | null
   onRetry: () => void
 }
@@ -58,8 +55,6 @@ export function WorksList({
   loading,
   loadingMore,
   onLoadMore,
-  onRefresh,
-  refreshing,
   error,
   onRetry
 }: WorksListProps) {
@@ -88,10 +83,6 @@ export function WorksList({
           </div>
           <p className="mt-0.5 text-[11px] text-muted-foreground">数据更新至：{formatDateTime(dataTime)}</p>
         </div>
-        <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
-          {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-          {refreshing ? '更新中…' : '更新数据'}
-        </Button>
       </div>
 
       {error ? (
