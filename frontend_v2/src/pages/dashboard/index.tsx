@@ -61,7 +61,7 @@ function KpiCardView({
   onSelect: () => void
 }) {
   const valueText = kpi.value === null ? '暂无数据' : formatCount(kpi.value)
-  const deltaText = kpi.delta !== null ? `较前 ${days} 日 ${formatDelta(kpi.delta)}` : null
+  const deltaText = kpi.delta !== null ? formatDelta(kpi.delta) : null
   const hoverTimer = useRef<number | null>(null)
   // v7：鼠标悬浮即激活该指标（80ms 防抖，避免快速划过时曲线反复重绘）；点击同样生效
   const activate = () => onSelect()
@@ -91,7 +91,10 @@ function KpiCardView({
       {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
       <div className={cn('text-[10px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
       <div className="tnum mt-0.5 text-lg font-semibold leading-6 tracking-tight">{valueText}</div>
-      <div className={cn('mt-0.5 min-h-3.5 text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}>
+      <div
+        className={cn('mt-0.5 min-h-3.5 text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}
+        title={deltaText ? `较前 ${days} 日对比：${deltaText}` : undefined}
+      >
         {deltaText}
       </div>
     </button>
