@@ -84,24 +84,16 @@ function KpiCardView({
       aria-pressed={active}
       title={`悬浮/点击查看「${kpi.label}」在近 ${days} 日的趋势`}
       className={cn(
-        'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-md px-2 pb-3 pt-1 text-left transition-colors hover:bg-muted/40',
-        active && 'bg-accent-soft/40'
+        'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-lg px-3 py-2.5 text-left transition-colors',
+        active ? 'bg-muted' : 'bg-transparent hover:bg-muted/40'
       )}
     >
       {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
       <div className={cn('text-xs text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
-      <div className={cn('tnum mt-1.5 text-2xl font-semibold leading-8 tracking-tight', active && 'text-accent')}>{valueText}</div>
+      <div className="tnum mt-1.5 text-2xl font-semibold leading-8 tracking-tight">{valueText}</div>
       <div className={cn('mt-1 min-h-4 text-xs leading-4', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}>
         {deltaText}
       </div>
-      {/* 激活线固定在整张卡片区域的底部（切换时平滑移动） */}
-      {active ? (
-        <motion.span
-          layoutId="kpi-active-line"
-          className="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-accent"
-          transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-        />
-      ) : null}
     </button>
   )
 }
@@ -129,6 +121,18 @@ function AccountOverview({
   const series = data.series[metricKey] ?? null
   const points = (series?.points ?? []).map((point) => ({ label: formatMonthDay(point.date), value: point.value }))
   const chartLabel = series ? `${series.label}${series.mode === 'daily' ? '（较上次同步增量）' : ''}` : '播放量'
+  // v8：切换指标时保留旧曲线做交叉淡出（避免图表瞬间闪一下）
+  const [fadeFrom, setFadeFrom] = useState<{ points: Array<{ label: string; value: number | null }>; label: string } | null>(null)
+  useEffect(() => {
+    if (!fadeFrom) return
+    const timer = window.setTimeout(() => setFadeFrom(null), 280)
+    return () => window.clearTimeout(timer)
+  }, [fadeFrom])
+  const switchMetric = (key: string) => {
+    if (key === metricKey) return
+    setFadeFrom({ points, label: chartLabel })
+    onMetricChange(key)
+  }
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
       <div className="space-y-4 p-4 sm:p-5">
@@ -186,53 +190,70 @@ function AccountOverview({
           </span>
         </div>
 
-        <div>
-          <div className="flex flex-wrap items-baseline justify-end gap-2">
-            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
-              {chartLabel}
-            </span>
+        <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-start">
+          {/* 左：曲线 */}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline justify-end gap-2">
+              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
+                {chartLabel}
+              </span>
+            </div>
+            <div className="relative mt-1 min-h-[190px]">
+              {/* 切指标时：旧曲线淡出、新曲线淡入，交叉过渡不闪 */}
+              {fadeFrom ? (
+                <motion.div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0"
+                  initial={false}
+                  animate={{ opacity: 0 }}
+                  transition={{ duration: 0.26, ease: EASE_OUT_EXPO }}
+                >
+                  <TrendLine points={fadeFrom.points} ariaLabel="趋势" fillArea height={300} />
+                </motion.div>
+              ) : null}
+              <motion.div
+                key={`chart-${metricKey}`}
+                initial={reduce || !fadeFrom ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.26, ease: EASE_OUT_EXPO }}
+              >
+                {series && points.filter((point) => point.value !== null).length >= 2 ? (
+                  <TrendLine points={points} ariaLabel={`${chartLabel}趋势`} fillArea height={300} />
+                ) : (
+                  <Empty
+                    className="mt-2"
+                    text={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
+                  />
+                )}
+              </motion.div>
+            </div>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              {series?.mode === 'cumulative'
+                ? '总粉丝量：账号每日快照的累计值。'
+                : '增量：本次抓取值 - 上一次可用快照值（昨天没抓时用非今天的最近一日做基线，该点含这段间隔的累计）；缺口直接平滑连线跨过，不补 0。'}
+            </p>
           </div>
+
+          {/* 右：数据（2 列，悬浮即切换左侧曲线） */}
           <motion.div
-            key={`chart-${metricKey}-${periodDays}`}
-            initial={reduce ? false : { opacity: 0.55, y: 8 }}
+            key={`kpis-${periodDays}`}
+            initial={reduce ? false : { opacity: 0.7, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             transition={softIn}
-            className="mt-1 min-h-[190px]"
+            className="grid grid-cols-2 items-stretch gap-x-3 gap-y-2"
           >
-            {series && points.filter((point) => point.value !== null).length >= 2 ? (
-              <TrendLine points={points} ariaLabel={`${chartLabel}趋势`} fillArea />
-            ) : (
-              <Empty
-                className="mt-2"
-                text={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
+            {data.kpis.map((kpi) => (
+              <KpiCardView
+                key={kpi.key}
+                kpi={kpi}
+                days={periodDays}
+                active={metricKey === (kpi.trend_key ?? kpi.key)}
+                onSelect={() => switchMetric(kpi.trend_key ?? kpi.key)}
               />
-            )}
+            ))}
           </motion.div>
-          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-            {series?.mode === 'cumulative'
-              ? '总粉丝量：账号每日快照的累计值。'
-              : '增量：本次抓取值 - 上一次可用快照值（昨天没抓时用非今天的最近一日做基线，该点含这段间隔的累计）；缺口直接平滑连线跨过，不补 0。'}
-          </p>
         </div>
-
-        <motion.div
-          key={`kpis-${periodDays}`}
-          initial={reduce ? false : { opacity: 0.7, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={softIn}
-          className="grid grid-cols-2 items-stretch gap-x-4 gap-y-5 md:grid-cols-4"
-        >
-          {data.kpis.map((kpi) => (
-            <KpiCardView
-              key={kpi.key}
-              kpi={kpi}
-              days={periodDays}
-              active={metricKey === (kpi.trend_key ?? kpi.key)}
-              onSelect={() => onMetricChange(kpi.trend_key ?? kpi.key)}
-            />
-          ))}
-        </motion.div>
         <p className="text-[11px] leading-4 text-muted-foreground">
           {periodDays === 7
             ? '近 7 日：播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；其余指标取本地每日快照差值。'

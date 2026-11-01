@@ -571,6 +571,15 @@ limit/offset 分页，返回 has_more
 | 悬浮即激活指标 | `KpiCardView` 增加 `onMouseEnter`（80ms 防抖避免快速划过反复重绘）+ `onMouseLeave` 取消 + `onFocus` 键盘聚焦；点击仍保留 |
 | 首次切换统计周期闪屏 | `useQuery(['dashboard','overview',periodDays])` 增加 `placeholderData: keepPreviousData`；渲染判断改为 `if (!data) { isPending ? 骨架 : 错误页 }`，切周期时继续显示上一周期数据直到新数据返回，不再整页骨架闪烁 |
 
+### 5.21 2026-11-01 v8 布局与切换动画（作者第七次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 去掉蓝色激活条 | `KpiCardView` 删除 `layoutId="kpi-active-line"` 与主色数字；选中/悬浮用 `bg-muted` 浅灰圆角底色块表示，数字保持普通前景色（对齐抖音创作者中心） |
+| 账号总览改左右布局 | `grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-start`：左栏曲线（`TrendLine height=300`，面积填充），右栏 7 个指标卡 `grid-cols-2`；移动端自动上下堆叠 |
+| 切换指标曲线闪一下 | 不再用 `initial opacity` 重挂闪烁；改为**交叉过渡**：`switchMetric` 时把当前曲线存 `fadeFrom`，旧曲线绝对定位原处 `animate opacity 1→0`（0.26s），新曲线 `opacity 0→1` 同时淡入，280ms 后移除旧层；容器 `min-h` 固定高度不跳版 |
+| 交互保留 | 悬浮 80ms 防抖激活、点击/键盘聚焦同样生效；`keepPreviousData` 保证切周期不闪骨架 |
+
 ---
 
 ## 6. 新增/修改表结构
