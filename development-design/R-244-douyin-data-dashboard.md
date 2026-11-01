@@ -610,6 +610,15 @@ limit/offset 分页，返回 has_more
 | 指标卡底部去掉「较前 N 日：」前缀 | `KpiCardView.deltaText = formatDelta(kpi.delta)`（纯数字，含 +/− 与千分位）；不再拼「较前 N 日」；div 的 `title` 保留「较前 N 日对比：xxx」便于悬停确认语义 |
 | 字号/布局不变 | 10px、18px 与 2:1 左右比例沿用 v11 |
 
+### 5.26 2026-11-01 v13 作品总览合并（作者第十二次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 移除「流量分析」「观众分析」两个 tab | `post-analysis.tsx` 删除 `FlowTab`/`AudienceTab` 组件与 tab trigger/content；tab 只剩总览/评论热词/评论管理；观看趋势/流量来源/画像分布不再渲染（API 字段保留，不删后端） |
+| 总览改左右布局 | 左栏 `Panel(指标趋势)`（宽 1.5fr）：一张图展示当前悬浮指标趋势，累计类指标可切「累计/新增」；右栏 `Panel(数据)`（1fr）：18 个指标块（流量 6 + 观看质量 5 + 观众 7）2 列排布 |
+| 播放量趋势与涨粉量趋势合并 | 后端新增 `metric_trends`（`_metric_trends`）：从 `douyin_post_metrics.raw.item.metrics` + `platform_post_stats` 逐日提取 18 个指标序列；前端统一用 `metric_trends[key]` 绘制，选中哪个指标就画哪条，不再有两张固定趋势图 |
+| 悬浮切换曲线 | 右侧指标块 `onMouseEnter`/`onFocus` → `setMetricKey(key)`；左图标题/单位/曲线随选中指标变化；比率指标纵轴显示百分数（`TrendLine` 新增 `axisFormat`） |
+
 ---
 
 ## 6. 新增/修改表结构

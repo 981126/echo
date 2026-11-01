@@ -280,6 +280,8 @@ export interface PostDetail {
   private_available: boolean
   overview: PostOverview
   play_trend: PostTrend
+  /** v13：各指标按天趋势（总览左侧曲线悬浮切换用），key 见 METRIC_SPECS */
+  metric_trends: Record<string, Array<{ date: string; value: number }>>
   fans: PostFans
   diagnosis: PostDiagnosis
   flow: PostFlow

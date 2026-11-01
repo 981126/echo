@@ -825,6 +825,86 @@ def _overview_values(row: DouyinPostMetric | None, stat: PlatformPostStat | None
     }
 
 
+TREND_METRIC_KEYS = (
+    "plays",
+    "likes",
+    "comments",
+    "shares",
+    "favorites",
+    "danmaku",
+    "finish_rate",
+    "bounce_2s_rate",
+    "finish_5s_rate",
+    "avg_play_seconds",
+    "avg_view_proportion",
+    "follower_gain",
+    "follower_rate",
+    "unfollowers",
+    "unfollower_rate",
+    "dislike_count",
+    "dislike_rate",
+    "fan_view_proportion",
+)
+
+
+def _metric_trends(db: Session, post_id: int) -> dict[str, list[dict]]:
+    """该作品各指标按天趋势（总览左侧曲线悬浮切换用）。
+
+    数据源：`douyin_post_metrics.raw.item.metrics`（创作者接口原始指标）+ `platform_post_stats`
+    同日兜底；只返回有数据的指标，前端对空序列显示「暂无趋势数据」。
+    """
+    metric_rows = (
+        db.query(DouyinPostMetric)
+        .filter_by(post_id=post_id)
+        .order_by(DouyinPostMetric.snapshot_date)
+        .all()
+    )
+    stat_rows = {row.stat_date: row for row in db.query(PlatformPostStat).filter_by(post_id=post_id).all()}
+    out: dict[str, list[dict]] = {key: [] for key in TREND_METRIC_KEYS}
+    for row in metric_rows:
+        raw = _raw_item(row)
+        raw_metrics = raw.get("metrics")
+        metrics: dict = raw_metrics if isinstance(raw_metrics, dict) else {}
+
+        def count(key: str, fallback: int | None = None) -> int | None:
+            value = _int(metrics.get(key))
+            return value if value is not None else fallback
+
+        def rate_value(key: str, fallback: float | None = None) -> float | None:
+            value = _rate(metrics.get(key))
+            return value if value is not None else fallback
+
+        def number(key: str, fallback: float | None = None) -> float | None:
+            value = _num(metrics.get(key))
+            return value if value is not None else fallback
+
+        stat = stat_rows.get(row.snapshot_date)
+        values: dict[str, int | float | None] = {
+            "plays": count("view_count", stat.plays if stat else None),
+            "likes": count("like_count", stat.likes if stat else None),
+            "comments": count("comment_count", stat.comments if stat else None),
+            "shares": count("share_count", stat.shares if stat else None),
+            "favorites": count("favorite_count", stat.favorites if stat else None),
+            "danmaku": count("danmaku_count"),
+            "finish_rate": rate_value("completion_rate", row.finish_rate),
+            "bounce_2s_rate": rate_value("bounce_rate_2s", row.bounce_2s_rate),
+            "finish_5s_rate": rate_value("completion_rate_5s", row.finish_5s_rate),
+            "avg_play_seconds": number("avg_view_second", row.avg_play_seconds),
+            "avg_view_proportion": rate_value("avg_view_proportion"),
+            "follower_gain": count("subscribe_count", row.follower_gain),
+            "follower_rate": rate_value("subscribe_rate"),
+            "unfollowers": count("unsubscribe_count"),
+            "unfollower_rate": rate_value("unsubscribe_rate"),
+            "dislike_count": count("dislike_count"),
+            "dislike_rate": rate_value("dislike_rate"),
+            "fan_view_proportion": rate_value("fan_view_proportion"),
+        }
+        for key, value in values.items():
+            if value is not None:
+                out[key].append({"date": row.snapshot_date, "value": value})
+    return {key: points for key, points in out.items() if points}
+
+
 def _play_trend(db: Session, post_id: int) -> dict:
     rows = (
         db.query(PlatformPostStat)
@@ -1222,6 +1302,7 @@ def post_detail(db: Session, post_id: int) -> dict:
             "avg_view_proportion": values["avg_view_proportion"],
         },
         "play_trend": _play_trend(db, post.id),
+        "metric_trends": _metric_trends(db, post.id),
         "fans": {
             "follower_gain": values["follower_gain"],
             "unfollowers": values["unfollowers"],

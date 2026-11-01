@@ -134,7 +134,8 @@ export function TrendLine({
   ariaLabel,
   height = 190,
   fillArea = false,
-  emptyText = '暂无可绘制的数据点'
+  emptyText = '暂无可绘制的数据点',
+  axisFormat
 }: {
   points: TrendLinePoint[]
   ariaLabel: string
@@ -142,6 +143,8 @@ export function TrendLine({
   /** 抖音账号总览同款：折线下方浅色面积（默认关闭，作品详情趋势保持纯线） */
   fillArea?: boolean
   emptyText?: string
+  /** 纵轴刻度格式化（比率指标传百分比格式，避免出现 0/1 而不是 30%/47%） */
+  axisFormat?: (value: number) => string
 }) {
   const reduce = useReducedMotion()
   const valid = points
@@ -181,7 +184,7 @@ export function TrendLine({
               strokeDasharray={index === ticks.length - 1 || (min < 0 && Math.abs(tick) < 1e-9) ? undefined : '3 4'}
             />
             <text x={LINE_LEFT - 6} y={y + 3.5} textAnchor="end" fill="var(--muted-foreground)" fontSize="10">
-              {axisText(tick)}
+              {(axisFormat ?? axisText)(tick)}
             </text>
           </g>
         )

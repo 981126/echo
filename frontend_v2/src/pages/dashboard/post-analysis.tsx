@@ -1,10 +1,10 @@
-// R-244 数据看板「作品分析」区：总览 / 流量分析 / 观众分析 / 评论热词 / 评论管理（只读）5 个 tab。
-import { useState } from 'react'
+// R-244 数据看板「作品分析」区：总览 / 评论热词 / 评论管理（只读）3 个 tab。
+// v13：流量分析、观众分析 tab 移除，指标并入总览右侧；悬浮指标切换左侧趋势曲线。
+import { useState, type ReactNode } from 'react'
 import {
   BarChart3,
   CircleAlert,
   ExternalLink,
-  Flame,
   Heart,
   Loader2,
   MessageCircle,
@@ -19,17 +19,16 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bars, Donut, Empty, Panel, RatioRows, StatTile, Thumb, TrendLine, WatchTrend } from './charts'
+import { Empty, Panel, StatTile, Thumb, TrendLine } from './charts'
 import {
   formatDateTime,
-  formatHeat,
   formatMonthDay,
   formatMonthDayTime,
   formatPercent,
   formatUnitValue,
   statusTone
 } from './format'
-import type { PostDetail, PostTrend } from './types'
+import type { PostDetail } from './types'
 
 const DOUYIN_COMMENT_ADMIN = 'https://creator.douyin.com/creator-micro/data/comment'
 
@@ -45,71 +44,160 @@ export interface PostAnalysisProps {
 }
 
 /** 逐日趋势卡：累计 / 新增切换（数据缺失时显示数据积累中，不补 0） */
-function TrendCard({ title, hint, trend, ariaLabel }: { title: string; hint: string; trend: PostTrend; ariaLabel: string }) {
-  const [mode, setMode] = useState<'total' | 'added'>('total')
-  const points = trend.points.map((point) => ({
-    label: formatMonthDay(point.date),
-    value: mode === 'total' ? point.total : point.added
-  }))
+type MetricSpec = {
+  key: string
+  label: string
+  unit: string
+  icon?: ReactNode
+  /** count = 累计计数器（可切累计/新增）；rate = 比率；seconds = 秒 */
+  kind: 'count' | 'rate' | 'seconds'
+}
+
+const METRIC_SPECS: MetricSpec[] = [
+  { key: 'plays', label: '播放量', unit: '次', icon: <Play className="h-3 w-3" />, kind: 'count' },
+  { key: 'likes', label: '点赞量', unit: '次', icon: <Heart className="h-3 w-3" />, kind: 'count' },
+  { key: 'comments', label: '评论量', unit: '条', icon: <MessageCircle className="h-3 w-3" />, kind: 'count' },
+  { key: 'shares', label: '分享量', unit: '次', icon: <Share2 className="h-3 w-3" />, kind: 'count' },
+  { key: 'favorites', label: '收藏量', unit: '次', icon: <Star className="h-3 w-3" />, kind: 'count' },
+  { key: 'danmaku', label: '弹幕量', unit: '条', icon: <MessageSquareText className="h-3 w-3" />, kind: 'count' },
+  { key: 'finish_rate', label: '完播率', unit: 'ratio', kind: 'rate' },
+  { key: 'bounce_2s_rate', label: '2 秒跳出率', unit: 'ratio', kind: 'rate' },
+  { key: 'finish_5s_rate', label: '5 秒完播率', unit: 'ratio', kind: 'rate' },
+  { key: 'avg_play_seconds', label: '平均播放时长', unit: '秒', kind: 'seconds' },
+  { key: 'avg_view_proportion', label: '平均播放占比', unit: 'ratio', kind: 'rate' },
+  { key: 'follower_gain', label: '涨粉量', unit: '人', icon: <ThumbsUp className="h-3 w-3" />, kind: 'count' },
+  { key: 'follower_rate', label: '涨粉率', unit: 'ratio', kind: 'rate' },
+  { key: 'unfollowers', label: '脱粉量', unit: '人', kind: 'count' },
+  { key: 'unfollower_rate', label: '脱粉率', unit: 'ratio', kind: 'rate' },
+  { key: 'dislike_count', label: '不感兴趣量', unit: '人', kind: 'count' },
+  { key: 'dislike_rate', label: '不感兴趣率', unit: 'ratio', kind: 'rate' },
+  { key: 'fan_view_proportion', label: '粉丝播放占比', unit: 'ratio', kind: 'rate' }
+]
+
+function formatMetricValue(value: number | null | undefined, unit: string): string {
+  if (unit === 'ratio') return formatPercent(value)
+  return formatUnitValue(value, unit)
+}
+
+/** 右侧指标块：鼠标悬浮/键盘聚焦即切换左侧曲线（v13） */
+function MetricTile({
+  spec,
+  value,
+  active,
+  onHover
+}: {
+  spec: MetricSpec
+  value: number | null | undefined
+  active: boolean
+  onHover: () => void
+}) {
   return (
-    <Panel
-      title={title}
-      hint={hint}
-      extra={
-        <Tabs value={mode} onValueChange={(value) => setMode(value as 'total' | 'added')}>
-          <TabsList className="h-8">
-            <TabsTrigger value="total" className="h-6 px-2.5 text-xs">累计</TabsTrigger>
-            <TabsTrigger value="added" className="h-6 px-2.5 text-xs">新增</TabsTrigger>
-          </TabsList>
-        </Tabs>
+    <button
+      type="button"
+      onMouseEnter={onHover}
+      onFocus={onHover}
+      aria-pressed={active}
+      title={`悬浮查看「${spec.label}」趋势`}
+      className={
+        active
+          ? 'rounded-lg bg-muted px-2 py-1.5 text-left transition-colors'
+          : 'rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/50'
       }
     >
-      {trend.available ? <TrendLine points={points} ariaLabel={ariaLabel} /> : <Empty text={trend.note || '数据积累中：需要至少 2 天同步数据'} />}
-      {trend.available && mode === 'added' ? (
-        <p className="mt-1 text-[11px] text-muted-foreground">新增 = 相邻两日快照差值；首日没有前一天数据，显示为空缺（不补 0）。</p>
-      ) : null}
-    </Panel>
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        {spec.icon}
+        <span className="truncate">{spec.label}</span>
+      </div>
+      <div className="tnum mt-0.5 text-sm font-semibold leading-5">{formatMetricValue(value, spec.unit)}</div>
+    </button>
   )
 }
 
 function OverviewTab({ detail }: { detail: PostDetail }) {
   const { overview, fans, diagnosis } = detail
-  const traffic = [
-    { key: 'plays', label: '播放量', unit: '次', value: overview.plays, icon: <Play className="h-3 w-3" /> },
-    { key: 'likes', label: '点赞量', unit: '次', value: overview.likes, icon: <Heart className="h-3 w-3" /> },
-    { key: 'comments', label: '评论量', unit: '条', value: overview.comments, icon: <MessageCircle className="h-3 w-3" /> },
-    { key: 'shares', label: '分享量', unit: '次', value: overview.shares, icon: <Share2 className="h-3 w-3" /> },
-    { key: 'favorites', label: '收藏量', unit: '次', value: overview.favorites, icon: <Star className="h-3 w-3" /> },
-    { key: 'danmaku', label: '弹幕量', unit: '条', value: overview.danmaku, icon: <MessageSquareText className="h-3 w-3" /> }
-  ]
+  const [metricKey, setMetricKey] = useState('plays')
+  const [mode, setMode] = useState<'total' | 'added'>('total')
+  const spec = METRIC_SPECS.find((item) => item.key === metricKey) ?? METRIC_SPECS[0]
+  const audienceCards: Record<string, number | null> = Object.fromEntries(
+    detail.audience.cards.map((card) => [card.key, card.value])
+  )
+  const values: Record<string, number | null | undefined> = {
+    plays: overview.plays,
+    likes: overview.likes,
+    comments: overview.comments,
+    shares: overview.shares,
+    favorites: overview.favorites,
+    danmaku: overview.danmaku,
+    finish_rate: overview.finish_rate,
+    bounce_2s_rate: overview.bounce_2s_rate,
+    finish_5s_rate: overview.finish_5s_rate,
+    avg_play_seconds: overview.avg_play_seconds,
+    avg_view_proportion: overview.avg_view_proportion ?? diagnosis.avg_view_proportion,
+    follower_gain: audienceCards.follower_gain ?? fans.follower_gain,
+    follower_rate: audienceCards.follower_rate,
+    unfollowers: audienceCards.unfollowers ?? fans.unfollowers,
+    unfollower_rate: audienceCards.unfollower_rate,
+    dislike_count: audienceCards.dislike_count,
+    dislike_rate: audienceCards.dislike_rate,
+    fan_view_proportion: fans.fan_view_proportion
+  }
+  // 播放量与涨粉量等累计指标的按天趋势已合并到同一张图（metric_trends），可切累计/新增
+  const rawPoints = detail.metric_trends[metricKey] ?? []
+  const points = rawPoints.map((point, index) => {
+    const label = formatMonthDay(point.date)
+    if (spec.kind !== 'count' || mode === 'total') return { label, value: point.value }
+    const previous = index > 0 ? rawPoints[index - 1].value : null
+    return { label, value: previous === null ? null : Math.max(0, point.value - previous) }
+  })
+  const available = points.filter((point) => point.value !== null).length >= 2
   return (
     <div className="space-y-3">
-      <Panel title="流量数据" hint="该作品累计数据（0 为平台返回的真实 0）">
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-          {traffic.map((item) => (
-            <StatTile key={item.key} label={item.label} icon={item.icon} value={formatUnitValue(item.value, item.unit)} />
-          ))}
-        </div>
-      </Panel>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Panel title="完播率" hint="完整播放该视频的比例">
-          <div className="tnum text-2xl font-semibold">{formatPercent(overview.finish_rate)}</div>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <Panel
+          title={`${spec.label}趋势`}
+          hint="逐日数据；逐小时趋势 TikHub 未提供。悬浮右侧指标可切换曲线"
+          extra={
+            spec.kind === 'count' ? (
+              <Tabs value={mode} onValueChange={(value) => setMode(value as 'total' | 'added')}>
+                <TabsList className="h-8">
+                  <TabsTrigger value="total" className="h-6 px-2.5 text-xs">累计</TabsTrigger>
+                  <TabsTrigger value="added" className="h-6 px-2.5 text-xs">新增</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            ) : null
+          }
+        >
+          {available ? (
+            <TrendLine
+              points={points}
+              ariaLabel={`${spec.label}趋势`}
+              axisFormat={
+                spec.unit === 'ratio'
+                  ? (value) => `${(value * 100).toFixed(0)}%`
+                  : spec.unit === '秒'
+                    ? (value) => `${value.toFixed(0)}s`
+                    : undefined
+              }
+            />
+          ) : (
+            <Empty text="该指标暂无足够趋势数据（需要至少 2 天同步快照）" />
+          )}
         </Panel>
-        <Panel title="2 秒跳出率" hint="播放 2 秒内划走的比例（越低越好）">
-          <div className="tnum text-2xl font-semibold">{formatPercent(overview.bounce_2s_rate)}</div>
+
+        <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换左侧曲线">
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+            {METRIC_SPECS.map((item) => (
+              <MetricTile
+                key={item.key}
+                spec={item}
+                value={values[item.key]}
+                active={item.key === metricKey}
+                onHover={() => setMetricKey(item.key)}
+              />
+            ))}
+          </div>
         </Panel>
       </div>
-
-      <TrendCard title="播放量趋势" hint="逐日数据；逐小时趋势 TikHub 未提供" trend={detail.play_trend} ariaLabel="作品播放量逐日趋势" />
-
-      <Panel title="粉丝数据" hint="该作品带来的粉丝变化与粉丝播放占比">
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-          <StatTile label="涨粉量" value={formatUnitValue(fans.follower_gain, '人')} icon={<ThumbsUp className="h-3 w-3" />} />
-          <StatTile label="脱粉量" value={formatUnitValue(fans.unfollowers, '人')} />
-          <StatTile label="粉丝播放占比" value={formatPercent(fans.fan_view_proportion)} />
-        </div>
-      </Panel>
 
       <Panel title="作品诊断" hint="只对比本账号近 30 条相近作品在相同发布天数的播放中位数，不做因果推断">
         <p className="text-sm font-medium">{diagnosis.conclusion || '暂无数据'}</p>
@@ -120,144 +208,6 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
         </div>
         {diagnosis.note ? <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{diagnosis.note}</p> : null}
       </Panel>
-    </div>
-  )
-}
-
-function FlowTab({ detail }: { detail: PostDetail }) {
-  const [watchKind, setWatchKind] = useState<'retention' | 'bounce'>('retention')
-  const { overview, diagnosis, flow } = detail
-  const series = watchKind === 'retention' ? flow.retention : flow.bounce
-  const attractiveness: Array<{ key: string; label: string; value: string; hint?: string }> = [
-    { key: 'finish', label: '完播率', value: formatPercent(overview.finish_rate) },
-    { key: 'avg_second', label: '平均播放时长', value: formatUnitValue(overview.avg_play_seconds, '秒') },
-    { key: 'bounce', label: '2s 跳出率', value: formatPercent(overview.bounce_2s_rate) },
-    { key: 'finish_5s', label: '5s 完播率', value: formatPercent(overview.finish_5s_rate) },
-    {
-      key: 'avg_proportion',
-      label: '平均播放占比',
-      value: formatPercent(overview.avg_view_proportion ?? diagnosis.avg_view_proportion)
-    }
-  ]
-  const sourceRows = flow.sources.map((source) => ({ label: source.name, ratio: source.ratio }))
-  return (
-    <div className="space-y-3">
-      <Panel title="内容吸引力" hint="5 项观看质量指标；平台未返回的项明确标注暂无数据">
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-          {attractiveness.map((item) => (
-            <StatTile key={item.key} label={item.label} value={item.value} hint={item.hint} />
-          ))}
-        </div>
-      </Panel>
-
-      <Panel
-        title="观看趋势"
-        hint="横轴为视频播放进度，纵轴为观众留存/跳出比例；实线为当前作品，虚线为同类作者参考"
-        extra={
-          <Tabs value={watchKind} onValueChange={(value) => setWatchKind(value as 'retention' | 'bounce')}>
-            <TabsList className="h-8">
-              <TabsTrigger value="retention" className="h-6 px-2.5 text-xs">留存分析</TabsTrigger>
-              <TabsTrigger value="bounce" className="h-6 px-2.5 text-xs">跳出分析</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        }
-      >
-        {series.points.length ? (
-          <>
-            <WatchTrend points={series.points} ariaLabel={watchKind === 'retention' ? '留存分析趋势图' : '跳出分析趋势图'} />
-            <p className="mt-1 text-[11px] text-muted-foreground">{series.reliable ? '该作品播放量充足，趋势可参考。' : '播放量较少，趋势仅供参考。'}</p>
-          </>
-        ) : (
-          <Empty text="暂无数据：TikHub 未返回该作品的观看趋势" />
-        )}
-      </Panel>
-
-      <Panel title="流量来源" hint="当前占比；TikHub 不提供与前 7 日的对比">
-        {sourceRows.length ? <RatioRows items={sourceRows} ariaLabel="流量来源占比" /> : <Empty text="暂无数据：TikHub 未返回该作品的流量来源" />}
-        {flow.unavailable.length ? (
-          <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
-            {flow.unavailable.map((item) => (
-              <li key={item} className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                <span>{item}</span>
-                <span>暂无数据</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </Panel>
-    </div>
-  )
-}
-
-function AudienceTab({ detail }: { detail: PostDetail }) {
-  const { audience } = detail
-  const provinceRows = [
-    ...audience.provinces.map((province) => ({ label: province.name, ratio: province.ratio })),
-    ...(audience.province_rest > 0 ? [{ label: '其他', ratio: audience.province_rest, muted: true }] : [])
-  ]
-  return (
-    <div className="space-y-3">
-      <Panel title="观众数据" hint="该作品带来的关注 / 取关 / 不感兴趣数据">
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-          {audience.cards.map((card) => (
-            <StatTile key={card.key} label={card.label} value={formatUnitValue(card.value, card.unit)} />
-          ))}
-        </div>
-      </Panel>
-
-      <TrendCard title="涨粉量趋势" hint="逐日数据；逐小时趋势 TikHub 未提供" trend={audience.fan_trend} ariaLabel="涨粉量逐日趋势" />
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Panel title="性别分布">
-          {audience.gender.length ? <Donut items={audience.gender.map((item) => ({ label: item.label || item.key, ratio: item.ratio }))} ariaLabel="性别分布环形图" /> : <Empty />}
-        </Panel>
-        <Panel title="活跃分布" hint="未知 / 低活 / 轻度 / 中度 / 重度">
-          {audience.active.length ? <Donut items={audience.active.map((item) => ({ label: item.label || item.key, ratio: item.ratio }))} ariaLabel="活跃分布环形图" /> : <Empty />}
-        </Panel>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Panel title="年龄分布">
-          {audience.age.length ? <Bars items={audience.age.map((item) => ({ label: item.label || item.key, ratio: item.ratio }))} ariaLabel="年龄分布柱状图" /> : <Empty />}
-        </Panel>
-        <Panel title="地域分布" hint="省份 Top 6，其余合计为「其他」；不画地图">
-          {provinceRows.length ? <RatioRows items={provinceRows} ariaLabel="地域分布占比" /> : <Empty />}
-          {audience.city_levels.length ? (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
-              <span className="text-[11px] text-muted-foreground">城市等级：</span>
-              {audience.city_levels.map((city) => (
-                <Badge key={city.name} variant="secondary">
-                  {city.name} {formatPercent(city.ratio)}
-                </Badge>
-              ))}
-            </div>
-          ) : null}
-        </Panel>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Panel title="受众兴趣分布">
-          {audience.interests.length ? <RatioRows items={audience.interests.map((item) => ({ label: item.name, ratio: item.ratio }))} ariaLabel="受众兴趣分布占比" /> : <Empty />}
-        </Panel>
-        <Panel title="受众关注热词" hint="近 7 日热度（TikHub 原始口径）">
-          {audience.keywords.length ? (
-            <ul className="space-y-1.5">
-              {audience.keywords.map((keyword, index) => (
-                <li key={keyword.word} className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-xs">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="tnum w-4 shrink-0 text-[10px] text-muted-foreground">{index + 1}</span>
-                    <span className="truncate" title={keyword.word}>{keyword.word}</span>
-                  </span>
-                  <span className="tnum flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-                    <Flame className="h-3 w-3 text-warning" />
-                    {formatHeat(keyword.heat)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : <Empty />}
-        </Panel>
-      </div>
     </div>
   )
 }
@@ -406,16 +356,12 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
         <div className="overflow-x-auto px-4 pt-3">
           <TabsList className="w-max">
             <TabsTrigger value="overview">总览</TabsTrigger>
-            <TabsTrigger value="flow">流量分析</TabsTrigger>
-            <TabsTrigger value="audience">观众分析</TabsTrigger>
             <TabsTrigger value="words">评论热词</TabsTrigger>
             <TabsTrigger value="comments">评论管理</TabsTrigger>
           </TabsList>
         </div>
         <div className="p-4">
           <TabsContent value="overview"><OverviewTab detail={detail} /></TabsContent>
-          <TabsContent value="flow"><FlowTab detail={detail} /></TabsContent>
-          <TabsContent value="audience"><AudienceTab detail={detail} /></TabsContent>
           <TabsContent value="words"><CommentWordsTab detail={detail} /></TabsContent>
           <TabsContent value="comments"><CommentsTab detail={detail} refreshing={refreshing} onRefresh={onRefreshComments} /></TabsContent>
         </div>
