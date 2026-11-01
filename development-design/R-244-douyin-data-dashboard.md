@@ -839,7 +839,7 @@ limit/offset 分页，返回 has_more
 
 请求参数：`period` 可选，取值 7/14/30/90，默认 7（其它值返回 400）。
 
-> **v3 响应结构（以代码为准）**：`period:{start,end,days,label}`、`kpis:[7 项：播放量/主页访问量/作品点赞/作品分享/作品评论/净增粉丝/总粉丝量]`、`series:{plays,homepage_visits,likes,shares,comments,net_fans,total_fans}`（每项 `{key,label,unit,mode:daily|cumulative,points:[{date,value|null}]}`）、`diagnosis`、`needs_refresh/stale/updating_task_id/warnings`；**不再返回** `analysis/fans/trend`。指标卡含 `trend_key` 供前端点击切换曲线；`net_fans` 与 7 日周期诊断一致，总粉丝量为累计曲线。以下旧示例仅保留以对照字段演进。
+> **v34 响应结构（以代码为准）**：`account:{id,nickname,avatar,followers,following,likes_total}`、`period:{start,end,days,label}`、`kpis:[6 项：播放量/主页访问量/作品点赞/作品分享/作品评论/净增粉丝]`、`series:{plays,homepage_visits,likes,shares,comments,net_fans}`（每项 `{key,label,unit,mode:daily,points:[{date,value|null}]}`）、`diagnosis`、`needs_refresh/stale/updating_task_id/warnings`；**不再返回** `analysis/fans/trend/total_fans`。指标卡含 `trend_key` 供前端点击/悬浮切换曲线。以下旧示例仅保留以对照字段演进。
 
 响应 200：
 
@@ -937,7 +937,7 @@ limit/offset 分页，返回 has_more
 {
   "post": {"post_id": 1952, "title": "…", "cover_url": "/covers/abc.jpg", "publish_time": "2026-10-29T21:45:05",
            "video_url": "https://www.douyin.com/video/7702085414127247306", "duration_seconds": 86,
-           "status": "approved", "status_label": "通过"},
+           "status": "approved", "status_label": "通过", "tags": ["#赚钱", "#理财"]},
   // video_url 固定为抖音作品页 https://www.douyin.com/video/{platform_post_id}
   // （平台同步里的 video_url 可能是 CDN 直链，数据看板「查看原视频」要的是可打开的抖音页面）
   "data_time": "2026-11-01T10:59:56",
@@ -968,6 +968,7 @@ limit/offset 分页，返回 has_more
     "interests": [{"name": "随拍", "ratio": 0.25}],
     "keywords": [{"word": "今日金价", "heat": 20382486}]
   },
+  "transcript": {"available": true, "status": "done", "text": "…ASR 转写文案…", "has_video": true},
   "comment_words": {"total_comments": 20, "items": [{"word": "工作", "count": 2}], "note": "基于已同步 20 条评论统计，与抖音官方口径可能不同"},
   "comments": {"total": 20, "items": [{"id": 1, "user": "7", "text": "现在这油价，老老实实骑小电驴吧", "likes": 0, "synced_at": "2026-10-31T07:12:00"}]},
   "updating_task_id": null,
@@ -976,6 +977,9 @@ limit/offset 分页，返回 has_more
 ```
 
 错误：404 作品不存在/不属于当前账号；400 无账号。
+
+> v33：`flow`/`audience` 的画像明细字段（gender/active/age/provinces/interests/keywords）与 `flow.sources/retention` 保留在响应结构中，但对应 tab 已在 v13 移除，作品更新不再请求这些接口 → 通常为空数组；`audience.cards`（涨粉/脱粉等）仍由 overview 指标填充。
+> v31/v32：`post.tags` 从 `platform_posts.raw.description` 解析；`transcript` 来自本地 `transcripts` 表（`local_video_id → videos`），`has_video` 表示是否有本地视频可转写。
 
 ### 7.4 `POST /api/douyin-dashboard/overview/refresh`
 
@@ -992,10 +996,27 @@ limit/offset 分页，返回 has_more
   - 缓存 <6h 且非 force → 200 `{"skipped": true, "reason": "数据已是最新（6 小时内）", "data_time": "..."}`；
   - 需要刷新 → 202 `{"task_id": 124, "reused": false}`；运行中 → 202 `reused=true`。
 - 错误：404 作品不存在；400 创作者数据不可用/额度不足。
-- 任务 kind：`douyin_dashboard_post`，payload `{"post_id": 1952, "account_id": 1}`；进度 5/20/40/60/75/90/100；note：缓存检查/获取作品指标/流量与趋势/观众画像/受众兴趣/同步评论/完成。
-- 任务 result：`{"ok": true, "post_id": 1952, "data_time": "..."}`。
+- 任务 kind：`douyin_dashboard_post`，payload `{"post_id": 1952, "account_id": 1, "force": true}`；v33 起请求数 = **2**（单作品 overview + 评论 Top50），进度 5/100，note：获取作品指标与评论/完成。
+- 统一入口：worker 内部调用 `platform_sync.sync_post_data()`（与素材库/博主管理同步同一函数，v34）。
+- 任务 result：`{"ok": true, "post_id": 1952, "data_time": "...", "comments_skipped": false}`。
 
-### 7.6 公共错误响应
+### 7.6 `POST /api/douyin-dashboard/works/{post_id}/transcribe`（v32）
+
+- 用途：文案脚本为空且作品有关联本地视频时，触发 ASR 转写（复用素材库 `import_video` 任务）。
+- 请求体：无。
+- 响应 202：`{"task_id": 130, "reused": false}`；同素材已在转写 → `{"task_id": 130, "reused": true}`。
+- 错误 400：作品未关联本地素材 / 素材无视频文件 / 文件缺失 / 已有转写文案（409 `RuntimeError`）；404 作品不存在。
+- 前端轮询 `/api/tasks/{id}`，完成后重新拉 `GET /works/{post_id}` 显示 `transcript.text`。
+
+### 7.7 `POST /api/platform/posts/sync-batch`（v34，素材库批量数据同步）
+
+- 用途：素材库「批量数据同步」一次请求同步多张卡片。
+- 请求体：`{"items": [{"key": "local-12", "kind": "local", "type": null, "id": 12}, {"key": "cloud-3", "kind": "cloud", "type": "post", "id": 30}]}`。
+- 逻辑：同账号抖音创作者作品按 20 条/组合并 `fetch_item_overview_data`（ids 批量）；评论 6 小时内复用；媒体/转写补齐任务按卡片提交（返回 `media.task_id`）。
+- 响应：`{"items": [{"key": "local-12", "ok": true, "message": "同步完成", "media": {"task_id": 131}, "posts": [30]}]}`。
+- 关联文档：R-067「后续变更」、R-029「后续变更」。
+
+### 7.8 公共错误响应
 
 | HTTP | detail 示例 | 触发 |
 |---|---|---|
@@ -1099,6 +1120,14 @@ limit/offset 分页，返回 has_more
 - **空数组/空对象**：来源接口返回但没有项目 → 对应区块空状态 + 说明，不用 0 填充。
 - **更新时间**：账号诊断/投稿概览用缓存 `captured_at`；作品详情用 `douyin_post_metrics.captured_at`；列表指标用 `platform_post_stats.stat_date`；评论用 `platform_post_comments.created_at`（同步时间）；页面分别显示，不合并成「实时」。
 - **负数**：净增粉丝可为负（真实）；点赞/播放等增量类派生值出现负值按 0 处理并在 warnings 记录。
+
+### 8.x v31-v34 新增数据来源
+
+| 数据 | 来源 | 落库/用途 | 空值处理 |
+|---|---|---|---|
+| 作品话题标签 | `platform_posts.raw.description` 正则 `#话题`（最多 8 个） | 详情头部标签行 | 无标签不显示该行 |
+| 文案脚本（ASR） | `platform_posts.local_video_id → videos → transcripts`（优先 corrected_text，否则 transcript_text） | 文案脚本 tab；`transcript.has_video` 决定是否显示 ASR 转写按钮 | 无素材/未转写显示空状态 + 转写按钮（有视频时） |
+| 同步请求量 | 无新表 | 作品更新 = overview 1 + 评论 1（评论 6h 内复用）；素材库批量同步按 20 条/组合同账号 overview | — |
 
 ## 9. 测试、验证与实施计划
 
