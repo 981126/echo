@@ -293,19 +293,20 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
       <header className="flex flex-col gap-3 border-b border-border p-4 md:flex-row md:items-start md:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <Thumb url={post.cover_url} alt={post.title || '作品封面'} className="h-[72px] w-[54px] shrink-0 rounded-md border border-border" />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="line-clamp-2 min-w-0 text-sm font-semibold leading-5" title={post.title}>{post.title || '无标题作品'}</h2>
+          <div className="min-w-0 flex-1">
+            {/* v17：标题过长单行省略，避免撑高头部导致右侧按钮位置变化 */}
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold leading-5" title={post.title}>{post.title || '无标题作品'}</h2>
               <Badge variant={statusTone(post.status)} className="shrink-0">{post.status_label || '—'}</Badge>
             </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">
               发布于 {formatMonthDayTime(post.publish_time)}
               {post.duration_seconds ? ` · 时长 ${post.duration_seconds} 秒` : ''}
               {' · '}数据更新至 {formatDateTime(detail.data_time)}
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
             {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
             {refreshing ? '更新中…' : '更新数据'}
