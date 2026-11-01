@@ -148,8 +148,8 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
   }))
   const available = points.filter((point) => point.value !== null).length >= 2
   return (
-    <div className="grid gap-3 lg:grid-cols-5 lg:items-start">
-      <div className="min-w-0 lg:col-span-2">
+    <div className="grid gap-3 lg:grid-cols-10 lg:items-start">
+      <div className="min-w-0 lg:col-span-6">
         <Panel
           title={`${spec.label}趋势`}
           hint="逐日数据（历史从系统开始每日同步后累积；TikHub 不提供单条作品的历史逐日数据）。悬浮右侧指标可切换曲线"
@@ -173,7 +173,7 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
         </Panel>
       </div>
 
-      <div className="min-w-0 lg:col-span-3">
+      <div className="min-w-0 lg:col-span-4">
         <Panel title="数据" hint="流量 / 观看质量 / 观众数据合并；悬浮指标切换左侧曲线">
           <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
             {METRIC_SPECS.map((item) => (
