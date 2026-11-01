@@ -121,7 +121,8 @@ function localDateString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-function OverviewTab({ detail }: { detail: PostDetail }) {
+/** 视频总览（数据看板作品详情用，也被视频复盘页复用）：左趋势曲线 + 右 18 项指标 */
+export function VideoOverview({ detail }: { detail: PostDetail }) {
   const { overview, fans, diagnosis } = detail
   const [metricKey, setMetricKey] = useState('plays')
   // v22：视频总览的统计周期（近 3 / 7 / 14 日），只影响左侧曲线范围
@@ -394,7 +395,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
         <div className="p-4">
           {/* v21：三个 tab 内容区固定同高（约等于总览高度），切换不跳；内容超长内部滚动 */}
           <div className="h-[400px] overflow-y-auto pr-1">
-            <TabsContent value="overview" className="h-[380px]"><OverviewTab detail={detail} /></TabsContent>
+            <TabsContent value="overview" className="h-[380px]"><VideoOverview detail={detail} /></TabsContent>
             <TabsContent value="words" className="h-[380px]"><CommentWordsTab detail={detail} /></TabsContent>
             <TabsContent value="comments" className="h-[380px]"><CommentsTab detail={detail} refreshing={refreshing} onRefresh={onRefreshComments} /></TabsContent>
           </div>

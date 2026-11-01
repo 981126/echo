@@ -740,6 +740,10 @@ limit/offset 分页，返回 has_more
 | 两处曲线接入 | 账号总览 key=`metricKey-dataUpdatedAt`：指标切换立即过渡，周期切换等新数据返回后再过渡，避免 keepPreviousData 期间旧数据自切一次；作品分析 key=`metricKey-periodDays`，指标与周期都覆盖 |
 | 回归测试 | `charts.test.tsx` 4 例：首次无旧层；A→B 旧层首帧 1/新层首帧 0；连续 A→B→C 旧层为 B；reduced-motion 直接替换 |
 
+### 5.43 2026-11-01 视频复盘复用「视频总览」（作者第二十九次反馈）
+
+`VideoOverview` 从作品分析的 Tab 内部抽成导出组件（`post-analysis.tsx`），数据看板「视频总览」与「视频复盘」首屏共用同一份渲染与数据接口（`GET /api/douyin-dashboard/works/{id}`）；视频复盘只保留选择视频 + 复盘分析内容，不再重复维护第二套指标卡。
+
 ---
 
 ## 6. 新增/修改表结构

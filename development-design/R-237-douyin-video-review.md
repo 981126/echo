@@ -700,6 +700,17 @@ current owner
 
 索引：`ix_video_reviews_post_created(post_id,created_at)`、`ix_video_reviews_account(account_id)`、`ix_video_reviews_fingerprint(input_fingerprint)`。每次重新分析新建记录，保留历史。
 
+---
+
+## v30 变更：首屏改用数据看板「视频总览」（作者 2026-11-01）
+
+| 改动 | 实现 |
+|---|---|
+| 首屏数据区替换 | 移除「历史数据还比较少」总结条、`MetricCards`（8 张平时对比卡）与 `review.warnings` 提示条；改为复用数据看板导出的 `VideoOverview` 组件（`@/pages/dashboard/post-analysis`），数据来自 `GET /api/douyin-dashboard/works/{post_id}`，回该作品最新快照 + `metric_trends`（趋势可切近 3/7/14 日、悬停指标切换曲线） |
+| 数据获取 | 页面新增 `overview` state + `loadOverview(postId)`：首屏与 `selectVideo` 时加载；「更新数据并分析」完成后重新加载；加载中显示 spinner，无数据显示「数据看板暂无这条作品的数据」 |
+| 按钮精简 | 移除「开始分析 / 重新分析」按钮（`analyze(false)` 入口），只保留「更新数据并分析」（`analyze(true)`） |
+
+
 ### 6.6 `video_review_findings`
 
 | 字段 | 类型 | 可空/默认 | 中文含义 |

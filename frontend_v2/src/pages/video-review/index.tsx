@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { BarChart3, Check, ChevronDown, ExternalLink, Lightbulb, Loader2, Play, RefreshCw, Sparkles, UserPlus } from 'lucide-react'
+import { Check, ChevronDown, ExternalLink, Lightbulb, Loader2, Play, RefreshCw, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
-import { BaselineBars, MetricCards, PlanComparisonCharts, SimpleBars, WatchTrendChart } from './charts'
+import { VideoOverview } from '@/pages/dashboard/post-analysis'
+import type { PostDetail } from '@/pages/dashboard/types'
+import { BaselineBars, PlanComparisonCharts, SimpleBars, WatchTrendChart } from './charts'
 import { waitForReviewTask } from './use-review-task'
 import type { Credential, FailedReview, ReferenceItem, Review, Topic, VideoItem } from './types'
 
@@ -18,6 +20,10 @@ export default function VideoReviewPage() {
   const [account, setAccount] = useState<{ id: number; nickname: string; avatar?: string } | null>(null)
   const [postId, setPostId] = useState<number>(0)
   const [review, setReview] = useState<Review | null>(null)
+  // v30：视频复盘第一块直接用数据看板的「视频总览」（趋势 + 指标）替代旧对比卡片
+  const [overview, setOverview] = useState<PostDetail | null>(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [overviewError, setOverviewError] = useState<string | null>(null)
   const [failedReview, setFailedReview] = useState<FailedReview | null>(null)
   const [loading, setLoading] = useState(true)
   const [task, setTask] = useState<{ id: number; progress: number; note: string } | null>(null)
@@ -50,6 +56,28 @@ export default function VideoReviewPage() {
       setDirection(data.review.follower_analysis.homepage.direction_note ?? '')
     }
     if (data.running_task_id) setTask((old) => old?.id === data.running_task_id ? old : { id: data.running_task_id!, progress: 5, note: '正在恢复分析进度' })
+  }, [])
+
+  const loadOverview = useCallback(async (id: number) => {
+    if (!id) {
+      setOverview(null)
+      return
+    }
+    setOverviewLoading(true)
+    try {
+      const data = await apiJson<PostDetail>(`/api/douyin-dashboard/works/${id}`)
+      if (activePost.current === id) {
+        setOverview(data)
+        setOverviewError(null)
+      }
+    } catch (error) {
+      if (activePost.current === id) {
+        setOverview(null)
+        setOverviewError(error instanceof Error ? error.message : '作品数据加载失败')
+      }
+    } finally {
+      setOverviewLoading(false)
+    }
   }, [])
 
   const followTask = useCallback(async (taskId: number) => {
@@ -96,7 +124,7 @@ export default function VideoReviewPage() {
         // R-243：review 与 references 无数据依赖 → 首屏并行请求（loadReferences 内部自行兜住错误，
         // loadReview 失败仍由外层 catch 统一提示，错误语义不变）。
         if (selected) {
-          await Promise.all([loadReview(selected), loadReferences('peer')])
+          await Promise.all([loadReview(selected), loadReferences('peer'), loadOverview(selected)])
         } else {
           await loadReferences('peer')
         }
@@ -107,7 +135,7 @@ export default function VideoReviewPage() {
       }
     })()
     return () => controller.current?.abort()
-  }, [loadReferences, loadReview])
+  }, [loadOverview, loadReferences, loadReview])
 
   async function selectVideo(id: number) {
     activePost.current = id
@@ -115,7 +143,7 @@ export default function VideoReviewPage() {
     setReview(null)
     setFailedReview(null)
     setTask(null)
-    await loadReview(id)
+    await Promise.all([loadReview(id), loadOverview(id)])
   }
 
   async function analyze(refresh: boolean) {
@@ -124,6 +152,7 @@ export default function VideoReviewPage() {
       const data = await apiJson<{ task_id: number; review?: Review }>(`/api/douyin-review/analyze`, { method: 'POST', body: JSON.stringify({ post_id: postId, refresh, force: true }) })
       if (data.review) setReview(data.review)
       if (data.task_id) await followTask(data.task_id)
+      await loadOverview(postId)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '分析失败')
     }
@@ -215,7 +244,6 @@ export default function VideoReviewPage() {
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><span className="h-2 w-2 rounded-full bg-indigo-500" />{account?.nickname || '当前抖音账号'} · 只分析抖音</div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={!postId || !!task} onClick={() => void analyze(false)}><BarChart3 className="mr-2 h-4 w-4" />{review ? '重新分析' : '开始分析'}</Button>
           <Button disabled={!postId || !!task} onClick={() => void analyze(true)}><RefreshCw className="mr-2 h-4 w-4" />更新数据并分析</Button>
         </div>
       </div>
@@ -250,16 +278,21 @@ export default function VideoReviewPage() {
       {failedReview && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
         最近一次刷新分析失败：{failedReview.error || '未知错误'}。当前展示的是上一次成功的复盘，旧数据没有被清空。
       </div>}
-      {review?.warnings.map((warning) => <div key={warning} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{warning}</div>)}
+      {/* v30：第一块直接用数据看板的「视频总览」（趋势 + 指标）替代旧对比卡片 */}
+      {postId ? (
+        <section className="rounded-xl border border-border bg-card p-4">
+          {overview ? (
+            <VideoOverview detail={overview} />
+          ) : overviewLoading ? (
+            <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : (
+            <p className="py-6 text-center text-sm text-muted-foreground">数据看板暂无这条作品的数据{overviewError ? `：${overviewError}` : ''}</p>
+          )}
+        </section>
+      ) : null}
 
       {review ? (
         <>
-          <section className="rounded-2xl border border-border bg-gradient-to-br from-indigo-50/70 to-card p-5 shadow-card dark:from-indigo-950/30">
-            <div className="flex items-start gap-3"><div className="rounded-lg bg-indigo-100 p-2 text-indigo-600 dark:bg-indigo-900"><Sparkles className="h-5 w-5" /></div><div><h2 className="text-lg font-semibold">{review.summary}</h2><p className="mt-1 text-xs text-muted-foreground">{review.comparison.sample_note} · 实际比较 {review.comparison.count} 条</p></div></div>
-          </section>
-
-          <MetricCards metrics={review.metrics} />
-
           {primary && <section className="rounded-2xl border border-indigo-200 bg-card p-5 shadow-card dark:border-indigo-900">
             <div className="flex items-center gap-2 text-xs font-medium text-indigo-500"><Lightbulb className="h-4 w-4" />下一条最推荐拍这个</div>
             <h2 className="mt-3 text-xl font-semibold">{primary.topic}</h2>
@@ -302,7 +335,7 @@ export default function VideoReviewPage() {
 
           {review.new_topics.length > 0 && <section className="rounded-xl border border-border bg-card p-4"><h2 className="text-sm font-semibold">账号可以尝试的新话题</h2><div className="mt-3 grid gap-3 md:grid-cols-3">{review.new_topics.map((topic) => <div key={topic.topic} className="rounded-lg border border-border p-3"><h3 className="text-sm font-medium">{topic.topic}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{topic.fit_reason}</p><p className="mt-2 text-xs">{topic.first_step}</p></div>)}</div></section>}
         </>
-      ) : !task && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><Play className="mx-auto h-8 w-8 text-muted-foreground" /><h2 className="mt-4 font-medium">选择一条视频，开始第一次复盘</h2><p className="mt-2 text-sm text-muted-foreground">会先保存数据，再给出有依据的原因和下一条主题。</p></div>}
+      ) : !task && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><Play className="mx-auto h-8 w-8 text-muted-foreground" /><h2 className="mt-4 font-medium">还没有这条视频的复盘分析</h2><p className="mt-2 text-sm text-muted-foreground">点右上角「更新数据并分析」，会先保存数据，再给出有依据的原因和下一条主题。</p></div>}
 
       <section className="space-y-3 border-t border-border pt-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">同行爆款与低粉爆款</h2><p className="mt-1 text-xs text-muted-foreground">同行只来自你手动添加的对标账号；低粉爆款来自抖音官方标签。</p></div><div className="flex gap-2"><Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('peer'); void loadReferences('peer') }}>同行爆款</Button><Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('low_fan'); void loadReferences('low_fan') }}>低粉爆款</Button>{kind === 'low_fan' && <Button variant="outline" size="sm" onClick={() => void refreshLowFan()}><RefreshCw className="mr-1 h-3.5 w-3.5" />更新</Button>}</div></div>
