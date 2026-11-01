@@ -219,28 +219,25 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
   // v14：一页最多 10 条，滑动到底部自动加载下一页（数据一次取回最多 50 条，本地分页）
   const PAGE_SIZE = 10
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
-  const sentinelRef = useRef<HTMLDivElement | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
   }, [detail.post.post_id])
+  // 滚动到底部才加载下一批（用监听 scroll 而不是 IntersectionObserver：内容短时避免自动一次性加载全部）
   useEffect(() => {
-    const node = sentinelRef.current
+    const node = viewportRef.current
     if (!node || visibleCount >= comments.items.length) return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setVisibleCount((count) => Math.min(count + PAGE_SIZE, comments.items.length))
-        }
-      },
-      { root: viewportRef.current, rootMargin: '80px' }
-    )
-    observer.observe(node)
-    return () => observer.disconnect()
+    const onScroll = () => {
+      if (node.scrollTop + node.clientHeight >= node.scrollHeight - 24) {
+        setVisibleCount((count) => Math.min(count + PAGE_SIZE, comments.items.length))
+      }
+    }
+    node.addEventListener('scroll', onScroll, { passive: true })
+    return () => node.removeEventListener('scroll', onScroll)
   }, [visibleCount, comments.items.length])
   const visibleComments = comments.items.slice(0, visibleCount)
   return (
-    <div className="space-y-3">
+    <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <span className="flex items-start gap-1.5">
           <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -258,7 +255,7 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
           <p className="text-[11px] text-muted-foreground">
             已同步 {comments.total} 条公开评论（按点赞排序，最多 50 条；同步时间为本地保存时间）· 已展示 {visibleComments.length}/{comments.items.length} 条
           </p>
-          <ScrollArea viewportRef={viewportRef} className="h-[420px] rounded-lg border border-border">
+          <ScrollArea viewportRef={viewportRef} className="min-h-0 flex-1 rounded-lg border border-border">
             <ul className="divide-y divide-border">
               {visibleComments.map((comment) => (
                 <li key={comment.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between">
@@ -276,7 +273,6 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
                 </li>
               ))}
             </ul>
-            <div ref={sentinelRef} className="h-px w-full" aria-hidden />
           </ScrollArea>
           <p className="text-center text-[11px] text-muted-foreground">
             {visibleCount < comments.items.length ? '向下滚动自动加载更多' : '已展示全部已同步评论'}
@@ -373,9 +369,12 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
           </TabsList>
         </div>
         <div className="p-4">
-          <TabsContent value="overview"><OverviewTab detail={detail} /></TabsContent>
-          <TabsContent value="words"><CommentWordsTab detail={detail} /></TabsContent>
-          <TabsContent value="comments"><CommentsTab detail={detail} refreshing={refreshing} onRefresh={onRefreshComments} /></TabsContent>
+          {/* v21：三个 tab 内容区固定同高（约等于总览高度），切换不跳；内容超长内部滚动 */}
+          <div className="h-[400px] overflow-y-auto pr-1">
+            <TabsContent value="overview" className="h-[380px]"><OverviewTab detail={detail} /></TabsContent>
+            <TabsContent value="words" className="h-[380px]"><CommentWordsTab detail={detail} /></TabsContent>
+            <TabsContent value="comments" className="h-[380px]"><CommentsTab detail={detail} refreshing={refreshing} onRefresh={onRefreshComments} /></TabsContent>
+          </div>
         </div>
       </Tabs>
     </section>

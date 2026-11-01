@@ -670,6 +670,13 @@ limit/offset 分页，返回 has_more
 |---|---|
 | 指标区域约 30% 宽度让给曲线 | 外层网格 `grid-cols-10`：左曲线 `lg:col-span-6`、右指标 `lg:col-span-4`（原 2/5 : 3/5 → 6/10 : 4/10）；1440 宽实测左 637px / 右 421px；指标仍每行 4 个 |
 
+### 5.34 2026-11-01 v21 tab 等高（作者第二十次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 三个 tab 高度一致、切换不跳 | Radix `<TabsContent>` 在项目里的 className 挂在**内层 motion.div**（外层 Content 高度 auto），所以给面板显式 `h-[380px]`，外层内容区 `h-[400px] overflow-y-auto`；实测三个 tab 内容区高度均 400px，切换无跳动；总览内容 367px 正常放下，超出时内容区内部滚动 |
+| 评论管理列表滚动 | `CommentsTab` 根容器 `flex h-full min-h-0 flex-col`，列表 `ScrollArea min-h-0 flex-1`（撑满剩余高度）；滚动加载从 IntersectionObserver 改为**监听 viewport scroll**（内容短时避免一次性自动加载全部）：滚到底 +10，实测 10/22 → 20/22 → 22/22 |
+
 ---
 
 ## 6. 新增/修改表结构
