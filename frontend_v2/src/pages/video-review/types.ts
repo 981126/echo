@@ -82,6 +82,18 @@ export interface Charts {
   plan: Array<{ metric: string; label: string; unit: string; before?: number; after?: number; result: string; reason?: string }>
 }
 
+export interface MetricAdvice {
+  dimension: string
+  title: string
+  target_metric: string
+  gap: string
+  judgement_type: 'fact' | 'hypothesis'
+  reasons: string[]
+  actions: string[]
+  copy_refs: string[]
+  evidence: string[]
+}
+
 export interface Review {
   id: number
   status: string
@@ -93,6 +105,7 @@ export interface Review {
   comparison: { count: number; post_ids: number[]; sample_note: string }
   metrics: Metric[]
   findings: Finding[]
+  advices: MetricAdvice[]
   follower_analysis: { strong_topics: Charts['follower_topics']; homepage: { bio?: string; direction_note?: string; pinned_post_ids?: number[]; needs_author_input?: boolean; message?: string } }
   recommendations: { primary?: Topic | null; backups: Topic[]; follow_ups: Topic[] }
   new_topics: Array<{ topic: string; reason: string; fit_reason: string; first_step: string }>

@@ -19,6 +19,7 @@ from .douyin_creator_sync import CredentialError, sync_post_creator_data
 from .douyin_references import refresh_references
 from .video_review_comparison import build_comparison, dumps, loads, low_fan_references, peer_references
 from .video_review_llm import enhance_findings
+from .video_review_advices import build_metric_advices
 from .video_review_rules import build_findings, comment_questions, homepage_analysis, summary_for
 from .video_review_topics import recommend_topics
 
@@ -258,6 +259,11 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         comparison["charts"]["peer_comparisons"] = peer_charts
         questions = comment_questions(comments)
         comparison["charts"]["comment_questions"] = questions
+        update(65, "生成按指标优化建议")
+        advices, advice_model, advice_warning = build_metric_advices(
+            db, comparison, transcript, questions, post.title or ""
+        )
+        comparison["advices"] = advices
         update(75, "生成原因和主题建议")
         findings, model_name, llm_warning = enhance_findings(db, findings)
         recommendations = recommend_topics(db, owner, post, comparison, comments, peer_items, low_items)
@@ -304,6 +310,8 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         review.homepage_analysis = dumps(homepage_analysis(account, recent))
         review.new_topics = dumps(recommendations["new_topics"])
         warnings = comparison["warnings"] + ([llm_warning] if llm_warning else [])
+        if advice_warning:
+            warnings.append(advice_warning)
         if refresh_source == "public":
             warnings.append("当前账号未启用创作者数据，播放量/完播等私有指标暂缺，已使用公开数据")
         if not transcript:
@@ -446,6 +454,7 @@ def review_out(db: Session, review: VideoReview) -> dict:
             "sample_note": snapshot.get("comparison", {}).get("sample_note", ""),
         },
         "metrics": snapshot.get("metrics", []),
+        "advices": snapshot.get("advices", []),
         "findings": [_finding_out(x) for x in db.query(VideoReviewFinding).filter_by(review_id=review.id).order_by(VideoReviewFinding.sort_order).all()],
         "follower_analysis": {"strong_topics": charts.get("follower_topics", []), "homepage": loads(review.homepage_analysis, {})},
         "recommendations": {

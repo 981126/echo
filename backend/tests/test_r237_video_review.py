@@ -134,6 +134,7 @@ def test_analysis_adopt_link_and_check(db):
     result = run_analysis(db, {"review_id": review.id, "refresh": True}, _update)
     assert result["review_id"] == review.id
     db.refresh(review)
+    assert "advices" in json.loads(review.metrics_snapshot or "{}")
     assert review.status in ("done", "partial")
     assert review.metrics_snapshot
     topics = db.query(VideoTopicRecommendation).filter_by(review_id=review.id).all()
@@ -423,3 +424,121 @@ def test_analysis_refresh_submits_media_topup(db):
     result = run_analysis(db, {"review_id": review.id, "refresh": True}, _update)
     assert result["media"] is not None
     assert result["media"].get("status") in {"skip", "started", "duplicate"}
+
+
+# ---------- R-245：按指标优化建议（指标 + 文案结合） ----------
+
+
+def _metric_row(db, post, days_after: int, *, finish_rate=None, avg_view=None, follower_gain=None):
+    from app.models.video_review import DouyinPostMetric
+
+    published = post.publish_time
+    snapshot = (published + timedelta(days=days_after)).date().isoformat()
+    db.add(DouyinPostMetric(
+        post_id=post.id,
+        snapshot_date=snapshot,
+        finish_rate=finish_rate,
+        follower_gain=follower_gain,
+        raw=json.dumps({"item": {"metrics": {"avg_view_proportion": avg_view, "favorite_rate": 0.002}}}),
+    ))
+    db.commit()
+
+
+def test_comparison_includes_avg_view_and_favorite_rate(db):
+    owner, account = _owner(db)
+    for index in range(6):
+        post = _post(db, account, index, 8000, 20 + index)
+        _metric_row(db, post, 3, finish_rate=0.2, avg_view=0.35, follower_gain=10)
+    target = _post(db, account, 99, 10000, 3)
+    _metric_row(db, target, 3, finish_rate=0.05, avg_view=0.10, follower_gain=1)
+
+    result = build_comparison(db, target)
+    avg = result["facts"]["avg_view_proportion"]
+    favorite = result["facts"]["favorite_rate"]
+    assert avg["missing"] is False
+    assert abs(float(avg["value"]) - 0.10) < 1e-9
+    assert abs(float(avg["baseline"]) - 0.35) < 1e-9
+    assert avg["state"] == "low"
+    # 官方 raw favorite_rate 优先
+    assert abs(float(favorite["value"]) - 0.002) < 1e-9
+    assert favorite["state"] in ("low", "normal", "high")
+
+
+def test_metric_advices_fallback_uses_real_gap_and_transcript(db):
+    from app.services.video_review_advices import FALLBACK_NOTE, build_metric_advices
+
+    owner, account = _owner(db)
+    for index in range(6):
+        post = _post(db, account, index, 8000, 20 + index)
+        _metric_row(db, post, 3, finish_rate=0.2, avg_view=0.35, follower_gain=10)
+    target = _post(db, account, 99, 10000, 3)
+    _metric_row(db, target, 3, finish_rate=0.05, avg_view=0.10, follower_gain=1)
+    comparison = build_comparison(db, target)
+    transcript = "大家好我是小王。今天想聊聊理财。我把五十万存款亏到不敢看。最后分享我的经验。"
+
+    advices, model_name, warning = build_metric_advices(db, comparison, transcript, [], target.title)
+    assert advices
+    assert model_name == ""
+    assert warning == FALLBACK_NOTE
+    text = json.dumps(advices, ensure_ascii=False)
+    for forbidden in ("同赛道", "行业平均", "提升"):
+        assert forbidden not in text
+    for advice in advices:
+        assert advice["dimension"] in {"completion", "avg_view_proportion", "favorite_rate", "follower_per_1k"}
+        assert advice["copy_refs"], advice["dimension"]
+        assert all(ref in transcript for ref in advice["copy_refs"])
+        assert len(advice["actions"]) >= 3
+        assert "中位数" in advice["gap"]
+
+
+def test_advice_candidates_validation_rejects_fake_numbers_and_quotes():
+    from app.services.video_review_advices import _valid_candidates
+
+    brief = {
+        "transcript": "今天聊聊理财。我把五十万存款亏到不敢看。",
+        "transcript_chars": 23,
+        "time_hints": "前 3 秒 / 每 15~30 秒 / 结尾 10 秒",
+        "metrics": [{
+            "dimension": "completion",
+            "label": "完整完播率",
+            "value": "5.0%",
+            "baseline": "12.0%",
+            "unit": "ratio",
+            "gap_text": "当前完整完播率 5.0%，中位数 12.0%（样本 10 条）",
+            "percentile": 10,
+            "sample_count": 10,
+            "state": "low",
+        }],
+    }
+    good = {
+        "dimension": "completion",
+        "reasons": ["完整完播率 5.0%，低于平时 12.0%"],
+        "actions": ["开头 3 秒先给结果", "每 15 秒一个信息点", "结尾提前收束"],
+        "copy_refs": ["我把五十万存款亏到不敢看"],
+    }
+    fake_number = {**good, "actions": ["播放量能提升 99%"]}
+    fake_quote = {**good, "copy_refs": ["这句话不在转写里"]}
+    kept = _valid_candidates([good, fake_number, fake_quote], brief)
+    assert len(kept) == 1
+    assert kept[0]["gap"] == brief["metrics"][0]["gap_text"]
+
+
+def test_review_out_advices_default_empty_for_old_snapshot(db):
+    from app.services.video_review_service import review_out
+
+    owner, account = _owner(db)
+    target = _post(db, account, 99, 10000, 3)
+    review = VideoReview(account_id=account.id, post_id=target.id, input_fingerprint="advice-old", metrics_snapshot="{}")
+    db.add(review)
+    db.commit()
+    out = review_out(db, review)
+    assert out["advices"] == []
+
+
+def test_advice_title_distinguishes_weak_and_above():
+    from app.services.video_review_advices import ADVICE_DIMENSIONS, _advice_title
+
+    spec = ADVICE_DIMENSIONS[0]
+    assert _advice_title(spec, {"value": 0.05, "baseline": 0.10}) == "如何优化完播率"
+    above = _advice_title(spec, {"value_num": 0.12, "baseline_num": 0.10})
+    assert "如何继续提升" in above

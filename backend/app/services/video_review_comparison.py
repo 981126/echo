@@ -42,6 +42,8 @@ SPECS = [
     MetricSpec("profile_visits", "主页访问量", "次"),
     MetricSpec("follower_gain", "粉丝增量", "人"),
     MetricSpec("follower_per_1k", "每1000次播放带来的关注", "人"),
+    MetricSpec("avg_view_proportion", "平均播放占比", "ratio", rate=True),
+    MetricSpec("favorite_rate", "收藏率", "ratio", rate=True),
 ]
 SPEC_MAP = {x.key: x for x in SPECS}
 
@@ -119,7 +121,11 @@ def _stat_at(post: PlatformPost, age: int, stats: dict[int, list[PlatformPostSta
         return None
     cutoff = (post.publish_time + timedelta(days=age)).date().isoformat()
     rows = [row for row in stats.get(post.id, []) if row.stat_date <= cutoff]
-    return rows[-1] if rows else None
+    if rows:
+        return rows[-1]
+    # 历史快照起始晚于「发布+天数」时，退回最早可用快照（页面 sample_note 已说明）
+    all_rows = stats.get(post.id, [])
+    return all_rows[0] if all_rows else None
 
 
 def _private_at(post: PlatformPost, age: int, metrics: dict[int, list[DouyinPostMetric]]) -> DouyinPostMetric | None:
@@ -127,7 +133,40 @@ def _private_at(post: PlatformPost, age: int, metrics: dict[int, list[DouyinPost
         return None
     cutoff = (post.publish_time + timedelta(days=age)).date().isoformat()
     rows = [row for row in metrics.get(post.id, []) if row.snapshot_date <= cutoff]
-    return rows[-1] if rows else None
+    if rows:
+        return rows[-1]
+    # 私有指标历史短于作品发布时间时，退回最早可用快照作参考（页面 sample_note 已说明）
+    all_rows = metrics.get(post.id, [])
+    return all_rows[0] if all_rows else None
+
+
+def _raw_metrics(private: DouyinPostMetric | None) -> dict:
+    """douyin_post_metrics.raw.item.metrics（创作者接口原始指标，未落列的指标从这里取）。"""
+    if private is None:
+        return {}
+    try:
+        payload = json.loads(private.raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    item = payload.get("item") if isinstance(payload, dict) else None
+    metrics = item.get("metrics") if isinstance(item, dict) else None
+    return metrics if isinstance(metrics, dict) else {}
+
+
+def _raw_int(private: DouyinPostMetric | None, key: str) -> int | None:
+    value = _raw_metrics(private).get(key)
+    try:
+        return int(float(value)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _raw_rate(private: DouyinPostMetric | None, key: str) -> float | None:
+    value = _raw_metrics(private).get(key)
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _values(stat: PlatformPostStat | None, private: DouyinPostMetric | None) -> dict[str, float | int | None]:
@@ -136,12 +175,34 @@ def _values(stat: PlatformPostStat | None, private: DouyinPostMetric | None) -> 
         for key in ("plays", "likes", "comments", "favorites", "shares"):
             out[key] = getattr(stat, key)
     if private:
-        for key in ("bounce_2s_rate", "finish_5s_rate", "finish_rate", "avg_play_seconds", "cover_click_rate", "profile_visits", "follower_gain"):
+        for key in (
+            "bounce_2s_rate",
+            "finish_5s_rate",
+            "finish_rate",
+            "avg_play_seconds",
+            "cover_click_rate",
+            "profile_visits",
+            "follower_gain",
+        ):
             out[key] = getattr(private, key)
+        out["avg_view_proportion"] = _raw_rate(private, "avg_view_proportion")
+    # 公开统计缺播/赞/藏时，用创作者原始 raw 指标补齐（否则比率型基准算不出来）
+    if not out["plays"]:
+        out["plays"] = _raw_int(private, "view_count")
+    if out["likes"] is None:
+        out["likes"] = _raw_int(private, "like_count")
+    if out["favorites"] is None:
+        out["favorites"] = _raw_int(private, "favorite_count")
     plays = out["plays"]
     if plays:
         out["like_rate"] = float(out["likes"] or 0) / float(plays)
         out["follower_per_1k"] = float(out["follower_gain"] or 0) / float(plays) * 1000 if out["follower_gain"] is not None else None
+        official_favorite_rate = _raw_rate(private, "favorite_rate")
+        out["favorite_rate"] = (
+            official_favorite_rate
+            if official_favorite_rate is not None
+            else (float(out["favorites"] or 0) / float(plays) if out["favorites"] is not None else None)
+        )
     return out
 
 
@@ -270,7 +331,11 @@ def build_comparison(db: Session, post: PlatformPost) -> dict:
         "comparison": {
             "count": len(comparison),
             "post_ids": ids,
-            "sample_note": "按相近主题、时长和发布天数比较" if comparison else "暂无可比较视频",
+            "sample_note": (
+                "按相近主题、时长和发布天数比较；私有指标历史较短时用最早可用快照作参考"
+                if comparison
+                else "暂无可比较视频"
+            ),
             "age_days": age,
         },
         "overall": overall,

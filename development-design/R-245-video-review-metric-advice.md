@@ -259,3 +259,15 @@ export interface MetricAdvice {
 - 上下文过长 → transcript 截断 3000 字，其余只传摘要；
 - 额外成本 → 仅每次生成复盘多 1 次 LLM 调用（与现有 enhance_findings 同级），无第三方 API 请求；
 - 历史复盘无新字段 → 响应默认 `[]`，兼容旧数据。
+
+## 10. 实现记录（2026-11-02）
+
+| 项 | 落地情况 |
+|---|---|
+| 对比指标 | `SPECS` 已加 `avg_view_proportion`、`favorite_rate`；两者无独立列，`_values` 从 `douyin_post_metrics.raw.item.metrics` 取；计数缺失时用 raw 的 `view_count/like_count/favorite_count` 补齐，再算比率 |
+| 基准回退 | 同发布天数无快照时用「最早可用快照」（设计未写，因私有指标 2026-10-30 才开始记录；`comparison.sample_note` 已注明，避免大多数老作品算不出基准） |
+| 标题口径 | 低于自身中位数 →「如何优化 X」；高于/持平 →「如何继续提升 X」；标题里的数值判断用 brief 的 `value_num/baseline_num`，避免格式化字符串无法比较 |
+| LLM 校验 | 维度白名单、`actions>=2`、`reasons>=1`、数字 ⊆ brief 数字白名单、`copy_refs` 必须是转写子串；数字白名单额外允许 `time_hints`（前 3 秒 / 每 15~30 秒 / 结尾 10 秒），否则合法的动作会因「3 秒」被误判 |
+| 降级 | 未配置模型/模型异常/输出不合规 → 规则兜底；实测第一次真实复盘因旧基准缺失导致 LLM 返回空 advices，回退警告正常显示且不阻塞复盘 |
+| 文件清单 | `backend/app/services/video_review_comparison.py`（指标/回退/raw 读取）、`backend/app/services/video_review_advices.py`（新增）、`backend/app/services/video_review_service.py`（接入 + `review_out` 暴露）、`backend/tests/test_r237_video_review.py`、`frontend_v2/src/pages/video-review/{types.ts,index.tsx}` |
+| 冒烟 | 作品 1952 真实复盘：4 张卡、每卡 3 条文案引用、无「同赛道/行业平均/提升 X%」；前端点检板块正常渲染、无 console error |

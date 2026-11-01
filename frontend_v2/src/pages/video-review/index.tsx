@@ -359,6 +359,34 @@ export default function VideoReviewPage() {
             <div className="grid gap-3 lg:grid-cols-2">{review.findings.map((finding) => <details key={finding.id} className="group rounded-xl border border-border bg-card p-4 shadow-card"><summary className="cursor-pointer list-none"><div className="flex items-start justify-between gap-3"><h3 className="text-sm font-medium leading-6">{finding.title}</h3><ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" /></div><span className="mt-2 inline-block rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">{judgementLabels[finding.judgement_type]}</span></summary><div className="mt-3 space-y-3 border-t border-border pt-3 text-sm leading-6"><p>{finding.conclusion}</p><p className="rounded-lg bg-indigo-50 p-3 text-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-100"><span className="font-medium">下一条怎么改：</span>{finding.suggestion}</p>{finding.metric_evidence.length > 0 && <div className="text-xs text-muted-foreground"><span className="font-medium">数据依据：</span><pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">{JSON.stringify(finding.metric_evidence, null, 2)}</pre></div>}{finding.content_evidence.length > 0 && <div className="text-xs text-muted-foreground"><span className="font-medium">内容依据：</span>{finding.content_evidence.map((x, i) => <blockquote key={i} className="mt-1 border-l-2 border-indigo-300 pl-2">{String(x.text ?? '')}</blockquote>)}</div>}</div></details>)}</div>
           </section>}
 
+          {review.advices.length > 0 && <section className="space-y-3">
+            <div><h2 className="text-base font-semibold">按指标优化建议</h2><p className="mt-1 text-xs text-muted-foreground">结合这条视频的指标差距和文案原句，按每个指标给出具体改法。</p></div>
+            <div className="grid gap-3 lg:grid-cols-2">{review.advices.map((advice) => (
+              <article key={advice.dimension} className="rounded-xl border border-border bg-card p-4 shadow-card">
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="text-sm font-medium leading-6">{advice.title}</h3>
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">{judgementLabels[advice.judgement_type]}</span>
+                </div>
+                <p className="mt-2 rounded-lg bg-muted/70 p-2 text-xs leading-5 text-muted-foreground">{advice.gap}</p>
+                <div className="mt-3 space-y-3 text-sm leading-6">
+                  <div>
+                    <span className="font-medium">原因：</span>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">{advice.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                  </div>
+                  <div>
+                    <span className="font-medium">具体怎么做：</span>
+                    <ol className="mt-1 list-decimal space-y-1 pl-5">{advice.actions.map((action) => <li key={action}>{action}</li>)}</ol>
+                  </div>
+                  {advice.copy_refs.length > 0 && <div className="text-xs text-muted-foreground">
+                    <span className="font-medium">文案依据：</span>
+                    {advice.copy_refs.map((ref) => <blockquote key={ref} className="mt-1 border-l-2 border-indigo-300 pl-2">{ref}</blockquote>)}
+                  </div>}
+                  {overview && !overview.transcript.available && <p className="text-xs text-amber-700 dark:text-amber-300">没有文案转写，本次建议只基于指标；转写后可结合文案分析。</p>}
+                </div>
+              </article>
+            ))}</div>
+          </section>}
+
           {charts && <div className="grid gap-4 xl:grid-cols-2">
             <BaselineBars metrics={(charts.comparison ?? []).filter((x) => ['plays', 'like_rate', 'finish_rate', 'follower_per_1k'].includes(x.key))} />
             <WatchTrendChart data={charts.retention} />
