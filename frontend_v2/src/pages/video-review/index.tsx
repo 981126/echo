@@ -181,10 +181,33 @@ export default function VideoReviewPage() {
   async function analyze(refresh: boolean) {
     if (!postId) return
     try {
-      const data = await apiJson<{ task_id: number; review?: Review }>(`/api/douyin-review/analyze`, { method: 'POST', body: JSON.stringify({ post_id: postId, refresh, force: true }) })
+      const data = await apiJson<{ task_id: number; review?: Review }>(`/api/douyin-review/analyze`, {
+        method: 'POST',
+        body: JSON.stringify({ post_id: postId, refresh, force: true })
+      })
       if (data.review) setReview(data.review)
-      if (data.task_id) await followTask(data.task_id)
+      const analysisResult = data.task_id ? await followTask(data.task_id) : null
+      let mediaTaskId = 0
+      try {
+        mediaTaskId = Number(JSON.parse(analysisResult?.result || '{}').media_task_id || 0)
+      } catch {
+        mediaTaskId = 0
+      }
       await loadOverview(postId)
+      // v35：刷新时后端已提交「视频下载 + ASR 转写」任务；等它完成后再用文案重新分析一次
+      if (mediaTaskId) {
+        setTask({ id: mediaTaskId, progress: 5, note: '正在下载视频并转写文案…' })
+        try {
+          await waitTaskResult(mediaTaskId)
+          setTask(null)
+          await loadOverview(postId)
+          toast.info('视频与文案已补齐，正在用文案重新分析…')
+          await analyze(false)
+        } catch (mediaError) {
+          setTask(null)
+          toast.error(mediaError instanceof Error ? `视频/转写任务失败：${mediaError.message}` : '视频/转写任务失败')
+        }
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '分析失败')
     }

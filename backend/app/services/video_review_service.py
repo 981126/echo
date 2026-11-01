@@ -231,9 +231,22 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
     try:
         update(10, "检查账号和视频")
         refresh_source = "creator"
+        media_info: dict | None = None
         if payload.get("refresh"):
             update(20, "更新抖音数据")
             refresh_source = refresh_post_by_policy(db, account, post)
+            # v35：与数据看板手动更新/素材库同步一致——刷新时补视频下载 + ASR 转写
+            # （有本地素材按 video_id 提交，素材库本地卡可认领动画；否则按 post_id 下载为新素材）
+            update(30, "提交视频下载与转写")
+            try:
+                from .media_ensure import submit_media_task
+
+                if post.local_video_id:
+                    media_info = submit_media_task(db, video_id=post.local_video_id)
+                else:
+                    media_info = submit_media_task(db, post_id=post.id)
+            except Exception as exc:  # noqa: BLE001 媒体补齐失败不影响复盘
+                media_info = {"status": "failed", "reason": str(exc)[:200]}
         update(40, "比较相近视频")
         comparison = build_comparison(db, post)
         comments = db.query(PlatformPostComment).filter_by(post_id=post.id).order_by(PlatformPostComment.likes.desc()).all()
@@ -305,7 +318,14 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         review.completed_at = _app_now()
         db.commit()
         update(100, "复盘完成")
-        return {"review_id": review.id, "post_id": post.id, "title": post.title, "status": review.status}
+        return {
+            "review_id": review.id,
+            "post_id": post.id,
+            "title": post.title,
+            "status": review.status,
+            "media": media_info,
+            "media_task_id": (media_info or {}).get("task_id"),
+        }
     except Exception as exc:
         db.rollback()
         failed = db.get(VideoReview, review_id)

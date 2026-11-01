@@ -713,6 +713,9 @@ current owner
 | v32 去掉独立选择卡片 + 头部下拉切换 | 删除顶部「选择要复盘的视频」卡片；`PostAnalysis` 新增 `videoOptions/onSelectVideo`：点击卡片头部弹出下拉（封面/标题/状态/播放/点赞/收藏/分享），外部点击关闭；`/api/douyin-review/videos` 返回 `status/status_label/plays/likes/favorites/shares` |
 | v32 文案脚本 ASR 转写 | 文案脚本空态：`transcript.has_video=true` 时显示「ASR 转写」按钮（`POST /api/douyin-dashboard/works/{id}/transcribe`，复用素材库 `import_video` 任务，旋转/呼吸动画，完成后重载文案）；`false` 时提示无本地素材；tab 栏在无文案时提示「暂无文案，分析结果可能不准」 |
 | v33/v34 统一作品更新入口 | 卡片「更新数据」最终调用数据看板的 `sync_post_data`（抖音作品 overview 1 次 + 评论 1 次，评论 6h 内复用），与素材库/博主管理同步同一逻辑；不再单独维护第二套作品取数 |
+| v36 刷新时补视频/转写并按文案重新分析 | `run_analysis(refresh=true)` 在刷新数据后调用 `submit_media_task`（有本地素材 → video_id，否则 post_id），任务 result 返回 `media/media_task_id`；前端 `analyze()` 等复盘任务完成后，若 `media_task_id` 存在：显示「正在下载视频并转写文案…」→ `waitTaskResult` 等媒体任务 → `loadOverview` 刷新文案脚本 tab → 自动 `analyze(false)` 用新文案重新生成一次复盘（不会再次触发媒体任务，避免循环） |
+| 与数据看板/素材库一致 | 手动操作（数据看板手动更新、视频复盘更新并分析）都会补视频下载+转写；自动刷新（看板选中作品静默刷新）仍只更新数据，避免静默消耗额度 |
+
 | 选错同名视频导致「数据看板有、复盘没数据」 | 原 `/api/douyin-review/videos` 按 `PlatformPost.id.desc()` 排序，默认落到同名的私密旧视频（1953，播放 0）；改为按 `publish_time desc nulls_last, id desc`（与数据看板一致），并在返回项中补充 `status/status_label`（来自最新 `douyin_post_metrics` 的 `post_status` 映射）；前端下拉选项显示「标题 · 状态 · 发布日期」 |
 
 

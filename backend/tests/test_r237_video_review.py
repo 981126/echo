@@ -402,3 +402,24 @@ def test_post_duration_is_converted_from_milliseconds(db):
     db.add(post)
     db.commit()
     assert _post_out(post)["duration_seconds"] == 147
+
+
+def test_analysis_refresh_submits_media_topup(db):
+    """v35：视频复盘「更新数据并分析」刷新时也会补视频下载/转写（已有视频+转写 → skip）。"""
+    owner, account = _owner(db)
+    for index in range(6):
+        _post(db, account, index, 5000 + index * 100, 20 + index)
+    target = _post(db, account, 120, 10000, 3)
+    video = Video(filename="r237-media.mp4", title=target.title, creator_id=owner.id, main_topics='["面试"]', status="published")
+    db.add(video)
+    db.flush()
+    db.add(Transcript(video_id=video.id, transcript_text="面试先给结果。", asr_status="done"))
+    target.local_video_id = video.id
+    db.commit()
+    review = VideoReview(account_id=account.id, post_id=target.id, input_fingerprint="media-test")
+    db.add(review)
+    db.commit()
+
+    result = run_analysis(db, {"review_id": review.id, "refresh": True}, _update)
+    assert result["media"] is not None
+    assert result["media"].get("status") in {"skip", "started", "duplicate"}
