@@ -138,7 +138,7 @@ function AccountOverview({
   }
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
-      <header className="flex h-16 items-center justify-between gap-2 px-4">
+      <header className="flex min-h-[56px] items-center justify-between gap-2 px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-2.5">
             <Avatar className="h-9 w-9">
               {account?.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}
@@ -150,13 +150,13 @@ function AccountOverview({
               {account ? (
                 <span className="flex flex-wrap items-baseline gap-x-2.5 text-xs text-muted-foreground">
                   <span>
-                    粉丝 <span className="tnum text-foreground">{account.followers === null ? '—' : formatCount(account.followers)}</span>
+                    粉丝 <span className="tnum text-foreground">{account.followers == null ? '—' : formatCount(account.followers)}</span>
                   </span>
                   <span>
-                    关注 <span className="tnum text-foreground">{account.following === null ? '—' : formatCount(account.following)}</span>
+                    关注 <span className="tnum text-foreground">{account.following == null ? '—' : formatCount(account.following)}</span>
                   </span>
                   <span>
-                    获赞 <span className="tnum text-foreground">{account.likes_total === null ? '—' : formatCount(account.likes_total)}</span>
+                    获赞 <span className="tnum text-foreground">{account.likes_total == null ? '—' : formatCount(account.likes_total)}</span>
                   </span>
                 </span>
               ) : null}
@@ -169,13 +169,10 @@ function AccountOverview({
       </header>
 
       <div className="space-y-3 p-4 sm:p-5">
-        <div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <Badge variant={data.private_available ? 'success' : 'secondary'}>
             {data.private_available ? '创作者数据可用' : '仅公开数据'}
           </Badge>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span>统计周期</span>
             <Select value={String(periodDays)} onValueChange={(value) => onPeriodChange(Number(value) as PeriodDays)}>
