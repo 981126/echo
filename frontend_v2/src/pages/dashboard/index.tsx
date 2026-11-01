@@ -228,11 +228,6 @@ function AccountOverview({
                 )}
               </motion.div>
             </div>
-            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-              {series?.mode === 'cumulative'
-                ? '总粉丝量：账号每日快照的累计值。'
-                : '增量：本次抓取值 - 上一次可用快照值（昨天没抓时用非今天的最近一日做基线，该点含这段间隔的累计）；缺口直接平滑连线跨过，不补 0。'}
-            </p>
           </div>
 
           {/* 右：数据（2 列，悬浮即切换左侧曲线） */}
@@ -527,6 +522,14 @@ export default function DashboardPage() {
     setMorePages({ items: [], hasMore: false })
   }, [worksQ.dataUpdatedAt])
 
+  // v10：进入页面默认选中「近期作品」第一条，直接展示作品分析详情
+  useEffect(() => {
+    if (selectedId !== null) return
+    const firstItem = worksQ.data?.items?.[0]
+    if (!firstItem) return
+    setSelectedId(firstItem.post_id)
+  }, [worksQ.data, selectedId])
+
   const works = [...(worksQ.data?.items ?? []), ...morePages.items]
   const hasMore = morePages.items.length ? morePages.hasMore : (worksQ.data?.has_more ?? false)
   const worksDataTime = works.reduce<string | null>((latest, item) => {
@@ -637,9 +640,7 @@ export default function DashboardPage() {
           </div>
         </motion.div>
       ) : (
-        <div className="pt-4">
-          <AnalysisGuide />
-        </div>
+        <div className="pt-4">{worksQ.isPending ? <AnalysisSkeleton /> : <AnalysisGuide />}</div>
       )}
     </motion.div>
   )

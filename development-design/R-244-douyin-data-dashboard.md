@@ -588,6 +588,13 @@ limit/offset 分页，返回 has_more
 | 删除底部口径说明整段文字 | 移除 AccountOverview 底部 `<p>` 口径段（近 7 日/14/30/90 日说明 + 悬浮提示）；数据来源说明保留在统计周期旁的 ⓘ 悬浮提示中 |
 | 指标数字字号调小 | 标签 `text-xs(12px)` → `text-[11px]`；数字 `text-2xl(24px)` → `text-xl(20px)`；较前对比 `text-xs` → `text-[11px]`，卡片间距略收紧 |
 
+### 5.23 2026-11-01 v10 精简与默认选中（作者第九次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 删除曲线下方口径说明 | AccountOverview 曲线区不再渲染 `<p>增量：本次抓取值…</p>`；曲线语义说明只保留在需求/设计文档与统计周期 ⓘ 提示里 |
+| 默认选中近期作品第一条 | DashboardPage 新增 effect：`selectedId === null && worksQ.data.items[0]` 时 `setSelectedId(items[0].post_id)`；详情区在此期间显示 `AnalysisSkeleton`（列表加载中）或引导（列表为空）。首屏逻辑：overview+works 并行 → works 返回后自动展开第一条详情（详情缓存缺失/超 6h 仍按既有 10 分钟防重复自动刷新） |
+
 ---
 
 ## 6. 新增/修改表结构
