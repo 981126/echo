@@ -2,7 +2,7 @@
 // 数据获取：GET overview / works / works/{id}；刷新走后台任务，可用 useTaskScope 跨切页/刷新恢复。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { BarChart3, CircleAlert, Info, Loader2, RefreshCw, Users } from 'lucide-react'
 import { apiJson } from '@/api/client'
@@ -61,29 +61,38 @@ function KpiCardView({
   onSelect: () => void
 }) {
   const valueText = kpi.value === null ? '暂无数据' : formatCount(kpi.value)
-  const missingNote = kpi.source === 'diagnosis' ? '账号诊断暂无数据，可点「更新数据」获取' : kpi.note || '数据积累中：需要至少 2 天相邻快照'
   const deltaText = kpi.delta !== null ? `较前 ${days} 日 ${formatDelta(kpi.delta)}` : null
+  const hoverTimer = useRef<number | null>(null)
+  // v7：鼠标悬浮即激活该指标（80ms 防抖，避免快速划过时曲线反复重绘）；点击同样生效
+  const activate = () => onSelect()
+  const onEnter = () => {
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+    hoverTimer.current = window.setTimeout(activate, 80)
+  }
+  const onLeave = () => {
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+    hoverTimer.current = null
+  }
+  useEffect(() => () => onLeave(), [])
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={activate}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={activate}
       aria-pressed={active}
-      title={`点击查看「${kpi.label}」在近 ${days} 日的趋势`}
+      title={`悬浮/点击查看「${kpi.label}」在近 ${days} 日的趋势`}
       className={cn(
         'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-md px-2 pb-3 pt-1 text-left transition-colors hover:bg-muted/40',
         active && 'bg-accent-soft/40'
       )}
     >
-      {/* 上：指标名 / 中：数字 / 下：较前 N 日对比 */}
+      {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
       <div className={cn('text-xs text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
       <div className={cn('tnum mt-1.5 text-2xl font-semibold leading-8 tracking-tight', active && 'text-accent')}>{valueText}</div>
-      <div
-        className={cn(
-          'mt-1 text-xs leading-4',
-          kpi.available ? (deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground') : 'text-muted-foreground'
-        )}
-      >
-        {kpi.available ? deltaText || kpi.note || '\u00a0' : missingNote}
+      <div className={cn('mt-1 min-h-4 text-xs leading-4', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}>
+        {deltaText}
       </div>
       {/* 激活线固定在整张卡片区域的底部（切换时平滑移动） */}
       {active ? (
@@ -226,9 +235,9 @@ function AccountOverview({
         </motion.div>
         <p className="text-[11px] leading-4 text-muted-foreground">
           {periodDays === 7
-            ? '近 7 日：播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；其余指标取本地每日快照差值，历史不足时显示「暂无对比」。'
-            : `近 ${periodDays} 日：全部指标取本地每日快照差值（账号诊断只提供近 7 日口径）；历史不足时显示「暂无对比」。`}
-          点击指标卡可切换上方趋势曲线。
+            ? '近 7 日：播放量/净增粉丝取抖音账号诊断（与创作者中心口径一致）；其余指标取本地每日快照差值。'
+            : `近 ${periodDays} 日：全部指标取本地每日快照差值（账号诊断只提供近 7 日口径）。`}
+          鼠标悬浮或点击指标卡可切换上方趋势曲线；较前 N 日对比只在历史数据足够时显示。
         </p>
       </div>
     </section>
@@ -360,6 +369,8 @@ export default function DashboardPage() {
   const overviewQ = useQuery({
     queryKey: ['dashboard', 'overview', periodDays],
     queryFn: () => apiJson<DashboardOverview>(`/api/douyin-dashboard/overview?period=${periodDays}`),
+    // v7：切统计周期时保留上一周期数据，避免整页骨架闪一下
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => (query.state.data?.updating_task_id ? 2500 : false)
   })
   const worksQ = useQuery({
@@ -524,8 +535,8 @@ export default function DashboardPage() {
     }
   }
 
-  if (overviewQ.isPending) return <DashboardSkeleton />
-  if (overviewQ.isError || !overviewQ.data) {
+  if (!overviewQ.data) {
+    if (overviewQ.isPending) return <DashboardSkeleton />
     return <LoadError message={overviewQ.error instanceof Error ? overviewQ.error.message : '未知错误'} onRetry={() => void overviewQ.refetch()} />
   }
   const data = overviewQ.data
