@@ -9,7 +9,6 @@ import { apiJson } from '@/api/client'
 import { waitTaskResult } from '@/api/task'
 import { useTaskScope } from '@/hooks/use-task-scope'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -170,9 +169,6 @@ function AccountOverview({
 
       <div className="space-y-3 p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-          <Badge variant={data.private_available ? 'success' : 'secondary'}>
-            {data.private_available ? '创作者数据可用' : '仅公开数据'}
-          </Badge>
           <div className="flex items-center gap-1.5">
             <span>统计周期</span>
             <Select value={String(periodDays)} onValueChange={(value) => onPeriodChange(Number(value) as PeriodDays)}>
