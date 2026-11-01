@@ -89,9 +89,9 @@ function KpiCardView({
       )}
     >
       {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
-      <div className={cn('text-[11px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
-      <div className="tnum mt-1 text-xl font-semibold leading-7 tracking-tight">{valueText}</div>
-      <div className={cn('mt-0.5 min-h-4 text-[11px] leading-4', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}>
+      <div className={cn('text-[10px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
+      <div className="tnum mt-0.5 text-lg font-semibold leading-6 tracking-tight">{valueText}</div>
+      <div className={cn('mt-0.5 min-h-3.5 text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}>
         {deltaText}
       </div>
     </button>
@@ -190,7 +190,7 @@ function AccountOverview({
           </span>
         </div>
 
-        <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-start">
+        <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start">
           {/* 左：曲线 */}
           <div className="min-w-0">
             <div className="flex flex-wrap items-baseline justify-end gap-2">

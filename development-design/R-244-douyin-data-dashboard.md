@@ -595,6 +595,14 @@ limit/offset 分页，返回 has_more
 | 删除曲线下方口径说明 | AccountOverview 曲线区不再渲染 `<p>增量：本次抓取值…</p>`；曲线语义说明只保留在需求/设计文档与统计周期 ⓘ 提示里 |
 | 默认选中近期作品第一条 | DashboardPage 新增 effect：`selectedId === null && worksQ.data.items[0]` 时 `setSelectedId(items[0].post_id)`；详情区在此期间显示 `AnalysisSkeleton`（列表加载中）或引导（列表为空）。首屏逻辑：overview+works 并行 → works 返回后自动展开第一条详情（详情缓存缺失/超 6h 仍按既有 10 分钟防重复自动刷新） |
 
+### 5.24 2026-11-01 v11 右栏缩窄与字号（作者第十次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 右栏字号再缩小 | `KpiCardView`：标签 11px→10px、数字 20px→18px（`text-lg leading-6`）、较前对比 11px→10px；行高/间距同步收紧，右栏 2 列仍可容纳「1,619 / 较前 7 日 -1,243」 |
+| 右栏让约 20% 宽度给左侧曲线 | 左右网格 `lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]` → `[minmax(0,2fr)_minmax(0,1fr)]`（实测 1440 宽下左 731px / 右 357px，约 2:1）；曲线 `height=300` 保持不变，可视面积更大 |
+| 移动端 | 仍为上下堆叠（先曲线后数据），字号沿用缩小后的值 |
+
 ---
 
 ## 6. 新增/修改表结构
