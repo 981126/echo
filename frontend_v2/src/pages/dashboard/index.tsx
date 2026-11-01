@@ -15,9 +15,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toaster'
 import { coverThumb } from '@/lib/covers'
-import { EASE_OUT_EXPO, softIn } from '@/lib/motion'
+import { EASE_OUT_EXPO, itemVariants, listVariants, softIn } from '@/lib/motion'
 import { cn } from '@/lib/utils'
-import { Empty, TrendLine } from './charts'
+import { CrossfadeTrendLine } from './charts'
 import { deltaToneClass, formatCount, formatDateTime, formatDelta, formatMonthDay } from './format'
 import { PostAnalysis } from './post-analysis'
 import { WorksList } from './works-list'
@@ -102,6 +102,7 @@ function KpiCardView({
 
 function AccountOverview({
   data,
+  dataVersion,
   busy,
   onRefresh,
   periodDays,
@@ -110,6 +111,7 @@ function AccountOverview({
   onMetricChange
 }: {
   data: DashboardOverview
+  dataVersion: number
   busy: boolean
   onRefresh: () => void
   periodDays: PeriodDays
@@ -123,18 +125,6 @@ function AccountOverview({
   const series = data.series[metricKey] ?? null
   const points = (series?.points ?? []).map((point) => ({ label: formatMonthDay(point.date), value: point.value }))
   const chartLabel = series ? `${series.label}${series.mode === 'daily' ? '（较上次同步增量）' : ''}` : '播放量'
-  // v8：切换指标时保留旧曲线做交叉淡出（避免图表瞬间闪一下）
-  const [fadeFrom, setFadeFrom] = useState<{ points: Array<{ label: string; value: number | null }>; label: string } | null>(null)
-  useEffect(() => {
-    if (!fadeFrom) return
-    const timer = window.setTimeout(() => setFadeFrom(null), 280)
-    return () => window.clearTimeout(timer)
-  }, [fadeFrom])
-  const switchMetric = (key: string) => {
-    if (key === metricKey) return
-    setFadeFrom({ points, label: chartLabel })
-    onMetricChange(key)
-  }
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
       <header className="flex min-h-[56px] items-center justify-between gap-2 px-4 py-2.5">
@@ -212,41 +202,22 @@ function AccountOverview({
                 {chartLabel}
               </span>
             </div>
-            <div className="relative mt-1 min-h-[190px]">
-              {/* 切指标时：旧曲线淡出、新曲线淡入，交叉过渡不闪 */}
-              {fadeFrom ? (
-                <motion.div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0"
-                  initial={false}
-                  animate={{ opacity: 0 }}
-                  transition={{ duration: 0.26, ease: EASE_OUT_EXPO }}
-                >
-                  <TrendLine points={fadeFrom.points} ariaLabel="趋势" fillArea height={300} />
-                </motion.div>
-              ) : null}
-              <motion.div
-                key={`chart-${metricKey}`}
-                initial={reduce || !fadeFrom ? false : { opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.26, ease: EASE_OUT_EXPO }}
-              >
-                {series && points.filter((point) => point.value !== null).length >= 2 ? (
-                  <TrendLine points={points} ariaLabel={`${chartLabel}趋势`} fillArea height={300} />
-                ) : (
-                  <Empty
-                    className="mt-2"
-                    text={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
-                  />
-                )}
-              </motion.div>
+            <div className="mt-1 min-h-[190px]">
+              <CrossfadeTrendLine
+                transitionKey={`${metricKey}-${dataVersion}`}
+                points={points}
+                ariaLabel={`${chartLabel}趋势`}
+                fillArea
+                height={300}
+                emptyText={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
+              />
             </div>
           </div>
 
           {/* 右：数据（2 列，悬浮即切换左侧曲线） */}
           <motion.div
             key={`kpis-${periodDays}`}
-            initial={reduce ? false : { opacity: 0.7, y: 4 }}
+            initial={reduce ? false : { opacity: 0.85, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={softIn}
             className="grid grid-cols-2 items-stretch gap-x-3 gap-y-2"
@@ -257,7 +228,7 @@ function AccountOverview({
                 kpi={kpi}
                 days={periodDays}
                 active={metricKey === (kpi.trend_key ?? kpi.key)}
-                onSelect={() => switchMetric(kpi.trend_key ?? kpi.key)}
+                onSelect={() => onMetricChange(kpi.trend_key ?? kpi.key)}
               />
             ))}
           </motion.div>
@@ -578,26 +549,27 @@ export default function DashboardPage() {
 
   return (
     <motion.div
-      initial={reduce ? false : { opacity: 0.85, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={softIn}
+      variants={listVariants}
+      initial={reduce ? false : 'initial'}
+      animate="animate"
       className="space-y-4 pb-2"
     >
       <WarningBars data={data} onGoCreators={() => navigate('/creators')} />
       {overviewError ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <motion.div variants={itemVariants} className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="flex items-start gap-1.5 text-[11px] leading-5 text-warning">
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             刷新失败：{overviewError}（当前展示上一次成功的数据）
           </p>
           <Button variant="outline" size="sm" className="shrink-0" disabled={overviewBusy} onClick={() => void refreshOverview()}>重试</Button>
-        </div>
+        </motion.div>
       ) : null}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+      <motion.div variants={itemVariants} className="grid min-w-0 gap-4 lg:grid-cols-3">
         <div className="min-w-0 lg:col-span-2">
           <AccountOverview
             data={data}
+            dataVersion={overviewQ.dataUpdatedAt}
             busy={overviewBusy}
             onRefresh={() => void refreshOverview()}
             periodDays={periodDays}
@@ -624,13 +596,13 @@ export default function DashboardPage() {
             />
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {selectedId !== null ? (
         <motion.div
           initial={reduce ? false : { height: 0, opacity: 0.85 }}
           animate={{ height: 'auto', opacity: 1 }}
-          transition={{ height: { duration: 0.26, ease: EASE_OUT_EXPO }, opacity: { duration: 0.22 } }}
+          transition={{ height: { duration: 0.26, ease: EASE_OUT_EXPO }, opacity: softIn }}
           className="overflow-hidden"
         >
           <div className="pt-4">
@@ -640,14 +612,21 @@ export default function DashboardPage() {
                 onRetry={() => void detailQ.refetch()}
               />
             ) : detailQ.data ? (
-              <PostAnalysis
-                detail={detailQ.data}
-                refreshing={detailBusy}
-                refreshError={postError}
-                onRefresh={() => void refreshPost(selectedId, true)}
-                onRefreshComments={() => void refreshPost(selectedId, false)}
-                onOpenVideoReview={() => navigate(`/video-review?post=${selectedId}`)}
-              />
+              <motion.div
+                key={detailQ.data.post.post_id}
+                initial={reduce ? false : { opacity: 0.85, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={softIn}
+              >
+                <PostAnalysis
+                  detail={detailQ.data}
+                  refreshing={detailBusy}
+                  refreshError={postError}
+                  onRefresh={() => void refreshPost(selectedId, true)}
+                  onRefreshComments={() => void refreshPost(selectedId, false)}
+                  onOpenVideoReview={() => navigate(`/video-review?post=${selectedId}`)}
+                />
+              </motion.div>
             ) : (
               <AnalysisSkeleton />
             )}

@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Empty, Panel, Thumb, TrendLine } from './charts'
+import { CrossfadeTrendLine, Empty, Panel, Thumb } from './charts'
 import {
   formatDateTime,
   formatMonthDay,
@@ -157,7 +157,6 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
   const points = (detail.metric_trends[metricKey] ?? [])
     .filter((point) => point.date >= cutoffDate)
     .map((point) => ({ label: formatMonthDay(point.date), value: point.value }))
-  const available = points.filter((point) => point.value !== null).length >= 2
   return (
     <div className="grid gap-3 lg:grid-cols-10 lg:items-start">
       <div className="min-w-0 lg:col-span-6">
@@ -181,22 +180,20 @@ function OverviewTab({ detail }: { detail: PostDetail }) {
             </div>
           }
         >
-          {available ? (
-            <TrendLine
-              points={points}
-              ariaLabel={`${spec.label}趋势`}
-              height={300}
-              axisFormat={
-                spec.unit === 'ratio'
-                  ? (value) => `${(value * 100).toFixed(0)}%`
-                  : spec.unit === '秒'
-                    ? (value) => `${value.toFixed(0)}s`
-                    : undefined
-              }
-            />
-          ) : (
-            <Empty text="该指标暂无足够趋势数据（需要至少 2 天同步快照）" />
-          )}
+          <CrossfadeTrendLine
+            transitionKey={`${metricKey}-${periodDays}`}
+            points={points}
+            ariaLabel={`${spec.label}趋势`}
+            height={300}
+            emptyText="该指标暂无足够趋势数据（需要至少 2 天同步快照）"
+            axisFormat={
+              spec.unit === 'ratio'
+                ? (value) => `${(value * 100).toFixed(0)}%`
+                : spec.unit === '秒'
+                  ? (value) => `${value.toFixed(0)}s`
+                  : undefined
+            }
+          />
         </Panel>
       </div>
 

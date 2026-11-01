@@ -1,10 +1,11 @@
 // R-244 数据看板图表与共享展示件：项目无图表库，全部手写 SVG / CSS。
 // 图表入场统一「从浅到深淡入」（不从 opacity:0 起步，避免闪一帧空白），
 // 并尊重 prefers-reduced-motion（framermotion 的 useReducedMotion）。
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { ImageOff } from 'lucide-react'
 import { coverThumb } from '@/lib/covers'
+import { EASE_OUT_EXPO } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { formatPercent } from './format'
 import type { WatchPoint } from './types'
@@ -128,15 +129,7 @@ function smoothPath(points: Array<[number, number]>): string {
   return d
 }
 
-/** 趋势曲线：跳过空值、用平滑线连接有效点（不在缺口处断开、不画孤立点）。 */
-export function TrendLine({
-  points,
-  ariaLabel,
-  height = 190,
-  fillArea = false,
-  emptyText = '暂无可绘制的数据点',
-  axisFormat
-}: {
+interface TrendLineProps {
   points: TrendLinePoint[]
   ariaLabel: string
   height?: number
@@ -145,7 +138,17 @@ export function TrendLine({
   emptyText?: string
   /** 纵轴刻度格式化（比率指标传百分比格式，避免出现 0/1 而不是 30%/47%） */
   axisFormat?: (value: number) => string
-}) {
+}
+
+/** 趋势曲线：跳过空值、用平滑线连接有效点（不在缺口处断开、不画孤立点）。 */
+export function TrendLine({
+  points,
+  ariaLabel,
+  height = 190,
+  fillArea = false,
+  emptyText = '暂无可绘制的数据点',
+  axisFormat
+}: TrendLineProps) {
   const reduce = useReducedMotion()
   const valid = points
     .map((point, index) => ({ index, value: point.value }))
@@ -198,7 +201,7 @@ export function TrendLine({
           stroke="none"
           initial={reduce ? false : { opacity: 0.7 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.3, ease: EASE_OUT_EXPO }}
         />
       ) : null}
       <motion.path
@@ -208,9 +211,9 @@ export function TrendLine({
         strokeWidth={2.5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        initial={reduce ? false : { opacity: 0.65 }}
+        initial={reduce ? false : { opacity: 0.7 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
+        transition={{ duration: 0.3, ease: EASE_OUT_EXPO }}
       />
       {points.map((point, index) => {
         // 长周期（14/30/90 天）横轴只显示约 7 个日期，避免标签重叠
@@ -224,6 +227,55 @@ export function TrendLine({
         )
       })}
     </svg>
+  )
+}
+
+type TrendSnapshot = { key: string; props: TrendLineProps }
+
+export function CrossfadeTrendLine({ transitionKey, ...props }: TrendLineProps & { transitionKey: string }) {
+  const reduce = useReducedMotion()
+  const currentRef = useRef<TrendSnapshot>({ key: transitionKey, props })
+  const previousRef = useRef(currentRef.current)
+  const [fadeFrom, setFadeFrom] = useState<TrendSnapshot | null>(null)
+  currentRef.current = { key: transitionKey, props }
+  const previous = previousRef.current
+  const outgoing = previous.key !== transitionKey ? previous : fadeFrom
+
+  useLayoutEffect(() => {
+    const current = currentRef.current
+    const previous = previousRef.current
+    if (previous.key === current.key) return
+    previousRef.current = current
+    setFadeFrom(previous)
+    const timer = window.setTimeout(() => setFadeFrom(null), 280)
+    return () => window.clearTimeout(timer)
+  }, [transitionKey])
+
+  return (
+    <div className="relative">
+      {!reduce && outgoing ? (
+        <motion.div
+          key={`outgoing-${outgoing.key}`}
+          data-testid="trend-outgoing"
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          initial={{ opacity: 1 }}
+          animate={{ opacity: 0 }}
+          transition={{ duration: 0.26, ease: EASE_OUT_EXPO }}
+        >
+          <TrendLine {...outgoing.props} />
+        </motion.div>
+      ) : null}
+      <motion.div
+        key={`current-${transitionKey}`}
+        data-testid="trend-current"
+        initial={reduce || !outgoing ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.26, ease: EASE_OUT_EXPO }}
+      >
+        <TrendLine {...props} />
+      </motion.div>
+    </div>
   )
 }
 
@@ -247,7 +299,7 @@ export function Donut({ items, ariaLabel }: { items: Array<{ label: string; rati
       <svg viewBox="0 0 100 100" className="h-28 w-28 shrink-0" role="img" aria-label={ariaLabel}>
         <title>{ariaLabel}</title>
         <circle cx="50" cy="50" r={radius} fill="none" stroke="var(--muted)" strokeWidth="13" />
-        <motion.g initial={reduce ? false : { opacity: 0.65 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+        <motion.g initial={reduce ? false : { opacity: 0.7 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, ease: EASE_OUT_EXPO }}>
           <g transform="rotate(-90 50 50)">
             {segments.map((seg) => (
               <circle
@@ -287,13 +339,13 @@ export function Bars({ items, ariaLabel }: { items: Array<{ label: string; ratio
   const max = Math.max(...items.map((item) => item.ratio), 0.0001)
   return (
     <div role="img" aria-label={ariaLabel ?? '柱状分布图'} className="flex items-end justify-between gap-2 pt-4">
-      {items.map((item, index) => (
+      {items.map((item) => (
         <div key={item.label} className="flex min-w-0 flex-1 flex-col items-center gap-1">
           <span className="tnum text-[10px] text-muted-foreground">{formatPercent(item.ratio)}</span>
           <motion.div
-            initial={reduce ? false : { opacity: 0.55 }}
+            initial={reduce ? false : { opacity: 0.7 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.28, delay: reduce ? 0 : index * 0.03 }}
+            transition={{ duration: 0.3, ease: EASE_OUT_EXPO }}
             style={{ height: `${6 + (item.ratio / max) * 104}px` }}
             className="w-full max-w-10 rounded-t-md bg-accent/85"
           />
@@ -322,9 +374,9 @@ export function RatioRows({
           <span className={cn('truncate', item.muted && 'text-muted-foreground')} title={item.label}>{item.label}</span>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
             <motion.div
-              initial={reduce ? false : { opacity: 0.55 }}
+              initial={reduce ? false : { opacity: 0.7 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.28, delay: reduce ? 0 : index * 0.02 }}
+              transition={{ duration: 0.3, ease: EASE_OUT_EXPO }}
               style={{ width: `${Math.max(2, (item.ratio / max) * 100)}%` }}
               className={cn('h-2 rounded-full', item.muted ? 'bg-zinc-300 dark:bg-zinc-600' : 'bg-accent/85')}
             />
@@ -384,7 +436,7 @@ export function WatchTrend({ points, ariaLabel }: { points: WatchPoint[]; ariaLa
             </g>
           )
         })}
-        <motion.g initial={reduce ? false : { opacity: 0.65 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+        <motion.g initial={reduce ? false : { opacity: 0.7 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, ease: EASE_OUT_EXPO }}>
           {hasSimilar ? <path d={watchPath(points, 'similar', xAt, yAt)} fill="none" stroke="var(--muted-foreground)" strokeWidth={2} strokeDasharray="6 5" strokeLinecap="round" /> : null}
           {hasCurrent ? <path d={watchPath(points, 'current', xAt, yAt)} fill="none" stroke="var(--accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" /> : null}
           {points.map((point, index) =>

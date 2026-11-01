@@ -1,6 +1,7 @@
 // R-244 数据看板右侧「近期作品」：可滚动列表 + 加载更多 + 选中高亮（替代原通知/活动管理）。
 import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
+import { itemVariants, listVariants, softIn } from '@/lib/motion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -59,6 +60,10 @@ export function WorksList({
   onRetry
 }: WorksListProps) {
   const reduce = useReducedMotion()
+  const hasRenderedItems = useRef(false)
+  useEffect(() => {
+    if (items.length) hasRenderedItems.current = true
+  }, [items.length])
   // v14：滑动到底部自动加载下一页（去掉「加载更多」按钮）
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -98,17 +103,19 @@ export function WorksList({
         </div>
       ) : (
         <ScrollArea className="max-h-[420px] md:max-h-[520px] lg:max-h-none lg:min-h-0 lg:flex-1">
-          <ul className="divide-y divide-border">
-            {items.map((item, index) => {
+          <motion.ul variants={listVariants} initial={reduce ? false : 'initial'} animate="animate" className="divide-y divide-border">
+            {items.map((item) => {
               const selected = item.post_id === selectedId
+              const append = hasRenderedItems.current
               return (
                 <li key={item.post_id}>
                   <motion.button
                     type="button"
                     onClick={() => onSelect(item.post_id)}
-                    initial={reduce ? false : { opacity: 0.85 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.2, delay: reduce ? 0 : Math.min(index, 8) * 0.02 }}
+                    variants={itemVariants}
+                    initial={append ? (reduce ? false : { opacity: 0.85, y: 8 }) : undefined}
+                    animate={append ? { opacity: 1, y: 0 } : undefined}
+                    transition={append ? softIn : undefined}
                     className="relative flex w-full cursor-pointer gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/60"
                     aria-pressed={selected}
                   >
@@ -150,7 +157,7 @@ export function WorksList({
                 </li>
               )
             })}
-          </ul>
+          </motion.ul>
           <div ref={sentinelRef} className="h-px w-full" aria-hidden />
         </ScrollArea>
       )}

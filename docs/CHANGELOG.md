@@ -2,6 +2,7 @@
 
 ## [R-244] 2026-11-01 — 抖音数据看板（复刻创作者中心首页 + 作品分析）✅
 
+- **v29 动效统一与曲线切换修复（作者 2026-11-01 第二十八次反馈）**：页面/近期作品列表改用全站 `listVariants/itemVariants`，KPI、详情追加与局部更新统一 `softIn`；所有图表首次淡入统一为 0.7→1、0.3s、`EASE_OUT_EXPO`，去掉逐柱延迟。新增共享 `CrossfadeTrendLine`，修复账号总览旧曲线 `initial=false` 导致首帧直接为 0、作品分析只换 `points` 无切换动画的问题；两处指标与统计周期切换均有 0.26s 交叉过渡，支持连续快速切换和 reduced-motion。新增 4 条曲线动画回归测试。
 - **布局修正（作者反馈 2026-11-01）**：账号总览改为抖音创作者中心同款顺序——**播放量趋势曲线在上、6 个数字卡紧随其下（同一区块内，不拆独立卡片）**；数字卡改无边框样式（标签 + 大数字 + 较前 7 日同行显示），曲线加浅色面积填充；6 指标口径说明移到区块脚注；曲线与数据不再被其它区块隔开。
 - **v28 去掉创作者数据徽标（作者 2026-11-01 第二十七次反馈）**：删除账号卡的「创作者数据可用 / 仅公开数据」徽标汉字，统计周期行直接以「统计周期」开始。
 - **v27 收紧空白（作者 2026-11-01 第二十六次反馈）**：①去掉账号卡头部下方的多余空白：头部由固定 64px 改为自适应（56px 起），「创作者数据可用」徽标并入「统计周期 / 数据更新至」同一行；②「关注/获赞」在旧缓存响应下显示「—」而不是「暂无数据」。
@@ -37,7 +38,7 @@
 - **刷新与额度**：打开页面读本地缓存；账号诊断 24h / 作品详情 6h / 评论 6h；「更新数据」后台任务（账号 5 次请求、作品 8 次请求）带进度、预算预检、任务去重、切页/刷新恢复；同作品 6 小时内非 force 直接 skipped；Cookie 失效/额度不足/接口失败保留旧数据并给出原因。
 - **后端**：新增 `services/douyin_dashboard.py`（账号解析/缓存/KPI/趋势/详情装配/评论热词/作品诊断/刷新任务）、`api/douyin_dashboard.py`、`schemas/douyin_dashboard.py`；`TikHubClient` 新增 5 个 creator_v2 方法（author_diagnosis / item_audience_portrait / item_audience_others / item_analysis_verticals / item_analysis_overview，含 mock）；`sync_post_creator_data` 增加 `with_audience`；`_apply_item_metrics` 写 raw 时合并保留 review/visibility；`douyin_post_metrics` 新增 `audience_portrait`/`audience_others` 两列（Alembic `r244dashboard`）；任务 kind `douyin_dashboard_overview`/`douyin_dashboard_post` 与 `/dashboard` 跳转。
 - **前端**：新增 `pages/dashboard/`（index/works-list/post-analysis/charts/types/format + format 单测 8 例）；手写 SVG 图表（null 断点趋势线/环形/柱状/占比条/观看趋势双线）；自动刷新守卫（同一目标 10 分钟一次）、后台任务恢复、空态/失败态全覆盖；路由/侧栏「数据看板」/页面标题接入。
-- **测试与验证**：后端新增 `tests/test_r244_douyin_dashboard.py`（17 例：状态映射/raw 保留/7 日 KPI 差值/脏快照剔除/趋势/评论热词/观众映射/诊断归一化/接口冒烟/额度/Cookie/缓存 skip），迁移测试 head 更新为 `r244dashboard`；前端 vitest 154 例全过、lint 0 error、build 成功。`scripts/verify.sh` 全绿 + 真实 TikHub 全链路联调 + 1440×900/390×844 浏览器点检（无横向滚动、无 console 错误、tab 切换无白屏、5 个 tab 真实数据）。
+- **测试与验证**：后端新增 `tests/test_r244_douyin_dashboard.py`（17 例：状态映射/raw 保留/7 日 KPI 差值/脏快照剔除/趋势/评论热词/观众映射/诊断归一化/接口冒烟/额度/Cookie/缓存 skip），迁移测试 head 更新为 `r244dashboard`；前端 vitest 158 例全过、lint 0 error、build 成功。`scripts/verify.sh` 全绿 + 真实 TikHub 全链路联调 + 1440×900/390×844 浏览器点检（无横向滚动、无 console 错误、tab 切换无白屏、5 个 tab 真实数据）。
 - **明确不做**：直播数据 tab、通知/活动管理、评论写操作、逐小时趋势、平台扶持流量；视频复盘页零改动（仅加「去视频复盘」互链）。
 
 ## [R-243] 2026-10-31 — 前端性能优化（更快、更流畅、修闪屏/组件乱动）✅

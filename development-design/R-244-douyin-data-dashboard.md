@@ -500,12 +500,13 @@ limit/offset 分页，返回 has_more
 
 | 交互 | 动效 |
 |---|---|
-| 页面首次进入 | 区块 `initial={false}` 或 softIn（0.85→1 + 8px，0.22s），禁止从 opacity:0 起步导致白闪 |
-| tab 切换 | 复用 `ui/tabs` 滑块动画；内容用「保留旧内容到新内容就绪」策略（本次数据都在一个响应里，切换无需请求，直接局部淡入 0.2s） |
+| 页面首次进入 | 复用全站 `listVariants/itemVariants` 区块错峰入场（v29 起，覆盖早期看板独立 softIn 方案） |
+| tab 切换 | 复用 `ui/tabs` 滑块与内容入场动画；内容直接来自同一响应，无请求空白期 |
 | 选中近期作品 | 行高亮 spring 过渡；详情区高度展开 + 内容 softIn；切换作品时先用骨架占位（保持区域高度），不整块消失 |
-| 图表入场 | 路径/柱子 `initial={{opacity:0.7}} animate={{opacity:1}}`（0.3s），不做逐点动画 |
-| 更新中 | 按钮 spinner + 「更新中 x%」；区块右下角轻量进度条（复用 `Progress`） |
-| reduced-motion | `window.matchMedia('(prefers-reduced-motion: reduce)')` 时动画时长 0（状态切换保留） |
+| 图表入场 | 路径/环形/柱子/占比条 `initial={{opacity:0.7}} animate={{opacity:1}}`（0.3s + `EASE_OUT_EXPO`），不做逐点/逐柱延迟 |
+| 曲线切换 | 账号总览与作品分析共用 `CrossfadeTrendLine`，旧层 1→0、新层 0→1（0.26s），具体 key 与快速切换规则见 5.42 |
+| 更新中 | 按钮 spinner + 「更新中…」；后台任务状态跨切页/刷新恢复 |
+| reduced-motion | `useReducedMotion` 命中时去掉入场、展开与曲线交叉动画，保留状态切换 |
 
 ### 5.15 错误与降级总表
 
@@ -727,6 +728,17 @@ limit/offset 分页，返回 has_more
 | 改动 | 实现 |
 |---|---|
 | 删除「创作者数据可用/仅公开数据」徽标 | 账号卡头部下方行不再渲染该 Badge（连同 `Badge` 导入一并移除），行首直接是「统计周期」；`private_available` 字段仍保留（其它逻辑/WarningBars 使用），页面不再展示这组汉字 |
+
+### 5.42 2026-11-01 v29 全站动效统一与曲线切换修复（作者第二十八次反馈）
+
+| 改动 | 实现 |
+|---|---|
+| 页面与列表动效对齐其它页面 | 看板根容器改用 `listVariants/itemVariants`；账号总览+近期作品主区块错峰入场。近期作品首批复用同一组 variants，滚动追加行只用 `softIn`，旧行不重播 |
+| 局部更新统一 softIn | KPI 统计周期切换改为 `opacity .85→1 + y 8→0`；作品详情首次保留高度展开，后续按 `post_id` 以 `softIn` 入场；高度 0.26s、内容 0.24s，均用 `EASE_OUT_EXPO` |
+| 图表参数统一 | `TrendLine/Donut/Bars/RatioRows/WatchTrend` 首次绘制统一 `opacity .7→1`、0.3s、`EASE_OUT_EXPO`；删除柱子/占比条的逐项 delay，不逐点乱跳 |
+| 共享曲线交叉过渡 | `charts.tsx` 新增 `CrossfadeTrendLine`：保存上一轮 `{key,props}` 快照，旧层明确 `initial opacity:1 → animate 0`，新层 `0→1`，0.26s；280ms 清旧层；快速 A→B→C 时旧层为 B；reduced-motion 不渲染旧层并直接切换 |
+| 两处曲线接入 | 账号总览 key=`metricKey-dataUpdatedAt`：指标切换立即过渡，周期切换等新数据返回后再过渡，避免 keepPreviousData 期间旧数据自切一次；作品分析 key=`metricKey-periodDays`，指标与周期都覆盖 |
+| 回归测试 | `charts.test.tsx` 4 例：首次无旧层；A→B 旧层首帧 1/新层首帧 0；连续 A→B→C 旧层为 B；reduced-motion 直接替换 |
 
 ---
 
@@ -1045,8 +1057,8 @@ limit/offset 分页，返回 has_more
 ### 9.2 前端单测与点检
 
 - `format.test.ts`：百分比（0.075→7.5%）、万/亿格式（20382486→2038.2 万）、增减符号、0/缺失差异、状态文案映射。
-- `charts` 纯函数测试：折线点为空时断开、环形图占比总和、年龄柱顺序。
-- 点检（Playwright）：进入 `#/dashboard` 无整页骨架闪烁；点作品后详情展开；5 个 tab 切换无白屏；「更新数据」按钮 spinner；刷新浏览器后进行中状态恢复；1440×900 与 390×844 无横向滚动。
+- `charts.test.tsx` 4 例（v29）：首次无旧层；A→B 旧曲线首帧 1/新曲线首帧 0；连续 A→B→C 旧层为 B；reduced-motion 直接替换。
+- 点检（Playwright）：进入 `#/dashboard` 无整页骨架闪烁；账号总览和作品分析切指标/周期均实际播放曲线交叉过渡；点作品后详情展开；tab 切换无白屏；「更新数据」按钮 spinner；刷新浏览器后进行中状态恢复；1440×900 与 390×844 无横向滚动。
 
 ### 9.3 验证命令
 
