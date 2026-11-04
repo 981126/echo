@@ -16,6 +16,8 @@ import math
 import random
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -112,14 +114,62 @@ def _throttle_route(path: str) -> None:
         time.sleep(delay)
 
 
+# R-246：TikHub 全局并发上限（跨线程共享）。默认 8（共享连接池 16 的一半），避免「同步 Top15」
+# 等场景把 60 并发塞进 16 连接的池/代理；惰性构建，.env 改动需重启生效（与其它配置一致）。
+_CONCURRENCY_LOCK = threading.Lock()
+_CONCURRENCY: threading.BoundedSemaphore | None = None
+
+
+def _request_concurrency() -> int:
+    """TikHub 并发上限：默认 8；异常值/越界收敛到 1~64。"""
+    try:
+        value = int(get_settings().tikhub_max_concurrency or 8)
+    except (TypeError, ValueError):
+        value = 8
+    return max(1, min(64, value))
+
+
+def _concurrency_semaphore() -> threading.BoundedSemaphore:
+    global _CONCURRENCY
+    if _CONCURRENCY is None:
+        with _CONCURRENCY_LOCK:
+            if _CONCURRENCY is None:
+                _CONCURRENCY = threading.BoundedSemaphore(_request_concurrency())
+    return _CONCURRENCY
+
+
+@contextmanager
+def _request_slot() -> Iterator[None]:
+    """占用一个全局 TikHub 请求并发槽位（只包住真正发 HTTP 的那一小段）。"""
+    sem = _concurrency_semaphore()
+    sem.acquire()
+    try:
+        yield
+    finally:
+        sem.release()
+
+
+def _reset_shared_pool(base_url: str, use_proxy: bool) -> bool:
+    """R-246：关闭并丢弃进程级共享 Client，下次请求重建全新连接池（PoolTimeout 自愈）。"""
+    from ...core.http import reset_client
+
+    try:
+        return reset_client(base_url, follow_redirects=True, trust_env=use_proxy)
+    except Exception as exc:  # noqa: BLE001 重置失败不覆盖原始请求错误
+        log.warning("TikHub 共享连接池重置失败：%s", exc)
+        return False
+
+
 def _reset_limiter() -> None:
-    """测试用：清空全局令牌桶与路由状态（生产不调用）。"""
-    global _GLOBAL_BUCKET
+    """测试用：清空全局令牌桶、路由状态与并发信号量（生产不调用）。"""
+    global _GLOBAL_BUCKET, _CONCURRENCY
     with _GLOBAL_LOCK:
         _GLOBAL_BUCKET = None
     with _ROUTE_LOCK:
         _ROUTE_LAST.clear()
         _ROUTE_BACKOFF.clear()
+    with _CONCURRENCY_LOCK:
+        _CONCURRENCY = None
 
 # 主页链接解析规则：platform -> (正则组名/顺序)
 def _is_benchmark_account(account) -> bool:
@@ -348,13 +398,19 @@ class TikHubClient:
         self._local = threading.local()
 
     def _http(self) -> httpx.Client:
-        """R-241：使用进程级共享 httpx.Client（按 base_url 复用连接；线程安全）。"""
+        """R-241：使用进程级共享 httpx.Client（按 base_url 复用连接；线程安全）。
+
+        R-246：默认直连（trust_env=False，不跟随系统/环境代理）——macOS 系统代理会让 TikHub
+        走 CONNECT 隧道，httpcore 隧道建立失败会泄漏连接池槽位；需要代理时配
+        ECHO_TIKHUB_USE_PROXY=1。
+        """
         from ...core.http import get_client
 
         return get_client(
             self.base_url,
             follow_redirects=True,
             timeout=httpx.Timeout(connect=20, read=12, write=60, pool=20),
+            trust_env=bool(get_settings().tikhub_use_proxy),
         )
 
     def _bump_request(self) -> None:
@@ -383,13 +439,34 @@ class TikHubClient:
             raise TikHubError("未配置 ECHO_TIKHUB_API_KEY（real 模式需要）")
         url = f"{self.base_url}{path}"
         headers = {"Authorization": f"Bearer {self.api_key}"}
+        use_proxy = bool(get_settings().tikhub_use_proxy)
+        finished = False  # R-246：本次请求是否已重置过共享连接池
         last = "未知错误"
         last_exc: httpx.TransportError | None = None
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             _throttle_route(path)
             self._bump_request()
             try:
-                resp = self._http().get(url, params=params, headers=headers)
+                with _request_slot():
+                    resp = self._http().get(url, params=params, headers=headers)
+            except httpx.PoolTimeout as exc:
+                # R-246：连接池卡死（等连接超时）→ 重置共享池，下次尝试用新池，避免永久失败到重启
+                last = f"{type(exc).__name__}: {exc}"
+                last_exc = exc
+                if finished:
+                    log.warning("TikHub 连接池仍 PoolTimeout（本次已重置过，不再重复重置）：%s", path)
+                else:
+                    finished = True
+                    if _reset_shared_pool(self.base_url, use_proxy):
+                        log.warning(
+                            "TikHub 连接池 PoolTimeout，已重置共享连接池后重试（%s，第 %d/%d 次）",
+                            path, attempt, _MAX_ATTEMPTS,
+                        )
+                    else:
+                        log.warning(
+                            "TikHub 连接池 PoolTimeout，共享连接池已被其它线程重置（%s，第 %d/%d 次）",
+                            path, attempt, _MAX_ATTEMPTS,
+                        )
             except httpx.TransportError as exc:  # 代理掐断/连接重置/读写超时等瞬时故障
                 last = f"{type(exc).__name__}: {exc}"
                 last_exc = exc
@@ -420,13 +497,33 @@ class TikHubClient:
             raise TikHubError("未配置 ECHO_TIKHUB_API_KEY（real 模式需要）")
         url = f"{self.base_url}{path}"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        use_proxy = bool(get_settings().tikhub_use_proxy)
+        finished = False  # R-246：本次请求是否已重置过共享连接池
         last = "未知错误"
         last_exc: httpx.TransportError | None = None
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             _throttle_route(path)
             self._bump_request()
             try:
-                resp = self._http().post(url, params=params, json=payload, headers=headers)
+                with _request_slot():
+                    resp = self._http().post(url, params=params, json=payload, headers=headers)
+            except httpx.PoolTimeout as exc:
+                last = f"{type(exc).__name__}: {exc}"
+                last_exc = exc
+                if finished:
+                    log.warning("TikHub 连接池仍 PoolTimeout（本次已重置过，不再重复重置）：%s", path)
+                else:
+                    finished = True
+                    if _reset_shared_pool(self.base_url, use_proxy):
+                        log.warning(
+                            "TikHub 连接池 PoolTimeout，已重置共享连接池后重试（%s，第 %d/%d 次）",
+                            path, attempt, _MAX_ATTEMPTS,
+                        )
+                    else:
+                        log.warning(
+                            "TikHub 连接池 PoolTimeout，共享连接池已被其它线程重置（%s，第 %d/%d 次）",
+                            path, attempt, _MAX_ATTEMPTS,
+                        )
             except httpx.TransportError as exc:
                 last = f"{type(exc).__name__}: {exc}"
                 last_exc = exc

@@ -2,7 +2,7 @@
 
 - **对应需求**: `requirements/R-246-tikhub-pool-stability.md`
 - **日期**: 2026-11-04
-- **状态**: 📝 设计完成（待作者确认后开发）
+- **状态**: ✅ 已按本文实现（2026-11-04，verify 全绿 + 真实联调）
 - **前置**: R-241（进程级共享 httpx Client）、R-222（同步并发）、R-163（TikHub 限速/重试）
 - **原则**: 最小改动、只修连接池稳定性；不改前端/表结构/接口契约/其它服务代理行为；每项配回归测试；`verify.sh` 全绿
 
@@ -334,12 +334,35 @@ ECHO_TIKHUB_MAX_CONCURRENCY=8 # 全进程 TikHub 并发上限（1~64）
 - **配置项来源**：`ECHO_TIKHUB_USE_PROXY` / `ECHO_TIKHUB_MAX_CONCURRENCY` 来自 `.env` / 进程环境变量（程序输入），不入库、不改原始字段。
 - **更新/空值口径**：与 R-244/R-239 现有实现完全一致，本次不修改任何字段映射。
 
-## 9. 实施步骤与验证（开发完成后回填）
+## 9. 实施记录与验证（2026-11-04）
 
-1. 改 `core/http.py`（缓存键 + trust_env + reset_client），跑 `tests/test_r241_sync_http.py`。
-2. 改 `tikhub.py`（直连 + 并发闸门 + PoolTimeout 自愈），补 `tests/test_r246_tikhub_pool.py`。
-3. 改 `config.py` + `.env.example`。
-4. `scripts/verify.sh` 全绿。
-5. 重启后端，真实点检：看板「更新数据」×2、作品「更新数据」×1、手动「同步 Top15」×1，确认无 `PoolTimeout`、`diagnosis_at` 前进、日志无重置告警。
+### 9.1 改动文件
 
-> 待回填：实际命令输出、真实联调结果、verify 结果（开发完成后补）。
+| 文件 | 改动 |
+|---|---|
+| `backend/app/core/http.py` | `get_client` 增加 `trust_env`（默认 True，纳入缓存键）；新增 `reset_client()`（锁内摘除、锁外关闭） |
+| `backend/app/services/platform/tikhub.py` | `_http()` 默认 `trust_env=False`；新增全局并发信号量 `_request_slot()`；`_get/_post` 增加 `PoolTimeout` → `_reset_shared_pool()` 自愈 + warning 日志；`_reset_limiter()` 同步清空信号量 |
+| `backend/app/config.py` | 新增 `tikhub_use_proxy: bool = False`、`tikhub_max_concurrency: int = 8` |
+| `.env.example` | 新增 `ECHO_TIKHUB_USE_PROXY=0`、`ECHO_TIKHUB_MAX_CONCURRENCY=8` |
+| `backend/tests/test_r246_tikhub_pool.py` | 新增 6 例回归（trust_env/reset、直连开关、自愈成功/耗尽、并发上限、mock 不受影响） |
+| `backend/tests/test_r241_sync_http.py` | `test_tikhub_http_uses_shared_client` 按直连口径改为 `trust_env=False` |
+
+### 9.2 自动化验证
+
+- 定向测试：`pytest -q tests/test_r246_tikhub_pool.py tests/test_r151_tikhub_retry.py tests/test_r241_sync_http.py` → **29 passed**。
+- 全量门禁：`PYTHON=backend/.venv/bin/python scripts/verify.sh` → **门禁通过 ✔**（ruff / mypy / pytest 全量 / 前端 lint + build / 文档一致性 38 张表成对），日志 `.tmp/verify-r246-dev.log`。
+
+### 9.3 真实联调（2026-11-04 19:43–19:49，重启后端 PID 94231 加载新代码）
+
+| 验证项 | 结果 |
+|---|---|
+| 看板「更新数据」连续 3 次 | **5.20s / 3.54s / 3.19s 全部成功**（第 3 次在 Top15 同步风暴之后，说明池未被卡死；`needs_refresh=false`，`diagnosis_at` 正常前进） |
+| 手动「同步 Top15」（`POST /api/platform/sync-all`） | **12/12 博主任务完成**，19:43:23→19:47:04 共约 **3 分 40 秒**；其中 10/12 全量成功，2 个账号遇 TikHub 瞬时 `HTTP 400`（**非 PoolTimeout**，11-01 已有同类历史失败，属第三方偶发问题），单独重试后 **均成功**（14/18 条作品、60/81 条评论） |
+| 并发上限实测 | 同步期间后端到 `api.tikhub.io:443` 的并发连接峰值 **8**（= `ECHO_TIKHUB_MAX_CONCURRENCY` 默认值），12 个博主任务同时排队也没有超过；未超过 16 连接池 |
+| 连接池泄漏 | 同步结束后进程内 TikHub 池：`max=16 / connections=8 / queued=0`，8 条连接全部 **IDLE**（`Request Count` 2~76，正常复用），**无 ACTIVE 泄漏连接、无排队** |
+| 直连生效 | TikHub Client 缓存键 `('https://api.tikhub.io/api/v1', True, False)`，**mounts=0**（无代理挂载），连接目标为 `https://api.tikhub.io:443` 直连；对照 `cdn` 等其它服务仍为 `trust_env=True` + 代理 mounts，行为不变 |
+| 日志/预算 | 新进程日志 **0 次 `PoolTimeout`、0 次连接池重置**；TikHub 当日用量 77 → **394/2000**（Top15 约 311 次请求，未超预算） |
+
+### 9.4 结论
+
+需求 §七 验收项全部满足：连接池不再被永久占死、遇池超时可自愈、TikHub 默认直连成功、并发受全局上限约束、其它服务代理行为与接口契约不变；`verify.sh` 全绿。遗留说明：TikHub 对个别账号偶发 `HTTP 400`（第三方侧抖动，历史已出现，重试可恢复）不属本需求范围，沿用现有「失败账号可单独重试」机制。

@@ -245,7 +245,8 @@ def test_tikhub_http_uses_shared_client():
     tikhub._CLIENT_CACHE.clear()
     try:
         client = tikhub.TikHubClient(mode="mock")
-        shared = core_http.get_client(client.base_url, follow_redirects=True)
+        # R-246：TikHub 默认直连（trust_env=False），与测试取同一个共享 Client
+        shared = core_http.get_client(client.base_url, follow_redirects=True, trust_env=False)
         assert client._http() is shared
     finally:
         core_http.close_all()

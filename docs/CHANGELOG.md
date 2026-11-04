@@ -1,9 +1,10 @@
 # 变更记录
 
-## [R-246] 2026-11-04 — TikHub 请求不再因共享连接池卡死而整体失败（登记）🔨
+## [R-246] 2026-11-04 — TikHub 请求不再因共享连接池卡死而整体失败 ✅
 
-- **临时恢复（2026-11-04 19:29，已执行）**：重启后端进程清空内存里卡死的 TikHub 连接池，19:31 真实「更新数据」5.5 秒成功（此前同一操作 94 秒后报 `PoolTimeout`），看板诊断时间/作品数据恢复更新；本次只是清池，根因待 R-246 修复。
-- **登记记录**：TikHub 请求不再因共享连接池卡死而整体失败——进程级共享 httpx Client 的连接池被 16 个 httpcore 1.0.9 代理隧道泄漏连接永久占满（httpx `trust_env=True` 读取 macOS 系统代理 Clash `127.0.0.1:7890` 走 CONNECT 隧道；隧道建立失败时连接停在 ACTIVE、socket 已关闭且 `_connect_failed=False`，池永不回收；「同步 Top15」12 账号任务 × 单账号 5 并发 ≈ 60 并发打 16 连接池触发），11-02 09:00 起所有 TikHub 请求 `PoolTimeout`、只能重启恢复；修复 = TikHub 默认直连（`ECHO_TIKHUB_USE_PROXY=1` 可切回代理）+ 全进程并发上限（`ECHO_TIKHUB_MAX_CONCURRENCY` 默认 8）+ PoolTimeout 自动重置共享 Client 自愈 + 重置告警日志；不改前端/表结构/接口契约，其它服务代理行为不变。需求：`requirements/R-246-tikhub-pool-stability.md`；设计：`development-design/R-246-tikhub-pool-stability.md`。**待作者「继续」后开发**。
+- **已实现（2026-11-04）**：TikHub 访问层稳定性修复——①TikHub 专用共享 httpx Client 默认**直连**（`trust_env=False`，不跟随系统/环境代理，`ECHO_TIKHUB_USE_PROXY=1` 可切回）；②新增进程级 **TikHub 全局并发闸门**（`ECHO_TIKHUB_MAX_CONCURRENCY` 默认 8，只包住真正发 HTTP 的片段，重试退避/令牌桶等待不占额度）；③`_get/_post` 捕获 `httpx.PoolTimeout` 时**重置共享 Client**（关闭+摘除，下次请求重建新池）并按现有 4 次重试继续，warning 日志留痕；④`core/http.py` 的 `get_client` 增加 `trust_env` 缓存维度与 `reset_client()`。不改前端/表结构/接口契约，其它服务代理行为不变。**真实联调**：看板「更新数据」3 次连续成功 5.20s/3.54s/3.19s；Top15 同步 12/12 博主完成（3 分 40 秒、无 `PoolTimeout`；2 个账号遇 TikHub 瞬时 HTTP 400，单独重试后均成功），同步期间到 `api.tikhub.io:443` 并发连接峰值 8、结束后池 8 条 IDLE 无泄漏；新进程日志 0 次 `PoolTimeout`/0 次重置；`scripts/verify.sh` 全绿。
+- **临时恢复（2026-11-04 19:29，已执行）**：重启后端进程清空内存里卡死的 TikHub 连接池，19:31 真实「更新数据」5.5 秒成功（此前同一操作 94 秒后报 `PoolTimeout`），看板诊断时间/作品数据恢复更新。
+- **登记记录**：TikHub 请求不再因共享连接池卡死而整体失败——进程级共享 httpx Client 的连接池被 16 个 httpcore 1.0.9 代理隧道泄漏连接永久占满（httpx `trust_env=True` 读取 macOS 系统代理 Clash `127.0.0.1:7890` 走 CONNECT 隧道；隧道建立失败时连接停在 ACTIVE、socket 已关闭且 `_connect_failed=False`，池永不回收；「同步 Top15」12 账号任务 × 单账号 5 并发 ≈ 60 并发打 16 连接池触发），11-02 09:00 起所有 TikHub 请求 `PoolTimeout`、只能重启恢复；修复 = TikHub 默认直连（`ECHO_TIKHUB_USE_PROXY=1` 可切回代理）+ 全进程并发上限（`ECHO_TIKHUB_MAX_CONCURRENCY` 默认 8）+ PoolTimeout 自动重置共享 Client 自愈 + 重置告警日志；不改前端/表结构/接口契约，其它服务代理行为不变。需求：`requirements/R-246-tikhub-pool-stability.md`；设计：`development-design/R-246-tikhub-pool-stability.md`。**已按该设计实现（2026-11-04，verify 全绿 + 真实联调通过）**。
 
 ## [R-245] 2026-11-02 — 视频复盘按指标优化建议（指标 + 文案结合）✅
 

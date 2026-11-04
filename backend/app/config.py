@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     # R-163/R-222 同步并发：全局 TikHub 令牌桶（所有接口合计 ≤ rate req/s）+ 消费者池大小
     tikhub_rate_limit: float = 10.0  # 全局请求速率上限（req/s），ECHO_TIKHUB_RATE_LIMIT
     tikhub_rate_burst: int = 10  # 令牌桶容量（允许的瞬时突发），ECHO_TIKHUB_RATE_BURST
+    # R-246：TikHub 连接池稳定性（httpx 共享 Client）——默认直连 + 全进程并发上限
+    tikhub_use_proxy: bool = False  # 是否跟随系统/环境代理；默认 False=直连，ECHO_TIKHUB_USE_PROXY
+    tikhub_max_concurrency: int = 8  # 全进程 TikHub 并发上限（1~64），ECHO_TIKHUB_MAX_CONCURRENCY
     sync_concurrency: int = 4  # 博主级并发消费者数，ECHO_SYNC_CONCURRENCY
     sync_account_concurrency: int = 3  # 单个博主内账号并发数，ECHO_SYNC_ACCOUNT_CONCURRENCY（R-222）
     sync_post_concurrency: int = 5  # 单账号内作品/评论/B站补全并发数，ECHO_SYNC_POST_CONCURRENCY（R-222）
