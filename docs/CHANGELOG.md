@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-251] 2026-11-05 — 云端作品缺失封面自动补齐（素材库不再大片 ECHO） ✅
+
+- **已实现（2026-11-04）**：作者截图显示素材库按博主筛选时云作品封面为空（ECHO）。取证：`platform_posts` 1998 条中 **33 条 `cover_path` 为空 + 8 条占位 SVG**；封面下载在同步事务外执行，中断/下载失败/后端对 `ECHO_DATA_DIR` 无写权限（本次实测 PermissionError）会留空，而后续同步只补「本次拉到的作品」，历史缺失行不会自愈；远程签名 URL 过期后前端也无法回退显示。修复：①`_cover_path_for(..., reuse_svg=旧占位)` 失败时复用旧占位、不再重复生成 `-2/-3`；②新增 `_backfill_account_covers(db, account)`：查该账号全部 `cover_path` 为空/占位 SVG 的作品，用已存 `cover_url` 重试下载（封面 CDN 直连，**不消耗 TikHub 预算**），成功写真实封面并删除旧占位，失败复用/生成带标题占位；③`sync_account()` 每次同步（手动/定时/单账号）末尾调用，异常隔离不影响同步；④存量一次性修复 **40 条**（空 33→0、占位 SVG 8→1、真实 jpg 封面 1957→1997）。不改前端/接口/表结构。**验证**：新增单测 3 例；「车厘子在努力」79/79 条封面为本地文件；Playwright 素材库筛选该博主 40 张可见封面全部加载、**0 裂图、0 ECHO 占位**、console 0 error；`scripts/verify.sh` 全绿。需求：`requirements/R-251-cloud-post-cover-backfill.md`；设计：`development-design/R-251-cloud-post-cover-backfill.md`。
+
 ## [R-250] 2026-11-04 — 脚本工作台删除草稿时其他卡片不再「飞出去」 ✅
 
 - **v2（2026-11-04，作者反馈「删除后重排动画看不到/不明显」）**：在 v1 基础上恢复**可见但克制的平滑重排**——卡片改用 `layout="position"`（只对位置做布局动画、不对尺寸缩放，避免再次出现拉伸/乱飞）+ 显式 `layout: { duration: 0.26, ease: EASE_OUT_EXPO }`；入场 stagger 只作用于 `opacity/y`（不再给 layout 加延迟）；`exit` 缩到 0.16s 配合 `AnimatePresence mode="popLayout"`；卡片 hover 从 `-translate-y-0.5`（CSS transform，会与 layout 冲突）改为边框高亮。逐帧实测：删除中间一张后剩余卡片移动 12 帧（约 183ms）、370px 整列归位、矩阵始终 `1.00x1.00` 纯平移、0 console error；`verify.sh` 全绿。

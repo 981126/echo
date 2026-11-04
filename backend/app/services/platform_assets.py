@@ -72,10 +72,13 @@ def _cdn_headers(platform: str) -> dict:
     }
 
 
-def _cover_path_for(platform: str, platform_post_id: str, title: str, cover_url: str) -> str:
+def _cover_path_for(
+    platform: str, platform_post_id: str, title: str, cover_url: str, *, reuse_svg: str = ""
+) -> str:
     """返回本地封面文件名（下载真实封面或生成占位 SVG）。
 
     R-058：文件名用「标题-封面」（重名自动 -2/-3），文件夹里一眼可辨。
+    R-251：`reuse_svg` 传入已有占位 SVG 文件名时，下载仍失败则复用它（避免每次重试都新建 -2 占位）。
     注意：本函数只做文件 I/O，不持有数据库事务/锁。
     """
 
@@ -102,6 +105,8 @@ def _cover_path_for(platform: str, platform_post_id: str, title: str, cover_url:
                     return dest.name
         except Exception:  # noqa: BLE001  下载失败回退占位
             pass
+    if reuse_svg and (settings.covers_dir / reuse_svg).is_file():
+        return reuse_svg
     dest = unique_path(settings.covers_dir, stem, ".svg")
     label = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}.get(platform, platform)
     text = html.escape((title or "云端作品")[:26])

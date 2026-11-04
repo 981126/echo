@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from ..core.timeutil import now as _app_now
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -269,6 +269,65 @@ def _ensure_covers_batch(db: Session, account: CreatorAccount, posts: list[Platf
             db.commit()
         except Exception:  # noqa: BLE001
             db.rollback()
+
+
+def _backfill_account_covers(db: Session, account: CreatorAccount, *, limit: int = 200) -> int:
+    """R-251：补齐该账号历史作品的缺失封面（cover_path 为空或仍是占位 SVG）。
+
+    背景：同步中途重启/单次封面下载失败会让少量作品留下空 cover_path；之后同步只处理
+    「本次拉到的作品」，这些历史行会一直空着，素材库卡片一直显示 ECHO 占位。
+    这里用作品已存的远端 cover_url 再试一次（封面 CDN 下载不消耗 TikHub 预算）：
+    - 成功 → 写真实本地封面，旧占位 SVG 顺手删除；
+    - 仍失败 → 复用/生成占位 SVG（不再每次新建 -2 副本）。
+    返回本次修好的条数。
+    """
+    rows = (
+        db.query(PlatformPost)
+        .filter(
+            PlatformPost.account_id == account.id,
+            or_(
+                PlatformPost.cover_path.is_(None),
+                PlatformPost.cover_path == "",
+                PlatformPost.cover_path.like("%.svg"),
+            ),
+        )
+        .order_by(PlatformPost.publish_time.desc())
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return 0
+    fixed = 0
+    covers_dir = get_settings().covers_dir
+    for post in rows:
+        old = post.cover_path or ""
+        try:
+            name = _cover_path_for(
+                account.platform,
+                post.platform_post_id,
+                post.title or "",
+                post.cover_url or "",
+                reuse_svg=old if old.endswith(".svg") else "",
+            )
+        except Exception:  # noqa: BLE001 单张失败不影响其它
+            name = ""
+        if not name:
+            continue
+        if name != old:
+            post.cover_path = name
+            fixed += 1
+            if old.endswith(".svg"):
+                try:
+                    (covers_dir / old).unlink(missing_ok=True)
+                except Exception:  # noqa: BLE001 旧占位删不掉不影响
+                    pass
+    if fixed:
+        try:
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            return 0
+    return fixed
 
 
 _STAT_SOURCE_PRIORITY = {"tikhub": 1, "tikhub_statistics": 2, "tikhub_creator": 3}
@@ -939,6 +998,11 @@ def sync_account(
 
     # R-222：事务外批量下载封面，不阻塞作品入库
     _ensure_covers_batch(db, account, synced, post_data_map)
+    # R-251：顺带补齐该账号历史作品缺失的封面（不额外消耗 TikHub 请求；失败静默）
+    try:
+        _backfill_account_covers(db, account)
+    except Exception:  # noqa: BLE001 补封面失败不影响同步结果
+        db.rollback()
 
     # R-222：批量刷新并广播 card_sync 队列行
     if queue_rows and queue_tasks:
