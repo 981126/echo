@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-252] 2026-11-05 — 视频复盘参考视频切换动画 + 5 列 + 标题两行 + 更新按钮入场 ✅
+
+- **已实现（2026-11-04）**：①切「同行爆款/低粉爆款」不再把整个网格替换成转圈导致闪白：已有卡片时保留旧卡片（网格轻淡变淡提示加载），新数据到达后卡片用 `AnimatePresence mode="popLayout"` 交叉过渡——新卡 `opacity 0.85→1`、`y 8→0`、逐张 stagger 0.03s，旧卡 0.16s 淡出缩小，退场卡不占位无高度跳变；②「更新」按钮由 `AnimatePresence + motion.div` 以 `maxWidth 0↔120` + 透明度动画平滑展开/收起，不再突然挤开前两个 tab 按钮；刷新中显示「更新中…」转圈并禁用防重复；③参考视频宽屏改为**一行 5 条**（xl:5 / lg:4 / md:3 / sm:2 / 手机 1）；④标题 **`line-clamp-2` 最多两行省略**、`title` 悬停看全文；只改 `frontend_v2/src/pages/video-review/index.tsx`，不改接口/数据。**验证**：Playwright 1440 —— 20 条 4×5 布局、长标题 clientHeight=48（2 行）/scrollHeight=168、切换期间 `blankFrames=0` 且新卡 opacity 有 0.04→…→1.00 过渡、更新按钮宽度 0→57→74px 平滑、console 0 error；`verify.sh` 全绿（后端 761 / 前端 161 / 文档 37 表）。需求：`requirements/R-252-review-reference-tabs-animation.md`；设计：`development-design/R-252-review-reference-tabs-animation.md`。
+
 ## [R-251] 2026-11-05 — 云端作品缺失封面自动补齐（素材库不再大片 ECHO） ✅
 
 - **已实现（2026-11-04）**：作者截图显示素材库按博主筛选时云作品封面为空（ECHO）。取证：`platform_posts` 1998 条中 **33 条 `cover_path` 为空 + 8 条占位 SVG**；封面下载在同步事务外执行，中断/下载失败/后端对 `ECHO_DATA_DIR` 无写权限（本次实测 PermissionError）会留空，而后续同步只补「本次拉到的作品」，历史缺失行不会自愈；远程签名 URL 过期后前端也无法回退显示。修复：①`_cover_path_for(..., reuse_svg=旧占位)` 失败时复用旧占位、不再重复生成 `-2/-3`；②新增 `_backfill_account_covers(db, account)`：查该账号全部 `cover_path` 为空/占位 SVG 的作品，用已存 `cover_url` 重试下载（封面 CDN 直连，**不消耗 TikHub 预算**），成功写真实封面并删除旧占位，失败复用/生成带标题占位；③`sync_account()` 每次同步（手动/定时/单账号）末尾调用，异常隔离不影响同步；④存量一次性修复 **40 条**（空 33→0、占位 SVG 8→1、真实 jpg 封面 1957→1997）。不改前端/接口/表结构。**验证**：新增单测 3 例；「车厘子在努力」79/79 条封面为本地文件；Playwright 素材库筛选该博主 40 张可见封面全部加载、**0 裂图、0 ECHO 占位**、console 0 error；`scripts/verify.sh` 全绿。需求：`requirements/R-251-cloud-post-cover-backfill.md`；设计：`development-design/R-251-cloud-post-cover-backfill.md`。

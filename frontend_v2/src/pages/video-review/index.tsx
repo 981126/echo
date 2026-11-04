@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Check, ChevronDown, ExternalLink, Layers, Lightbulb, Loader2, Play, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
 import { cn } from '@/lib/utils'
+import { EASE_OUT_EXPO } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
 import { CoverImage } from '@/components/ui/cover-image'
 import { Progress } from '@/components/ui/progress'
@@ -80,6 +81,7 @@ export default function VideoReviewPage() {
   const [kind, setKind] = useState<'peer' | 'low_fan'>('peer')
   const [references, setReferences] = useState<ReferenceItem[]>([])
   const [referenceLoading, setReferenceLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   // R-247：采用主题 → 生成草稿；adopting 为被点按钮 key（空=空闲，非空时禁用本页全部采用按钮）
   const [adopting, setAdopting] = useState('')
   const navigate = useNavigate()
@@ -249,6 +251,8 @@ export default function VideoReviewPage() {
   }
 
   async function refreshLowFan() {
+    if (refreshing) return
+    setRefreshing(true)
     try {
       const data = await apiJson<{ task_id: number }>('/api/douyin-review/references/refresh', { method: 'POST', body: JSON.stringify({ date_window: 168, limit: 20, keyword: '' }) })
       await waitForReviewTask(data.task_id)
@@ -256,6 +260,8 @@ export default function VideoReviewPage() {
       toast.success('低粉爆款已更新')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '更新失败')
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -469,8 +475,65 @@ export default function VideoReviewPage() {
       ) : !task && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><Play className="mx-auto h-8 w-8 text-muted-foreground" /><h2 className="mt-4 font-medium">还没有这条视频的复盘分析</h2><p className="mt-2 text-sm text-muted-foreground">点右上角「更新数据并分析」，会先保存数据，再给出有依据的原因和下一条主题。</p></div>}
 
       <section className="space-y-3 border-t border-border pt-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">同行爆款与低粉爆款</h2><p className="mt-1 text-xs text-muted-foreground">同行只来自你手动添加的对标账号；低粉爆款只显示与你主赛道相关的视频，点「更新」重新抓取。</p></div><div className="flex gap-2"><Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('peer'); void loadReferences('peer') }}>同行爆款</Button><Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('low_fan'); void loadReferences('low_fan') }}>低粉爆款</Button>{kind === 'low_fan' && <Button variant="outline" size="sm" onClick={() => void refreshLowFan()}><RefreshCw className="mr-1 h-3.5 w-3.5" />更新</Button>}</div></div>
-        {referenceLoading ? <div className="py-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></div> : <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{references.map((item) => <article key={item.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-card"><ReferenceCover url={item.cover_url} /><div className="p-4"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-medium leading-6">{item.title}</h3><span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span></div><p className="mt-2 text-xs text-muted-foreground">{item.author_nickname}{item.author_followers !== null && item.author_followers !== undefined ? ` · ${item.author_followers}粉丝` : ''}</p><div className="tnum mt-3 text-xs">播放 {item.plays ?? '暂无'} · 点赞 {item.likes ?? '暂无'} · 评论 {item.comments ?? '暂无'}</div>{item.verdict_evidence.play_multiple && <p className="mt-2 text-xs text-emerald-600">是该同行平时播放的 {item.verdict_evidence.play_multiple} 倍（{item.verdict_evidence.sample_count}条样本）</p>}{item.video_url && <a href={item.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-500">查看原视频<ExternalLink className="h-3 w-3" /></a>}</div></article>)}</div>}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">同行爆款与低粉爆款</h2>
+            <p className="mt-1 text-xs text-muted-foreground">同行只来自你手动添加的对标账号；低粉爆款只显示与你主赛道相关的视频，点「更新」重新抓取。</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" className="transition-colors duration-200" onClick={() => { if (kind !== 'peer') { setKind('peer'); void loadReferences('peer') } }}>同行爆款</Button>
+            <Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" className="transition-colors duration-200" onClick={() => { if (kind !== 'low_fan') { setKind('low_fan'); void loadReferences('low_fan') } }}>低粉爆款</Button>
+            {/* R-252：更新按钮做宽度+透明度入场/退场，不再突然挤开前两个按钮 */}
+            <AnimatePresence initial={false}>
+              {kind === 'low_fan' && (
+                <motion.div
+                  key="refresh-low-fan"
+                  initial={{ maxWidth: 0, opacity: 0 }}
+                  animate={{ maxWidth: 120, opacity: 1 }}
+                  exit={{ maxWidth: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: EASE_OUT_EXPO }}
+                  className="overflow-hidden"
+                >
+                  <Button variant="outline" size="sm" className="whitespace-nowrap" disabled={refreshing} onClick={() => void refreshLowFan()}>
+                    {refreshing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+                    {refreshing ? '更新中…' : '更新'}
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+        {referenceLoading && !references.length ? (
+          <div className="py-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></div>
+        ) : (
+          <div className={cn('grid grid-cols-1 gap-3 transition-opacity duration-200 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5', referenceLoading && 'pointer-events-none opacity-60')}>
+            {/* R-252：五列 + 卡片入场/退场交叉动画；切换 tab 时旧卡 popLayout 让位、新卡 stagger 进入，不闪白 */}
+            <AnimatePresence mode="popLayout">
+              {references.map((item, index) => (
+                <motion.article
+                  key={item.id}
+                  initial={{ opacity: 0.85, y: 8, scale: 0.99 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  transition={{ duration: 0.26, ease: EASE_OUT_EXPO, delay: Math.min(index, 8) * 0.03 }}
+                  className="overflow-hidden rounded-xl border border-border bg-card shadow-card"
+                >
+                  <ReferenceCover url={item.cover_url} />
+                  <div className="p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-6" title={item.title}>{item.title}</h3>
+                      <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{item.author_nickname}{item.author_followers !== null && item.author_followers !== undefined ? ` · ${item.author_followers}粉丝` : ''}</p>
+                    <div className="tnum mt-3 text-xs">播放 {item.plays ?? '暂无'} · 点赞 {item.likes ?? '暂无'} · 评论 {item.comments ?? '暂无'}</div>
+                    {item.verdict_evidence.play_multiple && <p className="mt-2 text-xs text-emerald-600">是该同行平时播放的 {item.verdict_evidence.play_multiple} 倍（{item.verdict_evidence.sample_count}条样本）</p>}
+                    {item.video_url && <a href={item.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-500">查看原视频<ExternalLink className="h-3 w-3" /></a>}
+                  </div>
+                </motion.article>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
         {!referenceLoading && !references.length && <div className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">{kind === 'peer' ? '暂无符合规则的同行爆款，请先在博主管理添加抖音同行并同步数据。' : '当前方向下暂无低粉爆款，点「更新」获取。'}</div>}
       </section>
 
