@@ -5,7 +5,7 @@ import { Check, ChevronDown, ExternalLink, Layers, Lightbulb, Loader2, Play, Ref
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
 import { cn } from '@/lib/utils'
-import { EASE_OUT_EXPO } from '@/lib/motion'
+import { listReplace } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
 import { CoverImage } from '@/components/ui/cover-image'
 import { Progress } from '@/components/ui/progress'
@@ -81,6 +81,13 @@ export default function VideoReviewPage() {
   const [kind, setKind] = useState<'peer' | 'low_fan'>('peer')
   const [references, setReferences] = useState<ReferenceItem[]>([])
   const [referenceLoading, setReferenceLoading] = useState(false)
+  // R-253：参考视频换批（切 tab / 更新后新数据）标记 → 复用素材库 R-199 的逐格交接动画
+  const prevFirstRefIdRef = useRef('')
+  const firstRefId = references[0]?.id ?? ''
+  const referencesReplacing = !!firstRefId && !!prevFirstRefIdRef.current && prevFirstRefIdRef.current !== firstRefId
+  useEffect(() => {
+    if (firstRefId) prevFirstRefIdRef.current = firstRefId
+  }, [firstRefId])
   const [refreshing, setRefreshing] = useState(false)
   // R-247：采用主题 → 生成草稿；adopting 为被点按钮 key（空=空闲，非空时禁用本页全部采用按钮）
   const [adopting, setAdopting] = useState('')
@@ -481,26 +488,21 @@ export default function VideoReviewPage() {
             <p className="mt-1 text-xs text-muted-foreground">同行只来自你手动添加的对标账号；低粉爆款只显示与你主赛道相关的视频，点「更新」重新抓取。</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" className="transition-colors duration-200" onClick={() => { if (kind !== 'peer') { setKind('peer'); void loadReferences('peer') } }}>同行爆款</Button>
-            <Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" className="transition-colors duration-200" onClick={() => { if (kind !== 'low_fan') { setKind('low_fan'); void loadReferences('low_fan') } }}>低粉爆款</Button>
-            {/* R-252：更新按钮做宽度+透明度入场/退场，不再突然挤开前两个按钮 */}
-            <AnimatePresence initial={false}>
-              {kind === 'low_fan' && (
-                <motion.div
-                  key="refresh-low-fan"
-                  initial={{ maxWidth: 0, opacity: 0 }}
-                  animate={{ maxWidth: 120, opacity: 1 }}
-                  exit={{ maxWidth: 0, opacity: 0 }}
-                  transition={{ duration: 0.2, ease: EASE_OUT_EXPO }}
-                  className="overflow-hidden"
-                >
-                  <Button variant="outline" size="sm" className="whitespace-nowrap" disabled={refreshing} onClick={() => void refreshLowFan()}>
-                    {refreshing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
-                    {refreshing ? '更新中…' : '更新'}
-                  </Button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" className="w-[74px] justify-center transition-colors duration-200" onClick={() => { if (kind !== 'peer') { setKind('peer'); void loadReferences('peer') } }}>同行爆款</Button>
+            <Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" className="w-[74px] justify-center transition-colors duration-200" onClick={() => { if (kind !== 'low_fan') { setKind('low_fan'); void loadReferences('low_fan') } }}>低粉爆款</Button>
+            {/* R-253：更新按钮始终渲染、固定占位，切到低粉只是显示出来（不挤动前面两个按钮） */}
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn('whitespace-nowrap', kind !== 'low_fan' && 'invisible')}
+              aria-hidden={kind !== 'low_fan'}
+              tabIndex={kind === 'low_fan' ? 0 : -1}
+              disabled={refreshing}
+              onClick={() => void refreshLowFan()}
+            >
+              {refreshing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+              {refreshing ? '更新中…' : '更新'}
+            </Button>
           </div>
         </div>
         {referenceLoading && !references.length ? (
@@ -509,13 +511,31 @@ export default function VideoReviewPage() {
           <div className={cn('grid grid-cols-1 gap-3 transition-opacity duration-200 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5', referenceLoading && 'pointer-events-none opacity-60')}>
             {/* R-252：五列 + 卡片入场/退场交叉动画；切换 tab 时旧卡 popLayout 让位、新卡 stagger 进入，不闪白 */}
             <AnimatePresence mode="popLayout">
-              {references.map((item, index) => (
+              {references.map((item, index) => {
+                // R-253：与素材库「换一批结果」一致（R-199 逐格交接）——旧卡按 index 错峰退场，
+                // 新卡等本格旧卡退完再显影长大入场（backOut 过冲），两段动画都看得见且不整片空白。
+                const exitDelay = Math.min(index, listReplace.exit.maxItems) * listReplace.exit.stagger
+                const enterDelay = exitDelay + listReplace.exit.duration + listReplace.enter.breathAfterExit
+                const replacing = referencesReplacing && index < 40
+                return (
                 <motion.article
                   key={item.id}
-                  initial={{ opacity: 0.85, y: 8, scale: 0.99 }}
+                  initial={
+                    replacing
+                      ? { opacity: 0, scale: listReplace.enter.fromScale }
+                      : { opacity: 0, y: 14 }
+                  }
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  transition={{ duration: 0.26, ease: EASE_OUT_EXPO, delay: Math.min(index, 8) * 0.03 }}
+                  exit={{
+                    opacity: 0,
+                    scale: listReplace.exit.scale,
+                    transition: { duration: listReplace.exit.duration, delay: exitDelay, ease: 'easeOut' }
+                  }}
+                  transition={
+                    replacing
+                      ? { duration: listReplace.enter.duration, delay: enterDelay, ease: 'backOut' }
+                      : { duration: 0.34, ease: 'easeOut' }
+                  }
                   className="overflow-hidden rounded-xl border border-border bg-card shadow-card"
                 >
                   <ReferenceCover url={item.cover_url} />
@@ -530,7 +550,8 @@ export default function VideoReviewPage() {
                     {item.video_url && <a href={item.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-500">查看原视频<ExternalLink className="h-3 w-3" /></a>}
                   </div>
                 </motion.article>
-              ))}
+                )
+              })}
             </AnimatePresence>
           </div>
         )}

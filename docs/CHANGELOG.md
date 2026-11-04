@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-253] 2026-11-05 — 参考视频更新按钮固定占位 + 切换改用素材库逐格交接动画 ✅
+
+- **已实现（2026-11-04）**：①「更新」按钮改为**始终渲染、固定预占位**：同行爆款 tab 下 `visibility:hidden` 仍占约 74px（不可点/aria-hidden），切到低粉爆款直接显示，不再有 R-252 的宽度展开动画、也不会挤动前两个按钮；两个 tab 按钮固定 `w-[74px]`，消除 active/outline 边框造成的 2px 抖动 → 三个按钮切换前后 x 坐标与宽度完全不变。②切「同行爆款/低粉爆款」的卡片动画改为**素材库切换博主**那套 R-199 逐格交接：旧卡按 index 错峰淡出并缩到 0.94（0.35s、0.035s/档、最多 16 档），新卡等本格旧卡退完后（延迟 = 退场延迟 + 0.35s + 0.04s）从 `opacity 0 / scale 0.8` 用 `backOut` 显影长大（0.5s，中途略微冲过 1 再落回），两段动画都可见；`AnimatePresence mode="popLayout"` 保证退场卡不占位、新卡在原格入场；首次加载仍用普通淡入（不拖慢首屏）。复用 `@/lib/motion` 的 `listReplace` 参数，不搬素材库组件；只改 `frontend_v2/src/pages/video-review/index.tsx`。**验证**：Playwright 1440 —— 三按钮在同行/低粉/再切回同行时 x 坐标完全一致（0 位移）、更新按钮 hidden↔visible 且占位；卡片采样 opacity 0.00→1.00、scale 0.80→1.02（backOut 过冲）、切换期间最少可见 15 张（无整片空白）、console 0 error；`verify.sh` 全绿（后端 761 / 前端 161 / 文档 37 表）。需求：`requirements/R-253-review-reference-button-slot-and-replace-animation.md`；设计：`development-design/R-253-review-reference-button-slot-and-replace-animation.md`。
+
 ## [R-252] 2026-11-05 — 视频复盘参考视频切换动画 + 5 列 + 标题两行 + 更新按钮入场 ✅
 
 - **已实现（2026-11-04）**：①切「同行爆款/低粉爆款」不再把整个网格替换成转圈导致闪白：已有卡片时保留旧卡片（网格轻淡变淡提示加载），新数据到达后卡片用 `AnimatePresence mode="popLayout"` 交叉过渡——新卡 `opacity 0.85→1`、`y 8→0`、逐张 stagger 0.03s，旧卡 0.16s 淡出缩小，退场卡不占位无高度跳变；②「更新」按钮由 `AnimatePresence + motion.div` 以 `maxWidth 0↔120` + 透明度动画平滑展开/收起，不再突然挤开前两个 tab 按钮；刷新中显示「更新中…」转圈并禁用防重复；③参考视频宽屏改为**一行 5 条**（xl:5 / lg:4 / md:3 / sm:2 / 手机 1）；④标题 **`line-clamp-2` 最多两行省略**、`title` 悬停看全文；只改 `frontend_v2/src/pages/video-review/index.tsx`，不改接口/数据。**验证**：Playwright 1440 —— 20 条 4×5 布局、长标题 clientHeight=48（2 行）/scrollHeight=168、切换期间 `blankFrames=0` 且新卡 opacity 有 0.04→…→1.00 过渡、更新按钮宽度 0→57→74px 平滑、console 0 error；`verify.sh` 全绿（后端 761 / 前端 161 / 文档 37 表）。需求：`requirements/R-252-review-reference-tabs-animation.md`；设计：`development-design/R-252-review-reference-tabs-animation.md`。
