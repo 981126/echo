@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-254] 2026-11-05 — 洗稿/生成文案允许把参考素材写成作者本人经历（需求 + 开发设计完成，待开发）
+
+- **登记记录**：按作者确认放开两条硬规则——①「【对标】素材只能当参考，**禁止写成你自己的经历**」；②R-228「严禁编造具体数字/人名/机构/经历；缺素材标【需作者补充】」。范围 = **洗稿**（博主对标页 / 素材库非主博主素材 / 编辑页 ASR「已转写」旁 / 草稿讨论）+ **生成文案全部入口**（主页灵感「生成文案」、灵感随手记「生成」、视频复盘「采用」、脚本工作台 AI 生成、每日自动生成、回炉、AI 对话确认的生成）。对标/站内/联网素材里的经历、案例、数字可写成作者本人第一人称，允许基于素材补全、扩写细节；**保留**：整篇不逐字照抄（偶尔可直接沿用素材 1–2 句原句）、联网引用编号/来源留痕（越界编号仍由程序过滤）、人设红线（redlines）硬检查、D-028（对标仍不进人设学习/提示词优化语料）。前端 `evidence-panel.tsx` 的「对标参考（他人，非你经历）」改「**对标参考**」。生成文案实际读取 DB `ai_prompts` 中 enabled 的 generation 版本（开发库当前 v11 含旧限制），部署时一次性把命中的旧句精确替换并另存新版本启用（旧版归档可在 AI 设置回退；`app_kv` 标记幂等，失败下次启动重试）。无表结构/接口变更；历史草稿不重跑。需求：`requirements/R-254-reference-as-own-experience.md`；设计：`development-design/R-254-reference-as-own-experience.md`。**待作者第二次「继续」后开发**。
+
 ## [R-253] 2026-11-05 — 参考视频更新按钮固定占位 + 切换改用素材库逐格交接动画 ✅
 
 - **已实现（2026-11-04）**：①「更新」按钮改为**始终渲染、固定预占位**：同行爆款 tab 下 `visibility:hidden` 仍占约 74px（不可点/aria-hidden），切到低粉爆款直接显示，不再有 R-252 的宽度展开动画、也不会挤动前两个按钮；两个 tab 按钮固定 `w-[74px]`，消除 active/outline 边框造成的 2px 抖动 → 三个按钮切换前后 x 坐标与宽度完全不变。②切「同行爆款/低粉爆款」的卡片动画改为**素材库切换博主**那套 R-199 逐格交接：旧卡按 index 错峰淡出并缩到 0.94（0.35s、0.035s/档、最多 16 档），新卡等本格旧卡退完后（延迟 = 退场延迟 + 0.35s + 0.04s）从 `opacity 0 / scale 0.8` 用 `backOut` 显影长大（0.5s，中途略微冲过 1 再落回），两段动画都可见；`AnimatePresence mode="popLayout"` 保证退场卡不占位、新卡在原格入场；首次加载仍用普通淡入（不拖慢首屏）。复用 `@/lib/motion` 的 `listReplace` 参数，不搬素材库组件；只改 `frontend_v2/src/pages/video-review/index.tsx`。**验证**：Playwright 1440 —— 三按钮在同行/低粉/再切回同行时 x 坐标完全一致（0 位移）、更新按钮 hidden↔visible 且占位；卡片采样 opacity 0.00→1.00、scale 0.80→1.02（backOut 过冲）、切换期间最少可见 15 张（无整片空白）、console 0 error；`verify.sh` 全绿（后端 761 / 前端 161 / 文档 37 表）。需求：`requirements/R-253-review-reference-button-slot-and-replace-animation.md`；设计：`development-design/R-253-review-reference-button-slot-and-replace-animation.md`。
