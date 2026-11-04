@@ -1,5 +1,10 @@
 # 变更记录
 
+## [R-246] 2026-11-04 — TikHub 请求不再因共享连接池卡死而整体失败（登记）🔨
+
+- **临时恢复（2026-11-04 19:29，已执行）**：重启后端进程清空内存里卡死的 TikHub 连接池，19:31 真实「更新数据」5.5 秒成功（此前同一操作 94 秒后报 `PoolTimeout`），看板诊断时间/作品数据恢复更新；本次只是清池，根因待 R-246 修复。
+- **登记记录**：TikHub 请求不再因共享连接池卡死而整体失败——进程级共享 httpx Client 的连接池被 16 个 httpcore 1.0.9 代理隧道泄漏连接永久占满（httpx `trust_env=True` 读取 macOS 系统代理 Clash `127.0.0.1:7890` 走 CONNECT 隧道；隧道建立失败时连接停在 ACTIVE、socket 已关闭且 `_connect_failed=False`，池永不回收；「同步 Top15」12 账号任务 × 单账号 5 并发 ≈ 60 并发打 16 连接池触发），11-02 09:00 起所有 TikHub 请求 `PoolTimeout`、只能重启恢复；修复 = TikHub 默认直连（`ECHO_TIKHUB_USE_PROXY=1` 可切回代理）+ 全进程并发上限（`ECHO_TIKHUB_MAX_CONCURRENCY` 默认 8）+ PoolTimeout 自动重置共享 Client 自愈 + 重置告警日志；不改前端/表结构/接口契约，其它服务代理行为不变。需求：`requirements/R-246-tikhub-pool-stability.md`；设计：`development-design/R-246-tikhub-pool-stability.md`。**待作者「继续」后开发**。
+
 ## [R-245] 2026-11-02 — 视频复盘按指标优化建议（指标 + 文案结合）✅
 
 - **已实现**：视频复盘新增「按指标优化建议」——按完播率/平均播放占比/收藏率/吸粉率各 1 张卡，内容同时结合真实指标差距（自己近 30 条相近作品同发布天数中位数）与文案原句；数字白名单 + 引用子串校验，LLM 不可用回退程序规则；无新表/无新路由（存 `video_reviews.metrics_snapshot.advices`，`GET /reviews/{id}` 响应加 `advices`）。实测作品 1952 生成 4 张卡、每卡 3 条文案引用、无「同赛道/行业平均/提升 X%」；verify 全绿。
