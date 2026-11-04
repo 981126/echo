@@ -158,7 +158,7 @@ def _compute_angles(db: Session, topic: str, platform: str) -> dict:
     if platform:
         user_parts.append(f"目标平台：{platform}")
     if refs:
-        user_parts.append("参考风格（仅借鉴语气/结构，观点用你自己的）：\n" + refs)
+        user_parts.append("参考风格（可借鉴语气/结构/观点）：\n" + refs)
     try:
         data = persona.call_json(
             "ideas",

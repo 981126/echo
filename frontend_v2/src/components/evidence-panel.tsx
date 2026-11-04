@@ -189,7 +189,7 @@ export function EvidencePanel({
         )}
         {stationBench.length > 0 && (
           <div className="text-[11px] leading-relaxed">
-            <span className="text-muted-foreground/80">对标参考（他人，非你经历）：</span>
+            <span className="text-muted-foreground/80">对标参考：</span>
             {stationBench.map((s, i) => (
               <span key={i} className="text-foreground/80">
                 {i > 0 ? ' · ' : ''}

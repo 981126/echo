@@ -85,6 +85,18 @@ describe('EvidencePanel（R-227）', () => {
     expect(screen.getByText(/某搜索词/)).toBeInTheDocument()
   })
 
+  it('R-254：对标参考标签中性化，不再标「他人，非你经历」', async () => {
+    render(
+      <EvidencePanel
+        outlines={outlines}
+        station={{ benchmark: [{ title: '对标标题', blogger: '某博主' }] }}
+      />,
+    )
+    await userEvent.click(screen.getByRole('tab', { name: /引用来源/ }))
+    expect(screen.getByText('对标参考：')).toBeInTheDocument()
+    expect(screen.queryByText(/非你经历/)).not.toBeInTheDocument()
+  })
+
   it('全空不渲染', () => {
     const { container } = render(<EvidencePanel />)
     expect(container).toBeEmptyDOMElement()

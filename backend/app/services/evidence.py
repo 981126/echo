@@ -454,8 +454,8 @@ def _build_block(sources: list[dict]) -> str:
     if not sources:
         return ""
     lines = [
-        "【联网事实素材·生成方已按人设选文（营销内容已排除）；只能引用以下参考里的真实事实/数据/观点，"
-        "必须口语化转述（不要念 URL），不得编造】"
+        "【联网事实素材·生成方已按人设选文（营销内容已排除）；可参考以下素材的事实/数据/观点并补充细节，"
+        "口语化转述（不要念 URL）】"
     ]
     for i, item in enumerate(sources, 1):
         head = item.get("title") or item.get("site") or ""

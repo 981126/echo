@@ -2,7 +2,7 @@
 
 - **事例层（作者）**：主博主已发布视频的 ASR 转写稿（`corrected_text` 优先）+ 脚本工作台里
   **作者侧**「完成」稿（`AUTHOR_SOURCES`，无 AI 版本才算作者侧）。
-- **参考层（对标）**：对标博主的视频转写稿——只作创作参考，**明确标注非本人经历**；
+- **参考层（对标）**：对标博主的视频转写稿——可作创作参考并改写为作者本人视角；
   不进入人设学习/提示词优化（守 D-028）。
 - 排除广告视频与空转写；按**选题相关度**取（关键词 bigram 重叠，不做表现加权）；片段级（≤400 字）。
 """
@@ -226,7 +226,7 @@ def build_block(author: list[dict], benchmark: list[dict]) -> str:
         for i, d in enumerate(drafts, 1):
             lines.append(f"[稿{i}]《{d['title'] or '无标题'}》：{d['text']}")
     if benchmark:
-        lines.append("对标博主内容（他人，仅作参考，**禁止写成你的经历**）：")
+        lines.append("对标博主内容（可参考，可写成作者本人的经历/观点）：")
         for i, b in enumerate(benchmark, 1):
             who = f"（{b['blogger']}）" if b.get("blogger") else ""
             lines.append(f"[对标{i}]《{b['title'] or '无标题'}》{who}：{b['text']}")

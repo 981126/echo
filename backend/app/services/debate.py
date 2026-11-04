@@ -294,30 +294,28 @@ def _clear_status(db: Session, draft_id: int) -> None:
 PLACEHOLDER_SCRIPT = "（双模型讨论生成中…）"
 FAILED_SCRIPT = "（生成失败，请重试或删除本稿）"
 
-# R-228：评审/修订共用的事实硬规则——评审与修订每轮都要看到证据块，且都不得替作者编造经历。
-# 根因（draft 128 留痕）：评审在"修改建议"里发明第一人称素材（公司倒闭欠薪、投递转化数字），
-# 生成方照填，终稿全是作者没说过的话；作者 insight 反复毙此方向但机制未堵。
-NO_FABRICATION_RULE = (
-    "\n\n事实硬规则（评审与修订都必须遵守）：文中一切具体事实（数字/公司/人名/作者亲身经历）"
-    "只能来自注入的【联网事实素材】/【站内真实素材】或作者上下文（人设/ASR 转写/范本/金句锚点）"
-    "里已有的内容；**严禁替作者发明第一人称经历、具体数字、公司/人名**。"
-    "论据缺素材时，建议写「这里需要作者补充真实经历」，不要编一个填上。"
+# R-254：取代 R-228 的 NO_FABRICATION_RULE。作者确认放开：对标/站内/联网参考素材里的经历、案例、
+# 数字可以写成作者本人经历，也允许基于素材补全、扩写细节；不再要求缺素材标【需作者补充】。
+ALLOW_EXPANSION_RULE = (
+    "\n\n内容自由度（评审与修订都必须遵守）：为了让脚本真实、具体、能直接录，"
+    "允许把注入的素材（含【站内真实素材】/【对标】参考/【联网事实素材】）里的经历、案例、数字"
+    "改写成作者本人视角，也允许基于素材补全、扩写第一人称经历与细节；"
+    "不要再要求「这里需要作者补充真实经历」。"
 )
 
 def _with_evidence(system: str, evidence_block: str) -> str:
-    """证据块拼进 system prompt——每轮 critique/revise 调用都随消息可见（R-228）。"""
+    """证据块拼进 system prompt——每轮 critique/revise 调用都随消息可见（R-228；R-254 起为可扩写素材）。"""
     if not evidence_block:
         return system
-    return system + f"\n\n可引用的事实素材（评审与修订都只能用这里的事实）：\n{evidence_block}"
+    return system + f"\n\n可参考/扩写的素材（评审与修订都可据此补全细节）：\n{evidence_block}"
 
 # R-155：基于原文重新讨论时的初稿提示词（比对标洗稿多产出 tags）
-# R-181：改为「参考改写」契约——只借选题与信息线索，不借结构/比喻/句群，必须补作者自己的经历与判断。
+# R-254：素材经历可写成作者本人，允许补全/扩写；保留整篇不逐字照抄（可偶尔沿用 1-2 句原句）。
 SOURCE_REWRITE_SYSTEM = (
-    "你是口播脚本代笔。只把给定素材当作**选题与信息线索**，"
-    "用作者的人设口吻与表达习惯，写成作者能直接录的原创口播稿。"
-    "硬性要求：1) 不逐字抄袭，不复用原文的结构、核心比喻和句群；"
-    "2) 必须补入作者自己的经历、判断或案例，观点必须用作者自己的"
-    "（只能用作者上下文与注入证据里已有的内容，严禁编造；缺素材就标【需作者补充】）；"
+    "你是口播脚本代笔。把给定素材当作**可用内容**，"
+    "用作者的人设口吻与表达习惯，写成作者能直接录的口播稿。"
+    "硬性要求：1) 整篇不逐字照抄，但可以偶尔直接沿用素材的 1-2 句原句；"
+    "2) 可以把素材里的经历、案例、观点写成作者本人的，也可以基于素材补全、扩写细节；"
     "3) 语言自然口语，像作者本人对着镜头说话。"
     '只输出 JSON：{"title": string, "cover_text": string, "script": string, "tags": string[]}；'
     "title 必须与素材原标题不同；cover_text 是 3-8 字封面字（与 title 不同）；"
@@ -458,7 +456,7 @@ def run_debate(
         initial_system = SOURCE_REWRITE_SYSTEM
         initial_user = (
             f"{author_style_context(db)}\n\n"
-            f"【参考素材·只借选题与信息线索，不借结构与措辞】\n"
+            f"【参考素材·可把其中的经历/案例/观点当作可用内容（整篇不逐字照抄）】\n"
             f"素材标题：{source_title or topic}\n素材原文：\n{source_text[:4000]}"
             + (f"\n\n{evidence_block}" if evidence_block else "")
         )
@@ -527,15 +525,14 @@ def run_debate(
     _add(db, draft.id, 0, initial["model"], "draft", draft.script, llm=initial.get("llm"))
 
     # 2) N 轮讨论：评审方挑刺 → 生成方修订
-    # R-228：评审/修订 system 都带事实硬规则；证据块（联网+站内）拼进 system，每轮调用都可见
-    #（此前证据只在初稿注入，修订轮看不到事实，评审想"补具体细节"只能凭想象编）。
+    # R-228：证据块（联网+站内）拼进 system，每轮调用都可见；R-254：放开为可扩写素材、不再禁编造。
     critic_system = _with_evidence(
         (
             "你是脚本评审专家。请对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、"
             "哪些有 AI 感，并给出具体可执行的修改建议（每轮简短、直给）。"
             "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
-            "有没有正确但没用的空话、有没有编造数字/人名/机构。"
-            + NO_FABRICATION_RULE
+            "有没有正确但没用的空话。"
+            + ALLOW_EXPANSION_RULE
             + f"\n作者人设：\n{persona_text}\n红线（不得违反）：\n{red_text}\n作者语言习惯：\n{ctx['profile']}"
         ),
         evidence_block,
@@ -547,8 +544,8 @@ def run_debate(
             "你是撰稿模型。根据评审意见，用作者的口吻重写整篇口播脚本，"
             "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。"
             "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
-            "有可引用的联网事实就口语化引用；严禁编造数字/人名/机构。"
-            + NO_FABRICATION_RULE
+            "有可引用的联网事实就口语化引用。"
+            + ALLOW_EXPANSION_RULE
             + f"\n作者语言习惯（自然贴近即可，不要硬塞口头禅/标志词）：\n{style_note}"
         ),
         evidence_block,
@@ -886,7 +883,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
         },
     )
 
-    # R-194：初稿走统一「参考改写」契约 + 完整作者上下文（只借选题与信息线索）；R-227 注入联网证据
+    # R-194/R-254：初稿走统一「参考改写」契约 + 完整作者上下文（素材经历可写成作者本人）；R-227 注入联网证据
     rewrite_system = REWRITE_SYSTEM
     rewrite_user = _rewrite_user(db, source_title, source_text, evidence_block)
 
@@ -943,23 +940,22 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
 
     critic_system = (
         "你是脚本评审专家。对照**作者完整上下文**（人设/风格范本/语言习惯/禁用词/结构偏好）指出当前脚本"
-        "哪些地方不像作者、哪些有 AI 腔、哪些与原文结构或句子雷同照搬"
-        "（参考改写要求：只借选题与信息线索，不借结构/比喻/句群，必须补作者自己的经历与判断）；"
+        "哪些地方不像作者、哪些有 AI 腔、哪些与原文句子逐字照抄"
+        "（参考改写要求：整篇不逐字照抄，但可以偶尔沿用素材的 1-2 句原句；素材里的经历/案例可以写成作者本人的）；"
         "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
-        "引用的联网事实是否与提供的素材一致（有没有编造数字/人名/机构/经历）、"
         "有没有「要努力/要相信自己」这类正确但没用的空话；给出具体可执行的修改建议（简短直给）。"
-        + NO_FABRICATION_RULE
+        + ALLOW_EXPANSION_RULE
         + f"\n作者上下文：\n{author_ctx}"
-        + (f"\n\n可引用的联网事实素材：\n{evidence_block}" if evidence_block else "")
+        + (f"\n\n可参考/扩写的素材：\n{evidence_block}" if evidence_block else "")
     )
     revise_system = (
         "你是撰稿模型。根据评审意见，用作者口吻重写整篇口播脚本，只输出脚本正文，"
         "不要解释、不要加标题，保持 1-2 分钟口播长度。"
         "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
-        "有可引用的联网事实就口语化引用；严禁编造数字/人名/机构/经历；删掉空话。"
-        + NO_FABRICATION_RULE
+        "有可引用的联网事实就口语化引用；删掉空话。"
+        + ALLOW_EXPANSION_RULE
         + f"\n作者上下文（必须贴合）：\n{author_ctx}"
-        + (f"\n\n可引用的联网事实素材：\n{evidence_block}" if evidence_block else "")
+        + (f"\n\n可参考/扩写的素材：\n{evidence_block}" if evidence_block else "")
     )
 
     rounds = rewrite_rounds

@@ -570,3 +570,107 @@ def optimize_task(db: Session, payload: dict) -> dict:
     """R-202：单键提示词优化改为后台任务（LLM 较慢）；失败原因经 task.error 回传。"""
     row = optimize(db, str(payload.get("key") or ""), str(payload.get("material") or ""))
     return {"key": row.key, "version": row.version}
+
+
+# ---------- R-254：生成提示词一次性放开「参考素材经历归属」 ----------
+# 生成文案实际读取 DB 中 enabled 的 generation 版本（代码默认只做兜底）。作者确认放开
+# 「对标/他人素材禁止写成作者经历」与 R-228 反编造硬规则，因此部署时把旧句精确替换后
+# 另存为新启用版本（旧版归档可回退）。Kv 标记保证只跑一次，失败下次启动重试。
+
+R254_PATCH_DONE_KEY = "r254_generation_prompt_patched"
+R254_PATCH_NOTE = "R-254 放开参考素材经历归属（旧版归档可回退）"
+R254_GENERATION_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    (
+        "【对标】素材只能当参考，**禁止写成你自己的经历**；",
+        "【对标】素材可以直接使用，也可以把其中的经历、案例、观点写成作者本人的；",
+    ),
+    (
+        "4) 严禁编造具体数字/人名/机构/经历；没有可靠事实就只讲作者的判断，宁可不要数字；",
+        "4) 素材不够具体时，允许基于素材补全、扩写细节（包括第一人称经历、具体数字、人物/机构），",
+    ),
+    (
+        "论据缺素材处标【需作者补充】，不要编一个填上；",
+        "写成作者能直接录的口播稿即可；",
+    ),
+    (
+        "优先用【站内真实素材·你的】里的真实经历/说法",
+        "优先用【站内真实素材】里的真实经历/说法",
+    ),
+    (
+        "观点必须用作者自己的。",
+        "观点要按作者本人的口吻和立场表达。",
+    ),
+)
+
+
+def patch_generation_prompt_for_r254(db: Session) -> bool:
+    """把 enabled 的 generation 提示词按旧句替换后另存新版本（R-254）。返回是否写入新版本。
+
+    只处理命中的旧限制语句；一条都没命中（作者已手改/已是新规则）则不动。
+    """
+    row = (
+        db.query(AiPrompt)
+        .filter(AiPrompt.key == "generation", AiPrompt.status == "enabled")
+        .order_by(AiPrompt.version.desc())
+        .first()
+    )
+    if row is None:
+        return False
+    content = row.content or ""
+    patched = content
+    for old, new in R254_GENERATION_REPLACEMENTS:
+        patched = patched.replace(old, new)
+    if patched == content:
+        return False
+    old_version = row.version
+    new_row = save_new_version(db, "generation", patched, note=R254_PATCH_NOTE)
+    from ..core.log import get_logger
+
+    get_logger("prompt").info("R-254 生成提示词已替换为 v%s（v%s 归档）", new_row.version, old_version)
+    return True
+
+
+def run_r254_prompt_patch_once(db: Session) -> bool:
+    """执行一次 R-254 补丁并写 Kv 标记（启动线程与测试共用）；已标记过返回 False。"""
+    from ..core.log import get_logger
+    from ..models.kv import Kv
+
+    if db.get(Kv, R254_PATCH_DONE_KEY) is not None:
+        return False
+    changed = patch_generation_prompt_for_r254(db)
+    db.add(Kv(key=R254_PATCH_DONE_KEY, value="1"))
+    db.commit()
+    if not changed:
+        get_logger("prompt").info("R-254 生成提示词未命中旧限制语句，跳过（只写一次性标记）")
+    return changed
+
+
+def maybe_patch_r254_generation_prompt_on_startup() -> None:
+    """启动时后台跑一次 R-254 提示词补丁；已跑过（Kv 标记）则跳过。"""
+    import threading
+
+    from ..core.log import get_logger
+    from ..db import SessionLocal
+    from ..models.kv import Kv
+
+    logger = get_logger("prompt")
+    probe = SessionLocal()
+    try:
+        if probe.get(Kv, R254_PATCH_DONE_KEY) is not None:
+            return
+    except Exception:  # noqa: BLE001 读标记失败不阻断启动
+        probe.rollback()
+    finally:
+        probe.close()
+
+    def _run() -> None:
+        db = SessionLocal()
+        try:
+            run_r254_prompt_patch_once(db)
+        except Exception:  # noqa: BLE001 补丁失败保留标记缺失，下次启动可重跑
+            db.rollback()
+            logger.exception("R-254 生成提示词补丁失败（下次启动可重跑）")
+        finally:
+            db.close()
+
+    threading.Thread(target=_run, name="r254-prompt-patch", daemon=True).start()
