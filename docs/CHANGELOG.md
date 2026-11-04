@@ -2,6 +2,7 @@
 
 ## [R-250] 2026-11-04 — 脚本工作台删除草稿时其他卡片不再「飞出去」 ✅
 
+- **v2（2026-11-04，作者反馈「删除后重排动画看不到/不明显」）**：在 v1 基础上恢复**可见但克制的平滑重排**——卡片改用 `layout="position"`（只对位置做布局动画、不对尺寸缩放，避免再次出现拉伸/乱飞）+ 显式 `layout: { duration: 0.26, ease: EASE_OUT_EXPO }`；入场 stagger 只作用于 `opacity/y`（不再给 layout 加延迟）；`exit` 缩到 0.16s 配合 `AnimatePresence mode="popLayout"`；卡片 hover 从 `-translate-y-0.5`（CSS transform，会与 layout 冲突）改为边框高亮。逐帧实测：删除中间一张后剩余卡片移动 12 帧（约 183ms）、370px 整列归位、矩阵始终 `1.00x1.00` 纯平移、0 console error；`verify.sh` 全绿。
 - **已实现（2026-11-04）**：定位根因——`pages/drafts/index.tsx` 的网格容器 `<motion.div layout>` 与每张 `DraftTile` 根节点 `<motion.article layout>` 开了 Framer **layout 投影动画**：删除后网格重排被演绎成剩余卡片的「旧位置→新位置」动画（逐帧实测单帧位移 65~372px、`scaleY≈1.0757`、多卡错峰），叠加每卡 `delay:index*0.03` 与卡片 hover 的 CSS translate，视觉上就是「其他草稿飞出去」。修复：①移除容器与卡片的 `layout`（其余卡片由 CSS Grid 在数据变化同一帧重排，不再有位置动画）；②保留被删卡片自身 `exit` 淡出+缩到 0.94（约 0.1~0.2s 可见）；③列表 `AnimatePresence mode="popLayout"` 让退场卡不占位，避免「退场后再整体跳一下」；不改删除接口/逻辑删除语义/确认弹窗/其它页面。**验证**：Playwright rAF 逐帧采样——删除第 1 张与中间张，其余卡片仅同帧重排（`transform: none`、`multiFrameMoves=0`），被删卡片 0→60ms 淡出缩小→120ms 移除；console 0 error；`verify.sh` 全绿（后端 758 / 前端 161 / 文档 37 表）。需求：`requirements/R-250-drafts-delete-animation.md`；设计：`development-design/R-250-drafts-delete-animation.md`。
 
 ## [R-249] 2026-11-04 — 同行/低粉封面改 3:4 + 三处封面裂图兜底 ✅

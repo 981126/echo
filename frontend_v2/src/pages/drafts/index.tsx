@@ -1,11 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, type Variants } from 'framer-motion'
 import { Plus, Trash2, PenLine, LoaderCircle } from 'lucide-react'
 import { apiJson } from '@/api/client'
 import { fmtDate, fmtNum } from '@/lib/format'
-import { listVariants, itemVariants } from '@/lib/motion'
+import { listVariants, itemVariants, EASE_OUT_EXPO } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -28,6 +28,16 @@ const STATUS_TABS = [
 ] as const
 
 type Status = (typeof STATUS_TABS)[number]['key']
+
+/** R-250：卡片入场动画（stagger 只作用于 opacity/y）；重排动画由 `layout="position"` + 组件 transition 控制。 */
+const draftTileVariants: Variants = {
+  initial: { opacity: 0, y: 14 },
+  animate: (index: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.34, ease: EASE_OUT_EXPO, delay: Math.min(index, 12) * 0.03 }
+  })
+}
 
 /** R-211：「记反馈」行内展开状态（每篇草稿一份） */
 interface FeedbackUI {
@@ -97,13 +107,15 @@ function DraftTile({
   const coverage = d.quality?.diagnostics?.style_coverage
   return (
     <motion.article
-      variants={itemVariants}
+      layout="position"
+      custom={index}
+      variants={draftTileVariants}
       initial="initial"
       animate="animate"
-      exit={{ opacity: 0, scale: 0.94 }}
-      transition={{ delay: Math.min(index, 12) * 0.03 }}
+      exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.16, ease: EASE_OUT_EXPO } }}
+      transition={{ layout: { duration: 0.26, ease: EASE_OUT_EXPO }, duration: 0.26, ease: EASE_OUT_EXPO }}
       onClick={() => h.open(d)}
-      className="group cursor-pointer rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)] transition-all hover:-translate-y-0.5 hover:border-accent/40"
+      className="group cursor-pointer rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)] transition-colors hover:border-accent/40"
     >
       <div className="flex items-start gap-2">
         <h3 className="line-clamp-2 min-h-10 flex-1 text-[14px] font-semibold leading-snug">{d.title || '（无标题）'}</h3>

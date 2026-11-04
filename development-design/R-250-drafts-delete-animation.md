@@ -2,7 +2,7 @@
 
 - **对应需求**: `requirements/R-250-drafts-delete-animation.md`
 - **日期**: 2026-11-04
-- **状态**: ✅ 已按本文实现（2026-11-04，verify 全绿 + 逐帧采样通过）
+- **状态**: ✅ 已按本文实现（2026-11-04；v2 按作者反馈补充「可见但克制的重排动画」，verify 全绿 + 逐帧采样通过）
 - **前置**: R-173（草稿卡片 AI 状态动画）、R-175（动效规范：不能白闪/乱跳）、R-199（列表换批 `popLayout` 经验）、R-158（删除确认）
 - **原则**: 只改删除动画实现；不动删除接口/逻辑/确认弹窗/其它页面；保留被删卡片退场；`verify.sh` 全绿。
 
@@ -74,20 +74,29 @@ UAL[作者点击删除] --> API[PATCH /api/drafts/{id} status=deleted]
 
 - 容器不再对高度/自身布局做投影动画；网格高度变化随浏览器重排即时完成（列表删除场景没有「容器收缩」必要动画）。
 
-### 5.2 移除卡片根节点的 layout，保留入场/退场
+### 5.2 卡片改为 `layout="position"`，保留可见的平滑重排（v2）
 
 ```diff
-     <motion.article
--      layout
-       variants={itemVariants}
-       initial="initial"
-       animate="animate"
-       exit={{ opacity: 0, scale: 0.94 }}
-       transition={{ delay: Math.min(index, 12) * 0.03 }}
+-    <motion.article
+-      variants={itemVariants}
+-      initial="initial"
+-      animate="animate"
+-      exit={{ opacity: 0, scale: 0.94 }}
+-      transition={{ delay: Math.min(index, 12) * 0.03 }}
++    <motion.article
++      layout="position"
++      custom={index}
++      variants={draftTileVariants}
++      initial="initial"
++      animate="animate"
++      exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.16, ease: EASE_OUT_EXPO } }}
++      transition={{ layout: { duration: 0.26, ease: EASE_OUT_EXPO }, duration: 0.26, ease: EASE_OUT_EXPO }}
 ```
 
-- 保留：入场 `itemVariants`（淡入 + 上移 14px + stagger）、hover CSS 抬升、删除 `exit`（0.2s 默认，淡出+缩到 0.94）；
-- 移除 `layout` 后，剩余卡片不会再对「旧位置→新位置」做动画，只在数据变化的那一帧立即重排。
+- **`layout="position"`**：只对位置做布局动画，不对尺寸做缩放（旧版普通 `layout` 在跨行时会把高度差做成 scale，叠加错峰后看起来像「飞」）；
+- **入场 stagger** 移到本地 `draftTileVariants` 的 `animate` 函数里（`custom={index}`），只作用于 `opacity/y`，不再给 layout 动画加延迟；
+- **退场**：`exit` 0.16s 淡出 + scale 0.96，配合 `AnimatePresence mode="popLayout"` 先让出位置；
+- **hover**：卡片 class 去掉 `hover:-translate-y-0.5`（CSS transform 与 layout 内联 transform 冲突），保留 `hover:border-accent/40` 高亮反馈。
 
 ### 5.3 AnimatePresence 使用 popLayout
 
@@ -105,7 +114,7 @@ UAL[作者点击删除] --> API[PATCH /api/drafts/{id} status=deleted]
 |---|---|
 | 触发删除 | 仅确认弹窗「删除」后；取消/失败不触发 |
 | 退场时长 | 沿用 Framer 默认（~0.2s），被删卡片 opacity→0、scale→0.94 |
-| 其余卡片 | 0 帧动画，浏览器单帧重排；不做错峰/位移/缩放 |
+| 其余卡片 | `layout="position"` 平滑滑到新位置：0.26s、只平移不缩放、同时开始（不做错峰） |
 | 快速连续删除 | 每次列表更新独立处理；由于无 layout 投影，不会叠加动画 |
 | 数据失败 | 现有 toast 错误 + 列表不变（invalidate 失败也不产生动画） |
 | 其它动画 | 入场/stagger、hover、记反馈展开、tab 切换逻辑全部不变 |
@@ -133,8 +142,8 @@ UAL[作者点击删除] --> API[PATCH /api/drafts/{id} status=deleted]
 
 | 检查项 | 方法 | 结果 |
 |---|---|---|
-| 删除第 1 张 | Playwright rAF 逐帧采样（`getBoundingClientRect` + `transform` + `opacity`） | ✅ 其余卡片仅同帧重排（`transform: none`），无连续多帧位移动画、无 scale 变形 |
-| 删除中间一张 | 同上，3 篇测试草稿删除中间一篇 | ✅ `multiFrameMoves = 0`；其余卡片单帧归位 |
+| 删除第 1 张 | Playwright rAF 逐帧采样（`getBoundingClientRect` + `transform` + `opacity`） | ✅ v1 无乱飞；v2 平滑重排可见（12 帧）、无 scale 变形 |
+| 删除中间一张 | 同上，3 篇测试草稿删除中间一篇 | ✅ v2：剩余卡片移动 12 帧（约 183ms）、总位移 370px（整列归位）、变换矩阵始终 `1.00x1.00` 纯平移 |
 | 被删卡片退场 | 逐帧记录被删卡片 opacity/scale/存在性 | ✅ 0ms opacity≈0.968 → 60ms opacity≈0.003 + scale 0.94 → 120ms 移除 |
 | 控制台 | Playwright console/pageerror | ✅ 0 error |
 | 其它交互 | 页面点检 | ✅ 卡片入场/hover/tab 计数/记反馈展开正常 |
