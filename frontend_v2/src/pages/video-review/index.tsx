@@ -4,9 +4,9 @@ import { motion } from 'framer-motion'
 import { Check, ChevronDown, ExternalLink, Layers, Lightbulb, Loader2, Play, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
-import { coverThumb } from '@/lib/covers'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { CoverImage } from '@/components/ui/cover-image'
 import { Progress } from '@/components/ui/progress'
 import { waitTaskResult } from '@/api/task'
 import { PostAnalysis } from '@/pages/dashboard/post-analysis'
@@ -50,25 +50,16 @@ function adoptQuerySource(topic: AdoptTopic): string {
     .join('\n')
 }
 
-/** R-247：参考视频封面（同行=本地 /covers 缩略；低粉=远程签名 URL，坏图回退占位）。 */
+/** R-249：参考视频封面与抖音主页视频同比例（3:4 竖版），坏图按 CoverImage 兜底不裂图。 */
 function ReferenceCover({ url }: { url?: string | null }) {
-  const [failed, setFailed] = useState(false)
-  const src = coverThumb(url, 400)
   return (
-    <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
-      {src && !failed ? (
-        <img
-          src={src}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          referrerPolicy="no-referrer"
-          onError={() => setFailed(true)}
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-      ) : (
-        <div className="flex h-full items-center justify-center text-xs font-semibold text-muted-foreground/60">ECHO</div>
-      )}
+    <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
+      <CoverImage
+        url={url}
+        alt="参考视频封面"
+        className="absolute inset-0 h-full w-full object-cover"
+        placeholder={<div className="flex h-full items-center justify-center text-xs font-semibold text-muted-foreground/60">ECHO</div>}
+      />
     </div>
   )
 }

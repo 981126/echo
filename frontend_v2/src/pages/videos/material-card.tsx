@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { CardItem } from './types'
-import { coverThumb } from './types'
+import { CoverImage } from '@/components/ui/cover-image'
 import type { CardTaskState } from './use-card-tasks'
 
 const PLATFORM_DOT: Record<string, string> = {
@@ -121,20 +121,17 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
     >
       {/* 封面 */}
       <div className="relative aspect-[4/3] cursor-pointer overflow-hidden bg-muted" onClick={() => (selectMode ? onToggle(item) : onPlay(item))}>
-        {item.cover_url ? (
-          <img
-            // R-179：封面走缩略图（原图平均 191KB、首屏 20 张曾要 13MB → 缩图后 ~0.6MB）
-            src={coverThumb(item.cover_url, 400)}
-            alt={item.title}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted to-accent-soft">
-            <span className="text-lg font-bold tracking-widest text-muted-foreground/50">ECHO</span>
-          </div>
-        )}
+        <CoverImage
+          // R-179：封面走缩略图；R-249：缩略图坏图回退原图，再失败用占位，避免裂图
+          url={item.cover_url}
+          alt={item.title}
+          className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
+          placeholder={
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted to-accent-soft">
+              <span className="text-lg font-bold tracking-widest text-muted-foreground/50">ECHO</span>
+            </div>
+          }
+        />
 
         {/* hover 播放按钮 */}
         {!selectMode && item.hasVideo && (
