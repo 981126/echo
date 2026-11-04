@@ -16,11 +16,11 @@ from app.config import get_settings
 from app.core.timeutil import now
 from app.models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostComment, PlatformPostStat
 from app.models.video import Transcript, Video
-from app.models.video_review import VideoImprovementPlan, VideoReview, VideoTopicRecommendation
+from app.models.video_review import VideoReview, VideoTopicRecommendation
 from app.services.douyin_creator_sync import decrypt_cookie, encrypt_cookie
 from app.services.douyin_references import _text, refresh_references
 from app.services.video_review_comparison import build_comparison, peer_references
-from app.services.video_review_service import adopt_topic, link_plan, run_analysis, run_plan_check
+from app.services.video_review_service import run_analysis
 
 
 @pytest.fixture()
@@ -116,7 +116,7 @@ def test_peer_requires_manual_relationship_and_two_x(db):
     assert charts[0]["post_id"] == hit.id
 
 
-def test_analysis_adopt_link_and_check(db):
+def test_analysis_generates_review_and_topics(db):
     owner, account = _owner(db)
     for index in range(6):
         _post(db, account, index, 5000 + index * 100, 20 + index)
@@ -139,17 +139,6 @@ def test_analysis_adopt_link_and_check(db):
     assert review.metrics_snapshot
     topics = db.query(VideoTopicRecommendation).filter_by(review_id=review.id).all()
     assert topics
-    primary = next(x for x in topics if x.role == "primary")
-    plan = adopt_topic(db, primary, {"kept_text": "保留主题", "changes": ["开头先给结果"], "target_metrics": ["plays"]})
-    assert isinstance(plan, VideoImprovementPlan)
-    plan.created_at = now() - timedelta(days=2)
-    db.commit()
-    published = _post(db, account, 100, 16000, 1)
-    link_plan(db, plan, published, replace=False)
-    checked = run_plan_check(db, {"plan_id": plan.id, "refresh": False}, _update)
-    assert checked["items"][0]["result"] in ("improved", "not_improved", "uncertain")
-    assert checked["items"][0]["before"] is not None
-    assert checked["items"][0]["after"] is not None
 
 
 def test_low_fan_refresh_keeps_official_label(db):

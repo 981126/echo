@@ -1,8 +1,10 @@
 # 变更记录
 
-## [R-247] 2026-11-04 — 视频复盘页精简 + 参考视频封面 + 统一「采用」生成草稿
+## [R-247] 2026-11-04 — 视频复盘页精简 + 参考视频封面 + 统一「采用」生成草稿 ✅
 
-- **登记记录**：视频复盘页 4 项调整——①删除「这次准备重点改什么？」「怎样让观众愿意关注？」两个板块；②「下一条最推荐拍这个」与「两个备选主题」宽屏两列同排（左首选、右备选上下排，窄屏堆叠）；③同行爆款/低粉爆款卡片补 4:3 封面（后端已返回 `cover_url`，纯前端渲染、缺图占位；低粉为 TikHub 远程签名 URL，点「更新」续期）；④首选/备选/新话题统一「采用」，点击调现有 `POST /api/drafts/generate-async` 建草稿并跳 `/drafts?id=` 自动打开抽屉（后台双模型讨论、进行中可恢复）；同时按作者确认删除改进计划前后端（adopt/plans 5 个接口 + `video_improvement_plans` 表 + `adopted_at` 列 + 前端修改效果图表），Alembic `r247dropimprove`，表 38→37。需求：`requirements/R-247-video-review-adopt-draft.md`；设计：`development-design/R-247-video-review-adopt-draft.md`。**待作者第二次「继续」后开发**。
+- **已实现（2026-11-04）**：①视频复盘删除「这次准备重点改什么？」「怎样让观众愿意关注？」两个板块，并删除改进计划/修改效果整条功能（前端 `PlanComparisonCharts` + 5 个接口 + `video_improvement_plans` 表 + `video_topic_recommendations.adopted_at` 列，Alembic `r247dropimprove` 接 `r244dashboard`，表 38→37；旧 `metrics_snapshot.charts.plan` 键在读取侧过滤）；②「下一条最推荐拍这个」与「两个备选主题」宽屏两列同排（左首选、右备选上下排），窄屏堆叠；③同行爆款/低粉爆款卡片加 4:3 封面（本地 `/covers` 缩略、远程原图、坏图 ECHO 占位）；④首选/备选/新话题统一「采用」→ `POST /api/drafts/generate-async`（topic=主题，query_source=理由/适合原因/开头/第一步）建草稿并跳 `/drafts?id=` 自动打开生成中抽屉，请求中全部采用按钮禁用。**验证**：`verify.sh` 全绿（后端 751 passed + 前端 158 passed + build + 文档一致性 37 表）；迁移 head=`r247dropimprove` 且 information_schema 无表/无列；Playwright 1440/900 点检（同排 top 一致/封面加载/低粉过期 4 张占位/采用跳转与抽屉「双模型讨论进行中」/切页恢复）0 console error。
+
+- **登记记录**：视频复盘页 4 项调整——①删除「这次准备重点改什么？」「怎样让观众愿意关注？」两个板块；②「下一条最推荐拍这个」与「两个备选主题」宽屏两列同排（左首选、右备选上下排，窄屏堆叠）；③同行爆款/低粉爆款卡片补 4:3 封面（后端已返回 `cover_url`，纯前端渲染、缺图占位；低粉为 TikHub 远程签名 URL，点「更新」续期）；④首选/备选/新话题统一「采用」，点击调现有 `POST /api/drafts/generate-async` 建草稿并跳 `/drafts?id=` 自动打开抽屉（后台双模型讨论、进行中可恢复）；同时按作者确认删除改进计划前后端（adopt/plans 5 个接口 + `video_improvement_plans` 表 + `adopted_at` 列 + 前端修改效果图表），Alembic `r247dropimprove`，表 38→37。需求：`requirements/R-247-video-review-adopt-draft.md`；设计：`development-design/R-247-video-review-adopt-draft.md`。**已实现并验证（2026-11-04）**。
 
 ## [R-246] 2026-11-04 — TikHub 请求不再因共享连接池卡死而整体失败 ✅
 

@@ -5,7 +5,7 @@
 > 结构演进：R-236 起由 `backend/alembic/versions/` 管理；启动执行 `upgrade head`，现有完整旧库首次自动 baseline。新增表、字段、索引、视图或结构相关数据变更必须新增 revision，并同步本文。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（38 张）
+## 表总览（37 张）
 
 | 表 | 说明 |
 |---|---|
@@ -44,8 +44,7 @@
 | `douyin_reference_videos` | 抖音低粉榜和公开搜索参考：作者/公开互动/官方标签/类别关键词/分析/raw。 |
 | `video_reviews` | 每次视频复盘主记录：输入指纹、比较对象、指标快照、总结、主页分析、新话题、模型与警告。 |
 | `video_review_findings` | 复盘原因明细：规则、事实/推测、指标与内容证据、比较视频、修改建议。 |
-| `video_topic_recommendations` | 首选/备选/后续主题：理由、适合依据、证据、内容顺序、来源、评分明细与采用时间。 |
-| `video_improvement_plans` | 作者确认的修改计划：保留项、1～2 项修改、观察指标、关联新视频与检查结果。 |
+| `video_topic_recommendations` | 首选/备选/后续主题：理由、适合依据、证据、内容顺序、来源、评分明细。 |
 
 ## 核心数据流关系速览
 
@@ -913,25 +912,7 @@ R-237：本人或已授权抖音账号的创作者 Cookie。数据库只存 Fern
 | `source_types` | TEXT | 来源类型 JSON |
 | `score` | FLOAT | 本次排序分，不是爆款概率 |
 | `score_detail` | TEXT | 各维度得分与扣分 JSON |
-| `adopted_at` | DATETIME | 作者采用时间（可空） |
 | `created_at` | DATETIME | 创建时间 |
-
-## `video_improvement_plans`
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER | 主键 |
-| `review_id` | INTEGER | 来源复盘 |
-| `source_post_id` | INTEGER | 原视频 |
-| `recommendation_id` | INTEGER | 采用主题（可空） |
-| `kept_text` | TEXT | 本次保留的做法 |
-| `changes` | TEXT | 作者确认的 1～2 项修改 JSON |
-| `target_metrics` | TEXT | 主要观察指标 JSON |
-| `status` | VARCHAR(20) | `recorded/linked/checked` |
-| `published_post_id` | INTEGER | 关联的新发布视频（可空） |
-| `check_result` | TEXT | 改善/未改善/不确定及依据 |
-| `checked_at` | DATETIME | 最近检查时间（可空） |
-| `created_at` / `updated_at` | DATETIME | 创建/修改时间 |
 
 ## 只读分析视图（不是表，供 AI 对话的 `sql_query` 使用）
 

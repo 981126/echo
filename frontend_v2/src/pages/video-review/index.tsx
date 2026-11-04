@@ -1,20 +1,54 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Check, ChevronDown, ExternalLink, Lightbulb, Loader2, Play, RefreshCw, UserPlus } from 'lucide-react'
+import { Check, ChevronDown, ExternalLink, Lightbulb, Loader2, Play, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
+import { coverThumb } from '@/lib/covers'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
 import { waitTaskResult } from '@/api/task'
 import { PostAnalysis } from '@/pages/dashboard/post-analysis'
 import type { PostDetail } from '@/pages/dashboard/types'
-import { BaselineBars, PlanComparisonCharts, SimpleBars, WatchTrendChart } from './charts'
+import { BaselineBars, SimpleBars, WatchTrendChart } from './charts'
 import { waitForReviewTask } from './use-review-task'
-import type { FailedReview, ReferenceItem, Review, Topic, VideoItem } from './types'
+import type { FailedReview, ReferenceItem, Review, VideoItem } from './types'
 
 const judgementLabels = { fact: '数据直接显示', hypothesis: '结合内容推测', unknown: '目前无法判断' }
+
+/** R-247：采用主题时给生成链路的具体文本（「采用」→ 脚本工作台 AI 草稿）；空字段自动跳过。 */
+type AdoptTopic = { topic: string; reason?: string; fit_reason?: string; opening_line?: string; first_step?: string }
+
+function adoptQuerySource(topic: AdoptTopic): string {
+  return [topic.topic, topic.reason, topic.fit_reason, topic.opening_line, topic.first_step]
+    .map((x) => (x || '').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** R-247：参考视频封面（同行=本地 /covers 缩略；低粉=远程签名 URL，坏图回退占位）。 */
+function ReferenceCover({ url }: { url?: string | null }) {
+  const [failed, setFailed] = useState(false)
+  const src = coverThumb(url, 400)
+  return (
+    <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+      {src && !failed ? (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center text-xs font-semibold text-muted-foreground/60">ECHO</div>
+      )}
+    </div>
+  )
+}
 
 export default function VideoReviewPage() {
   const [videos, setVideos] = useState<VideoItem[]>([])
@@ -32,12 +66,9 @@ export default function VideoReviewPage() {
   const [kind, setKind] = useState<'peer' | 'low_fan'>('peer')
   const [references, setReferences] = useState<ReferenceItem[]>([])
   const [referenceLoading, setReferenceLoading] = useState(false)
-  const [keptText, setKeptText] = useState('')
-  const [changeOne, setChangeOne] = useState('')
-  const [changeTwo, setChangeTwo] = useState('')
-  const [linkPostId, setLinkPostId] = useState(0)
-  const [bio, setBio] = useState('')
-  const [direction, setDirection] = useState('')
+  // R-247：采用主题 → 生成草稿；adopting 为被点按钮 key（空=空闲，非空时禁用本页全部采用按钮）
+  const [adopting, setAdopting] = useState('')
+  const navigate = useNavigate()
   const controller = useRef<AbortController | null>(null)
   const activePost = useRef(0)
 
@@ -46,16 +77,6 @@ export default function VideoReviewPage() {
     if (activePost.current !== id) return
     setReview(data.review)
     setFailedReview(data.failed_review ?? null)
-    if (data.review?.improvement_plan) {
-      setKeptText(data.review.improvement_plan.kept_text)
-      setChangeOne(data.review.improvement_plan.changes[0] ?? '')
-      setChangeTwo(data.review.improvement_plan.changes[1] ?? '')
-      setLinkPostId(data.review.improvement_plan.published_post_id ?? 0)
-    }
-    if (data.review?.follower_analysis.homepage) {
-      setBio(data.review.follower_analysis.homepage.bio ?? '')
-      setDirection(data.review.follower_analysis.homepage.direction_note ?? '')
-    }
     if (data.running_task_id) setTask((old) => old?.id === data.running_task_id ? old : { id: data.running_task_id!, progress: 5, note: '正在恢复分析进度' })
   }, [])
 
@@ -224,70 +245,27 @@ export default function VideoReviewPage() {
     }
   }
 
-  async function adopt(topic: Topic) {
-    if (!topic.id) return
-    const changes = [changeOne.trim(), changeTwo.trim()].filter(Boolean)
-    if (!changes.length) {
-      toast.error('请先填写这次准备重点修改的1项内容')
-      return
-    }
+  /** R-247：「采用」= 在脚本工作台生成一篇 AI 草稿（占位稿立即创建，后台双模型讨论），成功后跳过去打开它。 */
+  async function adoptTopic(topic: AdoptTopic, key: string) {
+    const title = (topic.topic || '').trim()
+    if (!title || adopting) return
+    setAdopting(key)
     try {
-      await apiJson(`/api/douyin-review/recommendations/${topic.id}/adopt`, { method: 'POST', body: JSON.stringify({ kept_text: keptText, changes, target_metrics: [topic.target_metric || 'plays'] }) })
-      toast.success('已保存主题和本次修改')
-      await loadReview(postId)
+      const data = await apiJson<{ task_id: number; draft_id: number }>('/api/drafts/generate-async', {
+        method: 'POST',
+        body: JSON.stringify({ topic: title, query_source: adoptQuerySource(topic) })
+      })
+      toast.success(`已开始生成《${title}》，去脚本工作台查看`)
+      navigate(`/drafts?id=${data.draft_id}`)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '保存失败')
-    }
-  }
-
-  async function savePlan() {
-    if (!review?.improvement_plan) return
-    const changes = [changeOne.trim(), changeTwo.trim()].filter(Boolean)
-    try {
-      await apiJson(`/api/douyin-review/plans/${review.improvement_plan.id}`, { method: 'PATCH', body: JSON.stringify({ kept_text: keptText, changes, target_metrics: review.improvement_plan.target_metrics }) })
-      toast.success('修改内容已保存')
-      await loadReview(postId)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '保存失败')
-    }
-  }
-
-  async function linkPlan() {
-    if (!review?.improvement_plan || !linkPostId) return
-    try {
-      await apiJson(`/api/douyin-review/plans/${review.improvement_plan.id}/link`, { method: 'POST', body: JSON.stringify({ published_post_id: linkPostId, replace: true }) })
-      toast.success('已关联新发布视频')
-      await loadReview(postId)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '关联失败')
-    }
-  }
-
-  async function checkPlan() {
-    if (!review?.improvement_plan) return
-    try {
-      const data = await apiJson<{ task_id: number }>(`/api/douyin-review/plans/${review.improvement_plan.id}/check`, { method: 'POST', body: JSON.stringify({ refresh: true }) })
-      await waitForReviewTask(data.task_id)
-      await loadReview(postId)
-      toast.success('修改效果已更新')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '检查失败')
-    }
-  }
-
-  async function saveHomepage() {
-    if (!account || !review) return
-    try {
-      await apiJson('/api/douyin-review/homepage', { method: 'PUT', body: JSON.stringify({ account_id: account.id, bio, direction_note: direction, pinned_post_ids: review.follower_analysis.homepage.pinned_post_ids ?? [] }) })
-      toast.success('主页信息已保存，重新分析后会使用')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '保存失败')
+      setAdopting('')
+      toast.error(error instanceof Error ? error.message : '生成失败，请重试')
     }
   }
 
   const charts = review?.charts
-  const planItems = review?.improvement_plan?.check_result.items ?? charts?.plan ?? []
   const primary = review?.recommendations.primary
+  const backups = review?.recommendations.backups ?? []
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
 
@@ -343,16 +321,45 @@ export default function VideoReviewPage() {
 
       {review ? (
         <>
-          {primary && <section className="rounded-2xl border border-indigo-200 bg-card p-5 shadow-card dark:border-indigo-900">
-            <div className="flex items-center gap-2 text-xs font-medium text-indigo-500"><Lightbulb className="h-4 w-4" />下一条最推荐拍这个</div>
-            <h2 className="mt-3 text-xl font-semibold">{primary.topic}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{primary.reason}</p>
-            <div className="mt-3 rounded-lg bg-muted/70 p-3 text-sm leading-6"><span className="font-medium">为什么适合你：</span>{primary.fit_reason}</div>
-            {primary.opening_line && <div className="mt-3 text-sm"><span className="font-medium">开头第一句：</span>{primary.opening_line}</div>}
-            <Button className="mt-4" onClick={() => void adopt(primary)}><Check className="mr-2 h-4 w-4" />采用首选主题</Button>
-          </section>}
+          {/* R-247：首选与两个备选同排（宽屏两列，缺一侧单列占整行，窄屏自动堆叠） */}
+          <div className={cn('grid items-start gap-4', primary && backups.length > 0 && 'lg:grid-cols-2')}>
+            {primary ? (
+              <section className="rounded-2xl border border-indigo-200 bg-card p-5 shadow-card dark:border-indigo-900">
+                <div className="flex items-center gap-2 text-xs font-medium text-indigo-500"><Lightbulb className="h-4 w-4" />下一条最推荐拍这个</div>
+                <h2 className="mt-3 text-xl font-semibold">{primary.topic}</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{primary.reason}</p>
+                <div className="mt-3 rounded-lg bg-muted/70 p-3 text-sm leading-6"><span className="font-medium">为什么适合你：</span>{primary.fit_reason}</div>
+                {primary.opening_line && <div className="mt-3 text-sm"><span className="font-medium">开头第一句：</span>{primary.opening_line}</div>}
+                <Button className="mt-4" disabled={!!adopting} onClick={() => void adoptTopic(primary, 'primary')}>
+                  {adopting === 'primary' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                  {adopting === 'primary' ? '生成中…' : '采用'}
+                </Button>
+              </section>
+            ) : (
+              <section className="rounded-2xl border border-dashed border-border bg-card p-5"><div className="flex items-center gap-2 text-sm font-medium"><Lightbulb className="h-4 w-4 text-muted-foreground" />暂时没有足够依据给出可靠首选</div><p className="mt-2 text-xs leading-5 text-muted-foreground">不会为了凑主题而乱推荐。可以更新低粉爆款、补充视频转写和评论，或先同步更多同行数据。</p></section>
+            )}
 
-          {!primary && <section className="rounded-2xl border border-dashed border-border bg-card p-5"><div className="flex items-center gap-2 text-sm font-medium"><Lightbulb className="h-4 w-4 text-muted-foreground" />暂时没有足够依据给出可靠首选</div><p className="mt-2 text-xs leading-5 text-muted-foreground">不会为了凑主题而乱推荐。可以更新低粉爆款、补充视频转写和评论，或先同步更多同行数据。</p></section>}
+            {backups.length > 0 && (
+              <section className="rounded-xl border border-border bg-card p-4 shadow-card">
+                <h2 className="text-sm font-semibold">两个备选主题</h2>
+                <div className="mt-3 space-y-3">
+                  {backups.map((topic, index) => {
+                    const key = `backup-${topic.id ?? index}`
+                    return (
+                      <div key={key} className="rounded-lg border border-border p-3">
+                        <h3 className="text-sm font-medium">{topic.topic}</h3>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">{topic.reason}</p>
+                        <Button variant="outline" size="sm" className="mt-3" disabled={!!adopting} onClick={() => void adoptTopic(topic, key)}>
+                          {adopting === key && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                          {adopting === key ? '生成中…' : '采用'}
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
 
           {review.findings.length > 0 && <section className="space-y-3">
             <div><h2 className="text-base font-semibold">这条视频为什么好或差？</h2><p className="mt-1 text-xs text-muted-foreground">每条结论都能展开看依据，事实和推测分开写。</p></div>
@@ -401,23 +408,18 @@ export default function VideoReviewPage() {
 
           {(charts?.follower_topics?.length ?? 0) > 0 && <SimpleBars title="哪类内容更容易带来关注？" conclusion="同时看粉丝增量和样本数，不只看播放量。" unit="人" items={(charts?.follower_topics ?? []).map((x) => ({ label: x.topic, value: Number((x.follower_per_1k ?? 0).toFixed(1)), detail: `/千次播放 · 实际涨粉${x.follower_gain}人` }))} />}
 
-          {review.recommendations.backups.length > 0 && <section className="rounded-xl border border-border bg-card p-4"><h2 className="text-sm font-semibold">两个备选主题</h2><div className="mt-3 grid gap-3 md:grid-cols-2">{review.recommendations.backups.map((topic) => <div key={topic.id ?? topic.topic} className="rounded-lg border border-border p-3"><h3 className="text-sm font-medium">{topic.topic}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{topic.reason}</p>{topic.id && <Button variant="outline" size="sm" className="mt-3" onClick={() => void adopt(topic)}>采用这个备选</Button>}</div>)}</div></section>}
-
           {review.recommendations.follow_ups.length > 0 && <section className="rounded-xl border border-border bg-card p-4"><h2 className="text-sm font-semibold">首选之后，可以连续讲这3条</h2><div className="mt-3 space-y-3">{review.recommendations.follow_ups.map((topic, index) => <div key={topic.id ?? index} className="flex gap-3 rounded-lg bg-muted/60 p-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-600 dark:bg-indigo-900">{index + 1}</span><div><h3 className="text-sm font-medium">{topic.topic}</h3><p className="mt-1 text-xs text-muted-foreground">{topic.follow_up_role} · {topic.reason}</p></div></div>)}</div></section>}
 
-          <section className="rounded-xl border border-border bg-card p-4 shadow-card"><div className="flex items-center gap-2"><UserPlus className="h-4 w-4 text-indigo-500" /><h2 className="text-sm font-semibold">怎样让观众愿意关注？</h2></div><p className="mt-2 text-sm text-muted-foreground">{review.follower_analysis.homepage.message}</p><div className="mt-3 grid gap-3 md:grid-cols-2"><Textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="主页简介：关注你以后能持续看到什么" /><Textarea value={direction} onChange={(e) => setDirection(e.target.value)} placeholder="你的主要内容方向，例如：求职、面试和转行" /></div><Button variant="outline" size="sm" className="mt-3" onClick={() => void saveHomepage()}>保存主页信息</Button></section>
-
-          <section className="rounded-xl border border-border bg-card p-4 shadow-card"><h2 className="text-sm font-semibold">这次准备重点改什么？</h2><p className="mt-1 text-xs text-muted-foreground">最多两项，改太多就无法判断哪项有效。</p><div className="mt-3 grid gap-3"><Input value={keptText} onChange={(e) => setKeptText(e.target.value)} placeholder="这次保留什么？例如：保留这个主题" /><Input value={changeOne} onChange={(e) => setChangeOne(e.target.value)} placeholder="重点修改第1项（必填），例如：开头先给结果" /><Input value={changeTwo} onChange={(e) => setChangeTwo(e.target.value)} placeholder="重点修改第2项（可选）" /></div>{review.improvement_plan && <div className="mt-3 flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void savePlan()}>保存修改</Button><select value={linkPostId} onChange={(e) => setLinkPostId(Number(e.target.value))} className="h-9 rounded-md border border-input bg-card px-2 text-xs"><option value={0}>选择执行后发布的新视频</option>{videos.filter((x) => x.post_id !== postId).map((x) => <option key={x.post_id} value={x.post_id}>{x.title}</option>)}</select><Button variant="outline" size="sm" disabled={!linkPostId} onClick={() => void linkPlan()}>关联新视频</Button>{review.improvement_plan.published_post_id && <Button size="sm" onClick={() => void checkPlan()}>更新检查结果</Button>}</div>}</section>
-
-          {planItems.length > 0 && <PlanComparisonCharts items={planItems} />}
-
-          {review.new_topics.length > 0 && <section className="rounded-xl border border-border bg-card p-4"><h2 className="text-sm font-semibold">账号可以尝试的新话题</h2><div className="mt-3 grid gap-3 md:grid-cols-3">{review.new_topics.map((topic) => <div key={topic.topic} className="rounded-lg border border-border p-3"><h3 className="text-sm font-medium">{topic.topic}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{topic.fit_reason}</p><p className="mt-2 text-xs">{topic.first_step}</p></div>)}</div></section>}
+          {review.new_topics.length > 0 && <section className="rounded-xl border border-border bg-card p-4"><h2 className="text-sm font-semibold">账号可以尝试的新话题</h2><div className="mt-3 grid gap-3 md:grid-cols-3">{review.new_topics.map((topic, index) => {
+            const key = `new-${index}`
+            return <div key={key} className="rounded-lg border border-border p-3"><h3 className="text-sm font-medium">{topic.topic}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{topic.fit_reason}</p><p className="mt-2 text-xs">{topic.first_step}</p><Button variant="outline" size="sm" className="mt-3" disabled={!!adopting} onClick={() => void adoptTopic(topic, key)}>{adopting === key && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}{adopting === key ? '生成中…' : '采用'}</Button></div>
+          })}</div></section>}
         </>
       ) : !task && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><Play className="mx-auto h-8 w-8 text-muted-foreground" /><h2 className="mt-4 font-medium">还没有这条视频的复盘分析</h2><p className="mt-2 text-sm text-muted-foreground">点右上角「更新数据并分析」，会先保存数据，再给出有依据的原因和下一条主题。</p></div>}
 
       <section className="space-y-3 border-t border-border pt-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">同行爆款与低粉爆款</h2><p className="mt-1 text-xs text-muted-foreground">同行只来自你手动添加的对标账号；低粉爆款来自抖音官方标签。</p></div><div className="flex gap-2"><Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('peer'); void loadReferences('peer') }}>同行爆款</Button><Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('low_fan'); void loadReferences('low_fan') }}>低粉爆款</Button>{kind === 'low_fan' && <Button variant="outline" size="sm" onClick={() => void refreshLowFan()}><RefreshCw className="mr-1 h-3.5 w-3.5" />更新</Button>}</div></div>
-        {referenceLoading ? <div className="py-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{references.map((item) => <article key={item.id} className="rounded-xl border border-border bg-card p-4 shadow-card"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-medium leading-6">{item.title}</h3><span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span></div><p className="mt-2 text-xs text-muted-foreground">{item.author_nickname}{item.author_followers !== null && item.author_followers !== undefined ? ` · ${item.author_followers}粉丝` : ''}</p><div className="tnum mt-3 text-xs">播放 {item.plays ?? '暂无'} · 点赞 {item.likes ?? '暂无'} · 评论 {item.comments ?? '暂无'}</div>{item.verdict_evidence.play_multiple && <p className="mt-2 text-xs text-emerald-600">是该同行平时播放的 {item.verdict_evidence.play_multiple} 倍（{item.verdict_evidence.sample_count}条样本）</p>}{item.video_url && <a href={item.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-500">查看原视频<ExternalLink className="h-3 w-3" /></a>}</article>)}</div>}
+        {referenceLoading ? <div className="py-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{references.map((item) => <article key={item.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-card"><ReferenceCover url={item.cover_url} /><div className="p-4"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-medium leading-6">{item.title}</h3><span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span></div><p className="mt-2 text-xs text-muted-foreground">{item.author_nickname}{item.author_followers !== null && item.author_followers !== undefined ? ` · ${item.author_followers}粉丝` : ''}</p><div className="tnum mt-3 text-xs">播放 {item.plays ?? '暂无'} · 点赞 {item.likes ?? '暂无'} · 评论 {item.comments ?? '暂无'}</div>{item.verdict_evidence.play_multiple && <p className="mt-2 text-xs text-emerald-600">是该同行平时播放的 {item.verdict_evidence.play_multiple} 倍（{item.verdict_evidence.sample_count}条样本）</p>}{item.video_url && <a href={item.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-500">查看原视频<ExternalLink className="h-3 w-3" /></a>}</div></article>)}</div>}
         {!referenceLoading && !references.length && <div className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">{kind === 'peer' ? '暂无符合规则的同行爆款，请先在博主管理添加抖音同行并同步数据。' : '当前条件下暂无低粉爆款，点击更新获取。'}</div>}
       </section>
 

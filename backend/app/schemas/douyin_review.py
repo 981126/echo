@@ -23,27 +23,6 @@ class CredentialIn(BaseModel):
     cookie: str = Field(min_length=1, max_length=30000)
 
 
-class PlanIn(BaseModel):
-    kept_text: str = ""
-    changes: list[str] = Field(default_factory=list)
-    target_metrics: list[str] = Field(default_factory=list)
-
-
-class PlanPatchIn(BaseModel):
-    kept_text: str | None = None
-    changes: list[str] | None = None
-    target_metrics: list[str] | None = None
-
-
-class PlanLinkIn(BaseModel):
-    published_post_id: int
-    replace: bool = False
-
-
-class PlanCheckIn(BaseModel):
-    refresh: bool = True
-
-
 class HomepageIn(BaseModel):
     account_id: int
     bio: str = Field(default="", max_length=1000)

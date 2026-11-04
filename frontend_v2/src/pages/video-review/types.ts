@@ -59,16 +59,13 @@ export interface Topic {
   score_detail?: Record<string, unknown>
 }
 
-export interface Plan {
-  id: number
-  source_post_id: number
-  recommendation_id?: number | null
-  kept_text: string
-  changes: string[]
-  target_metrics: string[]
-  status: string
-  published_post_id?: number | null
-  check_result: { items?: Array<{ metric: string; label: string; unit: string; before?: number; after?: number; result: string; reason: string }> }
+export interface NewTopic {
+  topic: string
+  reason: string
+  fit_reason: string
+  first_step: string
+  evidence?: Array<Record<string, unknown>>
+  target_metric?: string
 }
 
 export interface Charts {
@@ -79,7 +76,6 @@ export interface Charts {
   comment_questions: Array<{ group_title: string; commenter_count: number; likes: number; comments?: Array<{ id: number; text: string; likes: number }> }>
   follower_topics: Array<{ topic: string; follower_gain: number; follower_per_1k?: number; sample_count: number }>
   peer_comparisons: Array<{ post_id: number; title: string; plays: number; baseline: number; play_multiple: number; sample_count: number }>
-  plan: Array<{ metric: string; label: string; unit: string; before?: number; after?: number; result: string; reason?: string }>
 }
 
 export interface MetricAdvice {
@@ -108,8 +104,7 @@ export interface Review {
   advices: MetricAdvice[]
   follower_analysis: { strong_topics: Charts['follower_topics']; homepage: { bio?: string; direction_note?: string; pinned_post_ids?: number[]; needs_author_input?: boolean; message?: string } }
   recommendations: { primary?: Topic | null; backups: Topic[]; follow_ups: Topic[] }
-  new_topics: Array<{ topic: string; reason: string; fit_reason: string; first_step: string }>
-  improvement_plan?: Plan | null
+  new_topics: NewTopic[]
   charts: Charts
   warnings: string[]
   model_name?: string

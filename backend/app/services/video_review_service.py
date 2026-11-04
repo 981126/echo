@@ -9,7 +9,6 @@ from ..core.timeutil import now as _app_now
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostComment, PlatformPostStat
 from ..models.video import Video
 from ..models.video_review import (
-    VideoImprovementPlan,
     VideoReview,
     VideoReviewFinding,
     VideoTopicRecommendation,
@@ -415,7 +414,6 @@ def _topic_out(row: VideoTopicRecommendation) -> dict:
         "fit_reason": row.fit_reason, "evidence": loads(row.evidence, []), "outline": loads(row.outline, []),
         "opening_line": row.opening_line, "target_metric": row.target_metric, "follow_up_role": row.follow_up_role,
         "source_types": loads(row.source_types, []), "score": row.score, "score_detail": loads(row.score_detail, {}),
-        "adopted_at": row.adopted_at,
     }
 
 
@@ -427,7 +425,6 @@ _EMPTY_CHARTS: dict = {
     "comment_questions": [],
     "follower_topics": [],
     "peer_comparisons": [],
-    "plan": [],
 }
 
 
@@ -435,11 +432,10 @@ def review_out(db: Session, review: VideoReview) -> dict:
     post = db.get(PlatformPost, review.post_id)
     snapshot = loads(review.metrics_snapshot, {})
     topics = db.query(VideoTopicRecommendation).filter_by(review_id=review.id).order_by(VideoTopicRecommendation.id).all()
-    plan = db.query(VideoImprovementPlan).filter_by(review_id=review.id).order_by(VideoImprovementPlan.id.desc()).first()
     # 失败/历史复盘可能没有图表快照，也必须返回完整 charts 结构，避免前端 undefined.filter 崩溃
     charts = {**_EMPTY_CHARTS, **(snapshot.get("charts") or {})}
-    if plan:
-        charts["plan"] = loads(plan.check_result, {}).get("items", [])
+    # R-247：改进计划已删除，历史快照里可能残留 plan 键，读取侧统一去掉（不清理历史 JSON）
+    charts.pop("plan", None)
     return {
         "id": review.id,
         "status": review.status,
@@ -463,139 +459,12 @@ def review_out(db: Session, review: VideoReview) -> dict:
             "follow_ups": [_topic_out(x) for x in topics if x.role == "follow_up"],
         },
         "new_topics": loads(review.new_topics, []),
-        "improvement_plan": plan_out(plan) if plan else None,
         "charts": charts,
         "warnings": loads(review.warnings, []),
         "model_name": review.model_name,
         "created_at": review.created_at,
         "completed_at": review.completed_at,
     }
-
-
-def plan_out(plan: VideoImprovementPlan) -> dict:
-    return {
-        "id": plan.id, "review_id": plan.review_id, "source_post_id": plan.source_post_id,
-        "recommendation_id": plan.recommendation_id, "kept_text": plan.kept_text,
-        "changes": loads(plan.changes, []), "target_metrics": loads(plan.target_metrics, []),
-        "status": plan.status, "published_post_id": plan.published_post_id,
-        "check_result": loads(plan.check_result, {}), "checked_at": plan.checked_at,
-        "created_at": plan.created_at, "updated_at": plan.updated_at,
-    }
-
-
-def adopt_topic(db: Session, recommendation: VideoTopicRecommendation, payload: dict) -> VideoImprovementPlan:
-    changes = [str(x).strip() for x in payload.get("changes", []) if str(x).strip()]
-    targets = [str(x) for x in payload.get("target_metrics", []) if str(x)]
-    if not 1 <= len(changes) <= 2:
-        raise ValueError("请记录1～2项重点修改")
-    if not targets:
-        raise ValueError("请至少选择一个主要观察指标")
-    plan = db.query(VideoImprovementPlan).filter_by(recommendation_id=recommendation.id).first()
-    if plan is None:
-        review = db.get(VideoReview, recommendation.review_id)
-        if review is None:
-            raise LookupError("推荐所属复盘不存在")
-        plan = VideoImprovementPlan(review_id=recommendation.review_id, source_post_id=review.post_id, recommendation_id=recommendation.id)
-        db.add(plan)
-    plan.kept_text = str(payload.get("kept_text") or "")
-    plan.changes = dumps(changes)
-    plan.target_metrics = dumps(targets)
-    plan.status = "linked" if plan.published_post_id else "recorded"
-    plan.check_result = "{}"
-    recommendation.adopted_at = _app_now()
-    db.commit()
-    db.refresh(plan)
-    return plan
-
-
-def update_plan(db: Session, plan: VideoImprovementPlan, payload: dict) -> VideoImprovementPlan:
-    if not any(key in payload for key in ("kept_text", "changes", "target_metrics")):
-        raise ValueError("至少修改一项内容")
-    if "kept_text" in payload:
-        plan.kept_text = str(payload["kept_text"] or "")
-    if "changes" in payload:
-        changes = [str(x).strip() for x in payload["changes"] if str(x).strip()]
-        if not 1 <= len(changes) <= 2:
-            raise ValueError("请记录1～2项重点修改")
-        plan.changes = dumps(changes)
-    if "target_metrics" in payload:
-        if not payload["target_metrics"]:
-            raise ValueError("请至少选择一个主要观察指标")
-        plan.target_metrics = dumps(payload["target_metrics"])
-    plan.status = "linked" if plan.published_post_id else "recorded"
-    plan.check_result = "{}"
-    db.commit()
-    return plan
-
-
-def link_plan(db: Session, plan: VideoImprovementPlan, published: PlatformPost, replace: bool) -> VideoImprovementPlan:
-    source = db.get(PlatformPost, plan.source_post_id)
-    if source is None or published.account_id != source.account_id:
-        raise ValueError("只能关联同一抖音账号的视频")
-    if published.publish_time and published.publish_time < plan.created_at:
-        raise ValueError("新视频发布时间早于修改计划，请确认是否选错")
-    if plan.published_post_id and plan.published_post_id != published.id and not replace:
-        raise RuntimeError("已关联另一条视频，确认替换后才能继续")
-    plan.published_post_id = published.id
-    plan.status = "linked"
-    plan.check_result = "{}"
-    db.commit()
-    return plan
-
-
-def run_plan_check(db: Session, payload: dict, update) -> dict:
-    plan = db.get(VideoImprovementPlan, int(payload["plan_id"]))
-    if plan is None or not plan.published_post_id:
-        raise ValueError("请先关联已发布视频")
-    published = db.get(PlatformPost, plan.published_post_id)
-    if published is None:
-        raise LookupError("关联的新视频不存在")
-    account = db.get(CreatorAccount, published.account_id)
-    if account is None:
-        raise LookupError("新视频账号不存在")
-    update(25, "更新新视频数据")
-    if payload.get("refresh"):
-        refresh_post_by_policy(db, account, published)
-    update(60, "比较修改前后数据")
-    before_review = db.get(VideoReview, plan.review_id)
-    if before_review is None:
-        raise LookupError("原复盘不存在")
-    before = loads(before_review.metrics_snapshot, {}).get("facts", {})
-    after = build_comparison(db, published)["facts"]
-    items = []
-    for key in loads(plan.target_metrics, []):
-        old = before.get(key, {})
-        new = after.get(key, {})
-        result = "uncertain"
-        reason = "缺少可比较数据"
-        if old.get("value") is not None and new.get("value") is not None:
-            av, bv = float(old["value"]), float(new["value"])
-            if old.get("unit") == "ratio":
-                difference = bv - av
-                if abs(difference) >= 0.03:
-                    result = "improved" if difference > 0 else "not_improved"
-                    reason = f"变化{difference * 100:+.1f}个百分点"
-                else:
-                    reason = "变化小于3个百分点"
-            elif av == 0:
-                result = "improved" if bv > 0 else "uncertain"
-                reason = f"从0变为{bv:g}"
-            else:
-                difference = (bv - av) / abs(av)
-                if abs(difference) >= 0.2:
-                    result = "improved" if difference > 0 else "not_improved"
-                    reason = f"变化{difference * 100:+.1f}%"
-                else:
-                    reason = "变化小于20%"
-            if key == "bounce_2s_rate" and result != "uncertain":
-                result = "improved" if result == "not_improved" else "not_improved"
-        items.append({"metric": key, "label": new.get("label") or old.get("label") or key, "unit": new.get("unit") or old.get("unit"), "before": old.get("value"), "after": new.get("value"), "result": result, "reason": reason})
-    plan.check_result = dumps({"status": "checked", "items": items, "comparison_days": after.get("plays", {}).get("sample_count")})
-    plan.status = "checked"
-    plan.checked_at = _app_now()
-    db.commit()
-    update(100, "检查完成")
-    return {"plan_id": plan.id, "items": items}
 
 
 def refresh_reference_worker(db: Session, payload: dict, update) -> dict:

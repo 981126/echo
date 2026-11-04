@@ -388,7 +388,6 @@ def _charts(stat: PlatformPostStat | None, private: DouyinPostMetric | None, met
         "comment_questions": [],
         "follower_topics": [],
         "peer_comparisons": [],
-        "plan": [],
     }
 
 

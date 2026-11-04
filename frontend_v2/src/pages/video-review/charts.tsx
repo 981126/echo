@@ -127,14 +127,3 @@ export function SimpleBars({ title, conclusion, items, unit = '次' }: { title: 
     </ChartFrame>
   )
 }
-
-export function PlanComparisonCharts({ items }: { items: Charts['plan'] }) {
-  return (
-    <ChartFrame title="上次修改以后，数据有没有改善？" conclusion="每项指标独立比较，不把不同单位放在同一坐标轴。" headers={['指标', '修改前', '修改后', '结果']} rows={items.map((x) => [x.label, formatMetric(x.before, x.unit), formatMetric(x.after, x.unit), x.result === 'improved' ? '改善' : x.result === 'not_improved' ? '未改善' : '暂时不能确定'])}>
-      <div className="grid gap-3 md:grid-cols-2">{items.map((item) => {
-        const before = item.before ?? 0, after = item.after ?? 0, max = Math.max(before, after, 0.001)
-        return <div key={item.metric} className="rounded-lg border border-border p-3"><div className="flex justify-between text-xs"><span>{item.label}</span><span className={cn(item.result === 'improved' ? 'text-emerald-600' : 'text-amber-600')}>{item.result === 'improved' ? '改善' : item.result === 'not_improved' ? '未改善' : '暂时不能确定'}</span></div><div className="mt-3 space-y-2"><div className="h-2 rounded bg-muted"><div style={{ width: `${before / max * 100}%` }} className="h-2 rounded bg-zinc-300 dark:bg-zinc-600" /></div><div className="h-2 rounded bg-muted"><div style={{ width: `${after / max * 100}%` }} className="h-2 rounded bg-indigo-500" /></div></div><div className="tnum mt-2 text-xs text-muted-foreground">{formatMetric(item.before, item.unit)} → {formatMetric(item.after, item.unit)}</div></div>
-      })}</div>
-    </ChartFrame>
-  )
-}

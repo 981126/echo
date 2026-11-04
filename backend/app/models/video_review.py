@@ -146,23 +146,4 @@ class VideoTopicRecommendation(Base):
     source_types: Mapped[str] = mapped_column(Text, default="[]")
     score: Mapped[float] = mapped_column(Float, default=0)
     score_detail: Mapped[str] = mapped_column(Text, default="{}")
-    adopted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
-
-
-class VideoImprovementPlan(Base):
-    __tablename__ = "video_improvement_plans"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    review_id: Mapped[int] = mapped_column(ForeignKey("video_reviews.id"), index=True)
-    source_post_id: Mapped[int] = mapped_column(ForeignKey("platform_posts.id"), index=True)
-    recommendation_id: Mapped[int | None] = mapped_column(ForeignKey("video_topic_recommendations.id"), nullable=True)
-    kept_text: Mapped[str] = mapped_column(Text, default="")
-    changes: Mapped[str] = mapped_column(Text, default="[]")
-    target_metrics: Mapped[str] = mapped_column(Text, default="[]")
-    status: Mapped[str] = mapped_column(String(20), default="recorded")
-    published_post_id: Mapped[int | None] = mapped_column(ForeignKey("platform_posts.id"), nullable=True, index=True)
-    check_result: Mapped[str] = mapped_column(Text, default="{}")
-    checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now, onupdate=_app_now)

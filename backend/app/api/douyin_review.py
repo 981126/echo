@@ -7,15 +7,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models.platform import CreatorAccount, PlatformPost
-from ..models.video_review import VideoImprovementPlan, VideoReview, VideoTopicRecommendation
+from ..models.platform import PlatformPost
+from ..models.video_review import VideoReview
 from ..schemas.douyin_review import (
     AnalyzeIn,
     HomepageIn,
-    PlanCheckIn,
-    PlanIn,
-    PlanLinkIn,
-    PlanPatchIn,
     ReferenceRefreshIn,
 )
 from ..services import video_review_service as service
@@ -170,77 +166,6 @@ def refresh_references(payload: ReferenceRefreshIn, db: Session = Depends(get_db
     return JSONResponse(status_code=202, content={"task_id": task_id, "reused": reused})
 
 
-@router.post("/recommendations/{recommendation_id}/adopt", response_model=dict)
-def adopt(recommendation_id: int, payload: PlanIn, db: Session = Depends(get_db)):
-    def run():
-        recommendation = db.get(VideoTopicRecommendation, recommendation_id)
-        if recommendation is None:
-            raise LookupError("主题推荐不存在")
-        review = db.get(VideoReview, recommendation.review_id)
-        service.own_post(db, service.current_owner(db), review.post_id)
-        plan = service.adopt_topic(db, recommendation, payload.model_dump())
-        return {"plan_id": plan.id, "recommendation_id": recommendation.id, "status": plan.status, "adopted_at": recommendation.adopted_at}
-
-    return _call(run)
-
-
-@router.patch("/plans/{plan_id}", response_model=dict)
-def patch_plan(plan_id: int, payload: PlanPatchIn, db: Session = Depends(get_db)):
-    def run():
-        plan = _plan(db, plan_id)
-        clean = {key: value for key, value in payload.model_dump().items() if value is not None}
-        return service.plan_out(service.update_plan(db, plan, clean))
-
-    return _call(run)
-
-
-@router.post("/plans/{plan_id}/link", response_model=dict)
-def link_plan(plan_id: int, payload: PlanLinkIn, db: Session = Depends(get_db)):
-    def run():
-        plan = _plan(db, plan_id)
-        published = db.get(PlatformPost, payload.published_post_id)
-        if published is None:
-            raise LookupError("新发布视频不存在")
-        service.own_post(db, service.current_owner(db), published.id)
-        plan = service.link_plan(db, plan, published, payload.replace)
-        return {"plan_id": plan.id, "status": plan.status, "published_post_id": plan.published_post_id}
-
-    return _call(run)
-
-
-@router.post("/plans/{plan_id}/check", response_model=dict)
-def check_plan(plan_id: int, payload: PlanCheckIn, db: Session = Depends(get_db)):
-    plan = _plan(db, plan_id)
-    if not plan.published_post_id:
-        raise HTTPException(status_code=409, detail="请先关联已发布视频")
-    task_id = find_running_task("douyin_review_plan_check", {"plan_id": plan.id})
-    if not task_id:
-        task_id = start_task(
-            "douyin_review_plan_check",
-            {"plan_id": plan.id, "refresh": payload.refresh},
-            service.run_plan_check,
-        )
-    return JSONResponse(status_code=202, content={"task_id": task_id})
-
-
-@router.get("/plans", response_model=dict)
-def plans(post_id: int | None = None, limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)):
-    try:
-        owner = service.current_owner(db)
-    except ValueError:
-        # R-242：无当前主博主（新环境/空库）时返回空列表，不再 500；有主博主行为不变
-        return {"items": []}
-    query = db.query(VideoImprovementPlan).join(VideoReview, VideoImprovementPlan.review_id == VideoReview.id)
-    if post_id:
-        service.own_post(db, owner, post_id)
-        query = query.filter(VideoImprovementPlan.source_post_id == post_id)
-    else:
-        account_ids = [x.id for x in db.query(CreatorAccount).filter_by(creator_id=owner.id, platform="douyin").all()]
-        query = query.filter(VideoReview.account_id.in_(account_ids or [0]))
-    rows = query.order_by(VideoImprovementPlan.id.desc()).limit(limit).all()
-    return {"items": [service.plan_out(x) for x in rows]}
-
-
 @router.put("/homepage", response_model=dict)
 def homepage(payload: HomepageIn, db: Session = Depends(get_db)):
     account = service.own_account(db, service.current_owner(db), payload.account_id)
@@ -257,11 +182,3 @@ def homepage(payload: HomepageIn, db: Session = Depends(get_db)):
     account.extra_config = json.dumps(extra, ensure_ascii=False)
     db.commit()
     return {**extra["review_homepage"], "account_id": account.id, "source": "author", "updated_at": account.last_sync_at}
-
-
-def _plan(db: Session, plan_id: int) -> VideoImprovementPlan:
-    plan = db.get(VideoImprovementPlan, plan_id)
-    if plan is None:
-        raise LookupError("修改计划不存在")
-    service.own_post(db, service.current_owner(db), plan.source_post_id)
-    return plan

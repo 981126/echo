@@ -2,7 +2,7 @@
 
 - **对应需求**: `requirements/R-247-video-review-adopt-draft.md`
 - **日期**: 2026-11-04
-- **状态**: 📝 设计已登记（等作者第二次「继续」后开发）
+- **状态**: ✅ 已按本文实现（2026-11-04，verify 全绿 + 迁移 + 浏览器点检）
 - **前置**: R-237（视频复盘/主题推荐/改进计划）、R-245（按指标优化建议）、R-244/R-172/R-174（封面缩略与 4:3 卡片口径）、R-173/R-202（草稿 AI 进行中状态与切页恢复）、R-158（脚本工作台）、R-236（Alembic 迁移机制）
 - **原则**: 前端只改视频复盘页相关文件；后端只删除「改进计划」及其表/接口；草稿生成复用现有链路，不加接口；不改复盘分析/主题推荐/指标建议算法；`scripts/verify.sh` 全绿；服务保持运行。
 
@@ -292,7 +292,7 @@ async function adoptTopic(topic: <上面三种之一>, key: string) {
 | `pages/video-review/types.ts` | `Plan` 接口、`Charts.plan` 字段、`Review.improvement_plan` 字段；`new_topics` 改用 `NewTopic[]` |
 | `pages/video-review/charts.tsx` | `PlanComparisonCharts` 组件（第 131～140 行）；检查 `cn`/`formatMetric` 仍有其它使用（保留） |
 | `pages/video-review/index.tsx` | `PlanComparisonCharts` import、`planItems`、5.1 中列出的状态/函数/JSX |
-| `api/schema.d.ts` | 后端重启后 `npm run gen:api` 重新生成（删除 adopt/plans 路由与 Plan schema 类型） |
+| `api/schema.d.ts` | 后端重启后 `npm run gen:api` 重新生成；本次按「只删除 adopt/plans/Plan* 块」收敛（不引入此前的生成漂移），diff 为纯删除 |
 
 ### 5.6 后端：删除改进计划功能（作者确认删除）
 
@@ -310,7 +310,7 @@ async function adoptTopic(topic: <上面三种之一>, key: string) {
 **5.6.3 `backend/app/services/video_review_service.py`**
 
 - import：删除 `VideoImprovementPlan`；
-- `review_out()`：删除 `plan = db.query(...)` 查询、`"improvement_plan"` 响应字段、`charts["plan"] = ...` 覆盖；
+- `review_out()`：删除 `plan = db.query(...)` 查询、`"improvement_plan"` 响应字段、`charts["plan"] = ...` 覆盖；合并历史快照后 `charts.pop("plan", None)`——旧 `metrics_snapshot` 里可能残留 `plan` 键，读取侧统一去掉（不清理历史 JSON）；
 - `_EMPTY_CHARTS`：删除 `"plan": []`；
 - `_topic_out()`：删除 `"adopted_at"` 输出；
 - 删除函数：`plan_out()`、`adopt_topic()`、`update_plan()`、`link_plan()`、`run_plan_check()`；
@@ -476,15 +476,22 @@ async function adoptTopic(topic: <上面三种之一>, key: string) {
 - **更新时机**：复盘主题随分析更新；参考视频随页面打开/点更新；草稿随点击生成；
 - **空值口径**：所有缺失显示占位/隐藏，不编造封面、不显示 0 充数。
 
-## 9. 验证与实施记录（开发完成后补充）
+## 9. 验证与实施记录（2026-11-04）
 
 | 检查项 | 方法 | 结果 |
 |---|---|---|
-| 后端单测/静态检查 | `pytest -q`、ruff、mypy | 待实施 |
-| 迁移往返 | `alembic upgrade head` / `downgrade -1` / `upgrade head`；查 information_schema | 待实施 |
-| OpenAPI 路由 | `curl /openapi.json` 无 plans/adopt | 待实施 |
-| 前端静态检查 | lint / vitest / build | 待实施 |
-| 页面布局 | Playwright 截图 + `getBoundingClientRect` 同排断言 | 待实施 |
-| 参考视频封面 | 同行/低粉 tab 截图 + 坏图占位断言 | 待实施 |
-| 采用流程 | 点击→生成中→跳转→抽屉进行中；切页恢复 | 待实施 |
-| 门禁 | `scripts/verify.sh` 全绿 | 待实施 |
+| 后端单测/静态检查 | ruff + mypy + `pytest -q` | ✅ All checks passed / 155 files / **751 passed** |
+| 迁移 | 重启后端自动 `upgrade head`；临时 PG 库 `upgrade → downgrade -1 → upgrade` 往返 | ✅ head=`r247dropimprove`；表/列已删；downgrade 可恢复表+列+2 索引 |
+| OpenAPI 路由 | `GET /openapi.json` | ✅ 无 plans/adopt；douyin-review 仅剩 7 个路由 |
+| 响应契约 | 真实 `latest-review` 1952 | ✅ 无 `improvement_plan` / `charts.plan` / `adopted_at` |
+| 前端静态检查 | lint / vitest / build | ✅ 0 error（9 个既有 warning）/ **158 passed** / build 成功 |
+| 页面布局 | Playwright 1440/900 视口 + `getBoundingClientRect` | ✅ 首选/备选 top 均为 750、width 544 两列；900 视口堆叠；两板块文案不存在；0 console error |
+| 参考视频封面 | 同行/低粉 tab 截图 + img 加载断言 | ✅ 同行 4/4、低粉 16/20 加载；4 张签名 URL 过期按设计显示 ECHO 占位 |
+| 采用流程 | Playwright 拦截延迟观察 loading → 真实生成 | ✅ 6 个采用按钮；点击后全禁用 + 1 个「生成中…」；跳 `/drafts?id=145` 并自动打开抽屉显示「双模型讨论进行中」；切页回来仍在进行中；验证草稿已逻辑删除 |
+| 数据清理 | 迁移前 `SELECT count(*)` | ✅ 0 条例计划 / 0 条 adopted_at，删除无数据损失 |
+| 门禁 | `scripts/verify.sh` | ✅ 全绿（37 张表 / 需求与设计成对） |
+
+实现偏差说明：
+1. `schema.d.ts` 用「只删除 adopt/plans/Plan* 块」的方式收敛（该文件上次生成后已落后于后端，全量重生成会带入 sync-batch/transcribe 等无关路由漂移），diff 为纯删除 316 行；
+2. 旧 `metrics_snapshot` 可能残留 `charts.plan` 键，在 `review_out` 合并后 `charts.pop("plan", None)` 统一过滤，不清理历史 JSON；
+3. `backend/tests/test_migrations.py` 两处 head 断言随迁移同步（r244dashboard→r247dropimprove），否则 pytest 必红。

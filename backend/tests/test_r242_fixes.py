@@ -3,8 +3,7 @@
 覆盖：
 1. transcripts.video_id 唯一（迁移后索引唯一、重复插入被拒、ASR 落稿重复调用只更新一行）；
 2. 批量同步单条详情失败不丢同批其它作品（作品仍入库、统计缺失、不 rollback）；
-3. 无主博主时 GET /api/douyin-review/plans 返回空列表而非 500；
-4. 抖音创作者同步 `_charge_requests` N 次请求合并为 1 次计费事务。
+3. 抖音创作者同步 `_charge_requests` N 次请求合并为 1 次计费事务。
 """
 
 from __future__ import annotations
@@ -183,21 +182,7 @@ def test_ensure_post_single_failure_still_saves_post() -> None:
         s.close()
 
 
-# ---------- 3) 无主博主 plans 返回空列表 ----------
-
-
-def test_plans_without_creator_returns_empty_list() -> None:
-    from app.api.douyin_review import plans
-
-    _eng, S = _session_factory()
-    s = S()
-    try:
-        assert plans(post_id=None, limit=20, db=s) == {"items": []}
-    finally:
-        s.close()
-
-
-# ---------- 4) 预算计费合并为单次事务 ----------
+# ---------- 3) 预算计费合并为单次事务 ----------
 
 
 def test_charge_requests_merges_into_single_charge(monkeypatch) -> None:

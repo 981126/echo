@@ -29,7 +29,6 @@ from .video_review import (
     DouyinCreatorCredential,
     DouyinPostMetric,
     DouyinReferenceVideo,
-    VideoImprovementPlan,
     VideoReview,
     VideoReviewFinding,
     VideoTopicRecommendation,
@@ -74,5 +73,4 @@ __all__ = [
     "VideoReview",
     "VideoReviewFinding",
     "VideoTopicRecommendation",
-    "VideoImprovementPlan",
 ]
