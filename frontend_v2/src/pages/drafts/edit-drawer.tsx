@@ -71,7 +71,7 @@ export function ModelChip({ label, tone }: { label: string; tone: 'gen' | 'criti
     <span
       data-testid={`model-chip-${tone}`}
       className={cn(
-        'rounded px-1 py-0.5 text-[10px] font-medium',
+        'rounded px-1 py-0.5 text-xs md:text-[10px] font-medium',
         tone === 'gen' ? 'bg-accent-soft text-accent' : 'bg-muted text-foreground'
       )}
     >
@@ -707,7 +707,7 @@ export function DraftEditDrawer({
       <DrawerHeader>
         <DrawerTitle>{id ? `草稿 #${id}` : '新建草稿'}</DrawerTitle>
         {sourceRef?.source_title && (
-          <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+          <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
             来源素材：
             {sourceRef.post_id ? (
               <a href={`#/videos?post=${sourceRef.post_id}`} className="text-accent hover:underline">
@@ -738,13 +738,13 @@ export function DraftEditDrawer({
                 发现一份<b>没同步到服务器</b>的本地内容
                 {fmtTime(localCopy.at) ? `（${fmtTime(localCopy.at)} 暂存）` : ''}，要恢复到编辑器吗？
               </span>
-              <Button size="sm" className="h-6 px-2 text-[11px]" onClick={restoreLocalCopy}>恢复</Button>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={dropLocalCopy}>丢弃</Button>
+              <Button size="sm" className="h-11 px-2 text-xs md:h-6 md:text-[11px]" onClick={restoreLocalCopy}>恢复</Button>
+              <Button variant="ghost" size="sm" className="h-11 px-2 text-xs md:h-6 md:text-[11px]" onClick={dropLocalCopy}>丢弃</Button>
             </motion.div>
           )}
         </AnimatePresence>
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">标题</label>
               <CreatableSelect
@@ -764,7 +764,7 @@ export function DraftEditDrawer({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">关联素材视频（可选）</label>
               <Select
@@ -785,6 +785,7 @@ export function DraftEditDrawer({
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">素材标签</label>
               <CreatableMultiSelect
+                className="w-full"
                 options={tagOptions}
                 value={state.tagsText.split(/[,，]/).map((x) => x.trim()).filter(Boolean)}
                 onChange={(v) => setState({ ...state, tagsText: v.join(', ') })}
@@ -793,7 +794,7 @@ export function DraftEditDrawer({
             </div>
           </div>
           {/* R-184 发布回填：记录发布链接/平台/时间，关联素材后可看表现 */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">发布平台（可选）</label>
               <Select value={state.publish_platform || 'none'} onValueChange={(v) => setState({ ...state, publish_platform: v === 'none' ? '' : v })}>
@@ -828,7 +829,7 @@ export function DraftEditDrawer({
 
           {/* 编辑 */}
           <TabsContent value="edit" className="space-y-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <label className="text-xs font-medium text-muted-foreground">口播脚本（Markdown，可插图）</label>
               <span className="flex-1" />
               {/* R-224：AI 生成标题/封面字/素材标签 */}
@@ -911,7 +912,7 @@ export function DraftEditDrawer({
                         {debate?.note || 'AI 处理中…'}
                       </div>
                       {!!(debate?.round && debate?.rounds) && (
-                        <div className="tnum mt-1 text-[11px] text-muted-foreground/80">
+                        <div className="tnum mt-1 text-xs md:text-[11px] text-muted-foreground/80">
                           第 {debate.round}/{debate.rounds} 轮
                         </div>
                       )}
@@ -927,7 +928,7 @@ export function DraftEditDrawer({
                 animate={{ opacity: 1, y: 0 }}
                 className="rounded-lg border border-border p-3"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Stethoscope className="h-4 w-4 text-accent" />
                   <span className="text-xs font-medium">脚本体检</span>
                   {checkInfo.ok ? <Badge variant="success">通过</Badge> : <Badge variant="warning">建议回炉</Badge>}
@@ -989,7 +990,7 @@ export function DraftEditDrawer({
                     initial={{ opacity: 0.85, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={softIn}
-                    className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-2 text-[11px]"
+                    className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-2 text-xs md:text-[11px]"
                   >
                     <Cpu className="h-3.5 w-3.5 shrink-0 text-accent" />
                     <span className="text-muted-foreground">本次讨论：</span>
@@ -1007,13 +1008,13 @@ export function DraftEditDrawer({
                 {/* R-207：生成自检（红线=硬问题；口癖/高频词覆盖率/AI 腔词=只诊断、不触发重写） */}
                 {!!draft?.quality?.diagnostics && (
                   <div className="rounded-lg border border-border p-2.5">
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs md:text-[11px]">
                       <Stethoscope className="h-3.5 w-3.5 shrink-0 text-accent" />
                       <span className="font-medium">生成自检</span>
                       {draft.quality.passed === false ? (
-                        <Badge variant="destructive" className="text-[10px]">踩红线</Badge>
+                        <Badge variant="destructive" className="text-xs md:text-[10px]">踩红线</Badge>
                       ) : (
-                        <Badge variant="success" className="text-[10px]">无红线</Badge>
+                        <Badge variant="success" className="text-xs md:text-[10px]">无红线</Badge>
                       )}
                       <span className="tnum text-muted-foreground">
                         像作者 {Math.round((draft.quality.diagnostics.style_coverage ?? 0) * 100)}%
@@ -1021,7 +1022,7 @@ export function DraftEditDrawer({
                       <span className="text-muted-foreground/70">（口癖/高频词覆盖率仅诊断，不作为重写依据）</span>
                     </div>
                     {!!draft.quality.issues?.length && (
-                      <ul className="mt-1 list-inside list-disc text-[11px] text-destructive">
+                      <ul className="mt-1 list-inside list-disc text-xs md:text-[11px] text-destructive">
                         {draft.quality.issues.map((iss, i) => (
                           <li key={i}>{iss}</li>
                         ))}
@@ -1030,15 +1031,15 @@ export function DraftEditDrawer({
                     {!!(draft.quality.diagnostics.style_matched?.length || draft.quality.diagnostics.style_missing?.length) && (
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         {(draft.quality.diagnostics.style_matched || []).map((w) => (
-                          <Badge key={w} variant="success" className="text-[10px]">{w}</Badge>
+                          <Badge key={w} variant="success" className="text-xs md:text-[10px]">{w}</Badge>
                         ))}
                         {(draft.quality.diagnostics.style_missing || []).map((w) => (
-                          <span key={w} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{w}</span>
+                          <span key={w} className="rounded-full bg-muted px-1.5 py-0.5 text-xs md:text-[10px] text-muted-foreground">{w}</span>
                         ))}
                       </div>
                     )}
                     {!!draft.quality.diagnostics.ai_cliche?.length && (
-                      <p className="mt-1 text-[11px] text-warning">
+                      <p className="mt-1 text-xs md:text-[11px] text-warning">
                         AI 腔词：{draft.quality.diagnostics.ai_cliche.join('、')}
                       </p>
                     )}
@@ -1081,7 +1082,7 @@ export function DraftEditDrawer({
                                   animate={{ opacity: 1 }}
                                   transition={softIn}
                                   className={cn(
-                                    'rounded px-1 py-0.5 text-[10px]',
+                                    'rounded px-1 py-0.5 text-xs md:text-[10px]',
                                     m.model_label ? 'bg-accent-soft text-accent' : 'bg-muted text-muted-foreground'
                                   )}
                                   title={m.model_id ? `${m.vendor}/${m.model_id}` : '这条留痕产生时还没有记录模型版本'}
@@ -1117,7 +1118,7 @@ export function DraftEditDrawer({
                           exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }}
                           transition={softIn}
                           onClick={() => scrollToBottom()}
-                          className="pointer-events-auto cursor-pointer rounded-full border border-accent/40 bg-card px-3 py-1 text-[11px] font-medium text-accent shadow-[var(--shadow-card)]"
+                          className="pointer-events-auto cursor-pointer rounded-full border border-accent/40 bg-card px-3 py-1 text-xs md:text-[11px] font-medium text-accent shadow-[var(--shadow-card)]"
                         >
                           {pendingNew} 条新留痕 ↓
                         </motion.button>
@@ -1198,11 +1199,11 @@ export function DraftEditDrawer({
                         {ver.note && <span className="ml-1 text-xs text-muted-foreground">· {ver.note}</span>}
                       </span>
                       <span className="text-xs text-muted-foreground">{fmtDate(ver.created_at)}</span>
-                      <Button variant="outline" size="sm" className="h-7 text-xs" disabled={rollingBack === ver.id} onClick={() => rollback(ver)}>
+                      <Button variant="outline" size="sm" className="h-11 text-xs md:h-7" disabled={rollingBack === ver.id} onClick={() => rollback(ver)}>
                         {rollingBack === ver.id ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
                         回滚到此版本
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setViewVer(ver)}>查看</Button>
+                      <Button variant="ghost" size="sm" className="h-11 text-xs md:h-7" onClick={() => setViewVer(ver)}>查看</Button>
                     </motion.li>
                   ))}
                 </AnimatePresence>
@@ -1223,6 +1224,7 @@ export function DraftEditDrawer({
         </Button>
         <span className="flex-1" />
         {/* R-212/R-224：新建与已有草稿的改动都会自动落库，这里常驻「保存中 / 已自动保存 HH:MM」状态位（R-202：进行中必须可见） */}
+        {/* R-218：<md 时状态位用 order-last 独占第二行（保存/定稿/关闭仍在第一行可见） */}
         <motion.span
           key={autoStatus}
           data-testid="draft-autosave"
@@ -1231,7 +1233,7 @@ export function DraftEditDrawer({
           animate={{ opacity: 1, y: 0 }}
           transition={softIn}
           className={cn(
-            'flex items-center gap-1 text-[11px]',
+            'flex items-center gap-1 text-xs md:text-[11px] max-md:order-last max-md:w-full max-md:pt-1',
             autoStatus === 'error' ? 'text-warning' : 'text-muted-foreground'
           )}
         >

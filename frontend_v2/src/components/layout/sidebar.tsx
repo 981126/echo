@@ -1,37 +1,10 @@
 import { NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import {
-  LayoutDashboard,
-  ChartNoAxesCombined,
-  BarChart3,
-  Clapperboard,
-  PenLine,
-  Target,
-  Users,
-  Fingerprint,
-  Settings2,
-  MessageSquare,
-  NotebookPen,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Waves
-} from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, Waves } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { SIDEBAR_NAV as NAV } from '@/lib/nav'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
-const NAV = [
-  { to: '/home', label: '主页', icon: LayoutDashboard },
-  { to: '/videos', label: '素材库', icon: Clapperboard },
-  { to: '/dashboard', label: '数据看板', icon: ChartNoAxesCombined },
-  { to: '/video-review', label: '视频复盘', icon: BarChart3 },
-  { to: '/drafts', label: '脚本工作台', icon: PenLine },
-  { to: '/inspiration', label: '灵感随手记', icon: NotebookPen },
-  { to: '/benchmark', label: '博主对标', icon: Target },
-  { to: '/creators', label: '博主管理', icon: Users },
-  { to: '/persona', label: '人设档案', icon: Fingerprint },
-  { to: '/prompts', label: 'AI 设置', icon: Settings2 },
-  { to: '/chat', label: 'AI 对话', icon: MessageSquare }
-]
 
 export function Sidebar({
   collapsed,

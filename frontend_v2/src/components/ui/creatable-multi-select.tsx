@@ -65,7 +65,7 @@ export function CreatableMultiSelect({
         <button
           type="button"
           className={cn(
-            'flex min-h-9 min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-3 py-1.5 text-sm outline-none transition-shadow focus-within:ring-2 focus-within:ring-[var(--ring)] cursor-pointer',
+            'flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-3 py-1.5 text-sm outline-none transition-shadow focus-within:ring-2 focus-within:ring-[var(--ring)] md:min-h-9 cursor-pointer',
             className
           )}
         >
@@ -105,7 +105,7 @@ export function CreatableMultiSelect({
         <Popover.Content
           align="start"
           sideOffset={6}
-          className="z-50 w-56 rounded-lg border border-border bg-card p-1 shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+          className="z-50 w-56 max-w-[92vw] rounded-lg border border-border bg-card p-1 shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
         >
           <div className="px-2 pb-1 pt-1">
             <input

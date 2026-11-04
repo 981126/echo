@@ -88,10 +88,10 @@ function KpiCardView({
       )}
     >
       {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
-      <div className={cn('text-[10px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
+      <div className={cn('text-xs md:text-[10px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
       <div className="tnum mt-0.5 text-lg font-semibold leading-6 tracking-tight">{valueText}</div>
       <div
-        className={cn('mt-0.5 min-h-3.5 text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}
+        className={cn('mt-0.5 min-h-3.5 text-xs md:text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}
         title={deltaText ? `较前 ${days} 日对比：${deltaText}` : undefined}
       >
         {deltaText}
@@ -162,7 +162,7 @@ function AccountOverview({
           <div className="flex items-center gap-1.5">
             <span>统计周期</span>
             <Select value={String(periodDays)} onValueChange={(value) => onPeriodChange(Number(value) as PeriodDays)}>
-              <SelectTrigger className="h-8 w-[104px] text-xs" aria-label="统计周期">
+              <SelectTrigger className="h-11 w-[104px] text-xs md:h-8" aria-label="统计周期">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -197,7 +197,7 @@ function AccountOverview({
           {/* 左：曲线 */}
           <div className="min-w-0">
             <div className="flex flex-wrap items-baseline justify-end gap-2">
-              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5 text-xs md:text-[11px] text-muted-foreground">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
                 {chartLabel}
               </span>
@@ -249,7 +249,7 @@ function WarningBars({ data, onGoCreators }: { data: DashboardOverview; onGoCrea
     <div className="space-y-2">
       {blocked ? (
         <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-[rgba(239,68,68,0.08)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="flex items-start gap-1.5 text-[11px] leading-5 text-destructive">
+          <p className="flex items-start gap-1.5 text-xs md:text-[11px] leading-5 text-destructive">
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>抖音创作者 Cookie 已失效（{policyReason || '接口拒绝访问'}），请重新保存；当前展示上次成功获取的数据。</span>
           </p>
@@ -257,7 +257,7 @@ function WarningBars({ data, onGoCreators }: { data: DashboardOverview; onGoCrea
         </div>
       ) : !data.private_available ? (
         <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="flex items-start gap-1.5 text-[11px] leading-5 text-warning">
+          <p className="flex items-start gap-1.5 text-xs md:text-[11px] leading-5 text-warning">
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>未启用创作者数据{policyReason ? `（${policyReason}）` : ''}，只能查看公开作品数据；观众画像 / 流量来源等私有指标不可用。</span>
           </p>
@@ -265,7 +265,7 @@ function WarningBars({ data, onGoCreators }: { data: DashboardOverview; onGoCrea
         </div>
       ) : null}
       {warnings.map((warning) => (
-        <p key={warning} className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 text-[11px] leading-5 text-warning">
+        <p key={warning} className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 text-xs md:text-[11px] leading-5 text-warning">
           <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {warning}
         </p>
@@ -577,7 +577,7 @@ export default function DashboardPage() {
       <WarningBars data={data} onGoCreators={() => navigate('/creators')} />
       {overviewError ? (
         <motion.div variants={itemVariants} className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="flex items-start gap-1.5 text-[11px] leading-5 text-warning">
+          <p className="flex items-start gap-1.5 text-xs md:text-[11px] leading-5 text-warning">
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             刷新失败：{overviewError}（当前展示上一次成功的数据）
           </p>

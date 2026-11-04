@@ -126,7 +126,7 @@ export function CloudDrawer({
               <Textarea rows={7} value={text} onChange={(e) => setText(e.target.value)} placeholder="粘贴/输入文稿，保存后进入素材库" />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="flex items-center gap-2 pt-5">
                 <Checkbox checked={isAd} onCheckedChange={(v) => setIsAd(!!v)} />
                 <span className="text-xs">商务广告（不参与人设学习）</span>

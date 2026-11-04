@@ -248,3 +248,76 @@ body {
   text-decoration: line-through;
   border-radius: 3px;
 }
+
+/* ============================================================
+   R-218 移动端基座（2026-11-05，作者三原则：流畅 / 动画保留 / 使用逻辑）
+   ============================================================ */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 触屏没有 hover：给所有可点区域明确的按下反馈（桌面 hover 动效保持不动） */
+.pressable {
+  transition: transform 150ms ease;
+}
+.pressable:active {
+  transform: scale(0.98);
+}
+
+/* reduce 用户：全局收敛动画（仅这一种情况允许减弱，其余一律保留） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .pressable,
+  .pressable:active {
+    transition: none;
+    transform: none;
+  }
+}
+
+@media (max-width: 767px) {
+  /* 触控目标 ≥44px（移动端基线）；switch/checkbox 的视觉本体保持原尺寸，由整行热区保证 */
+  button:not([role='switch']):not([role='checkbox']),
+  [role='button']:not([role='switch']):not([role='checkbox']),
+  [role='combobox'],
+  [role='menuitem'],
+  [role='option'],
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+  /* 纯图标按钮热区补宽 */
+  button:has(> svg:only-child) {
+    min-width: 44px;
+  }
+  /* 图表 SVG 内文字移动端 ≥12px（font-size 属性优先级低于 CSS） */
+  svg text {
+    font-size: 12px;
+  }
+  /* 编辑器密集工具栏例外：不强制 44px，避免撑坏工具条 */
+  .ProseMirror button,
+  .script-editor-content button {
+    min-height: 36px;
+    min-width: 36px;
+  }
+  /* 移动端去掉毛玻璃（保流畅；桌面 md+ 保留原效果） */
+  .backdrop-blur,
+  .backdrop-blur-sm,
+  .backdrop-blur-md,
+  .backdrop-blur-lg {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  /* 移动端页面不允许横向滚动（横向滚动只允许发生在明确的容器内） */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+}

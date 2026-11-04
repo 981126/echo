@@ -28,18 +28,37 @@ function ChartFrame({ title, conclusion, headers, rows, children }: { title: str
           <h3 className="text-sm font-semibold">{title}</h3>
           {conclusion && <p className="mt-1 text-xs leading-5 text-muted-foreground">{conclusion}</p>}
         </div>
-        <button type="button" onClick={() => setTable((v) => !v)} className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+        <button type="button" onClick={() => setTable((v) => !v)} className="flex h-11 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground md:h-8">
           {table ? <BarChart3 className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />}
           {table ? '看图' : '数据表'}
         </button>
       </div>
       {table ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[420px] text-left text-xs">
-            <thead><tr className="border-b border-border text-muted-foreground">{headers.map((x) => <th key={x} className="px-2 py-2 font-medium">{x}</th>)}</tr></thead>
-            <tbody>{rows.map((row, i) => <tr key={i} className="border-b border-border/60 last:border-0">{row.map((cell, j) => <td key={j} className="px-2 py-2">{cell}</td>)}</tr>)}</tbody>
-          </table>
-        </div>
+        <>
+          {/* R-218：<md 卡片式指标行（同源 rows，不横滚也看得全）；md+ 保持原表格 */}
+          <div className="space-y-2 md:hidden">
+            {rows.length ? (
+              rows.map((row, i) => (
+                <div key={i} className="rounded-md border border-border px-2.5 py-2">
+                  {row.map((cell, j) => (
+                    <div key={j} className="flex items-start justify-between gap-3 py-0.5 text-xs">
+                      <span className="shrink-0 text-muted-foreground">{headers[j]}</span>
+                      <span className="tnum min-w-0 break-words text-right">{cell}</span>
+                    </div>
+                  ))}
+                </div>
+              ))
+            ) : (
+              <div className="py-6 text-center text-xs text-muted-foreground">暂无数据</div>
+            )}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[420px] text-left text-xs">
+              <thead><tr className="border-b border-border text-muted-foreground">{headers.map((x) => <th key={x} className="px-2 py-2 font-medium">{x}</th>)}</tr></thead>
+              <tbody>{rows.map((row, i) => <tr key={i} className="border-b border-border/60 last:border-0">{row.map((cell, j) => <td key={j} className="px-2 py-2">{cell}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+        </>
       ) : children}
     </section>
   )
@@ -60,7 +79,7 @@ export function MetricCards({ metrics }: { metrics: Metric[] }) {
         <motion.div key={metric.key} initial={{ opacity: 0.7, y: 5 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border bg-card p-4 shadow-card">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">{metricIcons[metric.key] ?? <BarChart3 className="h-4 w-4" />}<span>{metric.label}</span></div>
           <div className="tnum mt-3 text-xl font-semibold">{formatMetric(metric.value, metric.unit)}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
+          <div className="mt-1 text-xs md:text-[11px] text-muted-foreground">
             平时 {formatMetric(metric.baseline, metric.unit)} · {metricStateText(metric)}
           </div>
         </motion.div>
@@ -80,8 +99,8 @@ export function BaselineBars({ metrics, title = '这条视频和平时相比，�
             <div key={metric.key}>
               <div className="mb-1.5 flex items-center justify-between text-xs"><span>{metric.label}{metric.key === 'bounce_2s_rate' ? '（越低越好）' : ''}</span><span className={cn('tnum font-medium', metric.state === 'high' && 'text-emerald-600', metric.state === 'low' && 'text-amber-600')}>{metricStateText(metric, true)}</span></div>
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2"><span className="w-9 text-[10px] text-muted-foreground">这条</span><div className="h-3 flex-1 rounded-full bg-muted"><motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(2, ((metric.value ?? 0) / max) * 100)}%` }} className="h-3 rounded-full bg-indigo-500" /></div><span className="tnum w-20 text-right text-[11px]">{formatMetric(metric.value, metric.unit)}</span></div>
-                <div className="flex items-center gap-2"><span className="w-9 text-[10px] text-muted-foreground">平时</span><div className="h-3 flex-1 rounded-full bg-muted"><div style={{ width: `${Math.max(2, ((metric.baseline ?? 0) / max) * 100)}%` }} className="h-3 rounded-full bg-zinc-300 dark:bg-zinc-600" /></div><span className="tnum w-20 text-right text-[11px]">{formatMetric(metric.baseline, metric.unit)}</span></div>
+                <div className="flex items-center gap-2"><span className="w-9 text-xs md:text-[10px] text-muted-foreground">这条</span><div className="h-3 flex-1 rounded-full bg-muted"><motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(2, ((metric.value ?? 0) / max) * 100)}%` }} className="h-3 rounded-full bg-indigo-500" /></div><span className="tnum w-20 text-right text-xs md:text-[11px]">{formatMetric(metric.value, metric.unit)}</span></div>
+                <div className="flex items-center gap-2"><span className="w-9 text-xs md:text-[10px] text-muted-foreground">平时</span><div className="h-3 flex-1 rounded-full bg-muted"><div style={{ width: `${Math.max(2, ((metric.baseline ?? 0) / max) * 100)}%` }} className="h-3 rounded-full bg-zinc-300 dark:bg-zinc-600" /></div><span className="tnum w-20 text-right text-xs md:text-[11px]">{formatMetric(metric.baseline, metric.unit)}</span></div>
               </div>
             </div>
           )
@@ -106,7 +125,7 @@ export function WatchTrendChart({ data }: { data: Charts['retention'] }) {
   return (
     <ChartFrame title="观众在哪些时间点继续看或离开？" conclusion={data.reliable ? '实线是当前视频，虚线是平台同类作者参考。异常下降点会直接标出。' : '播放量较少，趋势仅供参考。'} headers={['时间', '当前视频', '同类参考']} rows={points.map((p) => [p.time_label, formatMetric(p.current, 'ratio'), formatMetric(p.similar_author, 'ratio')])}>
       <div className="overflow-x-auto">
-        <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[560px]" role="img" aria-label="观看趋势折线图">
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full md:min-w-[560px]" role="img" aria-label="观看趋势折线图">
           <title>观看趋势：当前视频与同类作者参考</title><desc>横轴为视频时间，纵轴为留存比例</desc>
           {[0, 0.25, 0.5, 0.75, 1].map((v) => <g key={v}><line x1={left} x2={width - right} y1={top + (1 - v) * (height - top - bottom)} y2={top + (1 - v) * (height - top - bottom)} stroke="var(--border)" /><text x={4} y={top + (1 - v) * (height - top - bottom) + 4} fill="var(--muted-foreground)" fontSize="10">{v * 100}%</text></g>)}
           <motion.path initial={{ opacity: 0.7 }} animate={{ opacity: 1 }} d={path('current')} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinejoin="round" />
@@ -123,7 +142,7 @@ export function SimpleBars({ title, conclusion, items, unit = '次' }: { title: 
   const max = Math.max(...items.map((x) => x.value), 1)
   return (
     <ChartFrame title={title} conclusion={conclusion} headers={['项目', '数值', '说明']} rows={items.map((x) => [x.label, x.value, x.detail ?? ''])}>
-      {items.length ? <div className="space-y-3">{items.map((item) => <div key={item.label} className="grid grid-cols-[minmax(90px,0.8fr)_2fr_auto] items-center gap-3 text-xs"><span className="truncate" title={item.label}>{item.label}</span><div className="h-2.5 rounded-full bg-muted"><motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(2, item.value / max * 100)}%` }} className="h-2.5 rounded-full bg-indigo-500" /></div><span className="tnum text-right">{item.value.toLocaleString('zh-CN')}{unit}<span className="ml-1 text-muted-foreground">{item.detail}</span></span></div>)}</div> : <div className="py-8 text-center text-sm text-muted-foreground">暂无数据</div>}
+      {items.length ? <div className="space-y-3">{items.map((item) => <div key={item.label} className="grid grid-cols-[minmax(64px,0.8fr)_2fr_auto] items-center gap-2 text-xs md:grid-cols-[minmax(90px,0.8fr)_2fr_auto] md:gap-3"><span className="truncate" title={item.label}>{item.label}</span><div className="h-2.5 rounded-full bg-muted"><motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(2, item.value / max * 100)}%` }} className="h-2.5 rounded-full bg-indigo-500" /></div><span className="tnum text-right">{item.value.toLocaleString('zh-CN')}{unit}<span className="ml-1 text-muted-foreground">{item.detail}</span></span></div>)}</div> : <div className="py-8 text-center text-sm text-muted-foreground">暂无数据</div>}
     </ChartFrame>
   )
 }

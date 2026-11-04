@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { NotebookPen, Send, Sparkles, Trash2, LoaderCircle, Check } from 'lucide-react'
 import { apiJson } from '@/api/client'
 import { useActiveWork } from '@/hooks/use-active-work'
@@ -31,6 +31,7 @@ export default function InspirationPage() {
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState(0)
   const [del, setDel] = useState<Note | null>(null)
+  const reduce = useReducedMotion()
 
   const notesQ = useQuery({
     queryKey: ['inspiration'],
@@ -106,6 +107,8 @@ export default function InspirationPage() {
               rows={4}
               placeholder="一句话观察 / 经历 / 想吐槽的点…（例如：试用期被裁的人，简历都写得没问题，是入职前7天没做这件事）"
               className="min-h-24 resize-y text-[15px]"
+              // R-218：键盘弹起时让输入区保持可见（reduce 用户不播平滑滚动）
+              onFocus={(e) => e.currentTarget.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })}
             />
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">{text.trim().length} 字</span>
@@ -138,11 +141,11 @@ export default function InspirationPage() {
                     layout
                     variants={itemVariants}
                     exit={{ opacity: 0, x: 12 }}
-                    className="flex items-start gap-3 rounded-lg border border-border bg-card px-3.5 py-3"
+                    className="flex items-start gap-2 rounded-lg border border-border bg-card px-3.5 py-3 md:gap-3"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{n.text}</p>
-                      <span className="mt-1 block text-[11px] text-muted-foreground">
+                      <span className="mt-1 block text-xs md:text-[11px] text-muted-foreground">
                         {n.created_at ? String(n.created_at).replace('T', ' ').slice(0, 16) : ''}
                       </span>
                     </div>
@@ -153,12 +156,12 @@ export default function InspirationPage() {
                     ) : n.status === 'used' ? (
                       <Badge variant="secondary" className="shrink-0"><Check className="h-3 w-3" /> 已用</Badge>
                     ) : (
-                      <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => develop(n)} disabled={busyId === n.id}>
+                      <Button size="sm" className="h-11 shrink-0 text-xs md:h-7" onClick={() => develop(n)} disabled={busyId === n.id}>
                         {busyId === n.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                         生成
                       </Button>
                     )}
-                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-destructive" onClick={() => setDel(n)}>
+                    <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0 text-destructive md:h-7 md:w-7" onClick={() => setDel(n)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </motion.div>

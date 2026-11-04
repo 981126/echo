@@ -431,7 +431,8 @@ export default function VideosPage() {
   return (
     <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-4">
       {/* 上传 + 工具栏 */}
-      <motion.div variants={listVariants} className="flex flex-wrap items-center gap-2">
+      {/* R-218：<md 两列栅格（搜索标题/标签整行），md+ 恢复原行内换行布局 */}
+      <motion.div variants={listVariants} className="grid grid-cols-2 items-center gap-2 md:flex md:flex-wrap">
         <input
           ref={uploadInputRef}
           type="file"
@@ -439,7 +440,7 @@ export default function VideosPage() {
           className="hidden"
           onChange={(e) => e.target.files?.[0] && doUpload(e.target.files[0])}
         />
-        <Button size="sm" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>
+        <Button size="sm" className="max-md:w-full" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>
           {uploading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
           {uploading ? '上传中…' : '上传视频'}
         </Button>
@@ -448,7 +449,7 @@ export default function VideosPage() {
           value={String(filters.creatorId)}
           onValueChange={(v) => setFilters({ ...filters, creatorId: Number(v) })}
         >
-          <SelectTrigger className="h-9 w-44">
+          <SelectTrigger className="h-9 w-full md:w-44">
             <SelectValue placeholder="博主（默认当前主博主）">
               <FilterValue
                 active={!!filters.creatorId}
@@ -472,10 +473,10 @@ export default function VideosPage() {
           value={filters.platforms}
           onChange={(v) => setFilters({ ...filters, platforms: v })}
           placeholder="平台"
-          className="w-32"
+          className="w-full md:w-32"
         />
         <Select value={filters.status || 'all'} onValueChange={(v) => setFilters({ ...filters, status: v === 'all' ? '' : v })}>
-          <SelectTrigger className="h-9 w-28">
+          <SelectTrigger className="h-9 w-full md:w-28">
             <SelectValue placeholder="发布状态">
               <FilterValue active={!!filters.status} name="发布状态" label={filters.status === 'published' ? '已发布' : '待发布'} />
             </SelectValue>
@@ -487,7 +488,7 @@ export default function VideosPage() {
           </SelectContent>
         </Select>
         <Select value={filters.video || 'all'} onValueChange={(v) => setFilters({ ...filters, video: v === 'all' ? '' : v })}>
-          <SelectTrigger className="h-9 w-28">
+          <SelectTrigger className="h-9 w-full md:w-28">
             <SelectValue placeholder="有无视频">
               <FilterValue active={!!filters.video} name="有无视频" label={filters.video === 'yes' ? '有视频' : '无视频'} />
             </SelectValue>
@@ -499,7 +500,7 @@ export default function VideosPage() {
           </SelectContent>
         </Select>
         <Select value={filters.ad || 'all'} onValueChange={(v) => setFilters({ ...filters, ad: v === 'all' ? '' : v })}>
-          <SelectTrigger className="h-9 w-28">
+          <SelectTrigger className="h-9 w-full md:w-28">
             <SelectValue placeholder="是否广告">
               <FilterValue active={!!filters.ad} name="是否广告" label={filters.ad === 'ad' ? '仅广告' : '非广告'} />
             </SelectValue>
@@ -514,17 +515,17 @@ export default function VideosPage() {
           value={filters.kw}
           onChange={(e) => setFilters({ ...filters, kw: e.target.value })}
           placeholder="搜索标题…"
-          className="h-9 w-36"
+          className="h-9 w-full max-md:col-span-2 md:w-36"
           onKeyDown={(e) => e.key === 'Enter' && setApplied({ ...filters })}
         />
-        <MultiSelect options={allTags} value={filters.tags} onChange={(v) => setFilters({ ...filters, tags: v })} placeholder="标签" className="w-32" />
+        <MultiSelect options={allTags} value={filters.tags} onChange={(v) => setFilters({ ...filters, tags: v })} placeholder="标签" className="w-full max-md:col-span-2 md:w-32" />
         <Input
           type="number"
           min={0}
           value={filters.likesMin ?? ''}
           onChange={(e) => setFilters({ ...filters, likesMin: e.target.value === '' ? null : Number(e.target.value) })}
           placeholder="≥ 点赞"
-          className="h-9 w-24"
+          className="h-9 w-full md:w-24"
         />
         <Input
           type="number"
@@ -532,16 +533,16 @@ export default function VideosPage() {
           value={filters.likesMax ?? ''}
           onChange={(e) => setFilters({ ...filters, likesMax: e.target.value === '' ? null : Number(e.target.value) })}
           placeholder="≤ 点赞"
-          className="h-9 w-24"
+          className="h-9 w-full md:w-24"
         />
-        <Button size="sm" onClick={() => setApplied({ ...filters })}>查询</Button>
-        <Button variant="outline" size="sm" onClick={autoMergeAll}>
+        <Button size="sm" className="max-md:w-full" onClick={() => setApplied({ ...filters })}>查询</Button>
+        <Button variant="outline" size="sm" className="max-md:w-full" onClick={autoMergeAll}>
           <Merge className="h-3.5 w-3.5" /> 自动合并
         </Button>
       </motion.div>
 
       {/* 多选栏 */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {!selectMode ? (
           <Button variant="secondary" size="sm" onClick={() => setSelectMode(true)}>
             <CheckSquare className="h-3.5 w-3.5" /> 多选
@@ -579,7 +580,7 @@ export default function VideosPage() {
               initial={{ opacity: 0.85 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground"
+              className="flex items-center gap-1 text-xs md:text-[11px] text-muted-foreground"
             >
               <LoaderCircle className="h-3 w-3 animate-spin" /> 正在刷新…
             </motion.span>
@@ -687,7 +688,7 @@ export default function VideosPage() {
       />
 
       {/* 底部提示 + 计数：贴底常显（height 稳定），无限滚动追加时不再被新卡顶出视口 */}
-      <div className="sticky bottom-0 z-10 -mx-1 flex h-9 items-center justify-between gap-2 rounded-md bg-background/85 px-2 text-xs text-muted-foreground backdrop-blur-sm">
+      <div className="sticky bottom-0 z-10 -mx-1 flex h-11 box-content items-center justify-between gap-2 rounded-md bg-background px-2 text-xs text-muted-foreground pb-[env(safe-area-inset-bottom)] md:h-9 md:bg-background/85 md:pb-0 md:backdrop-blur-sm">
         {libQ.hasNextPage ? (
           libQ.isFetchingNextPage ? (
             <span className="flex items-center gap-1.5">

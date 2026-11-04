@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -18,6 +18,9 @@ import {
 } from 'lucide-react'
 import { apiJson, apiFetch } from '@/api/client'
 import { cn } from '@/lib/utils'
+import { useBackToClose } from '@/hooks/use-back-to-close'
+import { useVisualViewportHeight } from '@/hooks/use-visual-viewport'
+import { useCoarsePointer, useMediaQuery } from '@/hooks/use-media-query'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -84,6 +87,68 @@ export function errText(v: unknown): string {
   return String(v)
 }
 
+interface ConversationListProps {
+  items: Conversation[]
+  currentId: number | null
+  onSelect: (c: Conversation) => void
+  onNew: () => void
+  onRename: (c: Conversation) => void
+  onDelete: (c: Conversation) => void
+  footer?: ReactNode
+}
+
+// R-218：会话列表抽成组件——桌面侧栏与手机「会话」Sheet 共用；手机端重命名/删除不再依赖 hover。
+function ConversationList({ items, currentId, onSelect, onNew, onRename, onDelete, footer }: ConversationListProps) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border p-2">
+        <Button size="sm" className="w-full" onClick={onNew}>
+          <Plus className="h-3.5 w-3.5" /> 新对话
+        </Button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-0.5 p-1.5">
+          {items.map((c) => (
+            <div
+              key={c.id}
+              className={cn(
+                'group flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-[13px] transition-colors',
+                currentId === c.id ? 'bg-accent-soft text-foreground' : 'text-muted-foreground hover:bg-muted'
+              )}
+              onClick={() => onSelect(c)}
+            >
+              <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{c.title || '未命名对话'}</span>
+              <button
+                aria-label="重命名对话"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground md:h-6 md:w-6 md:opacity-0 md:group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRename(c)
+                }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button
+                aria-label="删除对话"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-destructive md:h-6 md:w-6 md:opacity-0 md:group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete(c)
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          {!items.length && <p className="px-2 py-6 text-center text-xs text-muted-foreground">还没有对话</p>}
+        </div>
+      </ScrollArea>
+      {footer}
+    </div>
+  )
+}
+
 export default function ChatPage() {
   const qc = useQueryClient()
   const [currentId, setCurrentId] = useState<number | null>(null)
@@ -95,6 +160,10 @@ export default function ChatPage() {
   const [deleteConv, setDeleteConv] = useState<Conversation | null>(null)
   const [renaming, setRenaming] = useState<Conversation | null>(null)
   const [renameText, setRenameText] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const isMobile = useMediaQuery('(max-width: 767px)')
+  const coarse = useCoarsePointer()
+  const vvHeight = useVisualViewportHeight()
   const boxRef = useRef<HTMLDivElement>(null)
   const keySeq = useRef(0)
   const loadSeq = useRef(0) // R-243：会话加载序号，快速切换时丢弃过期响应
@@ -298,55 +367,39 @@ export default function ChatPage() {
   }
 
   const pendingActions = actions.filter((a) => a.status === 'pending')
+  const currentTitle = (convsQ.data ?? []).find((c) => c.id === currentId)?.title
+  // R-218：移动端用 visualViewport 高度兜底键盘；桌面维持原 100vh 计算不变。
+  // 移动端：减去 header 56 + 页面 py 48 + 底部 Tab 56 + 手机会话入口约 52 + 安全余量
+  const mobileHeight = Math.max(280, vvHeight - 56 - 48 - 56 - 52 - 8)
+  const heightStyle = isMobile ? { height: mobileHeight } : undefined
 
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] gap-3">
-      {/* 会话列表 */}
-      <aside className="hidden w-56 shrink-0 flex-col rounded-lg border border-border bg-card md:flex">
-        <div className="border-b border-border p-2">
-          <Button size="sm" className="w-full" onClick={newConversation}>
-            <Plus className="h-3.5 w-3.5" /> 新对话
-          </Button>
-        </div>
-        <ScrollArea className="flex-1">
-          <div className="space-y-0.5 p-1.5">
-            {(convsQ.data ?? []).map((c) => (
-              <div
-                key={c.id}
-                className={cn(
-                  'group flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-[13px] transition-colors',
-                  currentId === c.id ? 'bg-accent-soft text-foreground' : 'text-muted-foreground hover:bg-muted'
-                )}
-                onClick={() => selectConv(c)}
-              >
-                <MessageSquare className="h-3.5 w-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{c.title || '未命名对话'}</span>
-                <button
-                  className="hidden shrink-0 text-muted-foreground hover:text-foreground group-hover:block"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setRenaming(c)
-                    setRenameText(c.title || '')
-                  }}
-                >
-                  <Pencil className="h-3 w-3" />
-                </button>
-                <button
-                  className="hidden shrink-0 text-muted-foreground hover:text-destructive group-hover:block"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setDeleteConv(c)
-                  }}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-            {!(convsQ.data ?? []).length && (
-              <p className="px-2 py-6 text-center text-xs text-muted-foreground">还没有对话</p>
-            )}
-          </div>
-        </ScrollArea>
+    <div className="flex min-h-0 flex-col">
+      {/* R-218：移动端会话入口（桌面侧栏在手机上隐藏） */}
+      <div className="mb-2 flex items-center gap-2 md:hidden">
+        <Button variant="secondary" size="sm" onClick={() => setHistoryOpen(true)} aria-label="打开历史会话">
+          <MessageSquare className="h-4 w-4" /> 会话
+        </Button>
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{currentTitle || '未选择会话'}</span>
+        <Button size="sm" onClick={newConversation}>
+          <Plus className="h-4 w-4" /> 新对话
+        </Button>
+      </div>
+
+      <div className="flex gap-3 md:min-h-0 md:flex-1 md:h-[calc(100vh-8.5rem)]" style={heightStyle}>
+      {/* 会话列表（桌面侧栏；移动端收进「会话」Sheet） */}
+      <aside className="hidden w-56 shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card md:flex">
+        <ConversationList
+          items={convsQ.data ?? []}
+          currentId={currentId}
+          onSelect={selectConv}
+          onNew={newConversation}
+          onRename={(c) => {
+            setRenaming(c)
+            setRenameText(c.title || '')
+          }}
+          onDelete={setDeleteConv}
+        />
       </aside>
 
       {/* 主聊天区 */}
@@ -367,10 +420,10 @@ export default function ChatPage() {
                     AI 提议：<b>{a.title}</b>
                     {a.detail ? `（${a.detail}）` : ''}
                   </span>
-                  <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => actOn(a, 'confirm')}>
+                  <Button size="sm" className="h-6 px-2 text-xs md:text-[11px]" onClick={() => actOn(a, 'confirm')}>
                     <CheckCheck className="h-3 w-3" /> 确认
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => actOn(a, 'cancel')}>
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs md:text-[11px]" onClick={() => actOn(a, 'cancel')}>
                     <X className="h-3 w-3" /> 取消
                   </Button>
                 </div>
@@ -416,7 +469,7 @@ export default function ChatPage() {
                     {!!m.steps?.length && (
                       <div className="mb-2 space-y-1 border-b border-border/60 pb-2">
                         {m.steps.map((s, i) => (
-                          <div key={i} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <div key={i} className="flex items-center gap-1.5 text-xs md:text-[11px] text-muted-foreground">
                             {s.kind === 'ok' ? (
                               <CircleCheck className="h-3 w-3 shrink-0 text-success" />
                             ) : (
@@ -436,7 +489,7 @@ export default function ChatPage() {
                               navigator.clipboard.writeText(m.content)
                               toast.success('已复制')
                             }}
-                            className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                            className="mt-1 flex items-center gap-1 text-xs md:text-[10px] text-muted-foreground hover:text-foreground"
                           >
                             <Copy className="h-2.5 w-2.5" /> 复制
                           </button>
@@ -479,12 +532,13 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                // R-218：触屏上回车=换行（手机键盘不要误发送），发送用按钮；桌面保持回车发送。
+                if (e.key === 'Enter' && !e.shiftKey && !coarse) {
                   e.preventDefault()
                   void send()
                 }
               }}
-              placeholder={currentId == null ? '先选一个会话' : '输入消息，Enter 发送 / Shift+Enter 换行'}
+              placeholder={currentId == null ? '先选一个会话' : coarse ? '输入消息，点右侧按钮发送' : '输入消息，Enter 发送 / Shift+Enter 换行'}
               disabled={currentId == null || sending}
               rows={2}
               className="min-h-11 flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-[var(--ring)] disabled:opacity-60"
@@ -495,6 +549,31 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+      </div>
+
+      <MobileHistorySheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <ConversationList
+          items={convsQ.data ?? []}
+          currentId={currentId}
+          onSelect={(c) => {
+            selectConv(c)
+            setHistoryOpen(false)
+          }}
+          onNew={() => {
+            newConversation()
+            setHistoryOpen(false)
+          }}
+          onRename={(c) => {
+            setHistoryOpen(false)
+            setRenaming(c)
+            setRenameText(c.title || '')
+          }}
+          onDelete={(c) => {
+            setHistoryOpen(false)
+            setDeleteConv(c)
+          }}
+        />
+      </MobileHistorySheet>
 
       <ConfirmDialog
         open={deleteConv !== null}
@@ -524,5 +603,74 @@ export default function ChatPage() {
         document.body
       )}
     </div>
+  )
+}
+
+interface MobileHistorySheetProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  children: ReactNode
+}
+
+// R-218：手机会话 Sheet（受控 animate + 延迟卸载，保证退出动画；返回键先关）
+function MobileHistorySheet({ open, onOpenChange, children }: MobileHistorySheetProps) {
+  const [mounted, setMounted] = useState(open)
+  const close = () => onOpenChange(false)
+  useBackToClose(open, close)
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      return
+    }
+    if (!mounted) return
+    const timer = window.setTimeout(() => setMounted(false), 320)
+    return () => window.clearTimeout(timer)
+  }, [open, mounted])
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+  if (!mounted) return null
+  return createPortal(
+    <>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: open ? 1 : 0 }}
+        transition={{ duration: 0.2 }}
+        style={{ pointerEvents: open ? 'auto' : 'none' }}
+        className="fixed inset-0 z-50 bg-black/45 md:hidden"
+        onClick={close}
+      />
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="历史会话"
+        initial={{ y: '100%' }}
+        animate={{ y: open ? 0 : '100%' }}
+        transition={{ type: 'spring', stiffness: 360, damping: 36 }}
+        style={{ pointerEvents: open ? 'auto' : 'none' }}
+        className="fixed inset-x-0 bottom-0 z-50 flex h-[75dvh] flex-col rounded-t-2xl border-t border-border bg-card shadow-2xl md:hidden"
+      >
+        <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-border" aria-hidden />
+        <div className="flex items-center justify-between px-4 pb-2 pt-3">
+          <h2 className="text-sm font-semibold">历史会话</h2>
+          <button
+            type="button"
+            onClick={close}
+            aria-label="关闭"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">{children}</div>
+      </motion.div>
+    </>
+    ,
+    document.body
   )
 }

@@ -34,7 +34,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'z-50 max-h-72 min-w-32 overflow-hidden rounded-lg border border-border bg-card shadow-lg',
+        'z-50 min-w-32 max-h-72 max-w-[92vw] overflow-hidden rounded-lg border border-border bg-card shadow-lg',
         'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
         className
       )}

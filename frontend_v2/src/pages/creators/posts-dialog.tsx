@@ -61,7 +61,7 @@ export function PostsDialog({
             <span className="ml-2 text-xs font-normal text-muted-foreground">{q.data?.total ?? items.length} 条</span>
           </DialogTitle>
         </DialogHeader>
-        <div className="max-h-[70vh] overflow-y-auto">
+        <div className="max-h-[calc(100dvh-7rem)] overflow-y-auto md:max-h-[70vh]">
           {q.isLoading ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -81,14 +81,14 @@ export function PostsDialog({
                       url={p.cover}
                       alt=""
                       className="h-full w-full object-cover"
-                      placeholder={<div className="flex h-full items-center justify-center text-[10px] font-semibold text-muted-foreground/60">ECHO</div>}
+                      placeholder={<div className="flex h-full items-center justify-center text-xs md:text-[10px] font-semibold text-muted-foreground/60">ECHO</div>}
                     />
                     {p.page_url && (
                       <a
                         href={p.page_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="absolute right-1.5 top-1.5 rounded-md bg-black/45 p-1 text-white backdrop-blur-sm hover:bg-black/65"
+                        className="absolute right-1.5 top-1.5 flex h-11 w-11 items-center justify-center rounded-md bg-black/45 p-1 text-white backdrop-blur-sm hover:bg-black/65"
                       >
                         <ExternalLink className="h-3 w-3" />
                       </a>
@@ -96,23 +96,23 @@ export function PostsDialog({
                   </div>
                   <div className="p-2.5">
                     <p className="line-clamp-2 min-h-8 text-xs font-medium leading-snug">{p.title || '（无标题）'}</p>
-                    <div className="tnum mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <div className="tnum mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs md:text-[10px] text-muted-foreground">
                       <span>👍 {fmtNum(p.latest_stat?.likes)}</span>
                       <span>💬 {fmtNum(p.latest_stat?.comments)}</span>
                       <span>⭐ {fmtNum(p.latest_stat?.favorites)}</span>
                       <span className="flex-1" />
-                      <span>{fmtDate(p.publish_time)}</span>
+                      <span className="whitespace-nowrap">{fmtDate(p.publish_time)}</span>
                     </div>
                     <div className="mt-2 flex items-center gap-1">
                       {p.local_video_id ? (
-                        <Badge variant="success" className="text-[10px]">已转素材</Badge>
+                        <Badge variant="success" className="text-xs md:text-[10px]">已转素材</Badge>
                       ) : (
-                        <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => toMaterial(p)}>
+                        <Button variant="outline" size="sm" className="h-11 text-xs md:h-7 md:text-[11px]" onClick={() => toMaterial(p)}>
                           <PackagePlus className="h-3 w-3" /> 转素材
                         </Button>
                       )}
                       <span className="flex-1" />
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => syncPost(p)}>
+                      <Button variant="ghost" size="icon" className="h-11 w-11 md:h-7 md:w-7" aria-label="同步作品" onClick={() => syncPost(p)}>
                         <RefreshCw className="h-3 w-3" />
                       </Button>
                     </div>

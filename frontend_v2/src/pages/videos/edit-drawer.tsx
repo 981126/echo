@@ -400,12 +400,12 @@ export function EditDrawer({
                       url={detail.cover_url}
                       alt="封面"
                       className="h-full w-full object-cover"
-                      placeholder={<div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">无封面</div>}
+                      placeholder={<div className="flex h-full items-center justify-center text-xs md:text-[10px] text-muted-foreground">无封面</div>}
                     />
                     {hasRealFile(detail.filename) && (
                       <button
                         onClick={() => onPlay(detail.id, state.title)}
-                        className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all hover:bg-black/30 hover:opacity-100 cursor-pointer"
+                        className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all hover:bg-black/30 hover:opacity-100 max-md:items-end max-md:justify-end max-md:p-1 max-md:opacity-100 cursor-pointer"
                       >
                         <Play className="h-6 w-6 text-white" fill="currentColor" />
                       </button>
@@ -469,11 +469,11 @@ export function EditDrawer({
               )}
 
               {/* 元信息 */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-muted-foreground">平台</label>
                   {detail && detail.platform_links.length > 0 && (
-                    <p className="mb-1 text-[10px] text-muted-foreground">由已绑定的平台作品决定</p>
+                    <p className="mb-1 text-xs md:text-[10px] text-muted-foreground">由已绑定的平台作品决定</p>
                   )}
                   <div className="flex gap-3 pt-1.5">
                     {PLATFORMS.map((p) => {

@@ -27,7 +27,7 @@ export function DraftAiStatus({ debate, className }: { debate?: DebateState | nu
       exit={{ opacity: 0, y: -4, transition: { duration: 0.15 } }}
       transition={softIn}
       className={cn(
-        'flex items-start gap-1.5 rounded-md px-2 py-1.5 text-[11px] leading-snug',
+        'flex items-start gap-1.5 rounded-md px-2 py-1.5 text-xs md:text-[11px] leading-snug',
         running ? 'bg-accent-soft/60 text-accent' : 'bg-[rgba(245,158,11,0.10)] text-warning',
         className
       )}

@@ -48,7 +48,7 @@ export function PlayerDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(760px,96vw)]">
-        <DialogHeader>
+        <DialogHeader className="max-md:pr-12">
           <DialogTitle>{title || '视频播放'}</DialogTitle>
         </DialogHeader>
         {error ? (
@@ -56,7 +56,7 @@ export function PlayerDialog({
         ) : !src ? (
           <Skeleton className="h-64 w-full" />
         ) : kind === 'video' ? (
-          <video src={src} controls autoPlay playsInline className="max-h-[70vh] w-full rounded-lg bg-black" />
+          <video src={src} controls autoPlay playsInline className="max-h-[70dvh] w-full rounded-lg bg-black" />
         ) : (
           <div className="rounded-lg border border-border bg-muted/40 p-6">
             <audio src={src} controls autoPlay className="w-full" />

@@ -287,8 +287,8 @@ export default function HomePage() {
                       <span className="tnum mt-0.5 shrink-0 rounded bg-muted px-1.5 text-xs font-semibold">{c.count}人问</span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[13px]">{c.title}</span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                          {c.tier && <Badge variant={TIER_LABEL[c.tier]?.variant || 'secondary'} className="text-[10px]">{TIER_LABEL[c.tier]?.label || c.tier}</Badge>}
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs md:text-[11px] text-muted-foreground">
+                          {c.tier && <Badge variant={TIER_LABEL[c.tier]?.variant || 'secondary'} className="text-xs md:text-[10px]">{TIER_LABEL[c.tier]?.label || c.tier}</Badge>}
                           {!!c.blogger_count && c.blogger_count > 0 && <span>{c.blogger_count} 个对标</span>}
                           {!!c.samples?.length && <span className="truncate">来自：{c.samples.join(' / ')}</span>}
                         </span>
@@ -309,7 +309,7 @@ export default function HomePage() {
                       <span className="tnum mt-0.5 shrink-0 text-xs text-muted-foreground">#{i + 1}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[13px]">{p.title}</span>
-                        <span className="mt-0.5 block text-[11px] text-muted-foreground">{p.reason} · 分 {p.score}</span>
+                        <span className="mt-0.5 block text-xs md:text-[11px] text-muted-foreground">{p.reason} · 分 {p.score}</span>
                       </span>
                       <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title, [p.reason, ...(p.samples || [])].filter(Boolean).join(' '))} disabled={generating !== null}>生成</Button>
                     </li>
@@ -326,7 +326,7 @@ export default function HomePage() {
                       <span className="tnum mt-0.5 shrink-0 text-xs text-muted-foreground">#{i + 1}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[13px]">{p.title}</span>
-                        {p.reason && <span className="mt-0.5 block text-[11px] text-muted-foreground">{p.reason}</span>}
+                        {p.reason && <span className="mt-0.5 block text-xs md:text-[11px] text-muted-foreground">{p.reason}</span>}
                       </span>
                       <Button size="sm" className="h-7 shrink-0 text-xs" onClick={() => generate(p.title, p.reason || '')} disabled={generating !== null}>生成</Button>
                     </li>
@@ -353,7 +353,7 @@ export default function HomePage() {
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {attr.by_tag.map((t) => (
-                      <Badge key={t.tag} variant={attr.good_tags.includes(t.tag) ? 'success' : 'secondary'} className="text-[11px]">
+                      <Badge key={t.tag} variant={attr.good_tags.includes(t.tag) ? 'success' : 'secondary'} className="text-xs md:text-[11px]">
                         {t.tag} · {fmtNum(Math.round(t.avg_engagement))}
                       </Badge>
                     ))}
@@ -377,7 +377,7 @@ export default function HomePage() {
             <CardDescription>评论与热榜按人设相关度均衡展示 · 人工挑选</CardDescription>
             <div className="flex-1" />
             <Tabs value={sourceTab} onValueChange={setSourceTab}>
-              <TabsList className="h-8">
+              <TabsList className="h-auto flex-wrap md:h-8">
                 <TabsTrigger value="all" className="text-xs">全部</TabsTrigger>
                 <TabsTrigger value="comment" className="text-xs">只看评论</TabsTrigger>
                 <TabsTrigger value="hot" className="text-xs">只看热榜</TabsTrigger>
@@ -410,33 +410,38 @@ export default function HomePage() {
             ) : (
               <motion.ul variants={listVariants} initial="initial" animate="animate" className="divide-y divide-border/60">
                 {shown.map((it) => (
-                  <motion.li key={`${it.source}-${it.id}`} variants={itemVariants} className="flex items-center gap-2 py-2.5">
-                    <span className="w-12 shrink-0 text-xs text-muted-foreground">
-                      {platformName(it.platform, '综合')}
-                    </span>
-                    <Badge variant={it.source === 'hot' ? 'secondary' : 'default'}>
-                      {it.source === 'hot' ? '热榜' : '评论'}
-                    </Badge>
-                    {it.matched || (it.score ?? 0) > 0 ? (
-                      <Badge variant="success">相关</Badge>
-                    ) : it.source === 'hot' ? (
-                      <Badge variant="secondary">低相关</Badge>
-                    ) : null}
-                    {it.source === 'comment' && it.likes ? (
-                      <span className="tnum shrink-0 text-xs text-muted-foreground">👍 {fmtNum(it.likes)}</span>
-                    ) : null}
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{it.title}</span>
-                    {isMaybeRepeated(it.title) && <Badge variant="warning" className="shrink-0">可能已讲</Badge>}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-accent"
-                      disabled={generating !== null}
-                      onClick={() => pickAngle(it.title, [it.detail, it.post_title].filter(Boolean).join(' '))}
-                    >
-                      {generating === it.title ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      生成文案
-                    </Button>
+                  <motion.li key={`${it.source}-${it.id}`} variants={itemVariants} className="flex flex-col gap-2 py-2.5 md:flex-row md:items-center md:gap-2">
+                    {/* R-218：移动端两行——上行平台/徽标/标题（可读两行不被压扁），下行数据+操作；桌面单行不变 */}
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 md:flex-1 md:flex-nowrap">
+                      <span className="w-12 shrink-0 text-xs text-muted-foreground">
+                        {platformName(it.platform, '综合')}
+                      </span>
+                      <Badge variant={it.source === 'hot' ? 'secondary' : 'default'}>
+                        {it.source === 'hot' ? '热榜' : '评论'}
+                      </Badge>
+                      {it.matched || (it.score ?? 0) > 0 ? (
+                        <Badge variant="success">相关</Badge>
+                      ) : it.source === 'hot' ? (
+                        <Badge variant="secondary">低相关</Badge>
+                      ) : null}
+                      <span className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-5 md:truncate">{it.title}</span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {it.source === 'comment' && it.likes ? (
+                        <span className="tnum shrink-0 text-xs text-muted-foreground">👍 {fmtNum(it.likes)}</span>
+                      ) : null}
+                      {isMaybeRepeated(it.title) && <Badge variant="warning" className="shrink-0">可能已讲</Badge>}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-accent"
+                        disabled={generating !== null}
+                        onClick={() => pickAngle(it.title, [it.detail, it.post_title].filter(Boolean).join(' '))}
+                      >
+                        {generating === it.title ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        生成文案
+                      </Button>
+                    </div>
                   </motion.li>
                 ))}
               </motion.ul>
@@ -447,7 +452,7 @@ export default function HomePage() {
 
       {/* 角度选择 */}
       <Dialog open={angleOpen} onOpenChange={setAngleOpen}>
-        <DialogContent className="w-[min(680px,94vw)]">
+        <DialogContent className="md:w-[min(680px,94vw)]">
           <DialogHeader>
             <DialogTitle>选一个切入角度</DialogTitle>
           </DialogHeader>

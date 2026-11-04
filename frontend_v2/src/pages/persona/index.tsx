@@ -115,7 +115,7 @@ return (
     exit={{ opacity: 0, x: 12 }}
     onClick={() => picking && onToggle(t)}
     className={cn(
-      'flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors',
+      'flex flex-wrap items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors',
       picking ? 'cursor-pointer' : '',
       picked ? 'border-accent bg-accent-soft/50' : 'border-border bg-card'
     )}
@@ -128,28 +128,28 @@ return (
         <Badge variant="secondary">{LAYER_LABEL[layerOf(t)] || layerOf(t)}</Badge>
         {t.dimension && t.category !== 'redline' && <Badge variant="secondary">{t.dimension}</Badge>}
         {t.confirm_strength === 1 && <Badge variant="outline">自动</Badge>}
-        {!!t.frequency && <span className="text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
+        {!!t.frequency && <span className="text-xs md:text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
       </div>
       {t.description && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.description}</p>}
-      {!!t.evidence && <p className="mt-0.5 text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
+      {!!t.evidence && <p className="mt-0.5 text-xs md:text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
     </div>
     {!picking && (
-      <div className="flex shrink-0 gap-1">
+      <div className="flex shrink-0 gap-1 max-md:w-full max-md:justify-end">
         {t.confirm_strength === 1 && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground"
+            className="h-11 px-3 text-xs text-muted-foreground md:h-7 md:px-2"
             title="撤销自动确认（移回待确认，需人工）"
             onClick={() => onDecide(t, 'rejected')}
           >
             <Undo2 className="h-3.5 w-3.5" /> 撤销
           </Button>
         )}
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(t)}>
+        <Button variant="ghost" size="icon" className="h-11 w-11 md:h-7 md:w-7" onClick={() => onEdit(t)}>
           <Pencil className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(t)}>
+        <Button variant="ghost" size="icon" className="h-11 w-11 text-destructive md:h-7 md:w-7" onClick={() => onDelete(t)}>
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -490,10 +490,10 @@ export default function PersonaPage() {
                       <p className="text-[13px] leading-relaxed">“{ph.text}”</p>
                       <span className="text-xs text-muted-foreground">{ph.source_title || '素材'}</span>
                     </div>
-                    <Button size="sm" className="h-7 text-xs" onClick={() => adoptPhrase(ph)}>
+                    <Button size="sm" className="h-11 text-xs md:h-7" onClick={() => adoptPhrase(ph)}>
                       <Check className="h-3 w-3" /> 收为锚点
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setPhrases(phrases.filter((p) => p !== ph))}>
+                    <Button variant="ghost" size="sm" className="h-11 text-xs md:h-7" onClick={() => setPhrases(phrases.filter((p) => p !== ph))}>
                       <X className="h-3 w-3" />
                     </Button>
                   </motion.div>
@@ -539,7 +539,7 @@ export default function PersonaPage() {
                         </AnimatePresence>
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Input value={avoidText} onChange={(e) => setAvoidText(e.target.value)} placeholder="添加（逗号分隔）" className="h-8 w-64 text-xs" />
+                        <Input value={avoidText} onChange={(e) => setAvoidText(e.target.value)} placeholder="添加（逗号分隔）" className="h-9 w-full text-xs md:h-8 md:w-64" />
                         <Button
                           variant="outline"
                           size="sm"
@@ -558,7 +558,7 @@ export default function PersonaPage() {
                           type="number"
                           min={3}
                           max={8}
-                          className="h-8 w-20 text-xs"
+                          className="h-9 w-full text-xs md:h-8 md:w-20"
                           value={styleDraft.sample}
                           onChange={(e) => setStyleDraft({ ...styleDraft, sample: Number(e.target.value) })}
                         />
@@ -575,7 +575,7 @@ export default function PersonaPage() {
                         </span>
                         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
                           {style.anchor_candidates.map((c) => (
-                            <label key={c.id} className="flex cursor-pointer items-center gap-1.5 text-xs">
+                            <label key={c.id} className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs md:min-h-0">
                               <Checkbox
                                 checked={styleDraft.anchors.includes(c.id)}
                                 onCheckedChange={(v) =>
@@ -626,8 +626,8 @@ export default function PersonaPage() {
             ) : (
               <AnimatePresence initial={false}>
                 {suggested.map((t) => (
-                  <motion.div key={t.id} layout variants={itemVariants} exit={{ opacity: 0, x: -16 }} className="flex items-start gap-3 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.05)] px-3.5 py-3">
-                    <div className="min-w-0 flex-1">
+                  <motion.div key={t.id} layout variants={itemVariants} exit={{ opacity: 0, x: -16 }} className="flex flex-wrap items-start gap-3 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.05)] px-3.5 py-3">
+                    <div className="min-w-0 flex-1 max-md:basis-full">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <b className="text-[13px]">{t.label}</b>
                         <Badge variant={(CATEGORY[t.category] || CATEGORY.style).variant}>
@@ -635,15 +635,15 @@ export default function PersonaPage() {
                         </Badge>
                         <Badge variant="secondary">{LAYER_LABEL[layerOf(t)] || layerOf(t)}</Badge>
                         {t.dimension && <Badge variant="secondary">{t.dimension}</Badge>}
-                        {!!t.frequency && <span className="text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
+                        {!!t.frequency && <span className="text-xs md:text-[10px] text-muted-foreground">出现 {t.frequency} 次</span>}
                       </div>
                       {t.description && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.description}</p>}
-                      {!!t.evidence && <p className="mt-0.5 text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
+                      {!!t.evidence && <p className="mt-0.5 text-xs md:text-[11px] italic text-muted-foreground/80">“{t.evidence}”</p>}
                     </div>
-                    <Button size="sm" className="h-7 text-xs" onClick={() => decide(t, 'confirmed')}>
+                    <Button size="sm" className="h-11 text-xs md:h-7" onClick={() => decide(t, 'confirmed')}>
                       <Check className="h-3 w-3" /> 确认
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => decide(t, 'rejected')}>
+                    <Button variant="ghost" size="sm" className="h-11 text-xs md:h-7" onClick={() => decide(t, 'rejected')}>
                       <X className="h-3 w-3" /> 拒绝
                     </Button>
                   </motion.div>
@@ -693,7 +693,7 @@ export default function PersonaPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-medium">{l.label}</span>
                         <Badge variant="secondary">{items.length}</Badge>
-                        <span className="text-[11px] text-muted-foreground">{l.hint}</span>
+                        <span className="text-xs md:text-[11px] text-muted-foreground">{l.hint}</span>
                       </div>
                       <motion.div layout className="space-y-2">
                         <AnimatePresence initial={false}>
@@ -732,7 +732,7 @@ export default function PersonaPage() {
 
       {/* 编辑/新增 */}
       <Dialog open={editForm !== null} onOpenChange={(v) => !v && setEditForm(null)}>
-        <DialogContent className="w-[min(460px,92vw)]">
+        <DialogContent className="md:w-[min(460px,92vw)]">
           <DialogHeader>
             <DialogTitle>{editForm?.id ? '编辑人设标签' : '新增风格档案'}</DialogTitle>
           </DialogHeader>

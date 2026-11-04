@@ -466,9 +466,9 @@ export default function PromptsPage() {
                     {([['model1', m1, setM1, models.model1], ['model2', m2, setM2, models.model2]] as const).map(([slot, st, setSt, meta]) => (
                       <div key={slot} className="rounded-lg border border-border p-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <b className="w-12 text-[13px]">{slot === 'model1' ? '模型1' : '模型2'}</b>
+                          <b className="w-full text-[13px] md:w-12">{slot === 'model1' ? '模型1' : '模型2'}</b>
                           <Select value={st.vendor} onValueChange={(v) => setSt({ ...st, vendor: v, model: models.vendors[v]?.default_model || '' })}>
-                            <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-9 w-full [&>span]:truncate md:w-36"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               {Object.entries(models.vendors).map(([vid, vm]) => (
                                 <SelectItem key={vid} value={vid}>{vm.label}</SelectItem>
@@ -476,7 +476,7 @@ export default function PromptsPage() {
                             </SelectContent>
                           </Select>
                           <Select value={st.model} onValueChange={(v) => setSt({ ...st, model: v })}>
-                            <SelectTrigger className="h-9 w-56"><SelectValue placeholder="模型 ID" /></SelectTrigger>
+                            <SelectTrigger className="h-9 w-full [&>span]:truncate md:w-56"><SelectValue placeholder="模型 ID" /></SelectTrigger>
                             <SelectContent>
                               {(models.vendors[st.vendor]?.models || []).map((m) => (
                                 <SelectItem key={m} value={m}>{m}</SelectItem>
@@ -488,7 +488,7 @@ export default function PromptsPage() {
                             value={st.key}
                             onChange={(e) => setSt({ ...st, key: e.target.value })}
                             placeholder={meta.key_hint || 'API Key（留空则用 .env）'}
-                            className="h-9 w-64"
+                            className="h-9 w-full md:w-64"
                           />
                           {meta.key_present ? (
                             <Badge variant="success">已配置{meta.key_from_env ? '（来自 .env）' : ''}</Badge>
@@ -496,21 +496,21 @@ export default function PromptsPage() {
                             <Badge variant="destructive">缺少 Key</Badge>
                           )}
                         </div>
-                        <p className="mt-1.5 text-xs text-muted-foreground">{meta.vendor_label} · {meta.base_url}</p>
+                        <p className="mt-1.5 break-words text-xs text-muted-foreground">{meta.vendor_label} · {meta.base_url}</p>
                       </div>
                     ))}
 
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs text-muted-foreground">脚本生成 · 生成方：</span>
                       <Select value={genRole} onValueChange={setGenRole}>
-                        <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-9 w-full [&>span]:truncate md:w-32"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {ROLE_OPTS.map((r) => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                       <span className="text-xs text-muted-foreground">评审方：</span>
                       <Select value={refereeRole} onValueChange={setRefereeRole}>
-                        <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-9 w-full [&>span]:truncate md:w-32"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {ROLE_OPTS.map((r) => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}
                         </SelectContent>
@@ -525,13 +525,13 @@ export default function PromptsPage() {
                       </p>
                       <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                         {Object.entries(models.feature_routes || {}).map(([group, fr]) => (
-                          <div key={group} className="flex items-center gap-2">
-                            <span className="w-28 shrink-0 text-xs text-muted-foreground">{fr.label}</span>
+                          <div key={group} className="flex flex-col items-stretch gap-1 md:flex-row md:items-center md:gap-2">
+                            <span className="text-xs text-muted-foreground md:w-28 md:shrink-0">{fr.label}</span>
                             <Select
                               value={featureRoutes[group] ?? fr.value}
                               onValueChange={(v) => setFeatureRoutes((s) => ({ ...s, [group]: v }))}
                             >
-                              <SelectTrigger className="h-8 w-64 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectTrigger className="h-9 w-full text-xs [&>span]:truncate md:h-8 md:w-64"><SelectValue /></SelectTrigger>
                               <SelectContent>
                                 {fr.options.map((o) => (
                                   <SelectItem key={o.v} value={o.v}>{o.label}</SelectItem>
@@ -546,7 +546,7 @@ export default function PromptsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs text-muted-foreground">ASR 服务商：</span>
                       <Select value={asrMode} onValueChange={changeAsrMode}>
-                        <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-9 w-full [&>span]:truncate md:w-44"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {Object.entries(models.asr.options || {}).map(([o, label]) => (
                             <SelectItem key={o} value={o}>{label}</SelectItem>
@@ -559,11 +559,11 @@ export default function PromptsPage() {
                           initial={{ opacity: 0.85, x: 6 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={softIn}
-                          className="flex flex-wrap items-center gap-2"
+                          className="flex w-full flex-wrap items-center gap-2 md:w-auto"
                         >
                           <span className="text-xs text-muted-foreground">ASR 模型：</span>
                           <Select value={asrModel} onValueChange={setAsrModel}>
-                            <SelectTrigger className="h-9 w-64"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-9 w-full [&>span]:truncate md:w-64"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               {(asrMode === 'tencent' ? models.asr.tencent_models : models.asr.siliconflow_models).map((m) => (
                                 <SelectItem key={m} value={m}>{m}</SelectItem>
@@ -573,14 +573,14 @@ export default function PromptsPage() {
                         </motion.span>
                       )}
                       <span className="text-xs text-muted-foreground">每日自动生成篇数：</span>
-                      <Input type="number" min={1} max={10} className="h-9 w-20 text-xs" value={topicsCount} onChange={(e) => setTopicsCount(Number(e.target.value))} />
+                      <Input type="number" min={1} max={10} className="h-9 w-full text-xs md:w-20" value={topicsCount} onChange={(e) => setTopicsCount(Number(e.target.value))} />
                       <span className="text-xs text-muted-foreground">讨论轮次：</span>
-                      <Input type="number" min={1} max={10} className="h-9 w-20 text-xs" value={debateRounds} onChange={(e) => setDebateRounds(Number(e.target.value))} />
+                      <Input type="number" min={1} max={10} className="h-9 w-full text-xs md:w-20" value={debateRounds} onChange={(e) => setDebateRounds(Number(e.target.value))} />
                     </div>
                   </CardContent>
                 </Card>
 
-                <div className="flex items-center gap-2">
+                <div className="sticky bottom-[calc(56px+env(safe-area-inset-bottom))] z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-border bg-background px-4 py-2 md:static md:mx-0 md:border-0 md:bg-transparent md:p-0">
                   <Button onClick={saveModels} disabled={savingModels}>
                     {savingModels ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     保存（立即生效）
@@ -623,12 +623,12 @@ export default function PromptsPage() {
                               type="number"
                               min={256}
                               max={b.ceiling}
-                              className="h-8 w-28 text-xs tnum"
+                              className="h-9 w-24 text-xs tnum md:h-8 md:w-28"
                               value={budgetEdits[key] ?? b.value}
                               onChange={(e) => setBudgetEdits({ ...budgetEdits, [key]: Number(e.target.value) })}
                             />
                           </div>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
+                          <p className="mt-1 text-xs md:text-[11px] text-muted-foreground">
                             默认 {b.default}{b.value !== b.default ? ` · 生效 ${b.value}` : ''}{b.custom ? ' · 已改' : ''} · {b.desc}
                           </p>
                         </div>
@@ -637,7 +637,7 @@ export default function PromptsPage() {
                   </CardContent>
                 </Card>
 
-                <div className="flex items-center gap-2">
+                <div className="sticky bottom-[calc(56px+env(safe-area-inset-bottom))] z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-border bg-background px-4 py-2 md:static md:mx-0 md:border-0 md:bg-transparent md:p-0">
                   <Button onClick={saveModels} disabled={savingModels}>
                     {savingModels ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     保存（立即生效）
@@ -723,7 +723,7 @@ export default function PromptsPage() {
                               <span className="flex w-full flex-wrap items-center gap-2">
                                 <span className="min-w-0 truncate text-[13px] font-medium">{promptTitle(it)}</span>
                                 <Badge variant={meta.variant}>{meta.label}</Badge>
-                                {it.module_label && <span className="text-[11px] text-muted-foreground">{it.module_label}</span>}
+                                {it.module_label && <span className="text-xs md:text-[11px] text-muted-foreground">{it.module_label}</span>}
                                 <span className="flex-1" />
                                 {promptEditable(it) && it.enabled_version > 0 && <Badge variant="secondary">v{it.enabled_version}</Badge>}
                                 {it.has_candidate && <Badge variant="warning">有候选 v{it.candidate_version}</Badge>}
@@ -758,11 +758,11 @@ export default function PromptsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <b className="text-[13px] font-medium">{promptTitle(it)}</b>
                           <Badge variant="warning">程序固定</Badge>
-                          {it.module_label && <span className="text-[11px] text-muted-foreground">{it.module_label}</span>}
+                          {it.module_label && <span className="text-xs md:text-[11px] text-muted-foreground">{it.module_label}</span>}
                         </div>
                         {it.purpose && <p className="mt-1 text-xs text-muted-foreground">{it.purpose}</p>}
                         <ScrollArea className="mt-2 max-h-56 rounded-md bg-muted/40">
-                          <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed">{it.content}</pre>
+                          <pre className="whitespace-pre-wrap p-3 font-mono text-xs md:text-[11px] leading-relaxed">{it.content}</pre>
                         </ScrollArea>
                       </div>
                     ))}
@@ -784,7 +784,7 @@ export default function PromptsPage() {
                     {item.has_candidate && <Badge variant="warning">有候选 v{item.candidate_version} 待启用</Badge>}
                   </div>
                   {item.purpose && <p className="text-xs text-muted-foreground">{item.purpose}</p>}
-                  {item.entry && <p className="text-[11px] text-muted-foreground">触发入口：{item.entry}</p>}
+                  {item.entry && <p className="text-xs md:text-[11px] text-muted-foreground">触发入口：{item.entry}</p>}
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {!canEdit && <p className="text-xs text-muted-foreground">程序固定，不能在这里改；正文仅供查看。</p>}
@@ -848,7 +848,7 @@ export default function PromptsPage() {
                   )}
                   <CardContent className="pt-0">
                     <ScrollArea className="max-h-72 rounded-lg border border-border bg-muted/40">
-                      <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed">{item.candidate_content}</pre>
+                      <pre className="whitespace-pre-wrap p-3 font-mono text-xs md:text-[11px] leading-relaxed">{item.candidate_content}</pre>
                     </ScrollArea>
                   </CardContent>
                 </Card>
@@ -895,7 +895,7 @@ export default function PromptsPage() {
                           <span className="text-xs text-muted-foreground">{v.note} · {String(v.created_at).slice(0, 10)}</span>
                         </summary>
                         <ScrollArea className="mt-2 max-h-56 rounded-md bg-muted/40">
-                          <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed">{v.content}</pre>
+                          <pre className="whitespace-pre-wrap p-3 font-mono text-xs md:text-[11px] leading-relaxed">{v.content}</pre>
                         </ScrollArea>
                         {v.status !== 'enabled' && (
                           <Button variant="outline" size="sm" className="mt-2" onClick={() => enable(item, v.version)}>

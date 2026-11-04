@@ -47,7 +47,7 @@ export function RewriteDiffDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(920px,96vw)]">
-        <DialogHeader>
+        <DialogHeader className="max-md:pr-12">
           <DialogTitle>洗稿完成 · 原文对照</DialogTitle>
           <DialogDescription>
             来源：{result.benchmark_name || '对标'}《{result.source_title || '—'}》
@@ -78,7 +78,7 @@ export function RewriteDiffDialog({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
+                className="h-11 w-11 md:h-6 md:w-6"
                 onClick={() => {
                   navigator.clipboard.writeText(result.script)
                   toast.success('已复制')
@@ -105,7 +105,7 @@ export function RewriteDiffDialog({
           outlineDrift={!!result.outline_drift}
         />
 
-        <div className="mt-2 flex justify-end gap-2">
+        <div className="mt-2 flex flex-wrap justify-end gap-2 max-md:sticky max-md:bottom-0 max-md:z-10 max-md:-mx-4 max-md:border-t max-md:border-border max-md:bg-card max-md:px-4 max-md:py-3 max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>关闭</Button>
           {!!result.draft_id && (
             <Button size="sm" onClick={() => { onOpenChange(false); navigate(`/drafts?id=${result.draft_id}`) }}>

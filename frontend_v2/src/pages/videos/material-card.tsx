@@ -135,7 +135,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
 
         {/* hover 播放按钮 */}
         {!selectMode && item.hasVideo && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-300 group-hover:bg-black/25 group-hover:opacity-100">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-300 group-hover:bg-black/25 group-hover:opacity-100 max-md:opacity-100">
             <motion.span
               initial={false}
               className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-black shadow-lg"
@@ -183,8 +183,8 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 backdrop-blur-[2px]">
             {syncing ? <LoaderCircle className="h-5 w-5 animate-spin text-white" /> : <BadgeCheck className="h-5 w-5 text-success" />}
             <Progress value={task.progress} className="w-3/4 bg-white/20" />
-            <span className="max-w-[85%] truncate text-[11px] text-white/90">{task.note}</span>
-            <span className="tnum text-[10px] text-white/70">{Math.round(task.progress)}%</span>
+            <span className="max-w-[85%] truncate text-xs md:text-[11px] text-white/90">{task.note}</span>
+            <span className="tnum text-xs md:text-[10px] text-white/70">{Math.round(task.progress)}%</span>
           </div>
         )}
       </div>
@@ -192,7 +192,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
       {/* 信息区 */}
       <div className="cursor-pointer p-3" onClick={() => (selectMode ? onToggle(item) : onOpen(item))}>
         <p className="line-clamp-2 min-h-9 text-[13px] font-medium leading-snug">{item.title}</p>
-        <div className="mt-2 flex items-center gap-1.5">
+        <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
           {item.platforms.map((p) => (
             <Tooltip key={p} delayDuration={0}>
               <TooltipTrigger asChild>
@@ -201,29 +201,29 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
               <TooltipContent>{platformName(p)}</TooltipContent>
             </Tooltip>
           ))}
-          {showPlays && <span className="tnum text-[11px] text-muted-foreground">▶ {fmtNum(plays)}</span>}
-          {likes > 0 && <span className="tnum text-[11px] text-muted-foreground">👍 {fmtNum(likes)}</span>}
-          <span className="flex-1" />
-          <span className="text-[11px] text-muted-foreground">{fmtDate(item.date)}</span>
+          {showPlays && <span className="tnum text-xs md:text-[11px] text-muted-foreground">▶ {fmtNum(plays)}</span>}
+          {likes > 0 && <span className="tnum text-xs md:text-[11px] text-muted-foreground">👍 {fmtNum(likes)}</span>}
+          <span className="hidden flex-1 md:block" />
+          <span className="whitespace-nowrap text-xs md:text-[11px] text-muted-foreground">{fmtDate(item.date)}</span>
         </div>
         {!!item.tags.length && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {item.tags.slice(0, 3).map((t) => (
-              <span key={t} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <span key={t} className="rounded-full bg-muted px-1.5 py-0.5 text-xs md:text-[10px] text-muted-foreground">
                 {t}
               </span>
             ))}
-            {item.tags.length > 3 && <span className="text-[10px] text-muted-foreground">+{item.tags.length - 3}</span>}
+            {item.tags.length > 3 && <span className="text-xs md:text-[10px] text-muted-foreground">+{item.tags.length - 3}</span>}
           </div>
         )}
       </div>
 
       {/* 操作行 */}
       {!selectMode && (
-        <div className="flex items-center gap-0.5 border-t border-border px-2 py-1.5">
+        <div className="flex flex-wrap items-center gap-0.5 border-t border-border px-2 py-1.5 md:flex-nowrap">
           <Tooltip delayDuration={0}>
             <TooltipTrigger asChild>
-              <button onClick={() => onSync(item)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer">
+              <button onClick={() => onSync(item)} className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer max-md:flex-1 md:h-7 md:w-7">
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
@@ -232,7 +232,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
           {item.kind === 'local' && item.tags_confirmed === false && (
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
-                <button onClick={() => onConfirmTags(item)} className="flex h-7 w-7 items-center justify-center rounded-md text-warning transition-colors hover:bg-muted cursor-pointer">
+                <button onClick={() => onConfirmTags(item)} className="flex h-11 w-11 items-center justify-center rounded-md text-warning transition-colors hover:bg-muted cursor-pointer max-md:flex-1 md:h-7 md:w-7">
                   <CheckCheck className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
@@ -242,17 +242,17 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
           {item.kind === 'cloud' && item.type === 'work' && item.merged > 1 && (
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
-                <button onClick={() => onSplit(item)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer">
+                <button onClick={() => onSplit(item)} className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer max-md:flex-1 md:h-7 md:w-7">
                   <Split className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent>拆分合并</TooltipContent>
             </Tooltip>
           )}
-          <span className="flex-1" />
+          <span className="hidden flex-1 md:block" />
           <Tooltip delayDuration={0}>
             <TooltipTrigger asChild>
-              <button onClick={() => onDelete(item)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[rgba(239,68,68,0.1)] hover:text-destructive cursor-pointer">
+              <button onClick={() => onDelete(item)} className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[rgba(239,68,68,0.1)] hover:text-destructive cursor-pointer max-md:flex-1 md:h-7 md:w-7">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>

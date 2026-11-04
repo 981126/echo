@@ -33,11 +33,12 @@ export function ActiveWorkIndicator() {
           <Popover.Root open={open} onOpenChange={setOpen}>
             <Popover.Trigger asChild>
               <button
-                className="flex h-9 items-center gap-1.5 rounded-md border border-accent/30 bg-accent-soft/50 px-2.5 text-xs font-medium text-accent transition-colors hover:bg-accent-soft cursor-pointer"
+                className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-md border border-accent/30 bg-accent-soft/50 px-2 text-xs font-medium text-accent transition-colors hover:bg-accent-soft md:h-9 md:min-w-0 md:gap-1.5 md:px-2.5 cursor-pointer"
                 aria-label={`进行中 ${count}`}
               >
                 <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                <span className="tnum">进行中 {count}</span>
+                <span className="tnum">{count}</span>
+                <span className="hidden md:inline">进行中</span>
               </button>
             </Popover.Trigger>
             <Popover.Portal>
@@ -66,7 +67,7 @@ export function ActiveWorkIndicator() {
                           >
                             <span className="flex items-center gap-2">
                               <span className="text-[13px] font-medium">{t.label || t.kind}</span>
-                              <span className="tnum text-[11px] text-muted-foreground">{t.progress}%</span>
+                              <span className="tnum text-xs md:text-[11px] text-muted-foreground">{t.progress}%</span>
                             </span>
                             {t.note && <span className="line-clamp-1 text-xs text-muted-foreground">{t.note}</span>}
                             <Progress value={t.progress} />

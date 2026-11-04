@@ -366,8 +366,8 @@ export default function VideoReviewPage() {
                     <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {!!finding.verdict && verdictMeta[finding.verdict] && <span className={cn('rounded-full px-2 py-1 text-[10px]', verdictMeta[finding.verdict].cls)}>{verdictMeta[finding.verdict].label}</span>}
-                    <span className="rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">{judgementLabels[finding.judgement_type]}</span>
+                    {!!finding.verdict && verdictMeta[finding.verdict] && <span className={cn('rounded-full px-2 py-1 text-xs md:text-[10px]', verdictMeta[finding.verdict].cls)}>{verdictMeta[finding.verdict].label}</span>}
+                    <span className="rounded-full bg-muted px-2 py-1 text-xs md:text-[10px] text-muted-foreground">{judgementLabels[finding.judgement_type]}</span>
                   </div>
                 </summary>
                 <div className="mt-3 space-y-3 border-t border-border pt-3 text-sm leading-6">
@@ -392,7 +392,7 @@ export default function VideoReviewPage() {
               <article key={advice.dimension} className="rounded-xl border border-border bg-card p-4 shadow-card">
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="text-sm font-medium leading-6">{advice.title}</h3>
-                  <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">{judgementLabels[advice.judgement_type]}</span>
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs md:text-[10px] text-muted-foreground">{judgementLabels[advice.judgement_type]}</span>
                 </div>
                 <p className="mt-2 rounded-lg bg-muted/70 p-2 text-xs leading-5 text-muted-foreground">{advice.gap}</p>
                 <div className="mt-3 space-y-3 text-sm leading-6">
@@ -542,7 +542,7 @@ export default function VideoReviewPage() {
                   <div className="p-4">
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-6" title={item.title}>{item.title}</h3>
-                      <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span>
+                      <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-xs md:text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">{item.author_nickname}{item.author_followers !== null && item.author_followers !== undefined ? ` · ${item.author_followers}粉丝` : ''}</p>
                     <div className="tnum mt-3 text-xs">播放 {item.plays ?? '暂无'} · 点赞 {item.likes ?? '暂无'} · 评论 {item.comments ?? '暂无'}</div>

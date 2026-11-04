@@ -13,7 +13,7 @@ export function ThemeToggle() {
       <TooltipTrigger asChild>
         <button
           onClick={cycle}
-          className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+          className="relative flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:h-9 md:w-9 cursor-pointer"
           aria-label="切换主题"
         >
           <AnimatePresence mode="wait" initial={false}>

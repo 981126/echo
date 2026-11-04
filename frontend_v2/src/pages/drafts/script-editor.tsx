@@ -164,7 +164,7 @@ export function ScriptEditor({
         <button type="button" className={btn()} disabled={!editor?.can().undo()} onClick={() => run((e) => e.chain().focus().undo().run())} title="撤销"><Undo2 className="h-3.5 w-3.5" /></button>
         <button type="button" className={btn()} disabled={!editor?.can().redo()} onClick={() => run((e) => e.chain().focus().redo().run())} title="重做"><Redo2 className="h-3.5 w-3.5" /></button>
         <span className="flex-1" />
-        <span className="text-[10px] text-muted-foreground">支持粘贴/拖拽图片</span>
+        <span className="text-xs md:text-[10px] text-muted-foreground">支持粘贴/拖拽图片</span>
         <input ref={imgInput} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadAndInsert(e.target.files[0])} />
       </div>
       <EditorContent editor={editor} className="script-editor-content" />

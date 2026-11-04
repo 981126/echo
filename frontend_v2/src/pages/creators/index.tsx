@@ -126,7 +126,7 @@ function CreatorBlock({
           <AvatarFallback>{c.name.slice(0, 1) || '博'}</AvatarFallback>
         </Avatar>
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[15px] font-semibold">{c.name}</span>
             {benchmark ? (
               <Badge variant="secondary"><Target className="h-3 w-3" /> 对标</Badge>
@@ -136,7 +136,7 @@ function CreatorBlock({
               <Badge variant="secondary">主博主</Badge>
             )}
           </div>
-          <div className="tnum text-[11px] text-muted-foreground">
+          <div className="tnum text-xs md:text-[11px] text-muted-foreground">
             全网粉丝 {fmtNum(c.followers_total)} · {c.account_count} 个账号
             {c.note ? ` · ${c.note}` : ''}
           </div>
@@ -179,7 +179,15 @@ function CreatorBlock({
       {/* 对标开关 */}
       <div className="flex items-center justify-end gap-2">
         <span className="text-xs text-muted-foreground">{benchmark ? '恢复为独立主博主' : '对标博主'}</span>
-        <Switch checked={benchmark} onCheckedChange={(v) => h.onBenchmarkToggle(c, v)} />
+        {/* R-218：开关视觉保持原尺寸，外层 44×44 热区（点空白处也能切换） */}
+        <span
+          className="flex h-11 w-11 cursor-pointer items-center justify-center md:h-auto md:w-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) h.onBenchmarkToggle(c, !benchmark)
+          }}
+        >
+          <Switch checked={benchmark} onCheckedChange={(v) => h.onBenchmarkToggle(c, v)} aria-label={benchmark ? '恢复为独立主博主' : '设为对标博主'} />
+        </span>
       </div>
 
       <AnimatePresence>{job && <SyncProgressBar job={job} />}</AnimatePresence>
@@ -508,13 +516,13 @@ export default function CreatorsPage() {
           <CardContent className="flex flex-wrap items-center gap-3 py-3">
             <span className="text-xs text-muted-foreground">当前主博主：</span>
             {current?.id ? (
-              <span className="flex items-center gap-2 rounded-full bg-accent-soft py-1 pl-1 pr-3">
+              <span className="flex min-w-0 max-w-full items-center gap-2 rounded-full bg-accent-soft py-1 pl-1 pr-3">
                 <Avatar className="h-6 w-6">
                   {current.avatar ? <AvatarImage src={coverThumb(current.avatar, 160)} alt="" decoding="async" /> : null}
-                  <AvatarFallback className="text-[10px]">{current.name.slice(0, 1)}</AvatarFallback>
+                  <AvatarFallback className="text-xs md:text-[10px]">{current.name.slice(0, 1)}</AvatarFallback>
                 </Avatar>
-                <b className="text-[13px]">{current.name}</b>
-                <span className="tnum text-xs text-muted-foreground">全网粉丝 {fmtNum(current.followers_total)}</span>
+                <b className="max-w-full truncate text-[13px]">{current.name}</b>
+                <span className="tnum shrink-0 text-xs text-muted-foreground">全网粉丝 {fmtNum(current.followers_total)}</span>
               </span>
             ) : (
               <Badge variant="warning">未创建</Badge>
@@ -559,7 +567,7 @@ export default function CreatorsPage() {
               <CardContent className="space-y-4 py-4">
                 <CreatorBlock c={c} job={jobFor(c)} running={runningCreators.has(c.id)} syncingAll={syncingAll} skipped={skipFor(c)} hasBenchmarks={benchmarksOf(c).length > 0} h={handlers} />
                 {benchmarksOf(c).map((bm) => (
-                  <div key={bm.id} className="ml-4 border-l-2 border-border pl-4">
+                  <div key={bm.id} className="ml-2 border-l-2 border-border pl-2 md:ml-4 md:pl-4">
                     <CreatorBlock c={bm} benchmark job={jobFor(bm)} running={runningCreators.has(bm.id)} syncingAll={syncingAll} skipped={skipFor(bm)} hasBenchmarks={false} h={handlers} />
                   </div>
                 ))}
@@ -599,7 +607,7 @@ export default function CreatorsPage() {
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">备注</label>
                 <Textarea rows={3} value={creatorForm.note} onChange={(e) => setCreatorForm({ ...creatorForm, note: e.target.value })} placeholder="可选" />
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setCreatorForm(null)}>取消</Button>
                 <Button size="sm" onClick={saveCreator} disabled={!creatorForm.name.trim()}>保存</Button>
               </div>
@@ -631,14 +639,14 @@ export default function CreatorsPage() {
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">主页链接</label>
                 <div className="flex gap-2">
-                  <Input value={accountForm.home_link} onChange={(e) => setAccountForm({ ...accountForm, home_link: e.target.value })} placeholder="粘贴主页分享链接" />
+                  <Input className="min-w-0 flex-1" value={accountForm.home_link} onChange={(e) => setAccountForm({ ...accountForm, home_link: e.target.value })} placeholder="粘贴主页分享链接" />
                   <Button variant="outline" size="sm" onClick={parseLink} disabled={parsing || !accountForm.home_link}>
                     {parsing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
                     解析
                   </Button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-muted-foreground">昵称</label>
                   <Input value={accountForm.nickname} onChange={(e) => setAccountForm({ ...accountForm, nickname: e.target.value })} />
@@ -656,12 +664,19 @@ export default function CreatorsPage() {
               )}
               {accountForm.platform === 'douyin' && (
                 <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="text-xs font-medium">启用创作者中心数据</div>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">开启且 Cookie 有效时，账号数据走抖音创作者中心；关闭则使用公开接口</p>
+                      <p className="mt-0.5 text-xs md:text-[11px] text-muted-foreground">开启且 Cookie 有效时，账号数据走抖音创作者中心；关闭则使用公开接口</p>
                     </div>
-                    <Switch checked={accountForm.douyinEnabled} onCheckedChange={(v: boolean) => setAccountForm({ ...accountForm, douyinEnabled: v })} />
+                    <span
+                      className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center"
+                      onClick={(e) => {
+                        if (e.target === e.currentTarget) setAccountForm({ ...accountForm, douyinEnabled: !accountForm.douyinEnabled })
+                      }}
+                    >
+                      <Switch checked={accountForm.douyinEnabled} onCheckedChange={(v: boolean) => setAccountForm({ ...accountForm, douyinEnabled: v })} aria-label="启用创作者中心数据" />
+                    </span>
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-muted-foreground">抖音创作者 Cookie（不回显，留空表示不修改）</label>
@@ -670,11 +685,11 @@ export default function CreatorsPage() {
                       value={accountForm.douyinCookie}
                       onChange={(e) => setAccountForm({ ...accountForm, douyinCookie: e.target.value })}
                       placeholder="粘贴 creator.douyin.com 的完整 Cookie（含 sessionid/sid_tt）"
-                      className="font-mono text-[11px]"
+                      className="font-mono text-xs md:text-[11px]"
                     />
                   </div>
                   {accountForm.douyinStatus && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs md:text-[11px] text-muted-foreground">
                       当前状态：{accountForm.douyinStatus.status_label}
                       {accountForm.douyinStatus.last_success_at ? ` · 最近成功 ${fmtDate(accountForm.douyinStatus.last_success_at)}` : ''}
                       {accountForm.douyinStatus.last_error ? <span className="block text-destructive">{accountForm.douyinStatus.last_error}</span> : null}
@@ -682,7 +697,7 @@ export default function CreatorsPage() {
                   )}
                 </div>
               )}
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setAccountForm(null)}>取消</Button>
                 <Button size="sm" onClick={saveAccount} disabled={!accountForm.platform_user_id && !accountForm.home_link}>保存</Button>
               </div>
@@ -698,8 +713,8 @@ export default function CreatorsPage() {
             <DialogTitle>TikHub 每日请求预算</DialogTitle>
             <DialogDescription>超出预算后当日同步自动停止，防止额度透支</DialogDescription>
           </DialogHeader>
-          <div className="flex items-center gap-2">
-            <Input type="number" min={1} value={budgetLimit} onChange={(e) => setBudgetLimit(Number(e.target.value))} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Input className="min-w-0 flex-1" type="number" min={1} value={budgetLimit} onChange={(e) => setBudgetLimit(Number(e.target.value))} />
             <Button size="sm" onClick={saveBudget}>保存</Button>
           </div>
           <p className="tnum text-xs text-muted-foreground">今日已用 {budgetQ.data?.used ?? 0} · 剩余 {budgetQ.data?.remaining ?? '—'}</p>

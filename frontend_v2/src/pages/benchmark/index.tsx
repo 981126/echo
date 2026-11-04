@@ -63,6 +63,25 @@ async function waitTask(taskId: number, signal: { cancelled: boolean }): Promise
   }
 }
 
+/** R-218：分析理由在 <md 折叠 3 行 + 展开/收起（触控 ≥44），md+ 完全保持原样。 */
+function AnalysisReason({ can, reason }: { can: boolean; reason?: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const long = !!reason && reason.length > 60
+  return (
+    <div className="min-w-0 flex-1">
+      <p className={cn('leading-relaxed', long && !expanded && 'line-clamp-3 md:line-clamp-none')}>
+        {can ? '能讲' : '不建议'}
+        {reason ? `：${reason}` : ''}
+      </p>
+      {long && (
+        <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1 text-xs font-medium underline underline-offset-2 md:hidden">
+          {expanded ? '收起' : '展开'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function BenchmarkPage() {
   const qc = useQueryClient()
   const [analysisMap, setAnalysisMap] = useState<Record<string, Analysis>>({})
@@ -251,7 +270,7 @@ export default function BenchmarkPage() {
         benchmarks.map((b) => (
           <motion.section key={b.benchmark_id} variants={itemVariants}>
             <Card>
-              <CardHeader className="flex-row items-center gap-2">
+              <CardHeader className="flex-row flex-wrap items-center gap-2">
                 <CardTitle className="text-base">{b.name}</CardTitle>
                 {b.note && <CardDescription className="truncate">{b.note}</CardDescription>}
                 <span className="flex-1" />
@@ -266,7 +285,7 @@ export default function BenchmarkPage() {
                     暂无作品（先「重新对标」拉取）
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                     {/* R-174：网格与素材库一致（2/3/4 列），封面尺寸因此相同 */}
                     {b.items.map((it, idx) => {
                       const ana = analysisMap[it.key]
@@ -294,13 +313,13 @@ export default function BenchmarkPage() {
                                 </Badge>
                               ))}
                             </div>
-                            <span className="tnum absolute right-2 top-2 rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] text-white">
+                            <span className="tnum absolute right-2 top-2 rounded-md bg-black/45 px-1.5 py-0.5 text-xs md:text-[10px] text-white">
                               互动分 {fmtNum(it.score)}
                             </span>
                           </div>
                           <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
                             <p className="line-clamp-2 text-[13px] font-medium leading-snug">{it.title || '（无标题）'}</p>
-                            <div className="tnum flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+                            <div className="tnum flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs md:text-[11px] text-muted-foreground">
                               <span>👍 {fmtNum(it.likes)}</span>
                               <span>⭐ {fmtNum(it.favorites)}</span>
                               <span>💬 {fmtNum(it.comments)}</span>
@@ -309,7 +328,7 @@ export default function BenchmarkPage() {
                             {!!it.tags.length && (
                               <div className="flex flex-wrap gap-1">
                                 {it.tags.slice(0, 3).map((t) => (
-                                  <span key={t} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t}</span>
+                                  <span key={t} className="rounded-full bg-muted px-1.5 py-0.5 text-xs md:text-[10px] text-muted-foreground">{t}</span>
                                 ))}
                               </div>
                             )}
@@ -334,18 +353,18 @@ export default function BenchmarkPage() {
                                   )}
                                 >
                                   {ana.can ? <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <CircleX className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-                                  <span className="leading-relaxed">{ana.can ? '能讲' : '不建议'}{ana.reason ? `：${ana.reason}` : ''}</span>
+                                  <AnalysisReason can={ana.can} reason={ana.reason} />
                                 </motion.div>
                               )}
                             </AnimatePresence>
 
                             <div className="mt-auto flex items-center gap-1.5 pt-1">
-                              <Button variant="outline" size="sm" className="h-7 text-xs" disabled={busyOf(it.key) === 'a' + it.key || !it.has_text} onClick={() => analyze(it)}>
+                              <Button variant="outline" size="sm" className="text-xs md:h-7" disabled={busyOf(it.key) === 'a' + it.key || !it.has_text} onClick={() => analyze(it)}>
                                 {busyOf(it.key) === 'a' + it.key ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
                                 AI 分析
                               </Button>
                               {ana?.can && (
-                                <Button size="sm" className="h-7 text-xs" disabled={busyOf(it.key) === 'r' + it.key} onClick={() => doRewrite(b, it)}>
+                                <Button size="sm" className="text-xs md:h-7" disabled={busyOf(it.key) === 'r' + it.key} onClick={() => doRewrite(b, it)}>
                                   {busyOf(it.key) === 'r' + it.key ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <PenLine className="h-3 w-3" />}
                                   洗稿
                                 </Button>

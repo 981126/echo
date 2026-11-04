@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Waves, ArrowRight, LoaderCircle } from 'lucide-react'
 import { setToken } from '@/lib/token'
 import { apiJson } from '@/api/client'
@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const reduce = useReducedMotion()
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -30,18 +31,18 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-full items-center justify-center overflow-hidden bg-background">
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* 背景光斑（表现力：缓慢漂移） */}
       <motion.div
         aria-hidden
         className="pointer-events-none absolute -top-40 left-1/2 h-[480px] w-[720px] -translate-x-1/2 rounded-full bg-accent/15 blur-3xl"
-        animate={{ y: [0, 30, 0], scale: [1, 1.06, 1] }}
+        animate={reduce ? undefined : { y: [0, 30, 0], scale: [1, 1.06, 1] }}
         transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
         aria-hidden
         className="pointer-events-none absolute -bottom-48 -left-32 h-[380px] w-[380px] rounded-full bg-[rgba(16,185,129,0.10)] blur-3xl"
-        animate={{ y: [0, -24, 0] }}
+        animate={reduce ? undefined : { y: [0, -24, 0] }}
         transition={{ duration: 11, repeat: Infinity, ease: 'easeInOut' }}
       />
 
@@ -83,8 +84,7 @@ export default function LoginPage() {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             placeholder="输入 ECHO_ACCESS_TOKEN"
-            autoFocus
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition-shadow placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+            className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition-shadow placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-[var(--ring)] md:h-10"
           />
           {error && (
             <motion.p

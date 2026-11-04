@@ -1,7 +1,7 @@
 // R-244 数据看板「作品分析」区：总览 / 评论热词 / 评论管理（只读）3 个 tab。
 // v13：流量分析、观众分析 tab 移除，指标并入总览右侧；悬浮指标切换左侧趋势曲线。
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import {
   BarChart3,
   ChevronDown,
@@ -129,7 +129,7 @@ function MetricTile({
           : 'rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/50'
       }
     >
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-xs md:text-[11px] text-muted-foreground">
         {spec.icon}
         <span className="truncate">{spec.label}</span>
       </div>
@@ -157,7 +157,7 @@ function ScriptTab({ detail, onTranscribe, transcribing }: { detail: PostDetail;
     <div className="flex h-full min-h-0 flex-col gap-2">
       {transcript.available ? (
         <>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs md:text-[11px] text-muted-foreground">
             ASR 转写文案（来自本地素材转写，可能有错别字；共 {transcript.text.length} 字）
           </p>
           <motion.div
@@ -251,9 +251,9 @@ export function VideoOverview({ detail }: { detail: PostDetail }) {
           title={`${spec.label}趋势`}
           extra={
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">统计周期</span>
+              <span className="text-xs md:text-[11px] text-muted-foreground">统计周期</span>
               <Select value={String(periodDays)} onValueChange={(value) => setPeriodDays(Number(value))}>
-                <SelectTrigger className="h-7 w-[92px] text-xs" aria-label="统计周期">
+                <SelectTrigger className="h-11 w-[92px] text-xs md:h-7" aria-label="统计周期">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -307,14 +307,14 @@ function CommentWordsTab({ detail }: { detail: PostDetail }) {
   const { comment_words: words } = detail
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] leading-5 text-muted-foreground">{words.note}</div>
+      <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs md:text-[11px] leading-5 text-muted-foreground">{words.note}</div>
       {words.items.length ? (
         <div className="columns-1 gap-x-8 md:columns-2">
           {words.items.map((item, index) => (
             <div key={`${item.word}-${index}`} className="mb-1 flex break-inside-avoid items-center gap-2 border-b border-border/60 py-1.5 text-xs last:border-0">
-              <span className="tnum w-5 shrink-0 text-[10px] text-muted-foreground">{index + 1}</span>
+              <span className="tnum w-5 shrink-0 text-xs md:text-[10px] text-muted-foreground">{index + 1}</span>
               <span className="min-w-0 flex-1 truncate font-medium" title={item.word}>{item.word}</span>
-              <span className="tnum shrink-0 text-[11px] text-muted-foreground">{item.count} 条评论</span>
+              <span className="tnum shrink-0 text-xs md:text-[11px] text-muted-foreground">{item.count} 条评论</span>
             </div>
           ))}
         </div>
@@ -349,7 +349,7 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
   const visibleComments = comments.items.slice(0, visibleCount)
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs md:text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <span className="flex items-start gap-1.5">
           <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           本页只读：回复 / 删除 / 举报请到抖音创作者中心操作（TikHub 只提供公开评论读取）
@@ -363,7 +363,7 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
       </div>
       {comments.items.length ? (
         <>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs md:text-[11px] text-muted-foreground">
             已同步 {comments.total} 条公开评论（按点赞排序，最多 50 条；同步时间为本地保存时间）· 已展示 {visibleComments.length}/{comments.items.length} 条
           </p>
           <ScrollArea viewportRef={viewportRef} className="min-h-0 flex-1 rounded-lg border border-border">
@@ -372,12 +372,12 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
                 <li key={comment.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-[11px] font-medium text-muted-foreground">{comment.user || '抖音用户'}</span>
-                      <span className="text-[10px] text-muted-foreground/80">同步于 {formatDateTime(comment.synced_at)}</span>
+                      <span className="truncate text-xs md:text-[11px] font-medium text-muted-foreground">{comment.user || '抖音用户'}</span>
+                      <span className="text-xs md:text-[10px] text-muted-foreground/80">同步于 {formatDateTime(comment.synced_at)}</span>
                     </div>
                     <p className="mt-1 break-words text-xs leading-5 text-foreground">{comment.text}</p>
                   </div>
-                  <span className="tnum mt-1 flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground sm:mt-0">
+                  <span className="tnum mt-1 flex shrink-0 items-center gap-1 text-xs md:text-[11px] text-muted-foreground sm:mt-0">
                     <ThumbsUp className="h-3 w-3" />
                     {comment.likes}
                   </span>
@@ -385,7 +385,7 @@ function CommentsTab({ detail, refreshing, onRefresh }: { detail: PostDetail; re
               ))}
             </ul>
           </ScrollArea>
-          <p className="text-center text-[11px] text-muted-foreground">
+          <p className="text-center text-xs md:text-[11px] text-muted-foreground">
             {visibleCount < comments.items.length ? '向下滚动自动加载更多' : '已展示全部已同步评论'}
           </p>
         </>
@@ -414,6 +414,17 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
     document.addEventListener('mousedown', onPointerDown)
     return () => document.removeEventListener('mousedown', onPointerDown)
   }, [pickerOpen])
+
+  // R-218：tab 行横滑时把当前选中项滚入视口（reduce 用户瞬移，不播平滑滚动）
+  const tabStripRef = useRef<HTMLDivElement | null>(null)
+  const reduceMotion = useReducedMotion()
+  const scrollActiveTabIntoView = () => {
+    requestAnimationFrame(() => {
+      const active = tabStripRef.current?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')
+      active?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' })
+    })
+  }
+
   return (
     <section className="rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
       <header ref={pickerRef} className="relative flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
@@ -435,11 +446,11 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
                 {postTags.length ? (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {postTags.map((tag) => (
-                      <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">{tag}</span>
+                      <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-xs md:text-[10px] leading-4 text-muted-foreground">{tag}</span>
                     ))}
                   </div>
                 ) : null}
-                <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                <p className="mt-1 truncate text-xs md:text-[11px] text-muted-foreground">
                   发布于 {formatMonthDayTime(post.publish_time)}
                   {post.duration_seconds ? ` · 时长 ${post.duration_seconds} 秒` : ''}
                   {' · '}数据更新至 {formatDateTime(detail.data_time)}
@@ -455,13 +466,13 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
             {postTags.length ? (
               <div className="mt-1 flex flex-wrap gap-1">
                 {postTags.map((tag) => (
-                  <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">
+                  <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-xs md:text-[10px] leading-4 text-muted-foreground">
                     {tag}
                   </span>
                 ))}
               </div>
             ) : null}
-            <p className="mt-1 truncate text-[11px] text-muted-foreground">
+            <p className="mt-1 truncate text-xs md:text-[11px] text-muted-foreground">
               发布于 {formatMonthDayTime(post.publish_time)}
               {post.duration_seconds ? ` · 时长 ${post.duration_seconds} 秒` : ''}
               {' · '}数据更新至 {formatDateTime(detail.data_time)}
@@ -517,9 +528,9 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="min-w-0 flex-1 truncate text-xs font-medium">{option.title || '无标题作品'}</span>
-                    {option.status_label ? <span className="shrink-0 text-[10px] text-muted-foreground">{option.status_label}</span> : null}
+                    {option.status_label ? <span className="shrink-0 text-xs md:text-[10px] text-muted-foreground">{option.status_label}</span> : null}
                   </span>
-                  <span className="tnum mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] text-muted-foreground">
+                  <span className="tnum mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs md:text-[10px] text-muted-foreground">
                     <span>播放 {formatCount(option.plays)}</span>
                     <span>点赞 {formatCount(option.likes)}</span>
                     <span>收藏 {formatCount(option.favorites)}</span>
@@ -535,7 +546,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
       {detail.warnings.length ? (
         <div className="space-y-1.5 px-4 pt-3">
           {detail.warnings.map((warning) => (
-            <p key={warning} className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-2.5 py-1.5 text-[11px] leading-4 text-warning">
+            <p key={warning} className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-2.5 py-1.5 text-xs md:text-[11px] leading-4 text-warning">
               <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               {warning}
             </p>
@@ -543,7 +554,7 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
         </div>
       ) : null}
       {refreshError ? (
-        <div className="mx-4 mt-3 flex flex-col gap-2 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 text-[11px] leading-5 text-warning sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-4 mt-3 flex flex-col gap-2 rounded-lg border border-warning/40 bg-[rgba(245,158,11,0.08)] px-3 py-2 text-xs md:text-[11px] leading-5 text-warning sm:flex-row sm:items-center sm:justify-between">
           <span className="flex items-start gap-1.5">
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             刷新失败：{refreshError}（当前展示上一次成功的数据）
@@ -552,26 +563,30 @@ export function PostAnalysis({ detail, refreshing, refreshError, onRefresh, onRe
         </div>
       ) : null}
       {detail.stale ? (
-        <p className="px-4 pt-3 text-[11px] text-muted-foreground">
+        <p className="px-4 pt-3 text-xs md:text-[11px] text-muted-foreground">
           数据已超过 6 小时未更新，可点「更新数据」获取最新数据
         </p>
       ) : null}
 
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue="overview" onValueChange={scrollActiveTabIntoView}>
         <div className="flex items-center justify-between gap-3 px-4 pt-3">
           {showTranscriptHint && !detail.transcript.available ? (
-            <p className="order-2 flex shrink-0 items-center gap-1 text-[11px] text-warning">
+            <p className="order-2 flex shrink-0 items-center gap-1 text-xs md:text-[11px] text-warning">
               <CircleAlert className="h-3 w-3 shrink-0" />
               暂无文案，分析结果可能不准
             </p>
           ) : null}
-          <div className="order-1 min-w-0 overflow-x-auto">
-          <TabsList className="w-max">
-            <TabsTrigger value="overview">视频总览</TabsTrigger>
-            <TabsTrigger value="script">文案脚本</TabsTrigger>
-            <TabsTrigger value="words">评论热词</TabsTrigger>
-            <TabsTrigger value="comments">评论管理</TabsTrigger>
-          </TabsList>
+          {/* R-218：tab 行横滑时右侧渐隐提示；切换后当前项自动滚入视口 */}
+          <div className="relative order-1 min-w-0">
+            <div ref={tabStripRef} className="overflow-x-auto">
+              <TabsList className="w-max">
+                <TabsTrigger value="overview">视频总览</TabsTrigger>
+                <TabsTrigger value="script">文案脚本</TabsTrigger>
+                <TabsTrigger value="words">评论热词</TabsTrigger>
+                <TabsTrigger value="comments">评论管理</TabsTrigger>
+              </TabsList>
+            </div>
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-card to-transparent md:hidden" />
           </div>
         </div>
         <div className="p-4">

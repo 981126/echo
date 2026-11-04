@@ -84,9 +84,9 @@ export function WorksList({
         <div className="min-w-0">
           <div className="flex items-baseline gap-2">
             <h2 className="text-sm font-semibold">近期作品</h2>
-            {total > 0 ? <span className="text-[11px] text-muted-foreground">共 {total} 条</span> : null}
+            {total > 0 ? <span className="text-xs md:text-[11px] text-muted-foreground">共 {total} 条</span> : null}
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">数据更新至：{formatDateTime(dataTime)}</p>
+          <p className="mt-0.5 text-xs md:text-[11px] text-muted-foreground">数据更新至：{formatDateTime(dataTime)}</p>
         </div>
       </div>
 
@@ -145,8 +145,8 @@ export function WorksList({
                         <p className="line-clamp-2 min-w-0 flex-1 text-xs font-medium leading-5" title={item.title}>{item.title || '无标题作品'}</p>
                         <Badge variant={statusTone(item.status)} className="shrink-0">{item.status_label || '—'}</Badge>
                       </div>
-                      <p className="mt-1 text-[11px] text-muted-foreground">{formatMonthDayTime(item.publish_time)}</p>
-                      <div className="tnum mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                      <p className="mt-1 text-xs md:text-[11px] text-muted-foreground">{formatMonthDayTime(item.publish_time)}</p>
+                      <div className="tnum mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs md:text-[11px] text-muted-foreground">
                         <span>播放 {metricText(item.plays)}</span>
                         <span>点赞 {metricText(item.likes)}</span>
                         <span>评论 {metricText(item.comments)}</span>

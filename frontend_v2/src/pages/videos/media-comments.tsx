@@ -72,11 +72,11 @@ function PostComments({ postId, platform }: { postId: number; platform: string }
               transition={{ delay: Math.min(i, 20) * 0.02 }}
               className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
             >
-              <span className="tnum mt-0.5 flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground">
+              <span className="tnum mt-0.5 flex shrink-0 items-center gap-0.5 text-xs md:text-[11px] text-muted-foreground">
                 <ThumbsUp className="h-3 w-3" /> {fmtNum(c.likes)}
               </span>
               <div className="min-w-0">
-                {c.user_nick && <span className="mr-1.5 text-[11px] font-medium text-accent">{c.user_nick}</span>}
+                {c.user_nick && <span className="mr-1.5 text-xs md:text-[11px] font-medium text-accent">{c.user_nick}</span>}
                 <span className="text-xs leading-relaxed">{c.text}</span>
               </div>
             </motion.li>

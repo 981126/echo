@@ -31,7 +31,7 @@ export function Panel({
       <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">{title}</h3>
-          {hint ? <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{hint}</p> : null}
+          {hint ? <p className="mt-0.5 text-xs md:text-[11px] leading-4 text-muted-foreground">{hint}</p> : null}
         </div>
         {extra}
       </div>
@@ -54,12 +54,12 @@ export function Empty({ text = '暂无数据', children, className }: { text?: R
 export function StatTile({ label, value, hint, icon }: { label: string; value: ReactNode; hint?: ReactNode; icon?: ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-muted/30 px-2.5 py-2">
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-xs md:text-[11px] text-muted-foreground">
         {icon}
         <span className="truncate">{label}</span>
       </div>
       <div className="tnum mt-1 text-base font-semibold leading-6">{value}</div>
-      {hint ? <div className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{hint}</div> : null}
+      {hint ? <div className="mt-0.5 text-xs md:text-[10px] leading-4 text-muted-foreground">{hint}</div> : null}
     </div>
   )
 }
@@ -339,7 +339,7 @@ export function Bars({ items, ariaLabel }: { items: Array<{ label: string; ratio
     <div role="img" aria-label={ariaLabel ?? '柱状分布图'} className="flex items-end justify-between gap-2 pt-4">
       {items.map((item) => (
         <div key={item.label} className="flex min-w-0 flex-1 flex-col items-center gap-1">
-          <span className="tnum text-[10px] text-muted-foreground">{formatPercent(item.ratio)}</span>
+          <span className="tnum text-xs md:text-[10px] text-muted-foreground">{formatPercent(item.ratio)}</span>
           <motion.div
             initial={reduce ? false : { opacity: 0.7 }}
             animate={{ opacity: 1 }}
@@ -347,7 +347,7 @@ export function Bars({ items, ariaLabel }: { items: Array<{ label: string; ratio
             style={{ height: `${6 + (item.ratio / max) * 104}px` }}
             className="w-full max-w-10 rounded-t-md bg-accent/85"
           />
-          <span className="w-full truncate text-center text-[10px] text-muted-foreground" title={item.label}>{item.label}</span>
+          <span className="w-full truncate text-center text-xs md:text-[10px] text-muted-foreground" title={item.label}>{item.label}</span>
         </div>
       ))}
     </div>
@@ -451,7 +451,7 @@ export function WatchTrend({ points, ariaLabel }: { points: WatchPoint[]; ariaLa
           </text>
         ))}
       </svg>
-      <div className="mt-2 flex flex-wrap items-center gap-4 text-[11px] text-muted-foreground">
+      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs md:text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 rounded-full bg-accent" />当前作品</span>
         <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dashed border-muted-foreground" />同类作者参考</span>
       </div>

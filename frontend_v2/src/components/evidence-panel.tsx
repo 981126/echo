@@ -130,7 +130,7 @@ export function EvidencePanel({
   if (!hasOutlines && !hasEvidenceSources && !hasQueries) return null
 
   const queryLine = hasQueries ? (
-    <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+    <div className="flex items-start gap-1.5 text-xs md:text-[11px] text-muted-foreground">
       <Search className="mt-0.5 h-3 w-3 shrink-0" />
       <span>
         <span className="text-muted-foreground/80">联网搜索词：</span>
@@ -157,13 +157,13 @@ export function EvidencePanel({
   const outlinesBody = (
     <div className="mt-1.5">
       {outlineDrift && (
-        <p className="mb-1.5 text-[11px] text-warning">
+        <p className="mb-1.5 text-xs md:text-[11px] text-warning">
           论点为讨论前初稿口径，讨论后已调整，以正文为准
         </p>
       )}
       <ol className="list-inside list-decimal space-y-1.5">
         {outlineItems.map((o, i) => (
-          <li key={i} className="text-[11px] leading-relaxed">
+          <li key={i} className="text-xs md:text-[11px] leading-relaxed">
             <span className="font-medium text-foreground">{o.claim}</span>
             {_norm(o.support) && <span className="text-muted-foreground">：{o.support}</span>}
           </li>
@@ -176,7 +176,7 @@ export function EvidencePanel({
     stationTotal > 0 ? (
       <div className="mt-1.5 space-y-1">
         {stationAuthor.length > 0 && (
-          <div className="text-[11px] leading-relaxed">
+          <div className="text-xs md:text-[11px] leading-relaxed">
             <span className="text-muted-foreground/80">你的素材：</span>
             {stationAuthor.map((s, i) => (
               <span key={i} className="text-foreground/80">
@@ -188,7 +188,7 @@ export function EvidencePanel({
           </div>
         )}
         {stationBench.length > 0 && (
-          <div className="text-[11px] leading-relaxed">
+          <div className="text-xs md:text-[11px] leading-relaxed">
             <span className="text-muted-foreground/80">对标参考：</span>
             {stationBench.map((s, i) => (
               <span key={i} className="text-foreground/80">
@@ -206,7 +206,7 @@ export function EvidencePanel({
     <div>
       {stationBody}
       {refs.length > 0 && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
+        <p className="mt-1.5 text-xs md:text-[11px] text-muted-foreground">
           {refsMode
             ? `生成方按人设选了 ${refs.length} 篇作为参考`
             : `生成方选文 ${refs.length} 篇 · 当前展开全部候选`}
@@ -219,20 +219,20 @@ export function EvidencePanel({
           return (
             <li
               key={i}
-              className={cn('text-[11px] leading-relaxed', !used && !picked && 'opacity-60')}
+              className={cn('text-xs md:text-[11px] leading-relaxed', !used && !picked && 'opacity-60')}
             >
               {providerLabel(s.provider) && (
-                <Badge variant="secondary" className="mr-1 align-middle text-[9px]">
+                <Badge variant="secondary" className="mr-1 align-middle text-xs md:text-[9px]">
                   {providerLabel(s.provider)}
                 </Badge>
               )}
               {used && (
-                <Badge variant="success" className="mr-1 align-middle text-[9px]">
+                <Badge variant="success" className="mr-1 align-middle text-xs md:text-[9px]">
                   已引用
                 </Badge>
               )}
               {!used && picked && (
-                <Badge variant="outline" className="mr-1 align-middle text-[9px]">
+                <Badge variant="outline" className="mr-1 align-middle text-xs md:text-[9px]">
                   参考
                 </Badge>
               )}
@@ -253,23 +253,23 @@ export function EvidencePanel({
                 <span className="text-muted-foreground/60"> · {_norm(s.date).slice(0, 10)}</span>
               )}
               {_norm(s.reason) && (
-                <p className="mt-0.5 text-[10px] text-muted-foreground">选文理由：{s.reason}</p>
+                <p className="mt-0.5 text-xs md:text-[10px] text-muted-foreground">选文理由：{s.reason}</p>
               )}
             </li>
           )
         })}
       </ul>
       {hasSources && usedCount === 0 && refs.length === 0 && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">本次联网检索到的内容未直接引用。</p>
+        <p className="mt-1.5 text-xs md:text-[11px] text-muted-foreground">本次联网检索到的内容未直接引用。</p>
       )}
       {outlineDrift && hasSources && (
-        <p className="mt-1.5 text-[11px] text-warning">引用为讨论前初稿口径，讨论后正文可能已调整</p>
+        <p className="mt-1.5 text-xs md:text-[11px] text-warning">引用为讨论前初稿口径，讨论后正文可能已调整</p>
       )}
       {hasSources && (usedCount > 0 || refs.length > 0) && (
         <button
           type="button"
           onClick={() => setShowAll((v) => !v)}
-          className="mt-1 cursor-pointer text-[11px] text-muted-foreground/80 hover:text-foreground"
+          className="mt-1 cursor-pointer text-xs md:text-[11px] text-muted-foreground/80 hover:text-foreground"
         >
           {refs.length > 0
             ? showAll
@@ -288,10 +288,10 @@ export function EvidencePanel({
       <div className="flex items-center gap-1.5">
         <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
         <TabsList className="h-7 flex-1 justify-start bg-transparent p-0">
-          <TabsTrigger value="outlines" className="h-7 px-2 text-[11px]">
+          <TabsTrigger value="outlines" className="h-7 px-2 text-xs md:text-[11px]">
             论点 {outlineItems.length}
           </TabsTrigger>
-          <TabsTrigger value="sources" className="h-7 px-2 text-[11px]">
+          <TabsTrigger value="sources" className="h-7 px-2 text-xs md:text-[11px]">
             引用来源 {sourceCount}
           </TabsTrigger>
         </TabsList>
@@ -312,7 +312,7 @@ export function EvidencePanel({
     <>
       <div className="flex items-center gap-1.5">
         <Link2 className="h-3.5 w-3.5 shrink-0 text-accent" />
-        <span className="text-[11px] font-medium">
+        <span className="text-xs md:text-[11px] font-medium">
           {hasOutlines ? `论点 ${outlineItems.length}` : `引用来源 ${sourceCount}`}
         </span>
         <CollapseButton collapsed={collapsed} onClick={() => setCollapsed((v) => !v)} className="ml-auto" />

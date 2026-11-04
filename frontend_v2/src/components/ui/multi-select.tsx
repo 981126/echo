@@ -26,7 +26,7 @@ export function MultiSelect({
       <Popover.Trigger asChild>
         <button
           className={cn(
-            'flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-[var(--ring)] cursor-pointer',
+            'flex h-11 min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-[var(--ring)] md:h-9 cursor-pointer',
             className
           )}
         >
@@ -51,7 +51,7 @@ export function MultiSelect({
         <Popover.Content
           align="start"
           sideOffset={6}
-          className="z-50 w-56 rounded-lg border border-border bg-card p-1 shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+          className="z-50 w-56 max-w-[92vw] rounded-lg border border-border bg-card p-1 shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
         >
           <ScrollArea className="max-h-64">
             {options.length === 0 ? (

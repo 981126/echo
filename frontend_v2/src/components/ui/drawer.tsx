@@ -2,12 +2,14 @@ import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { X } from 'lucide-react'
+import { useBackToClose } from '@/hooks/use-back-to-close'
 import { cn } from '@/lib/utils'
 
 // 右侧抽屉（弹簧物理曲线）：素材编辑/详情主容器
 // R-205：退出动画改为「受控 animate + 延迟卸载」——本项目 React 19 + framer-motion v12 下
 // AnimatePresence 的 exit 不触发（实测抽屉/移动端导航关闭时元素直接消失），
 // 因此关闭后先保持挂载、把 animate 切到关闭态，动画跑完（约 340ms）再卸载。
+// R-218：<md 抽屉全屏（100vw）；footer 避让安全区；延迟卸载 400ms（覆盖 spring 收口）；返回键先关抽屉。
 export function Drawer({
   open,
   onOpenChange,
@@ -23,12 +25,14 @@ export function Drawer({
 }) {
   const [mounted, setMounted] = React.useState(open)
 
+  useBackToClose(open, () => onOpenChange(false))
+
   React.useEffect(() => {
     if (open) {
       setMounted(true)
       return
     }
-    const timer = window.setTimeout(() => setMounted(false), 340)
+    const timer = window.setTimeout(() => setMounted(false), 400)
     return () => window.clearTimeout(timer)
   }, [open])
 
@@ -52,16 +56,17 @@ export function Drawer({
         animate={{ opacity: open ? 1 : 0 }}
         transition={{ duration: 0.2 }}
         style={{ pointerEvents: open ? 'auto' : 'none' }}
-        className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]"
+        className="fixed inset-0 z-50 bg-black/45 md:backdrop-blur-[2px]"
         onClick={() => onOpenChange(false)}
       />
       <motion.div
         initial={{ x: '100%' }}
         animate={{ x: open ? 0 : '100%' }}
         transition={{ type: 'spring', stiffness: 340, damping: 36 }}
-        style={{ width, pointerEvents: open ? 'auto' : 'none' }}
+        style={{ ['--drawer-w' as string]: width, pointerEvents: open ? 'auto' : 'none' } as React.CSSProperties}
         className={cn(
-          'fixed inset-y-0 right-0 z-50 flex flex-col border-l border-border bg-card shadow-2xl',
+          // R-218：<md 全屏；md+ 维持桌面右侧抽屉宽度（由调用方 width 决定）
+          'fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-border bg-card shadow-2xl md:w-[var(--drawer-w)]',
           className
         )}
         role="dialog"
@@ -70,7 +75,7 @@ export function Drawer({
       >
         <button
           onClick={() => onOpenChange(false)}
-          className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+          className="pressable absolute right-2 top-2 z-10 flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:right-3 md:top-3 md:h-auto md:w-auto md:p-1.5 cursor-pointer"
           aria-label="关闭"
         >
           <X className="h-4 w-4" />
@@ -95,5 +100,13 @@ export function DrawerBody({ className, ...props }: React.HTMLAttributes<HTMLDiv
 }
 
 export function DrawerFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex items-center gap-2 border-t border-border px-5 py-3', className)} {...props} />
+  return (
+    <div
+      className={cn(
+        'flex flex-wrap items-center gap-2 border-t border-border px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:flex-nowrap md:px-5 md:pb-3',
+        className
+      )}
+      {...props}
+    />
+  )
 }

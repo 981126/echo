@@ -6,11 +6,17 @@ export const EASE_SPRING = { type: 'spring', stiffness: 380, damping: 34 } as co
 
 export const pageTransition: Transition = { duration: 0.32, ease: EASE_OUT_EXPO }
 
+// R-218（作者硬要求）：页面转场首帧不再全透明（0 → 0.85，消除每页 1 帧空白，对齐 R-175）。
+// 同时去掉大面积 blur（原本 4px blur 在低端机上是 GPU 大开销，且 framer 落定会残留 blur(0px)
+// 继续创建 containing block）——动感由透明度+位移承担，动画本体不删，桌面/移动一致。
 export const pageVariants: Variants = {
-  initial: { opacity: 0, y: 12, filter: 'blur(4px)' },
-  animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
-  exit: { opacity: 0, y: -8, filter: 'blur(4px)' }
+  initial: { opacity: 0.85, y: 12 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -8 }
 }
+
+// 保留移动端专用变体名，便于后续按端微调（当前与桌面同参数）。
+export const pageVariantsMobile: Variants = pageVariants
 
 // 列表 stagger：父容器 + 子项
 export const listVariants: Variants = {

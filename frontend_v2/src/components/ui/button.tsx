@@ -15,11 +15,12 @@ const buttonVariants = cva(
         destructive: 'bg-destructive text-white hover:opacity-90',
         link: 'text-accent underline-offset-4 hover:underline'
       },
+      // R-218：<md 触控目标 ≥44px；md+ 保持改造前尺寸（桌面零回归）
       size: {
-        default: 'h-9 px-4',
-        sm: 'h-8 px-3 text-xs',
-        lg: 'h-10 px-5',
-        icon: 'h-9 w-9'
+        default: 'h-11 px-4 md:h-9',
+        sm: 'h-11 px-3 text-xs md:h-8',
+        lg: 'h-11 px-5 md:h-10',
+        icon: 'h-11 w-11 md:h-9 md:w-9'
       }
     },
     defaultVariants: { variant: 'default', size: 'default' }

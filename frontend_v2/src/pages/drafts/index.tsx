@@ -64,24 +64,24 @@ function Actions({ d, busy, h }: { d: Draft; busy: boolean; h: TileHandlers }) {
       {busy && <LoaderCircle className="h-3.5 w-3.5 animate-spin text-accent" />}
       {d.status === 'draft' && (
         <>
-          <Button variant="secondary" size="sm" className="h-7 text-xs" onClick={() => h.setStatus(d, 'used', '已采用，移入待制作')}>✅ 采用</Button>
-          <Button variant="secondary" size="sm" className="h-7 text-xs" onClick={() => h.setStatus(d, 'archived', '已移入废稿')}>不采用</Button>
+          <Button variant="secondary" size="sm" className="h-11 text-xs md:h-7" onClick={() => h.setStatus(d, 'used', '已采用，移入待制作')}>✅ 采用</Button>
+          <Button variant="secondary" size="sm" className="h-11 text-xs md:h-7" onClick={() => h.setStatus(d, 'archived', '已移入废稿')}>不采用</Button>
         </>
       )}
       {d.status === 'used' && (
         <>
-          <Button size="sm" className="h-7 text-xs" onClick={() => h.setStatus(d, 'done', '已完成')}>完成</Button>
-          <Button variant="secondary" size="sm" className="h-7 text-xs" onClick={() => h.setStatus(d, 'draft', '已退回草稿')}>退回草稿</Button>
-          <Button variant="secondary" size="sm" className="h-7 text-xs" onClick={() => h.setStatus(d, 'archived', '已移入废稿')}>移入废稿</Button>
+          <Button size="sm" className="h-11 text-xs md:h-7" onClick={() => h.setStatus(d, 'done', '已完成')}>完成</Button>
+          <Button variant="secondary" size="sm" className="h-11 text-xs md:h-7" onClick={() => h.setStatus(d, 'draft', '已退回草稿')}>退回草稿</Button>
+          <Button variant="secondary" size="sm" className="h-11 text-xs md:h-7" onClick={() => h.setStatus(d, 'archived', '已移入废稿')}>移入废稿</Button>
         </>
       )}
       {d.status === 'done' && (
-        <Button variant="secondary" size="sm" className="h-7 text-xs" onClick={() => h.setStatus(d, 'used', '已退回待制作')}>退回待制作</Button>
+        <Button variant="secondary" size="sm" className="h-11 text-xs md:h-7" onClick={() => h.setStatus(d, 'used', '已退回待制作')}>退回待制作</Button>
       )}
       {d.status === 'archived' && (
-        <Button variant="secondary" size="sm" className="h-7 text-xs" onClick={() => h.setStatus(d, 'draft', '已恢复为草稿')}>恢复为草稿</Button>
+        <Button variant="secondary" size="sm" className="h-11 text-xs md:h-7" onClick={() => h.setStatus(d, 'draft', '已恢复为草稿')}>恢复为草稿</Button>
       )}
-      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => h.remove(d)}>
+      <Button variant="ghost" size="icon" className="h-11 w-11 text-destructive md:h-7 md:w-7" aria-label="删除草稿" onClick={() => h.remove(d)}>
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
@@ -121,7 +121,7 @@ function DraftTile({
         <h3 className="line-clamp-2 min-h-10 flex-1 text-[14px] font-semibold leading-snug">{d.title || '（无标题）'}</h3>
         {/* R-210：纯手写（AI 从未参与）标 */}
         {!!d.pure_manual && (
-          <Badge variant="success" className="mt-0.5 shrink-0 text-[10px]">纯手写</Badge>
+          <Badge variant="success" className="mt-0.5 shrink-0 text-xs md:text-[10px]">纯手写</Badge>
         )}
       </div>
       <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -134,13 +134,13 @@ function DraftTile({
           target="_blank"
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="mt-1 inline-block text-[11px] text-accent hover:underline"
+          className="mt-1 inline-block text-xs md:text-[11px] text-accent hover:underline"
         >
           已发布{d.publish_platform ? ` · ${PLATFORM_LABEL[d.publish_platform] || d.publish_platform}` : ''}
         </a>
       )}
       {!!d.performance?.totals && (
-        <p className="tnum mt-0.5 text-[11px] text-muted-foreground">
+        <p className="tnum mt-0.5 text-xs md:text-[11px] text-muted-foreground">
           表现：播放 {fmtNum(d.performance.totals.plays || 0)} · 赞 {fmtNum(d.performance.totals.likes || 0)} · 藏{' '}
           {fmtNum(d.performance.totals.favorites || 0)} · 评 {fmtNum(d.performance.totals.comments || 0)}
         </p>
@@ -155,17 +155,17 @@ function DraftTile({
 
       {!!info && (
         <div className="mt-1.5 flex flex-wrap gap-1">
-          <Badge variant="secondary" className="text-[10px]">{info}</Badge>
-          {!!d.quality?.fallback && <Badge variant="warning" className="text-[10px]">由备用模型生成</Badge>}
+          <Badge variant="secondary" className="text-xs md:text-[10px]">{info}</Badge>
+          {!!d.quality?.fallback && <Badge variant="warning" className="text-xs md:text-[10px]">由备用模型生成</Badge>}
         </div>
       )}
       {(redlineHit || coverage != null) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {redlineHit && <Badge variant="destructive" className="text-[10px]">踩红线</Badge>}
+          {redlineHit && <Badge variant="destructive" className="text-xs md:text-[10px]">踩红线</Badge>}
           {coverage != null && (
             <Badge
               variant="secondary"
-              className="text-[10px] font-normal text-muted-foreground"
+              className="text-xs md:text-[10px] font-normal text-muted-foreground"
               title="口癖/高频词覆盖率（仅诊断，不作为重写依据）"
             >
               像作者 {Math.round(coverage * 100)}%
@@ -179,7 +179,7 @@ function DraftTile({
       {/* R-211：记反馈（文本评价，AI 在完成/不采用时结合评价学习）；星级/四维/快速反馈已下线 */}
       <div className="mt-2 border-t border-border pt-2" onClick={(e) => e.stopPropagation()}>
         <button
-          className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          className="flex min-h-11 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground md:min-h-0 md:text-[11px]"
           onClick={() => h.toggleFeedback(d)}
         >
           <PenLine className="h-3 w-3" />
@@ -206,14 +206,14 @@ function DraftTile({
               <div className="mt-1 flex items-center gap-2">
                 <Button
                   size="sm"
-                  className="h-6 px-2 text-[11px]"
+                  className="h-11 px-2 text-xs md:h-6 md:text-[11px]"
                   disabled={fb.saving || !fb.text.trim()}
                   onClick={() => h.submitFeedback(d)}
                 >
                   {fb.saving && <LoaderCircle className="h-3 w-3 animate-spin" />}
                   提交评价
                 </Button>
-                <span className="text-[10px] text-muted-foreground">完成 = 好 / 不采用 = 差，会触发 AI 复盘</span>
+                <span className="text-xs md:text-[10px] text-muted-foreground">完成 = 好 / 不采用 = 差，会触发 AI 复盘</span>
               </div>
             </motion.div>
           )}
@@ -378,7 +378,7 @@ export default function DraftsPage() {
 
   return (
     <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-4">
-      <motion.div variants={itemVariants} className="flex items-center gap-2">
+      <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={createDraft}>
           <Plus className="h-3.5 w-3.5" /> 新建草稿
         </Button>
