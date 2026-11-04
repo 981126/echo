@@ -1,5 +1,16 @@
 # 变更记录
 
+## [R-218] 2026-11-05 — 移动端适配 M218–M220 完成（导航重构 + 全屏化 + 逐页 + 三原则） ✅
+
+- **已实现（2026-11-05）**：按作者「开始开发，把这些需求都开发测试完完」一次性交付 M218 基座与导航 → M219 逐页适配 → M220 点检回归。
+  - **M218**：`lib/nav.ts` 导航单一数据源；新增底部 TabBar（5 页 + 更多，6 格，56px + `env(safe-area-inset-bottom)`，共享 layout 滑块）与「更多」底部 Sheet；**删除移动端汉堡空白抽屉**；顶栏瘦身（标题 truncate + 通知 + 紧凑「进行中 N」+ 主题，移动端 44px）；`<md` 抽屉 100vw / 弹窗全屏可滚；全局触控 ≥44、字号 ≥12（`text-[9/10/11px]` → `text-xs md:text-[原px]` 约 148 处）；页面转场首帧 0.85（消除每页 1 帧全透明）并去掉大面积 blur；`prefers-reduced-motion` 全站生效；`useBackToClose`（返回键先关弹层）/`useMainScrollRestore`（切页恢复滚动）/`useVisualViewport`（键盘兜底）/`pressable` 按下反馈。
+  - **M219**：13 页逐页适配——**博主管理**账号行三行卡片化（不再「一行一字」）+ 时间线 `<md` 纵向按月分组（桌面横向画布保留）；**脚本工作台** tab 换行不裁切 + 抽屉全屏/表单单列/底栏两行 + 安全区；**素材库**筛选两列栅格/卡片操作 44/hover 播放提示常显/贴底栏安全区；**视频复盘**数据表移动端卡片化 + 图表自适应 + tab 自动滚入 + 右缘渐隐；**AI 对话**手机会话 Sheet + 触屏回车换行 + visualViewport；**AI 设置/人设/灵感/登录/主页/看板**控件全宽/热区/键盘处理；**博主对标**栅格与按钮/洗稿弹窗全屏可滚。
+  - **M220**：新增 `frontend_v2/mobile-probe.mjs`，320/375/390/412 四档 × 11 路由 + 登录 + 抽屉/弹窗/更多 Sheet/断点/reduce/动画保留/帧率断言；`--only=anim` 逐帧动画保留采样；截图矩阵 37 张。
+- **三原则验收**：① 流畅——切页 rAF p95=16.8ms/max=33.3ms，reduce 下 0 运行 CSS 动画；② 动画保留——页面转场 13 帧中间态（首帧 0.85）、更多 Sheet 21 种位置、抽屉 26 种位置、Tab 滑块 17 种位置，R-199/R-252/253/R-250/R-206 参数未改；③ 使用逻辑——返回键先关弹层且路由不变、切页滚动恢复 700px、触屏回车换行、按钮按下反馈、弹层全屏 + 安全区。
+- **验证**：`scripts/verify.sh` 全绿（backend ruff/mypy/pytest、frontend lint/vitest 166/build、docs 38 表）；`node frontend_v2/mobile-probe.mjs` 失败 0 / console 0 error；既有 5 个 headless 全绿（r206 pass true / r212 ✔ / r213 ✔ / r214 ✔ / r217 ✅）；服务保持 3000/8000 运行。
+  - 注：r206/r212/r213 在开工前已因 R-224 标题输入改版、内容长度变化、默认样本草稿缺失而在 `main` 基线上失败（baseline worktree 复现）；本次仅按当前 UI 契约修正脚本交互（回车提交标题、相对滚动断言、动态样本），断言未放宽，业务无回归。
+- 需求：`requirements/R-218-mobile-adaptation.md`（§9 实现与验收记录）；设计：`development-design/R-218-mobile-adaptation.md`（§14 实现记录与偏差）。
+
 ## [R-255] 2026-11-05 — 全部 AI 提示词统一入库（新建 `ai_prompt_defs` 中文说明注册表，运行时统一读表） ✅
 
 - **登记记录**：按作者原话「所有写死到代码中的 ai 提示词，包括页面上配置的 ai 提示词，全部理出来，专门建一张表存表里，以后就读这张表，表里需要有个字段用中文描述清楚这个提示词用于哪个模块功能，干什么用的」完成全仓只读盘点：**33 个提示词单元**（32 条产品系统提示词 + 2 条内部自检探针；「对标广告判定」单条/批量拆两行 → 注册表 **34 行**系统提示词）+ **11 条程序固定输出契约** + 17 条固定规则片段 + 25 条用户消息模板 + ~8 处运行时上下文数据块。现状：`ai_prompts` 只覆盖 10 个 key（49 行/10 enabled），其余 22 条写死代码、页面不可见；`ensure_defaults`/`ensure_enabled_fallback` 未接启动（R-231 文档所称接线已丢失）；`video_review` 库里是 54 字占位种子 ≠ 代码 119 字完整版，契约/语料/评测均缺。方案（作者已确认 4 项口径）：①新建 `ai_prompt_defs`（`key/title/module/module_label`/中文 `purpose`/`category/editable/optimizable/llm_feature/entry/default_content/code_ref/sort_order/is_active`）登记 34 条系统提示词 + 11 条契约（只读）；②`ai_prompts` 继续存版本正文；③运行时 `get_prompt` 统一读表（enabled → defs 默认 → 代码兜底 → 空串），22 条新提示词调用点改造（其中 debate/benchmark/pipeline/api-drafts/model_health 等 10 处内联字符串提为常量，评审/修订只把静态指令段入库、运行时上下文仍由代码拼接，`evidence_pick` 保留 `{min_pick}/{max_pick}` 占位并在格式化失败时回退代码默认）；④启动幂等补种（缺登记补 defs、缺 enabled 补 v1、不动已有版本，接上 R-231 兜底）+ `video_review` 一次性升级（Kv 标记幂等，旧版归档可回退）；⑤页面「AI 设置→高级→功能提示词」改为 14 个模块分组清单（行内显示中文名/模块/用途说明/类型/当前版本），可编辑项沿用编辑/版本/候选/评测/历史回滚，契约与探针只读折叠区；⑥新增 22 条可编辑、`optimizable=false`（页面不显示优化/评测，接口 400），现有 10 条能力不变；⑦不改任何提示词正文（`video_review` 升级除外）、不改 JSON 契约与解析、不覆盖现有 10 个 key 的启用正文。需求：`requirements/R-255-prompt-registry.md`；设计：`development-design/R-255-prompt-registry.md`；决策 D-048。

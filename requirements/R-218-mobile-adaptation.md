@@ -1,7 +1,7 @@
 # R-218 移动端适配：导航重构 + 全站响应式（320px 起）
 
 - **日期**: 2026-09-30（首版登记） / 2026-11-05（补全完整需求文档）
-- **状态**: 🟡 已确认（需求 + 开发设计完成，待作者确认后开发）
+- **状态**: ✅ 已完成（2026-11-05，M218–M220 一次性开发交付：verify 全绿 + mobile-probe 4 档 0 失败 + 5 个既有 headless 全绿）
 - **开发设计**: `development-design/R-218-mobile-adaptation.md`
 - **排期**: M218（基座与导航）/ M219（逐页适配）/ M220（点检与回归）
 - **交付方式**: 文档一次性出全（2026-11-05 作者要求）；**开发仍按 2026-09-30 作者确认的分阶段交付**——先只交 M218 给作者看手感，确认后继续 M219 → M220。
@@ -617,3 +617,44 @@ home 0     persona 0  creators 0  inspiration 0  login 0
 - 2026-09-30：登记需求、完成反问确认（12 条）、划定 M218/M219/M220 范围与验收（本文件首版）。
 - 2026-11-05：全页面只读点检（4 档视口 × 13 路由 + 静态/动效交叉审计）后补全完整需求文档：新增 P0 空白抽屉、博主管理/脚本工作台/时间线实测证据、新页面纳入、待确认口径 3 项、完整功能需求（逐页）、用户故事、探针验收清单。
 - 2026-11-05（补充）：按作者硬要求新增 §C 三原则（流畅 / 原有动画必须保留 / 符合人的使用逻辑）、§4.7 动效保留与流畅性要求、§4.8 使用逻辑要求，并同步加严 §7 验收与 §8 交付说明。
+
+---
+
+## 九、实现与验收记录（2026-11-05）
+
+### 9.1 交付内容
+
+- 分支 `feat/r218`；按作者「开始开发，把这些需求都开发测试完完」一次性实现 M218 + M219 + M220。
+- **新增**：`src/lib/nav.ts`（导航单一数据源）、`src/components/layout/mobile-tab-bar.tsx`、`more-sheet.tsx`、`src/hooks/{use-back-to-close,use-main-scroll-restore,use-media-query,use-visual-viewport}.ts`、`frontend_v2/mobile-probe.mjs`（M220 点检脚本）。
+- **改造**：`app-shell.tsx`（移除汉堡抽屉、底部 Tab、顶栏瘦身、滚动恢复）、`sidebar.tsx`（共用导航数据源）、`index.html`（viewport-fit）、`index.css`（safe-area/reduce/按下反馈/移动端触控与字号基线/去 blur）、`ui/{button,tabs,drawer,dialog,select,dropdown-menu,multi-select,creatable-multi-select}`、`lib/motion.ts`、`chat/index.tsx`（手机会话 Sheet/触屏回车/视觉视口）及 13 个页面。
+- 统计：修改 46 个文件、新增 8 个文件（含探针）。
+
+### 9.2 三原则落实（作者 2026-11-05 硬要求）
+
+| 要求 | 落地 | 实测证据 |
+|---|---|---|
+| **一定要流畅** | 动画只动 `transform/opacity`；`<md` 去掉 `backdrop-blur` 与页面转场 blur；同屏动画并发限制；`svg text` 移动 12px；只用 GPU 属性 | 切页 rAF 采样 p95=16.8ms / max=33.3ms（≤34/100ms）；reduce 下运行中 CSS 动画 = 0 |
+| **原有动画必须保留** | 页面转场、Tab 滑块、更多 Sheet、抽屉/弹窗进出、列表 stagger、R-199 换批逐格交接、R-252/253 参考视频、R-250 删除重排、R-206 讨论 tab、thinking-dots/进度/进行中、通知角标、登录光斑全部保留/触屏等价（hover→常显或按下反馈），仅 reduce 用户收敛 | 逐帧：页面转场 13 帧中间态（首帧 0.85 无全透明）、更多 Sheet 21 种位置、抽屉 26 种位置、Tab 滑块 17 种位置 |
+| **符合人的使用逻辑** | 底部 Tab 拇指区；返回键先关弹层（`useBackToClose` + popstate）；切页恢复滚动位置（`useMainScrollRestore`）；触屏回车=换行、按钮发送；按下反馈 `pressable`；抽屉/弹窗 <md 全屏且 footer 安全区；破坏性操作保持二次确认 | 返回键关更多 Sheet 且路由不变 ✅；videos 滚 700px 切页回来恢复 700px ✅；`(pointer: coarse)` 回车不发送 ✅ |
+
+### 9.3 点检与回归结果
+
+- **`frontend_v2/mobile-probe.mjs`**：320/375/390/412 四档 × 11 路由 + 登录页 + 抽屉/弹窗/更多 Sheet/断点/reduce/动效保留/帧率 —— **失败 0 项、console 0 error**；每页 main 无横溢/无越界元素，触控 ≥44（0.5px 亚像素容差）、字号 ≥12、底部 Tab 6 格均达标；截图矩阵 37 张存 `.tmp/audit/mobile/shots/r218-*`。
+  - 3 条「采样提示」（nav/interact 弱采样）已由动效专项 `--only=anim` 的强断言覆盖（全部 ✅）。
+- **既有 5 个 headless 回归**：`r206-discuss-tab-motion` ✅、`r212-autosave` ✅、`r213-offline` ✅、`r214-prompter` ✅、`r217-brand-text` ✅。
+  - 说明：`r206/r212/r213` 在本需求开工前已因后续需求（R-224 标题改为「可创建下拉输入」、页面内容长度变化、脚本默认草稿样本被删）在 `main` 基线上同样失败（已用 baseline worktree 复现），本次按当前 UI 契约修正脚本交互后全绿，**不涉及业务回归**。
+- **`scripts/verify.sh` 全绿**：backend ruff/mypy/pytest、frontend lint/vitest（166 passed）/build、文档一致性（38 张表 + 需求/设计成对）。
+- 浏览器服务保持运行：前端 3000（Vite）、后端 8000（venv uvicorn，重启加载最新后端代码后 r214 真实上传链路全绿）。
+
+### 9.4 与设计的差异（已在设计 §14 记录）
+
+1. **M218-0 未单独交付**：本次一次性完成整个 R-218，移动端汉堡抽屉已被底部 Tab 取代并删除，「空白抽屉」入口不复存在；`SidebarNav` 未单独抽取（无第二个调用方），侧栏改为共用 `lib/nav.ts`。
+2. 页面转场采纳 §B-1 推荐（首帧 0.85），并**移除首帧 blur**（framer 落定会残留 `blur(0px)`；低端机大面积 blur 开销大），位移/时长/缓动不变。
+3. 触控基线用「全局 CSS 最小 44px + 组件断点尺寸」实现；switch/checkbox 保持视觉本体尺寸，由整行/包裹层 44px 热区保证（探针白名单注明）。
+4. 既有 3 个回归脚本的交互按当前 UI 修正（见 9.3 说明），行为断言不放宽。
+
+### 9.5 遗留（不阻塞，后续可迭代）
+
+- 桌面端 `SelectTrigger` 增加单行省略后，超长文案在桌面会显示省略号（宽度未变，属可接受视觉差异）。
+- 移动端素材库筛选区在 320 下有 7 行（两列栅格），卡墙需下滑一屏；需求未要求折叠「更多筛选」，留待作者真机体验后决定。
+- 移动时间线按设计只渲染最近 40 条（更早内容用电脑查看），如作者需要可加「加载更多」。
