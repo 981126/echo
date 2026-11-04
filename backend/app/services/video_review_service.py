@@ -17,7 +17,7 @@ from .creator_service import get_current_creator
 from .douyin_creator_sync import CredentialError, sync_post_creator_data
 from .douyin_references import refresh_references
 from .video_review_comparison import build_comparison, dumps, loads, low_fan_references, peer_references
-from .video_review_llm import enhance_findings
+from .video_review_attribution import build_attribution
 from .video_review_advices import build_metric_advices
 from .video_review_rules import build_findings, comment_questions, homepage_analysis, summary_for
 from .video_review_topics import recommend_topics
@@ -264,7 +264,9 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         )
         comparison["advices"] = advices
         update(75, "生成原因和主题建议")
-        findings, model_name, llm_warning = enhance_findings(db, findings)
+        findings, model_name, llm_warning = build_attribution(
+            db, comparison, transcript, comments, questions, findings, post_title=post.title or ""
+        )
         recommendations = recommend_topics(db, owner, post, comparison, comments, peer_items, low_items)
         for index, finding in enumerate(findings):
             finding["comparison_post_ids"] = comparison["comparison"]["post_ids"]
@@ -276,6 +278,7 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
                 rule_key=finding["rule_key"],
                 title=finding["title"],
                 judgement_type=finding["judgement_type"],
+                verdict=finding.get("verdict", ""),
                 conclusion=finding["conclusion"],
                 suggestion=finding.get("suggestion", ""),
                 target_metric=finding.get("target_metric", "plays"),
@@ -401,7 +404,7 @@ def _follower_topics(db: Session, account: CreatorAccount) -> list[dict]:
 def _finding_out(row: VideoReviewFinding) -> dict:
     return {
         "id": row.id, "dimension": row.dimension, "rule_key": row.rule_key, "title": row.title,
-        "judgement_type": row.judgement_type, "conclusion": row.conclusion,
+        "judgement_type": row.judgement_type, "verdict": row.verdict, "conclusion": row.conclusion,
         "suggestion": row.suggestion, "target_metric": row.target_metric,
         "metric_evidence": loads(row.metric_evidence, []), "content_evidence": loads(row.content_evidence, []),
         "comparison_post_ids": loads(row.comparison_post_ids, []),

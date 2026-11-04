@@ -31,6 +31,28 @@ export interface Metric {
   missing: boolean
 }
 
+export type FindingVerdict = 'strength' | 'weak' | 'neutral' | 'unknown' | ''
+
+/** R-248：归因证据结构化（新分析由程序构造；历史数据可能是旧结构，渲染侧做兼容）。 */
+export interface FindingMetricEvidence {
+  evidence_id?: string
+  key?: string
+  label?: string
+  value?: number | null
+  baseline?: number | null
+  unit?: string
+  state?: string
+  sample_count?: number
+  time?: string
+  drop?: number
+}
+
+export interface FindingContentEvidence {
+  evidence_id?: string
+  text?: string
+  source?: string
+}
+
 export interface Finding {
   id: number
   dimension: string
@@ -39,8 +61,10 @@ export interface Finding {
   conclusion: string
   suggestion: string
   target_metric: string
-  metric_evidence: Array<Record<string, unknown>>
-  content_evidence: Array<Record<string, unknown>>
+  /** R-248：归因方向（程序按真实指标判定）；历史数据为空串/缺省 */
+  verdict?: FindingVerdict
+  metric_evidence: FindingMetricEvidence[]
+  content_evidence: FindingContentEvidence[]
 }
 
 export interface Topic {

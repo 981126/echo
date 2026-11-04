@@ -116,6 +116,8 @@ class VideoReviewFinding(Base):
     rule_key: Mapped[str] = mapped_column(String(60), default="")
     title: Mapped[str] = mapped_column(String(300), default="")
     judgement_type: Mapped[str] = mapped_column(String(20), default="fact")
+    # R-248：程序按真实指标状态判定的归因方向（strength/weak/neutral/unknown，历史行为空串）
+    verdict: Mapped[str] = mapped_column(String(10), default="")
     conclusion: Mapped[str] = mapped_column(Text, default="")
     metric_evidence: Mapped[str] = mapped_column(Text, default="[]")
     content_evidence: Mapped[str] = mapped_column(Text, default="[]")

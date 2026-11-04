@@ -500,9 +500,10 @@ def test_low_fan_references_computes_owner_keywords_once(db):
         db.add(reference)
     db.commit()
 
+    owner.id  # 提前加载主博主属性，避免「刷新 expiry」的 SELECT 混进下面的 SQL 计数
     with _sql_count(db) as counter:
         items = low_fan_references(db, owner, limit=20)
-    assert counter["n"] <= 3, "关键词只算一次：1 条素材查询 + 1 条参考榜查询"
+    assert counter["n"] <= 3, "关键词只算一次：参考榜 1 条 + 素材查询 1 条 + 方向词查询 1 条"
     assert len(items) == 5
     for item in items:
         row = db.query(DouyinReferenceVideo).filter_by(id=int(item["id"].split(":")[1])).one()

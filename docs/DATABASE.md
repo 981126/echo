@@ -43,7 +43,7 @@
 | `douyin_post_metrics` | 自己抖音作品创作者指标按天快照：跳出/完播/平均播放/封面点击/主页访问/单条涨粉/趋势/raw。 |
 | `douyin_reference_videos` | 抖音低粉榜和公开搜索参考：作者/公开互动/官方标签/类别关键词/分析/raw。 |
 | `video_reviews` | 每次视频复盘主记录：输入指纹、比较对象、指标快照、总结、主页分析、新话题、模型与警告。 |
-| `video_review_findings` | 复盘原因明细：规则、事实/推测、指标与内容证据、比较视频、修改建议。 |
+| `video_review_findings` | 复盘原因明细：规则、事实/推测、归因方向(verdict)、指标与内容证据、比较视频、修改建议。 |
 | `video_topic_recommendations` | 首选/备选/后续主题：理由、适合依据、证据、内容顺序、来源、评分明细。 |
 
 ## 核心数据流关系速览
@@ -884,6 +884,7 @@ R-237：本人或已授权抖音账号的创作者 Cookie。数据库只存 Fern
 | `rule_key` | VARCHAR(60) | 程序规则标识 |
 | `title` | VARCHAR(300) | 小白可读原因 |
 | `judgement_type` | VARCHAR(20) | `fact/hypothesis/unknown` |
+| `verdict` | VARCHAR(10) | 归因方向（程序按真实指标 state 判定，R-248）：`strength`=好在哪 / `weak`=差在哪 / `neutral`=影响有限 / `unknown`=无法判断 / `''`=历史数据无判定 |
 | `conclusion` | TEXT | 具体结论 |
 | `metric_evidence` | TEXT | 指标依据 JSON |
 | `content_evidence` | TEXT | 转写/评论/主页依据 JSON |

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Check, ChevronDown, ExternalLink, Lightbulb, Loader2, Play, RefreshCw } from 'lucide-react'
+import { Check, ChevronDown, ExternalLink, Layers, Lightbulb, Loader2, Play, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
 import { coverThumb } from '@/lib/covers'
@@ -11,11 +11,34 @@ import { Progress } from '@/components/ui/progress'
 import { waitTaskResult } from '@/api/task'
 import { PostAnalysis } from '@/pages/dashboard/post-analysis'
 import type { PostDetail } from '@/pages/dashboard/types'
-import { BaselineBars, SimpleBars, WatchTrendChart } from './charts'
+import { BaselineBars, SimpleBars, WatchTrendChart, formatMetric } from './charts'
 import { waitForReviewTask } from './use-review-task'
-import type { FailedReview, ReferenceItem, Review, VideoItem } from './types'
+import type { FailedReview, FindingContentEvidence, FindingMetricEvidence, ReferenceItem, Review, VideoItem } from './types'
 
 const judgementLabels = { fact: '数据直接显示', hypothesis: '结合内容推测', unknown: '目前无法判断' }
+
+/** R-248：归因方向徽标（verdict 由后端按真实指标判定，不交给 AI）。 */
+const verdictMeta: Record<string, { label: string; cls: string }> = {
+  strength: { label: '好在哪', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' },
+  weak: { label: '差在哪', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' },
+  neutral: { label: '影响有限', cls: 'bg-muted text-muted-foreground' },
+  unknown: { label: '无法判断', cls: 'bg-muted text-muted-foreground' }
+}
+
+/** R-248：把结构化指标证据转成可读文字（新分析由程序构造；历史数据字段缺失时降级）。 */
+function metricEvidenceText(evidence: FindingMetricEvidence): string {
+  if (evidence.time) return `${evidence.time}：留存下降 ${(Number(evidence.drop ?? 0) * 100).toFixed(1)} 个百分点`
+  const label = evidence.label || evidence.key || '指标'
+  const value = typeof evidence.value === 'number' ? formatMetric(evidence.value, evidence.unit || '') : '暂无数据'
+  const extra: string[] = []
+  if (typeof evidence.baseline === 'number') extra.push(`自己平时 ${formatMetric(evidence.baseline, evidence.unit || '')}`)
+  if (evidence.sample_count) extra.push(`样本 ${evidence.sample_count} 条`)
+  return `${label}：${value}${extra.length ? `（${extra.join('，')}）` : ''}`
+}
+
+function contentSourceLabel(evidence: FindingContentEvidence): string {
+  return evidence.source ? `（${evidence.source}）` : ''
+}
 
 /** R-247：采用主题时给生成链路的具体文本（「采用」→ 脚本工作台 AI 草稿）；空字段自动跳过。 */
 type AdoptTopic = { topic: string; reason?: string; fit_reason?: string; opening_line?: string; first_step?: string }
@@ -266,6 +289,10 @@ export default function VideoReviewPage() {
   const charts = review?.charts
   const primary = review?.recommendations.primary
   const backups = review?.recommendations.backups ?? []
+  // R-248：可比较样本 < 5 时提示「原因仅供参考，不能当成整体好坏结论」
+  const metricSamples = (review?.metrics ?? []).filter((m) => !m.missing && m.value !== null && m.sample_count > 0).map((m) => m.sample_count)
+  const dataThin = metricSamples.length > 0 && Math.min(...metricSamples) < 5
+  const minMetricSample = metricSamples.length > 0 ? Math.min(...metricSamples) : 0
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
 
@@ -321,49 +348,38 @@ export default function VideoReviewPage() {
 
       {review ? (
         <>
-          {/* R-247：首选与两个备选同排（宽屏两列，缺一侧单列占整行，窄屏自动堆叠） */}
-          <div className={cn('grid items-start gap-4', primary && backups.length > 0 && 'lg:grid-cols-2')}>
-            {primary ? (
-              <section className="rounded-2xl border border-indigo-200 bg-card p-5 shadow-card dark:border-indigo-900">
-                <div className="flex items-center gap-2 text-xs font-medium text-indigo-500"><Lightbulb className="h-4 w-4" />下一条最推荐拍这个</div>
-                <h2 className="mt-3 text-xl font-semibold">{primary.topic}</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{primary.reason}</p>
-                <div className="mt-3 rounded-lg bg-muted/70 p-3 text-sm leading-6"><span className="font-medium">为什么适合你：</span>{primary.fit_reason}</div>
-                {primary.opening_line && <div className="mt-3 text-sm"><span className="font-medium">开头第一句：</span>{primary.opening_line}</div>}
-                <Button className="mt-4" disabled={!!adopting} onClick={() => void adoptTopic(primary, 'primary')}>
-                  {adopting === 'primary' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                  {adopting === 'primary' ? '生成中…' : '采用'}
-                </Button>
-              </section>
-            ) : (
-              <section className="rounded-2xl border border-dashed border-border bg-card p-5"><div className="flex items-center gap-2 text-sm font-medium"><Lightbulb className="h-4 w-4 text-muted-foreground" />暂时没有足够依据给出可靠首选</div><p className="mt-2 text-xs leading-5 text-muted-foreground">不会为了凑主题而乱推荐。可以更新低粉爆款、补充视频转写和评论，或先同步更多同行数据。</p></section>
-            )}
-
-            {backups.length > 0 && (
-              <section className="rounded-xl border border-border bg-card p-4 shadow-card">
-                <h2 className="text-sm font-semibold">两个备选主题</h2>
-                <div className="mt-3 space-y-3">
-                  {backups.map((topic, index) => {
-                    const key = `backup-${topic.id ?? index}`
-                    return (
-                      <div key={key} className="rounded-lg border border-border p-3">
-                        <h3 className="text-sm font-medium">{topic.topic}</h3>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">{topic.reason}</p>
-                        <Button variant="outline" size="sm" className="mt-3" disabled={!!adopting} onClick={() => void adoptTopic(topic, key)}>
-                          {adopting === key && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-                          {adopting === key ? '生成中…' : '采用'}
-                        </Button>
-                      </div>
-                    )
-                  })}
-                </div>
-              </section>
-            )}
-          </div>
-
           {review.findings.length > 0 && <section className="space-y-3">
-            <div><h2 className="text-base font-semibold">这条视频为什么好或差？</h2><p className="mt-1 text-xs text-muted-foreground">每条结论都能展开看依据，事实和推测分开写。</p></div>
-            <div className="grid gap-3 lg:grid-cols-2">{review.findings.map((finding) => <details key={finding.id} className="group rounded-xl border border-border bg-card p-4 shadow-card"><summary className="cursor-pointer list-none"><div className="flex items-start justify-between gap-3"><h3 className="text-sm font-medium leading-6">{finding.title}</h3><ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" /></div><span className="mt-2 inline-block rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">{judgementLabels[finding.judgement_type]}</span></summary><div className="mt-3 space-y-3 border-t border-border pt-3 text-sm leading-6"><p>{finding.conclusion}</p><p className="rounded-lg bg-indigo-50 p-3 text-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-100"><span className="font-medium">下一条怎么改：</span>{finding.suggestion}</p>{finding.metric_evidence.length > 0 && <div className="text-xs text-muted-foreground"><span className="font-medium">数据依据：</span><pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">{JSON.stringify(finding.metric_evidence, null, 2)}</pre></div>}{finding.content_evidence.length > 0 && <div className="text-xs text-muted-foreground"><span className="font-medium">内容依据：</span>{finding.content_evidence.map((x, i) => <blockquote key={i} className="mt-1 border-l-2 border-indigo-300 pl-2">{String(x.text ?? '')}</blockquote>)}</div>}</div></details>)}</div>
+            <div>
+              <h2 className="text-base font-semibold">这条视频为什么好或差？</h2>
+              <p className="mt-1 text-xs text-muted-foreground">每条结论都能展开看依据；方向由真实指标判定，事实和推测分开写。</p>
+              {dataThin && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">部分指标可比较样本仅 {minMetricSample} 条（较少），以下原因仅供参考，不能当成整体好坏结论。</p>}
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">{review.findings.map((finding) => (
+              <details key={finding.id} className="group rounded-xl border border-border bg-card p-4 shadow-card">
+                <summary className="cursor-pointer list-none">
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="text-sm font-medium leading-6">{finding.title}</h3>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {!!finding.verdict && verdictMeta[finding.verdict] && <span className={cn('rounded-full px-2 py-1 text-[10px]', verdictMeta[finding.verdict].cls)}>{verdictMeta[finding.verdict].label}</span>}
+                    <span className="rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">{judgementLabels[finding.judgement_type]}</span>
+                  </div>
+                </summary>
+                <div className="mt-3 space-y-3 border-t border-border pt-3 text-sm leading-6">
+                  <p className="whitespace-pre-wrap">{finding.conclusion}</p>
+                  <p className="rounded-lg bg-indigo-50 p-3 text-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-100"><span className="font-medium">下一条怎么改：</span>{finding.suggestion}</p>
+                  {finding.metric_evidence.length > 0 && <div className="text-xs text-muted-foreground">
+                    <span className="font-medium">数据依据：</span>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">{finding.metric_evidence.map((evidence, index) => <li key={evidence.evidence_id || index}>{metricEvidenceText(evidence)}</li>)}</ul>
+                  </div>}
+                  {finding.content_evidence.length > 0 && <div className="text-xs text-muted-foreground">
+                    <span className="font-medium">内容依据：</span>
+                    {finding.content_evidence.map((evidence, index) => <blockquote key={evidence.evidence_id || index} className="mt-1 border-l-2 border-indigo-300 pl-2">{evidence.text ?? ''}<span className="ml-1 opacity-70">{contentSourceLabel(evidence)}</span></blockquote>)}
+                  </div>}
+                </div>
+              </details>
+            ))}</div>
           </section>}
 
           {review.advices.length > 0 && <section className="space-y-3">
@@ -394,6 +410,50 @@ export default function VideoReviewPage() {
             ))}</div>
           </section>}
 
+          {/* R-248：首选与两个备选同排；两卡等高、标题行统一、底部对齐（缺一侧单列占整行，窄屏堆叠） */}
+          <div className={cn('grid gap-4', primary && backups.length > 0 && 'lg:grid-cols-2')}>
+            {primary ? (
+              <section className="flex h-full flex-col rounded-2xl border border-indigo-200 bg-card p-5 shadow-card dark:border-indigo-900">
+                <div className="flex h-6 items-center gap-2 text-xs font-medium text-indigo-500"><Lightbulb className="h-4 w-4" />下一条最推荐拍这个</div>
+                <h2 className="mt-3 text-xl font-semibold">{primary.topic}</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{primary.reason}</p>
+                <div className="mt-3 rounded-lg bg-muted/70 p-3 text-sm leading-6"><span className="font-medium">为什么适合你：</span>{primary.fit_reason}</div>
+                {primary.opening_line && <div className="mt-3 text-sm"><span className="font-medium">开头第一句：</span>{primary.opening_line}</div>}
+                <div className="mt-auto pt-4">
+                  <Button disabled={!!adopting} onClick={() => void adoptTopic(primary, 'primary')}>
+                    {adopting === 'primary' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                    {adopting === 'primary' ? '生成中…' : '采用'}
+                  </Button>
+                </div>
+              </section>
+            ) : (
+              <section className="rounded-2xl border border-dashed border-border bg-card p-5"><div className="flex items-center gap-2 text-sm font-medium"><Lightbulb className="h-4 w-4 text-muted-foreground" />暂时没有足够依据给出可靠首选</div><p className="mt-2 text-xs leading-5 text-muted-foreground">不会为了凑主题而乱推荐。可以更新低粉爆款、补充视频转写和评论，或先同步更多同行数据。</p></section>
+            )}
+
+            {backups.length > 0 && (
+              <section className="flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-card">
+                <div className="flex h-6 items-center gap-2 text-xs font-medium text-indigo-500"><Layers className="h-4 w-4" />两个备选主题</div>
+                <div className="mt-3 flex flex-1 flex-col gap-3">
+                  {backups.map((topic, index) => {
+                    const key = `backup-${topic.id ?? index}`
+                    return (
+                      <div key={key} className="flex flex-1 flex-col rounded-lg border border-border p-3">
+                        <h3 className="text-sm font-medium">{topic.topic}</h3>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">{topic.reason}</p>
+                        <div className="mt-auto pt-3">
+                          <Button variant="outline" size="sm" disabled={!!adopting} onClick={() => void adoptTopic(topic, key)}>
+                            {adopting === key && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                            {adopting === key ? '生成中…' : '采用'}
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+
           {charts && <div className="grid gap-4 xl:grid-cols-2">
             <BaselineBars metrics={(charts.comparison ?? []).filter((x) => ['plays', 'like_rate', 'finish_rate', 'follower_per_1k'].includes(x.key))} />
             <WatchTrendChart data={charts.retention} />
@@ -418,9 +478,9 @@ export default function VideoReviewPage() {
       ) : !task && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><Play className="mx-auto h-8 w-8 text-muted-foreground" /><h2 className="mt-4 font-medium">还没有这条视频的复盘分析</h2><p className="mt-2 text-sm text-muted-foreground">点右上角「更新数据并分析」，会先保存数据，再给出有依据的原因和下一条主题。</p></div>}
 
       <section className="space-y-3 border-t border-border pt-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">同行爆款与低粉爆款</h2><p className="mt-1 text-xs text-muted-foreground">同行只来自你手动添加的对标账号；低粉爆款来自抖音官方标签。</p></div><div className="flex gap-2"><Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('peer'); void loadReferences('peer') }}>同行爆款</Button><Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('low_fan'); void loadReferences('low_fan') }}>低粉爆款</Button>{kind === 'low_fan' && <Button variant="outline" size="sm" onClick={() => void refreshLowFan()}><RefreshCw className="mr-1 h-3.5 w-3.5" />更新</Button>}</div></div>
-        {referenceLoading ? <div className="py-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{references.map((item) => <article key={item.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-card"><ReferenceCover url={item.cover_url} /><div className="p-4"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-medium leading-6">{item.title}</h3><span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span></div><p className="mt-2 text-xs text-muted-foreground">{item.author_nickname}{item.author_followers !== null && item.author_followers !== undefined ? ` · ${item.author_followers}粉丝` : ''}</p><div className="tnum mt-3 text-xs">播放 {item.plays ?? '暂无'} · 点赞 {item.likes ?? '暂无'} · 评论 {item.comments ?? '暂无'}</div>{item.verdict_evidence.play_multiple && <p className="mt-2 text-xs text-emerald-600">是该同行平时播放的 {item.verdict_evidence.play_multiple} 倍（{item.verdict_evidence.sample_count}条样本）</p>}{item.video_url && <a href={item.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-500">查看原视频<ExternalLink className="h-3 w-3" /></a>}</div></article>)}</div>}
-        {!referenceLoading && !references.length && <div className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">{kind === 'peer' ? '暂无符合规则的同行爆款，请先在博主管理添加抖音同行并同步数据。' : '当前条件下暂无低粉爆款，点击更新获取。'}</div>}
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">同行爆款与低粉爆款</h2><p className="mt-1 text-xs text-muted-foreground">同行只来自你手动添加的对标账号；低粉爆款只显示与你主赛道相关的视频，点「更新」重新抓取。</p></div><div className="flex gap-2"><Button variant={kind === 'peer' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('peer'); void loadReferences('peer') }}>同行爆款</Button><Button variant={kind === 'low_fan' ? 'default' : 'outline'} size="sm" onClick={() => { setKind('low_fan'); void loadReferences('low_fan') }}>低粉爆款</Button>{kind === 'low_fan' && <Button variant="outline" size="sm" onClick={() => void refreshLowFan()}><RefreshCw className="mr-1 h-3.5 w-3.5" />更新</Button>}</div></div>
+        {referenceLoading ? <div className="py-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></div> : <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{references.map((item) => <article key={item.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-card"><ReferenceCover url={item.cover_url} /><div className="p-4"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-medium leading-6">{item.title}</h3><span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[10px] text-indigo-600 dark:bg-indigo-950">{item.verdict}</span></div><p className="mt-2 text-xs text-muted-foreground">{item.author_nickname}{item.author_followers !== null && item.author_followers !== undefined ? ` · ${item.author_followers}粉丝` : ''}</p><div className="tnum mt-3 text-xs">播放 {item.plays ?? '暂无'} · 点赞 {item.likes ?? '暂无'} · 评论 {item.comments ?? '暂无'}</div>{item.verdict_evidence.play_multiple && <p className="mt-2 text-xs text-emerald-600">是该同行平时播放的 {item.verdict_evidence.play_multiple} 倍（{item.verdict_evidence.sample_count}条样本）</p>}{item.video_url && <a href={item.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-500">查看原视频<ExternalLink className="h-3 w-3" /></a>}</div></article>)}</div>}
+        {!referenceLoading && !references.length && <div className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">{kind === 'peer' ? '暂无符合规则的同行爆款，请先在博主管理添加抖音同行并同步数据。' : '当前方向下暂无低粉爆款，点「更新」获取。'}</div>}
       </section>
 
     </motion.div>

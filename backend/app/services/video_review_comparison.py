@@ -15,7 +15,7 @@ from ..core.timeutil import now as _app_now
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video import Video
 from ..models.video_review import DouyinPostMetric, DouyinReferenceVideo
-from .douyin_references import _owner_keywords, reference_out
+from .douyin_references import _owner_keywords, reference_out, relevance_for
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,26 @@ SPECS = [
     MetricSpec("favorite_rate", "收藏率", "ratio", rate=True),
 ]
 SPEC_MAP = {x.key: x for x in SPECS}
+
+# R-248：低粉爆款方向词——当前主博主最近 30 条作品 main_topics 前 3（排除泛化类目），空则兜底
+DIRECTION_FALLBACK = ("求职", "面试", "赚钱")
+MAX_DIRECTION_TERMS = 3
+# 「其他/知识」是泛化留存类目而非内容方向（按「知识」抓低粉会返回科普/情感等无关内容），
+# 选方向词时排除；若账号只有泛化类目，则回退到原始排序，保证仍有词可搜。
+GENERIC_DIRECTION_TOPICS = {"其他", "知识"}
+# 只用于「标题命中」的高信号词：泛化词（赚钱/打工/上班/知识/学习/经验等）会让虫草、乌鸦、二婚
+# 这类标题也命中，故不作为匹配词；抓取仍可用方向词本身。
+# 方向词本身默认也算匹配词（如未来的「摄影」这类具体方向），但下面这组泛化词除外。
+BROAD_MATCH_TERMS = {"赚钱"}
+DIRECTION_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "求职": (
+        "求职", "找工作", "招聘", "简历", "面试", "面经", "offer", "秋招", "校招",
+        "跳槽", "转行", "职场", "背调", "求职者",
+    ),
+    "面试": ("面试", "面经", "hr", "群面", "终面", "背调", "面试官", "候选人"),
+    "赚钱": ("收入", "工资", "月入", "副业", "搞钱", "存钱", "存款", "理财", "薪资", "年薪", "年终奖", "涨薪"),
+    "知识": ("学习", "干货", "教程"),
+}
 
 
 def loads(value: str | None, fallback: Any) -> Any:
@@ -490,10 +510,65 @@ def peer_references(db: Session, owner: Creator, limit: int = 20) -> tuple[list[
     return items[:limit], charts[:limit]
 
 
+def owner_direction_terms(db: Session, owner: Creator) -> list[str]:
+    """R-248：低粉爆款方向词——最近 30 条作品 main_topics 按次数前 3（排除泛化类目），空则兜底。
+
+    取数口径与 `_owner_keywords` 一致（主博主 videos），只取当前主博主自己的最近作品；
+    排除「其他/知识」等泛化类目（搜「知识」会返回科普/情感等无关内容），若全被排除则回退原始词；
+    不足 3 个时仅用已有词，不强行补满。
+    """
+    rows = (
+        db.query(Video.main_topics)
+        .filter(Video.creator_id == owner.id)
+        .order_by(Video.id.desc())
+        .limit(30)
+        .all()
+    )
+    counts: dict[str, int] = {}
+    for (main_topics,) in rows:
+        values = loads(main_topics, [])
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            topic = str(value).strip()
+            if topic:
+                counts[topic] = counts.get(topic, 0) + 1
+    ranked = [
+        topic
+        for topic, _ in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        if topic != "其他"
+    ]
+    specific = [topic for topic in ranked if topic not in GENERIC_DIRECTION_TOPICS]
+    chosen = specific or ranked or list(DIRECTION_FALLBACK)
+    return chosen[:MAX_DIRECTION_TERMS]
+
+
+def direction_keywords(terms: list[str]) -> set[str]:
+    """方向词 + 同义扩展（小写）→ 标题/抓取关键词匹配用集合。"""
+    words: set[str] = set()
+    for term in terms:
+        name = str(term).strip().lower()
+        if name and name not in BROAD_MATCH_TERMS:
+            words.add(name)
+        words.update(str(word).strip().lower() for word in DIRECTION_SYNONYMS.get(str(term).strip(), ()))
+    return {word for word in words if word}
+
+
 def low_fan_references(db: Session, owner: Creator, keyword: str = "", limit: int = 20) -> list[dict]:
     query = db.query(DouyinReferenceVideo).order_by(DouyinReferenceVideo.last_seen_at.desc())
     if keyword:
         query = query.filter(DouyinReferenceVideo.title.contains(keyword))
-    rows = query.limit(200).all()
+    rows = query.limit(300).all()
     keywords = _owner_keywords(db, owner)  # R-240 S6：关键词一次算好，避免逐行重复查库
-    return [reference_out(db, owner, row, keywords=keywords) for row in rows][:limit]
+    words = direction_keywords(owner_direction_terms(db, owner))
+    scored: list[tuple[int, int, datetime, DouyinReferenceVideo]] = []
+    for row in rows:
+        # R-248：只看标题是否命中主赛道方向词/同义扩展（抓取关键词字段不算，避免「按词搜回来但标题跑题」混入）；
+        # 不相关赛道（搞笑/宠物/演唱会/花草等）不展示
+        hits = sum(1 for word in words if word in (row.title or "").lower())
+        if hits == 0:
+            continue
+        scored.append((hits, relevance_for(db, owner, row, keywords=keywords), row.last_seen_at or datetime.min, row))
+    # 最近出现（点「更新」后新抓的带新封面）→ 方向命中数 → 相关度
+    scored.sort(key=lambda item: (item[2], item[0], item[1]), reverse=True)
+    return [reference_out(db, owner, row, keywords=keywords) for _, _, _, row in scored[:limit]]

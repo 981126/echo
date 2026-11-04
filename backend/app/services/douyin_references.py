@@ -39,6 +39,14 @@ def _first(item: dict, *names: str) -> Any:
     return None
 
 
+def _cover_from_raw(raw: str) -> str:
+    """R-248：旧低粉行的 cover_url 可能为空（指数搜索把封面放在 thumbnail），展示时从原始响应回退。"""
+    item = _loads(raw, {})
+    if not isinstance(item, dict):
+        return ""
+    return str(_first(item, "thumbnail", "cover", "coverUrl", "cover_url", "item_cover_url") or "")[:1000]
+
+
 def _int(item: dict, *names: str) -> int | None:
     value = _first(item, *names)
     try:
@@ -158,28 +166,54 @@ def refresh_references(db: Session, owner: Creator, filters: dict) -> dict:
     date_window = int(filters.get("date_window") or 168)
     if date_window not in (1, 24, 72, 168):
         raise ValueError("时间窗口只支持1/24/72/168小时")
+    limit = max(1, min(50, int(filters.get("limit") or 20)))
     client = make_client()
     # R-241：make_client 进程级复用后 requests_used 是跨调用累计值，预算按「本次调用差值」计费
     before_requests = client.requests_used
     if keyword:
+        queries = [(keyword, "index_search", "低粉爆款筛选")]
+    else:
+        # R-248：未手填关键词时不再拉全站低粉总榜，改按主博主方向词逐个抓（每个词 1 次，最多 3 次）
+        from .video_review_comparison import MAX_DIRECTION_TERMS, owner_direction_terms
+
+        queries = [
+            (term, "direction_search", "主赛道低粉爆款")
+            for term in owner_direction_terms(db, owner)[:MAX_DIRECTION_TERMS]
+        ]
+    # 每个方向词平分名额，避免第一个词的结果把其它方向全部挤掉；不足时由后面词补齐
+    per_query = max(1, (limit + len(queries) - 1) // len(queries))
+    items: list[dict] = []
+    meta: dict[str, tuple[str, str, str]] = {}
+    leftovers: list[tuple[dict, str, str, str, str]] = []
+    for query, source, source_label in queries:
         raw = client.search_douyin_items(
-            query=keyword,
+            query=query,
             category_id=category_id,
             date_type=_DATE_TYPE[date_window],
             label_type=1,
             duration_type=int(filters.get("duration_type") or 0),
         )
-        source = "index_search"
-    else:
-        raw = client.fetch_douyin_low_fan(
-            page_size=int(filters.get("limit") or 20),
-            date_window=date_window,
-            keyword=keyword,
-            tags=filters.get("tags") or [],
-        )
-        source = "low_fan_billboard"
-    items = _items(raw) or (_mock_items(keyword) if client.mode != "real" else [])
-    items = items[:max(1, min(50, int(filters.get("limit") or 20)))]
+        found = _items(raw) or (_mock_items(query) if client.mode != "real" else [])
+        taken = 0
+        for item in found:
+            external_id = _text(_first(item, "itemId", "item_id", "aweme_id", "id"), 200)
+            if not external_id or external_id in meta:
+                continue
+            if taken >= per_query:
+                leftovers.append((item, external_id, query, source, source_label))
+                continue
+            # 合并去重：同一作品只保留首次命中的方向词/来源
+            meta[external_id] = (query, source, source_label)
+            items.append(item)
+            taken += 1
+    for item, external_id, query, source, source_label in leftovers:
+        if len(items) >= limit:
+            break
+        if external_id in meta:
+            continue
+        meta[external_id] = (query, source, source_label)
+        items.append(item)
+    items = items[:limit]
     saved = 0
     warnings: list[str] = []
     stats_failed = 0
@@ -187,12 +221,13 @@ def refresh_references(db: Session, owner: Creator, filters: dict) -> dict:
         external_id = _text(_first(item, "itemId", "item_id", "aweme_id", "id"), 200)
         if not external_id:
             continue
+        term, source, source_label = meta[external_id]
         row = db.query(DouyinReferenceVideo).filter_by(external_post_id=external_id).first()
         if row is None:
             row = DouyinReferenceVideo(external_post_id=external_id, first_seen_at=_app_now())
             db.add(row)
         row.source = source
-        row.source_label = "官方低粉爆款榜" if source == "low_fan_billboard" else "低粉爆款筛选"
+        row.source_label = source_label
         row.author_id = _text(_first(item, "authorId", "author_id", "uid", "user_id"), 200)
         row.author_nickname = _text(_first(item, "nickname", "nick_name", "authorNickname", "author_nickname", "name"), 100)
         row.author_followers = _int(item, "followers", "followerCount", "authorFollowers", "fans", "fans_cnt")
@@ -217,7 +252,7 @@ def refresh_references(db: Session, owner: Creator, filters: dict) -> dict:
                 stats_failed += 1
                 log.warning("低粉爆款播放补全失败 %s：%s", external_id, exc)
         row.category_id = category_id[:40]
-        row.keyword = keyword[:200]
+        row.keyword = term[:200]
         row.raw = json.dumps(item, ensure_ascii=False, default=str)
         row.last_seen_at = _app_now()
         saved += 1
@@ -266,7 +301,7 @@ def reference_out(
         "id": f"low_fan:{row.id}",
         "kind": "low_fan",
         "title": row.title,
-        "cover_url": row.cover_url,
+        "cover_url": row.cover_url or _cover_from_raw(row.raw),
         "author_nickname": row.author_nickname,
         "author_followers": row.author_followers,
         "publish_time": row.publish_time,

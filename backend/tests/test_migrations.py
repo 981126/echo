@@ -46,9 +46,10 @@ def test_empty_database_upgrade_and_repeat(migration_url):
     inspector = inspect(engine)
     assert set(Base.metadata.tables) <= set(inspector.get_table_names())
     assert allowed_views() <= set(inspector.get_view_names())
+    assert "verdict" in {column["name"] for column in inspector.get_columns("video_review_findings")}
     with engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompts").scalar() == 10
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r247dropimprove"
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r248verdict"
     engine.dispose()
 
 
@@ -62,7 +63,7 @@ def test_matching_legacy_database_is_baselines(migration_url):
     run_migrations(migration_url)
 
     with engine.connect() as connection:
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r247dropimprove"
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r248verdict"
     engine.dispose()
 
 

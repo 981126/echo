@@ -2,7 +2,7 @@
 
 - **对应需求**: `requirements/R-248-review-attribution-layout-relevance.md`
 - **日期**: 2026-11-04
-- **状态**: 📝 设计已登记（等作者第二次「继续」后开发）
+- **状态**: ✅ 已按本文实现（2026-11-04，verify 全绿 + 真实归因/低粉抓取 + 浏览器点检）
 - **前置**: R-237（视频复盘 findings/参考视频）、R-245（按指标优化建议的 LLM 校验范式）、R-247（首选/备选同排、参考视频封面）、R-240/R-241（复盘参考读路径性能）、R-236（Alembic）
 - **原则**: 只改复盘归因链路/复盘页版式/低粉参考筛选/侧栏顺序；不新增第三方数据源、不新增 LLM 调用次数（替换原 findings 润色调用）；历史数据不自动重算、不删除；`verify.sh` 全绿。
 
@@ -157,6 +157,7 @@ brief 字段：
 | 文案引用 | 每条 quote 必须是 `transcript` 或某条评论原文的子串 | 丢弃不合法 quote；全部不合法则按「无内容依据」处理 |
 | 条数不足 | 合规条目 < 2 且规则 findings 非空 | 合规条目 + 规则 findings 合并，最多 5 条 |
 | 全部失败/模型不可用 | — | 规则 findings 兜底；规则也为空 → 生成 1 条「数据不足以判断整体好坏」说明 |
+| 合规仅 1 条且规则为空 | 验收要求归因 ≥2 条 | 追加 1 条「暂时还不能判断整体好坏」说明（不增加 LLM 调用） |
 
 **5.1.4 程序判方向 `verdict`（不交给 AI）**
 
@@ -217,26 +218,28 @@ if not transcript: warnings.append("这条视频暂无转写，暂时不能结�
 ```python
 DIRECTION_FALLBACK = ("求职", "面试", "赚钱")
 MAX_DIRECTION_TERMS = 3
-DIRECTION_SYNONYMS = {
-    "求职": ("求职", "找工作", "招聘", "简历", "面试", "面经", "offer", "秋招", "校招", "跳槽", "转行", "职场", "上班", "打工", "背调"),
-    "面试": ("面试", "面经", "hr", "群面", "终面", "背调", "面试官"),
-    "赚钱": ("赚钱", "收入", "工资", "月入", "副业", "搞钱", "存钱", "存款", "理财", "买车", "买房"),
-    "知识": ("知识", "学习", "干货", "教程", "经验", "方法"),
+GENERIC_DIRECTION_TOPICS = {"其他", "知识"}     # 泛化留存类目，不作为方向词
+BROAD_MATCH_TERMS = {"赚钱"}                    # 泛化匹配词：标题里出现也不算命中
+DIRECTION_SYNONYMS = {                          # 只用于「标题命中」的高信号词
+    "求职": ("求职", "找工作", "招聘", "简历", "面试", "面经", "offer", "秋招", "校招", "跳槽", "转行", "职场", "背调", "求职者"),
+    "面试": ("面试", "面经", "hr", "群面", "终面", "背调", "面试官", "候选人"),
+    "赚钱": ("收入", "工资", "月入", "副业", "搞钱", "存钱", "存款", "理财", "薪资", "年薪", "年终奖", "涨薪"),
+    "知识": ("学习", "干货", "教程"),
 }
 
 def owner_direction_terms(db, owner) -> list[str]:
-    # 当前主博主最近 30 条 videos.main_topics（TEXT JSON）计数，排除「其他」
-    # 按出现次数降序取前 3；为空 → DIRECTION_FALLBACK
+    # 最近 30 条 videos.main_topics 计数；去掉「其他」→ 去掉泛化类目 → 次数降序取前 3
+    # 泛化类目全被排除时回退原始词（仅知识/其他时仍可搜）；空 → DIRECTION_FALLBACK
 ```
 
-- 规则：最近 30 条按 `videos.id desc`（与现有 `_owner_keywords` 取数口径一致）；方向词去重、排除“其他”；不足 3 个时仅用已有词（不强行补到 3 个）；无任何主赛道 → 兜底 3 词。
-- `direction_keywords(terms)` 展开同义词 → 小写 set（标题匹配用）。
+- 规则：最近 30 条按 `videos.id desc`（与现有 `_owner_keywords` 取数口径一致）；方向词去重；排除 `其他/知识` 泛化类目（用「知识」搜低粉会返回科普/情感等无关内容）；不足 3 个时仅用已有词；无任何主赛道 → 兜底 3 词。
+- `direction_keywords(terms)`：方向词本身（`BROAD_MATCH_TERMS` 除外）+ 高信号同义扩展 → 小写 set（标题匹配用）。
 - `low_fan_references(db, owner, keyword, limit)` 改为：
-  1. 取最近 300 条候选（原 200 保持亦可）；
+  1. 取最近 300 条候选；
   2. `keyword` 参数存在时先按标题包含过滤（保持现有手动筛选能力）；
-  3. 计算 `haystack = title + row.keyword`，命中方向词/同义扩展词数 `hits`；`hits == 0` 的条目不返回；
-  4. 排序键：`(hits, relevance_for(...), last_seen_at)` 降序；返回前 `limit`；
-  5. 旧的不相关库内数据不删除，仅过滤。
+  3. 只计算**标题**命中方向词/同义扩展词数 `hits`（`row.keyword` 字段不算，避免「按词搜回来但标题跑题」混入）；`hits == 0` 的条目不返回；
+  4. 排序键：`(last_seen_at, hits, relevance_for(...))` 降序（点「更新」后新抓、带新封面的优先）；返回前 `limit`；
+  5. 旧的不相关库内数据不删除，仅过滤；旧行 `cover_url` 为空时 `reference_out` 回退 `raw.thumbnail`（历史指数搜索把封面放在该字段）。
 - 保留 `relevance_for` / `_owner_keywords` 现有口径不变（relevance 仅用于排序分，不参与判定）。
 
 **5.2.2 刷新抓取（`douyin_references.refresh_references`）**
@@ -244,11 +247,11 @@ def owner_direction_terms(db, owner) -> list[str]:
 | 请求 `keyword` | 抓取行为 |
 |---|---|
 | 非空（手填） | 保持现有：单次 `search_douyin_items(query=keyword, label_type=1, ...)` |
-| 空（默认） | R-248 新逻辑：`terms = owner_direction_terms(db, owner)`，对每个词各发 1 次 `search_douyin_items(query=term, label_type=1, category_id, date_type, duration_type)`（最多 3 次），合并按 `external_post_id` 去重 |
+| 空（默认） | R-248 新逻辑：`terms = owner_direction_terms(db, owner)`，对每个词各发 1 次 `search_douyin_items(query=term, label_type=1, category_id, date_type, duration_type)`（最多 3 次）；**每个词平分名额**（`per_query = ceil(limit/词数)`，避免第一个词把 20 条占满，不足由后续词补齐），合并按 `external_post_id` 去重 |
 
 - 每条记录 `keyword = 命中的方向词`、`source="direction_search"`、`source_label="主赛道低粉爆款"`；手工关键词路径保持 `source="index_search"`、`source_label="低粉爆款筛选"`。
 - mock 模式：每个词用 `_mock_items(term)` 兜底（与现有 mock 口径一致）；按 external_id 去重后仍为 2 条。
-- 统计补全（前 5 条无播放量补 `fetch_video_statistics`）、预算按实际请求差值计、warning 汇总逻辑保持现有；某方向词 0 条不报错，全部 0 条 → 现有「没有获取到低粉爆款视频」warning。
+- 统计补全（前 5 条无播放量补 `fetch_video_statistics`）、预算按实际请求差值计、warning 汇总逻辑保持现有；某方向词 0 条不报错（不新增单方向 warning），全部 0 条 → 现有「没有获取到低粉爆款视频」warning。
 - 预算影响：默认路径 1 次 → 最多 3 次 TikHub 请求，仍受现有每日预算闸门保护。
 
 ### 5.3 表结构：`video_review_findings` 新增 `verdict`
@@ -398,7 +401,7 @@ def owner_direction_terms(db, owner) -> list[str]:
 | 项 | 内容 |
 |---|---|
 | 请求 | 不变（`kind/keyword/category_id/date_days/duration_type/limit`） |
-| 行为变化 | 只返回命中主博主方向词/同义扩展的条目，按（命中数→相关度→最近出现）排序；无命中返回空列表 |
+| 行为变化 | 只返回**标题**命中主博主方向词/高信号同义扩展的条目，按（最近出现→标题命中数→相关度）排序；旧行封面回退 `raw.thumbnail`；无命中返回空列表 |
 | 响应 | 结构不变（`ResponseItem` 字段不变） |
 | 错误 | 不变 |
 
@@ -425,15 +428,22 @@ def owner_direction_terms(db, owner) -> list[str]:
 | 7 | 低粉爆款 | 第三方 TikHub（现有接口） | `POST /douyin/index/fetch_item_query`（`label_type=1` 低粉爆款筛选，query=方向词） | `itemId/itemTitle/cover/author/play/like/comment/share/createTime/duration` → `douyin_reference_videos`（`keyword`=方向词、`source=direction_search`） | 低粉参考列表 | 点「更新」（≤3 次请求） | 0 条→warning；封面坏图占位 |
 | 8 | 侧栏菜单 | 前端静态 | `sidebar.tsx NAV` | — | 导航顺序 | 代码发布 | — |
 
-## 9. 验证与实施记录（开发完成后补充）
+## 9. 验证与实施记录（2026-11-04）
 
 | 检查项 | 方法 | 结果 |
 |---|---|---|
-| 后端单测/静态检查 | pytest / ruff / mypy | 待实施 |
-| 迁移 | 重启自动 upgrade；查 information_schema | 待实施 |
-| AI 归因真实效果 | 重跑作品 1952 分析，查 findings/verdict/引用 | 待实施 |
-| 低粉方向真实抓取 | `POST /references/refresh` + `GET /references?kind=low_fan` | 待实施 |
-| 前端静态检查 | lint / vitest / build | 待实施 |
-| 页面版式/顺序/4 列 | Playwright 1440/900 截图 + rect 断言 | 待实施 |
-| 侧栏顺序 | Playwright 导航顺序断言 | 待实施 |
-| 门禁 | `scripts/verify.sh` 全绿 | 待实施 |
+| 后端单测/静态检查 | ruff + mypy + pytest | ✅ All checks passed / 155 files / **758 passed**（基线 751 + 新增 7） |
+| 迁移 | 后端重启自动 upgrade；查 information_schema | ✅ head=`r248verdict`；`video_review_findings.verdict` 存在（NOT NULL DEFAULT ''）；表仍 37 张 |
+| AI 归因真实效果 | `POST /analyze {post_id:1952, refresh:false, force:true}` → latest-review | ✅ review 28：**4 条归因**（播放/互动/完播/涨粉），每条含真实指标差距 + 文案/评论原句；verdict 4 条=无法判断/影响有限（样本 4 条时不硬判好坏）；数字/引用校验通过 |
+| 低粉方向真实抓取 | `POST /references/refresh` → `GET /references?kind=low_fan` | ✅ 3 次 TikHub 低粉筛选（求职/面试/赚钱各 1、每词平分名额）；保存 20 条带方向词；接口返回 20 条全部求职/面试/职场/收入相关，无猫狗/演唱会/花草 |
+| 低粉封面 | 浏览器懒加载统计 | ✅ 20 条中 15 条封面加载成功（新抓的带新签名 URL）；5 条历史行 URL 过期 → ECHO 占位（点更新续期，符合设计） |
+| 前端静态检查 | lint / vitest / build | ✅ 0 error（9 个既有 warning）/ **158 passed** / build 成功 |
+| 页面版式/顺序 | Playwright 1440/900 + rect 断言 | ✅ 顺序 findings(750) < advices(935) < 首选/备选(2352 同排)；两卡 height 318/318、bottom 相同；参考视频 4/行、封面 199px；900 视口堆叠；0 console error |
+| 归因卡展示 | 展开断言 + 截图 | ✅ 方向徽标（无法判断/影响有限）+ 判断类型；数据依据为可读文字（无 JSON `<pre>`）；内容依据带「视频文案/评论」来源；样本不足提示可见 |
+| 侧栏顺序 | Playwright 导航断言 | ✅ 主页→素材库→数据看板→视频复盘→… |
+| 门禁 | `scripts/verify.sh` | ✅ 全绿（37 张表 / 需求与设计成对） |
+
+实现偏差说明：
+1. 写范围外必须同步 `prompt_service.py` 的 `video_review` 提示词来源（旧 `video_review_llm.REVIEW_SYSTEM` 删除后指向新模块 `SYSTEM`，避免 ImportError）；
+2. 低粉方向词在实现中排除了「其他/知识」两个泛化类目（用「知识」搜低粉会返回科普/情感），并对标题匹配使用高信号词、抓取每词平分名额、展示按最近优先；
+3. 历史低粉行 `cover_url` 为空时回退 `raw.thumbnail`（部分签名 URL 已过期仍会占位）。

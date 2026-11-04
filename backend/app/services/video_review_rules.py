@@ -12,6 +12,8 @@ def _evidence(item: dict) -> list[dict]:
         "label": item["label"],
         "value": item["value"],
         "baseline": item["baseline"],
+        "unit": item["unit"],
+        "state": item["state"],
         "percentile": item["percentile"],
         "sample_count": item["sample_count"],
     }]

@@ -141,10 +141,16 @@ def test_analysis_generates_review_and_topics(db):
     assert topics
 
 
-def test_low_fan_refresh_keeps_official_label(db):
+def test_low_fan_refresh_direction_terms_mock(db):
+    # R-248：关键词为空时按主博主方向词（无作品 → 兜底 求职/面试/赚钱）各抓 1 次，合并去重后仍 2 条
     owner, _ = _owner(db)
     result = refresh_references(db, owner, {"category_id": "628", "keyword": "", "date_window": 168})
     assert result["saved"] == 2
+    rows = db.query(DouyinReferenceVideo).all()
+    assert len(rows) == 2
+    assert all(row.source == "direction_search" for row in rows)
+    assert all(row.source_label == "主赛道低粉爆款" for row in rows)
+    assert all(row.keyword in {"求职", "面试", "赚钱"} for row in rows)
 
 
 def test_reference_text_is_bounded():
@@ -279,11 +285,17 @@ def test_business_error_is_not_treated_as_success(db, monkeypatch):
     assert "Cookie" in credential.last_error
 
 
-class _BillboardClient:
+class _DirectionSearchClient:
+    """真实低粉搜索响应形状的假客户端：每个方向词都返回同一作品（验证合并去重）。"""
+
     mode = "real"
     requests_used = 0
 
-    def fetch_douyin_low_fan(self, **kwargs):
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def search_douyin_items(self, *, query: str, category_id: str, date_type: int, label_type: int, duration_type: int) -> dict:
+        self.queries.append(query)
         # 真实响应为两层信封：{code, data: {code, data: {objs: [...]}, extra, message}}
         return {
             "code": 200,
@@ -313,10 +325,13 @@ class _BillboardClient:
         }
 
 
-def test_billboard_real_shape_parsed(db, monkeypatch):
+def test_direction_search_parses_real_shape_and_dedupes(db, monkeypatch):
     owner, _ = _owner(db)
-    monkeypatch.setattr(refs_mod, "make_client", lambda: _BillboardClient())
+    client = _DirectionSearchClient()
+    monkeypatch.setattr(refs_mod, "make_client", lambda: client)
     result = refresh_references(db, owner, {"category_id": "628", "keyword": "", "date_window": 168})
+    # R-248：无作品 → 兜底方向词各抓 1 次；3 个方向词返回同一作品 → external_id 去重后只落 1 条
+    assert client.queries == ["求职", "面试", "赚钱"]
     assert result["saved"] == 1
     row = db.query(DouyinReferenceVideo).filter_by(external_post_id="7100000000000000001").one()
     assert row.title == "低粉爆款：面试反问怎么问"
@@ -326,7 +341,9 @@ def test_billboard_real_shape_parsed(db, monkeypatch):
     assert row.duration_seconds == 28  # 毫秒归一到秒
     # item_url 是图片贴的音乐资源，不能当视频链接；应回退到作品页
     assert row.video_url == "https://www.douyin.com/note/7100000000000000001"
-    assert row.source == "low_fan_billboard"
+    assert row.source == "direction_search"
+    assert row.source_label == "主赛道低粉爆款"
+    assert row.keyword == "求职"
 
 
 class _SearchClient:
