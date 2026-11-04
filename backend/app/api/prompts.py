@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..core.log import get_logger
 from ..db import get_db
 from ..models.notification import Notification
-from ..models.prompt import AiPrompt
+from ..models.prompt import AiPrompt, AiPromptDef
 from ..services import prompt_service
 from ..tasks import find_running_task, start_task
 
@@ -63,36 +63,81 @@ def _eval_out(row) -> dict | None:
     }
 
 
+def _meta_out(spec, row: AiPromptDef | None) -> dict:
+    """R-255 注册表元数据（优先 DB 行，未迁移时用代码注册表兜底）。"""
+    title = (row.title if row is not None else spec.title) or spec.title
+    return {
+        "key": spec.key,
+        "title": title,
+        "label": title,
+        "module": (row.module if row is not None else spec.module) or spec.module,
+        "module_label": (row.module_label if row is not None else spec.module_label) or spec.module_label,
+        "purpose": (row.purpose if row is not None else spec.purpose) or spec.purpose,
+        "category": (row.category if row is not None else spec.category) or spec.category,
+        "editable": bool(row.editable if row is not None else spec.editable),
+        "optimizable": bool(row.optimizable if row is not None else spec.optimizable),
+        "llm_feature": (row.llm_feature if row is not None else spec.llm_feature) or "",
+        "entry": (row.entry if row is not None else spec.entry) or "",
+        "code_ref": (row.code_ref if row is not None else spec.code_ref) or "",
+        "sort_order": int(row.sort_order if row is not None else spec.sort_order),
+        "group": prompt_service.prompt_group(spec.key),
+    }
+
+
 @router.get("/keys", response_model=list[dict])
 def list_keys(db: Session = Depends(get_db)):
-    """每个功能：当前启用版本 + 候选 + 最近一次评测 + 版本效果对比（R-129）。"""
+    """全部提示词（R-255）：元数据（中文名/模块/用途/可编辑）+ 启用版本 + 候选 + 评测 + 版本效果。"""
     from ..services import prompt_eval
 
-    rows = db.query(AiPrompt).order_by(AiPrompt.key, AiPrompt.version.desc()).all()
-    by_key: dict[str, dict] = {}
-    for r in rows:
-        k = r.key
-        if k not in by_key:
-            by_key[k] = {"key": k, "label": prompt_service.label(k), "versions": []}
-        by_key[k]["versions"].append(_out(r))
-    out = []
-    for k, item in by_key.items():
-        enabled = next((v for v in item["versions"] if v["status"] == "enabled"), None)
-        candidate = next((v for v in item["versions"] if v["status"] == "candidate"), None)
+    defs: dict[str, AiPromptDef] = {}
+    try:
+        for row in db.query(AiPromptDef).all():
+            defs[row.key] = row
+    except Exception:  # noqa: BLE001 表未迁移时用代码注册表兜底，页面不空
+        defs = {}
+    by_key: dict[str, list[AiPrompt]] = {}
+    for r in db.query(AiPrompt).order_by(AiPrompt.key, AiPrompt.version.desc()).all():
+        by_key.setdefault(r.key, []).append(r)
+
+    out: list[dict] = []
+    for spec in prompt_service.sorted_specs():
+        versions = [_out(r) for r in by_key.get(spec.key, [])]
+        enabled = next((v for v in versions if v["status"] == "enabled"), None)
+        candidate = next((v for v in versions if v["status"] == "candidate"), None)
+        meta = _meta_out(spec, defs.get(spec.key))
+        fallback_content = (
+            defs[spec.key].default_content
+            if spec.key in defs
+            else prompt_service.default_content(spec.key)
+        ) or ""
+        if meta["category"] == "contract":
+            out.append(
+                {
+                    **meta,
+                    "enabled_version": 0,
+                    "content": fallback_content,
+                    "has_candidate": False,
+                    "candidate_version": 0,
+                    "candidate_content": "",
+                    "candidate_note": "",
+                    "eval": None,
+                    "effect": [],
+                    "versions": [],
+                }
+            )
+            continue
         out.append(
             {
-                "key": k,
-                "label": item["label"],
-                "group": prompt_service.prompt_group(k),
+                **meta,
                 "enabled_version": enabled["version"] if enabled else 0,
-                "content": enabled["content"] if enabled else "",
+                "content": enabled["content"] if enabled else fallback_content,
                 "has_candidate": candidate is not None,
                 "candidate_version": candidate["version"] if candidate else 0,
                 "candidate_content": candidate["content"] if candidate else "",
                 "candidate_note": candidate["note"] if candidate else "",
-                "eval": _eval_out(prompt_eval.latest_eval(db, k)),
-                "effect": prompt_service.version_effect(db, k),
-                "versions": item["versions"][:30],
+                "eval": _eval_out(prompt_eval.latest_eval(db, spec.key)) if meta["optimizable"] else None,
+                "effect": prompt_service.version_effect(db, spec.key),
+                "versions": versions[:30],
             }
         )
     return out
@@ -185,8 +230,13 @@ def _selfcheck_task(db: Session, payload: dict) -> None:
 
 @router.post("/{key}/save", response_model=dict)
 def save_prompt(key: str, payload: PromptSaveIn, db: Session = Depends(get_db)):
-    if key not in prompt_service.PROMPT_META:
+    spec = prompt_service.get_spec(key)
+    if spec is None:
         raise HTTPException(status_code=404, detail="未知提示词类别")
+    if not spec.editable:
+        raise HTTPException(status_code=400, detail="该提示词为程序固定，不可编辑")
+    if not (payload.content or "").strip():
+        raise HTTPException(status_code=400, detail="提示词正文不能为空")
     row = prompt_service.save_new_version(db, key, payload.content)
     if key == "generation":
         start_task("prompt_selfcheck", {"version": row.version}, _selfcheck_task)
@@ -195,6 +245,11 @@ def save_prompt(key: str, payload: PromptSaveIn, db: Session = Depends(get_db)):
 
 @router.post("/{key}/enable", response_model=dict)
 def enable_prompt(key: str, payload: PromptEnableIn, db: Session = Depends(get_db)):
+    spec = prompt_service.get_spec(key)
+    if spec is None:
+        raise HTTPException(status_code=404, detail="未知提示词类别")
+    if not spec.editable:
+        raise HTTPException(status_code=400, detail="该提示词为程序固定，不可启用")
     row = prompt_service.enable_version(db, key, payload.version)
     if row is None:
         raise HTTPException(status_code=404, detail="版本不存在")
@@ -209,8 +264,11 @@ def optimize_prompt(key: str, payload: PromptOptimizeIn, db: Session = Depends(g
 
     R-202：改为后台任务，点完返回 `task_id`；失败原因在 `task.error`（前端任务态提示）。
     """
-    if key not in prompt_service.PROMPT_META:
+    spec = prompt_service.get_spec(key)
+    if spec is None:
         raise HTTPException(status_code=404, detail="未知提示词类别")
+    if not spec.optimizable:
+        raise HTTPException(status_code=400, detail="该提示词暂未开放 AI 优化")
     tid = find_running_task("prompt_optimize", {"key": key})
     if tid:
         return {"task_id": tid}

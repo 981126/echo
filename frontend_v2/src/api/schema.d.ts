@@ -1389,7 +1389,7 @@ export interface paths {
         };
         /**
          * List Keys
-         * @description 每个功能：当前启用版本 + 候选 + 最近一次评测 + 版本效果对比（R-129）。
+         * @description 全部提示词（R-255）：元数据（中文名/模块/用途/可编辑）+ 启用版本 + 候选 + 评测 + 版本效果。
          */
         get: operations["list_keys_api_prompts_keys_get"];
         put?: never;
@@ -1880,6 +1880,29 @@ export interface paths {
          * @description 云端单条作品卡「同步数据」（R-067/R-077）：指标+评论 Top50；缺视频/转写则补齐。
          */
         post: operations["sync_post_api_platform_posts__post_id__sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/platform/posts/sync-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Posts Batch
+         * @description 素材库「批量数据同步」（R-244 v33）：多卡片一次请求。
+         *
+         *     同账号抖音创作者作品合并成一次 overview（ids 批量 ≤20/次），评论 6 小时内复用；
+         *     每张卡片仍按原逻辑提交媒体补齐任务。items: [{key, kind, type?, id}]
+         */
+        post: operations["sync_posts_batch_api_platform_posts_sync_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2671,7 +2694,7 @@ export interface paths {
         };
         /**
          * Overview
-         * @description 账号总览：诊断缓存 + 本地快照 KPI/趋势（无账号时返回 200 空状态）。
+         * @description 账号总览：诊断缓存 + 本地快照 KPI/各指标逐日曲线（无账号时返回 200 空状态）。
          */
         get: operations["overview_api_douyin_dashboard_overview_get"];
         put?: never;
@@ -2736,6 +2759,26 @@ export interface paths {
          * @description 账号「更新数据」后台任务（诊断 + 投稿概览 + 作品快照，5 次 TikHub 请求）。
          */
         post: operations["refresh_overview_api_douyin_dashboard_overview_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/douyin-dashboard/works/{post_id}/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transcribe Work
+         * @description 作品「ASR 转写」后台任务：复用素材库的 import_video 转写任务（需有关联本地视频）。
+         */
+        post: operations["transcribe_work_api_douyin_dashboard_works__post_id__transcribe_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8074,6 +8117,45 @@ export interface operations {
             };
         };
     };
+    sync_posts_batch_api_platform_posts_sync_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     post_to_material_api_platform_posts__post_id__to_material_post: {
         parameters: {
             query?: never;
@@ -9587,7 +9669,10 @@ export interface operations {
     };
     overview_api_douyin_dashboard_overview_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 统计周期天数：7/14/30/90 */
+                period?: number;
+            };
             header?: {
                 "x-access-token"?: string;
             };
@@ -9696,6 +9781,39 @@ export interface operations {
                 "x-access-token"?: string;
             };
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transcribe_work_api_douyin_dashboard_works__post_id__transcribe_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                post_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;

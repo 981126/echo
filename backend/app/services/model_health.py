@@ -33,13 +33,18 @@ PROBE_TIMEOUT_SECONDS = 90
 # 只有探针卡在 LLM 之外（异常路径）才落到「探针超时」记录，线程泄漏上限仍是 90s+5s。
 PROBE_FUTURE_GRACE_SECONDS = 5
 
+# 探针 system 文案（代码默认；运行时按 PROBES.prompt_key 从提示词注册表读表，见 run_selfcheck 主线程预取）
+SELFCHECK_PROBE_CHAT_SYSTEM = "你是测试助手。只回复两个字：正常。"
+SELFCHECK_PROBE_JSON_SYSTEM = '只输出 JSON：{"ok":true}，不要解释。'
+
 # 极简样例：每个探测项 = (标签, 调用方式, 系统提示词, user 消息, 契约字段)
 PROBES: list[dict] = [
     {
         "key": "chat",
         "label": "文本对话",
         "mode": "chat",
-        "system": "你是测试助手。只回复两个字：正常。",
+        "system": None,
+        "prompt_key": "selfcheck_probe_chat",
         "user": "回复两个字。",
         "text": True,
     },
@@ -56,7 +61,8 @@ PROBES: list[dict] = [
         "key": "json_basic",
         "label": "JSON 输出能力",
         "mode": "json",
-        "system": '只输出 JSON：{"ok":true}，不要解释。',
+        "system": None,
+        "prompt_key": "selfcheck_probe_json",
         "user": "输出 JSON。",
         "require": ["ok"],
     },

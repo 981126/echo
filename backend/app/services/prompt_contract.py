@@ -62,6 +62,15 @@ CONTRACTS: dict[str, str] = {
         "输出契约（系统固定）：\n"
         "用简体中文回答，简洁、口语化、直接；涉及生成/修改/删除的写操作必须先取得作者明确同意才可调用工具执行。"
     ),
+    # 视频复盘两条契约原本内嵌在调用方的 user 消息里（R-255 顺带抽到只读镜像，文本逐字不变）。
+    "video_review": (
+        '输出：{"findings":[{"dimension":"completion","title":"...","conclusion":"...",'
+        '"suggestion":"...","judgement_type":"fact|hypothesis","metric_keys":["finish_rate"],'
+        '"content_quotes":["...原句..."]}]}'
+    ),
+    "video_review_advice": (
+        '输出：{"advices":[{"dimension":"...","reasons":["..."],"actions":["..."],"copy_refs":["...原句..."]}]}'
+    ),
 }
 
 # 契约/任务语义锚点：候选里必须出现，否则说明格式或任务本身被改坏了

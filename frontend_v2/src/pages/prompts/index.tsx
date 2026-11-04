@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
   Save,
@@ -10,15 +10,17 @@ import {
   CircleCheck,
   CircleX,
   Wand2,
-  FlaskConical
+  FlaskConical,
+  ChevronDown
 } from 'lucide-react'
 import { apiJson } from '@/api/client'
 import { startTask } from '@/api/task'
 import { useActiveWork } from '@/hooks/use-active-work'
 import { listVariants, itemVariants, softIn } from '@/lib/motion'
+import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -123,6 +125,72 @@ interface PromptItem {
   eval?: EvalInfo | null
   effect?: { version: number; drafts: number; rated: number; avg_rating?: number | null; used: number; mixed_persona?: boolean; persona_versions?: number[] }[]
   versions: PromptVersion[]
+  // R-255：注册表新增元数据。旧后端不返回时页面按兜底规则渲染（label 兜底标题、归入「全部提示词」、可编辑/可优化按 true）。
+  title?: string
+  module?: string
+  module_label?: string
+  purpose?: string
+  category?: 'system' | 'probe' | 'contract'
+  editable?: boolean
+  optimizable?: boolean
+  llm_feature?: string
+  entry?: string
+  code_ref?: string
+  sort_order?: number
+}
+
+const FALLBACK_MODULE_LABEL = '全部提示词'
+
+function promptTitle(it: PromptItem) {
+  return it.title || it.label || it.key
+}
+
+/** R-255：旧接口没有 category，一律按系统提示词处理，行为与改造前一致。 */
+function promptCategory(it: PromptItem): PromptItem['category'] {
+  return it.category ?? 'system'
+}
+
+function promptEditable(it: PromptItem) {
+  return it.editable ?? true
+}
+
+function promptOptimizable(it: PromptItem) {
+  return it.optimizable ?? true
+}
+
+function promptType(it: PromptItem): { label: string; variant: BadgeProps['variant'] } {
+  if (promptCategory(it) === 'probe') return { label: '内部探针', variant: 'secondary' }
+  if (!promptEditable(it)) return { label: '程序固定', variant: 'warning' }
+  return { label: '可编辑', variant: 'default' }
+}
+
+interface PromptGroup {
+  module: string
+  label: string
+  items: PromptItem[]
+}
+
+/** 按 module 分组（无 module 归入「全部提示词」），组内按 sort_order 升序；契约行不进清单。 */
+function groupPrompts(items: PromptItem[]): PromptGroup[] {
+  const groups: PromptGroup[] = []
+  const byModule = new Map<string, PromptGroup>()
+  for (const it of items) {
+    if (promptCategory(it) === 'contract') continue
+    const module = it.module || ''
+    let group = byModule.get(module)
+    if (!group) {
+      group = { module, label: it.module_label || FALLBACK_MODULE_LABEL, items: [] }
+      byModule.set(module, group)
+      groups.push(group)
+    } else if (group.label === FALLBACK_MODULE_LABEL && it.module_label) {
+      group.label = it.module_label
+    }
+    group.items.push(it)
+  }
+  for (const group of groups) {
+    group.items.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  }
+  return groups
 }
 
 const ROLE_OPTS = [
@@ -155,7 +223,28 @@ export default function PromptsPage() {
   const [editing, setEditing] = useState<Record<string, string>>({})
 
   const modelsQ = useQuery({ queryKey: ['settings', 'models'], queryFn: () => apiJson<ModelsPayload>('/api/settings/models') })
-  const keysQ = useQuery({ queryKey: ['prompts', 'keys'], queryFn: () => apiJson<PromptItem[]>('/api/prompts/keys') })
+  const keysQ = useQuery({
+    queryKey: ['prompts', 'keys'],
+    queryFn: () => apiJson<PromptItem[]>('/api/prompts/keys'),
+    // R-255：请求失败时保留上一次成功的清单，不把页面清空；失败由下方 toast 提示。
+    placeholderData: keepPreviousData,
+    retry: 1
+  })
+  const { isSuccess: keysLoaded, isError: keysFailed, error: keysError } = keysQ
+
+  // R-255：清单读取失败 → toast 报错一次（重试成功后再失败会再次提示），旧数据继续展示。
+  const lastKeysError = useRef('')
+  useEffect(() => {
+    if (keysLoaded) {
+      lastKeysError.current = ''
+      return
+    }
+    if (!keysFailed) return
+    const msg = (keysError as Error | null)?.message || '未知错误'
+    if (lastKeysError.current === msg) return
+    lastKeysError.current = msg
+    toast.error(`提示词清单读取失败：${msg}`)
+  }, [keysLoaded, keysFailed, keysError])
 
   // R-202：进行中状态以服务端任务为准（切页/刷新回来仍在跑 → 仍显示动画）
   const { tasks: activeTasks } = useActiveWork()
@@ -206,12 +295,30 @@ export default function PromptsPage() {
   }, [keysQ.data])
 
   const items = useMemo(() => keysQ.data ?? [], [keysQ.data])
-  const currentItem = items.find((i) => i.key === promptKey) || null
+  // R-255：契约行单独只读展示，不进入可选中清单
+  const selectableItems = useMemo(() => items.filter((it) => promptCategory(it) !== 'contract'), [items])
+  const contractItems = useMemo(() => items.filter((it) => promptCategory(it) === 'contract'), [items])
+  const promptGroups = useMemo(() => groupPrompts(items), [items])
+  const currentItem = selectableItems.find((i) => i.key === promptKey) || null
   const item = currentItem
+  const typeMeta = item ? promptType(item) : null
+  const canEdit = item ? promptEditable(item) : false
+  const canOptimize = item ? promptOptimizable(item) : false
+  const detailRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!promptKey && items.length) setPromptKey(items[0].key)
-  }, [items, promptKey])
+    if (promptKey && selectableItems.some((it) => it.key === promptKey)) return
+    if (selectableItems.length) setPromptKey(selectableItems[0].key)
+  }, [selectableItems, promptKey])
+
+  function selectPrompt(key: string) {
+    setPromptKey(key)
+    // 移动端清单较长：选中后滚到详情卡片
+    requestAnimationFrame(() => {
+      const el = detailRef.current
+      if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
 
   function changeAsrMode(mode: string) {
     setAsrMode(mode)
@@ -581,44 +688,128 @@ export default function PromptsPage() {
                   一键优化规则型
                 </Button>
               </CardHeader>
-              <CardContent>
-                <Select value={promptKey} onValueChange={setPromptKey}>
-                  <SelectTrigger className="h-9 w-full sm:w-80"><SelectValue placeholder="选择提示词" /></SelectTrigger>
-                  <SelectContent>
-                    {items.map((it) => (
-                      <SelectItem key={it.key} value={it.key}>
-                        {it.label}{it.group === 'persona_engine' ? '（人设引擎）' : ''}{it.has_candidate ? ' · 有候选' : ''}
-                      </SelectItem>
+              <CardContent className="space-y-4">
+                {keysQ.isLoading ? (
+                  <Skeleton className="h-40 w-full" />
+                ) : selectableItems.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-6 text-center">
+                    <p className="text-sm text-muted-foreground">
+                      {items.length === 0
+                        ? '提示词清单尚未初始化，后端启动会自动补种；若持续为空请检查数据库迁移'
+                        : '暂无系统提示词'}
+                    </p>
+                    <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['prompts', 'keys'] })}>
+                      <RefreshCw className="h-3.5 w-3.5" /> 重新读取
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {promptGroups.map((group) => (
+                      <div key={group.module || 'all'} className="space-y-1.5">
+                        <p className="text-xs font-medium text-muted-foreground">{group.label}</p>
+                        {group.items.map((it) => {
+                          const meta = promptType(it)
+                          const active = it.key === promptKey
+                          return (
+                            <button
+                              key={it.key}
+                              type="button"
+                              onClick={() => selectPrompt(it.key)}
+                              className={cn(
+                                'flex w-full flex-col gap-1 rounded-lg border px-3 py-2 text-left transition-colors',
+                                active ? 'border-accent bg-accent-soft/50' : 'border-border hover:bg-muted/60'
+                              )}
+                            >
+                              <span className="flex w-full flex-wrap items-center gap-2">
+                                <span className="min-w-0 truncate text-[13px] font-medium">{promptTitle(it)}</span>
+                                <Badge variant={meta.variant}>{meta.label}</Badge>
+                                {it.module_label && <span className="text-[11px] text-muted-foreground">{it.module_label}</span>}
+                                <span className="flex-1" />
+                                {promptEditable(it) && it.enabled_version > 0 && <Badge variant="secondary">v{it.enabled_version}</Badge>}
+                                {it.has_candidate && <Badge variant="warning">有候选 v{it.candidate_version}</Badge>}
+                              </span>
+                              {it.purpose && (
+                                <span className="w-full truncate text-xs text-muted-foreground" title={it.purpose}>
+                                  {it.purpose}
+                                </span>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            {item && (
-              <>
+            {contractItems.length > 0 && (
               <Card>
-                <CardHeader className="flex-row flex-wrap items-center gap-2">
-                  <CardTitle>当前启用 · v{item.enabled_version}</CardTitle>
-                  {item.group === 'persona_engine' && <Badge variant="secondary">改这里会影响人设提取质量</Badge>}
-                  {item.has_candidate && <Badge variant="warning">有候选 v{item.candidate_version} 待启用</Badge>}
+                <details className="group">
+                  <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 p-5 pb-3">
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+                    <CardTitle>程序固定输出契约（只读）</CardTitle>
+                    <Badge variant="secondary">{contractItems.length} 条</Badge>
+                    <CardDescription className="w-full pl-6">程序解析依赖这些输出契约，页面只读展示、不能修改</CardDescription>
+                  </summary>
+                  <CardContent className="space-y-3">
+                    {contractItems.map((it) => (
+                      <div key={it.key} className="rounded-lg border border-border p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <b className="text-[13px] font-medium">{promptTitle(it)}</b>
+                          <Badge variant="warning">程序固定</Badge>
+                          {it.module_label && <span className="text-[11px] text-muted-foreground">{it.module_label}</span>}
+                        </div>
+                        {it.purpose && <p className="mt-1 text-xs text-muted-foreground">{it.purpose}</p>}
+                        <ScrollArea className="mt-2 max-h-56 rounded-md bg-muted/40">
+                          <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed">{it.content}</pre>
+                        </ScrollArea>
+                      </div>
+                    ))}
+                  </CardContent>
+                </details>
+              </Card>
+            )}
+
+            {item && (
+              <div ref={detailRef} className="space-y-4">
+              <Card>
+                <CardHeader className="gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle>{promptTitle(item)}</CardTitle>
+                    {typeMeta && <Badge variant={typeMeta.variant}>{typeMeta.label}</Badge>}
+                    {item.module_label && <span className="text-xs text-muted-foreground">{item.module_label}</span>}
+                    {canEdit && item.enabled_version > 0 && <Badge variant="secondary">当前启用 v{item.enabled_version}</Badge>}
+                    {item.group === 'persona_engine' && <Badge variant="secondary">改这里会影响人设提取质量</Badge>}
+                    {item.has_candidate && <Badge variant="warning">有候选 v{item.candidate_version} 待启用</Badge>}
+                  </div>
+                  {item.purpose && <p className="text-xs text-muted-foreground">{item.purpose}</p>}
+                  {item.entry && <p className="text-[11px] text-muted-foreground">触发入口：{item.entry}</p>}
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {!canEdit && <p className="text-xs text-muted-foreground">程序固定，不能在这里改；正文仅供查看。</p>}
                   <Textarea
                     rows={14}
-                    className="font-mono text-xs leading-relaxed"
+                    readOnly={!canEdit}
+                    className={cn('font-mono text-xs leading-relaxed', !canEdit && 'cursor-default bg-muted/40 text-muted-foreground')}
                     value={editing[item.key] ?? item.content}
-                    onChange={(e) => setEditing({ ...editing, [item.key]: e.target.value })}
+                    onChange={canEdit ? (e) => setEditing({ ...editing, [item.key]: e.target.value }) : undefined}
                   />
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => savePrompt(item)}>
-                      <Save className="h-3.5 w-3.5" /> 保存为新版本并启用
-                    </Button>
-                    <Button variant="secondary" size="sm" onClick={() => optimize(item)} disabled={optimizingActive(item.key)}>
-                      {optimizingActive(item.key) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      AI 基于真实样本优化（候选）
-                    </Button>
-                  </div>
+                  {(canEdit || canOptimize) && (
+                    <div className="flex flex-wrap gap-2">
+                      {canEdit && (
+                        <Button size="sm" onClick={() => savePrompt(item)}>
+                          <Save className="h-3.5 w-3.5" /> 保存为新版本并启用
+                        </Button>
+                      )}
+                      {canOptimize && (
+                        <Button variant="secondary" size="sm" onClick={() => optimize(item)} disabled={optimizingActive(item.key)}>
+                          {optimizingActive(item.key) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                          AI 基于真实样本优化（候选）
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -641,10 +832,12 @@ export default function PromptsPage() {
                       </span>
                     )}
                     <span className="flex-1" />
-                    <Button variant="outline" size="sm" onClick={() => rerunEval(item)} disabled={evalActive(item.key)}>
-                      {evalActive(item.key) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />}
-                      {item.eval ? '重跑评测' : '跑评测'}
-                    </Button>
+                    {canOptimize && (
+                      <Button variant="outline" size="sm" onClick={() => rerunEval(item)} disabled={evalActive(item.key)}>
+                        {evalActive(item.key) ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />}
+                        {item.eval ? '重跑评测' : '跑评测'}
+                      </Button>
+                    )}
                     <Button size="sm" onClick={() => enable(item, item.candidate_version)}>启用此版本</Button>
                     <Button variant="outline" size="sm" className="text-destructive" onClick={() => setRejectKey(item.key)}>拒绝候选</Button>
                   </CardHeader>
@@ -714,7 +907,7 @@ export default function PromptsPage() {
                   )}
                 </CardContent>
               </Card>
-              </>
+              </div>
             )}
           </TabsContent>
         </Tabs>

@@ -28,6 +28,7 @@ from ..services.feedback import add_feedback
 from ..services.generation import generate_draft
 from ..services.draft_meta_suggest import suggest_meta_task
 from ..services.persona import PersonaService
+from ..services.prompt_service import get_prompt
 from ..tasks import find_running_task, start_task
 
 router = APIRouter()
@@ -142,18 +143,22 @@ def suggest_meta(draft_id: int, db: Session = Depends(get_db)):
     return {"task_id": task_id}
 
 
+# R-255：选题角度的静态提示词（代码默认/回退），运行时调用点走 get_prompt 读表。
+ANGLES_SYSTEM = (
+    "你是短视频选题策划。针对作者给出的选题，输出 3 个不同的切入角度。"
+    "每个角度要：标题抓人但不标题党、开头钩子一句能留住人、贴合作者口播风格。"
+    "只输出 JSON："
+    '{"angles":[{"title":"完整选题标题(直接可用于生成脚本)","hook":"开头钩子句","reason":"为什么这个角度能火"}]}'
+)
+
+
 def _compute_angles(db: Session, topic: str, platform: str) -> dict:
     """选题→3 个切入角度（R-030）。抽出来供后台任务复用（R-202）。"""
     from ..services.generation import benchmark_context_lines
 
     persona = PersonaService()
     refs = benchmark_context_lines(db)
-    system = (
-        "你是短视频选题策划。针对作者给出的选题，输出 3 个不同的切入角度。"
-        "每个角度要：标题抓人但不标题党、开头钩子一句能留住人、贴合作者口播风格。"
-        "只输出 JSON："
-        '{"angles":[{"title":"完整选题标题(直接可用于生成脚本)","hook":"开头钩子句","reason":"为什么这个角度能火"}]}'
-    )
+    system = get_prompt("ideas_angles", db)
     user_parts = [f"选题：{topic}"]
     if platform:
         user_parts.append(f"目标平台：{platform}")

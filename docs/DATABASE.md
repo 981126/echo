@@ -5,11 +5,12 @@
 > 结构演进：R-236 起由 `backend/alembic/versions/` 管理；启动执行 `upgrade head`，现有完整旧库首次自动 baseline。新增表、字段、索引、视图或结构相关数据变更必须新增 revision，并同步本文。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（37 张）
+## 表总览（38 张）
 
 | 表 | 说明 |
 |---|---|
 | `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版；R-129 起候选正文=可优化段+程序固定的输出契约段，支持候选拒绝(rejected)与历史回滚。 |
+| `ai_prompt_defs` | AI 提示词注册表（R-255）：一行一条提示词（34 条系统提示词/自检探针 + 11 条程序固定输出契约），含**中文模块名 `module_label`** 与**中文用途说明 `purpose`**（用于哪个模块功能、干什么用的）、是否可编辑/可 AI 优化、触发入口、代码位置、代码默认正文；运行时 `get_prompt` 先读 `ai_prompts` enabled 版本，缺失时回退本表 `default_content`。 |
 | `agent_actions` | AI 对话的写操作提案与审计（R-147 P2）：模型只**提议**（`status=pending`，含 `preview` 影响范围说明），作者在对话里点「确认执行」后才真正落库（`confirmed→done`），取消则 `cancelled`。`task_id` 记录入队的后台任务。 |
 | `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、R-022 优化节流计数等。 |
 | `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。 |
@@ -73,6 +74,41 @@ AI 提示词版本库（R-021）：key 标识用途，version 递增，status=en
 **索引**：`ix_ai_prompts_key`（key）
 
 **唯一约束**：`uq_prompt_version`（key, version）
+
+---
+
+## `ai_prompt_defs`
+
+AI 提示词注册表（R-255）：一行一条提示词，不存版本正文（版本在 `ai_prompts`），负责「有哪些提示词、中文名叫什么、属于哪个模块、干什么用的、默认正文是什么、页面能不能改」。
+
+当前登记 45 行：34 条系统提示词/内部自检探针（`category=system|probe`，32 条产品 + 2 条探针）+ 11 条程序固定输出契约（`category=contract`，只读镜像，真源仍是 `backend/app/services/prompt_contract.py`）。运行时优先级：`ai_prompts` enabled → 本表 `default_content` → 代码常量 → 空串；启动时 `prompt_service.ensure_prompt_catalog` 幂等补种（缺登记补登记、缺启用版本补 v1、已有版本绝不覆盖）。
+代码定义源：`backend/app/services/prompt_catalog.py`（`PROMPT_SPECS`）；启动入口：`main.py` lifespan → `init_prompt_registry_on_startup`。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `key` | VARCHAR(64) |  | 否 |  |
+| `title` | VARCHAR(80) |  | 否 |  （中文名） |
+| `module` | VARCHAR(40) |  | 否 |  （模块 code） |
+| `module_label` | VARCHAR(40) |  | 否 |  （中文模块名，如「对标洗稿」） |
+| `purpose` | TEXT |  | 否 |  （中文用途说明：用于哪个功能、干什么用的） |
+| `category` | VARCHAR(20) |  | 否 | system（system / probe / contract） |
+| `editable` | BOOLEAN |  | 否 | true（页面可编辑） |
+| `optimizable` | BOOLEAN |  | 否 | false（可 AI 优化/评测，当前仅现有 10 个 key） |
+| `llm_feature` | VARCHAR(40) |  | 否 |  （模型路由功能名） |
+| `entry` | TEXT |  | 否 |  （触发入口说明） |
+| `default_content` | TEXT |  | 否 |  （代码默认正文：种子/兜底基准） |
+| `code_ref` | TEXT |  | 否 |  （代码位置） |
+| `sort_order` | INTEGER |  | 否 | 0 |
+| `is_active` | BOOLEAN |  | 否 | true |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+| `updated_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**索引**：`ix_ai_prompt_defs_key`（key，唯一）、`ix_ai_prompt_defs_module`（module）
+
+**迁移**：Alembic `r255promptdefs`（建表 + 种子 45 行；对系统提示词/探针在 `ai_prompts` 中完全没有行时补 v1 enabled）。
+
+> 只读视图边界：本表含提示词正文与内部说明，**不加入** AI 对话 `sql_query` 可查的只读视图（与 `ai_prompts` 同边界，防止模型读到系统提示词）。
 
 ---
 

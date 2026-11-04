@@ -2,7 +2,7 @@
 
 - **对应需求**: `requirements/R-255-prompt-registry.md`
 - **日期**: 2026-11-05
-- **状态**: 📝 设计完成（待作者第二次「继续」后开发）
+- **状态**: ✅ 已按本文实现（2026-11-05，`scripts/verify.sh` 全绿（后端 ruff + mypy + pytest 788 用例；前端 lint + vitest 29 文件 166 用例 + build；文档一致性 38 表 / 需求与设计成对） + 接口/数据库/页面冒烟）
 - **前置**: R-021（`ai_prompts` 版本库）、R-129（按 key 语料/契约/自检/评测）、R-130（人设=事实源、提示词=指令模板）、R-131（提示词降权）、R-183（创作模式）、R-208（自动优化/自动启用）、R-231（无启用版本兜底，本次接上线）、R-254（生成提示词一次性补丁范式）、D-022/D-023
 - **原则**: 只做「登记 + 读表 + 页面展示」；不改任何提示词正文（`video_review` 恢复完整版除外）、不改 JSON 契约与解析、不覆盖作者已有版本、不改模型路由/预算/人设页；表缺失时自动回退代码默认，可随时回滚。
 
@@ -505,3 +505,18 @@ Alembic revision：`r255promptdefs`（`down_revision = "r248verdict"`，即当�
 | 页面改造破坏旧交互 | 前端 | 保留旧字段与旧卡片；新字段可选；build + vitest 门禁 |
 | 新增 key 无版本导致「v0」 | 启动补种未跑（如测试环境） | `get_prompt` 直接读 defs；页面 `enabled_version=0` 时显示「默认版（未入库版本）」并提示重启后端补种 |
 | 误改契约 | 直接 SQL 改 DB | 启动镜像覆盖回代码；页面只读；接口 400 |
+
+## 11. 实施记录（2026-11-05）
+
+按本文 M256-1~6 全部落地，与设计一致；实测偏差与补充：
+
+1. **§5.1 注册表**：45 条 `PROMPT_SPECS`（32 system + 2 probe + 11 contract）落在 `app/services/prompt_catalog.py`；`PROMPT_META` 由注册表派生 34 条（兼容旧 migration / 测试）。`module` 14 个、中文 `module_label` 与 `purpose` 全量填写。
+2. **§5.2 读表**：`get_prompt` 三级降级实现；`ai_prompt_defs` 表未迁移时查询异常被吞并回退代码默认（旧库/回滚安全）。
+3. **§5.3 补种**：`ensure_prompt_catalog` 实测首次登记 45、补启用版本 34；第二次全 0（幂等）；已有作者版本内容/版本号不变。启动入口挂在 `main.lifespan`（`init_prompt_registry_on_startup`，异常不阻断启动）。
+4. **§5.4 video_review 升级**：开发库 v1（54 字 R-237 种子）→ v2（119 字完整版）已归档旧版；Kv `r255_video_review_prompt_upgraded` 写入；二次启动不重复。
+5. **§5.5 调用点**：22 条全部改为 `get_prompt`；`chat_create_mode` 额外把「分隔空行」从常量移到调用点拼接（常量/DB 存干净正文，最终 system 文本与升级前逐字一致，解决 `save_new_version` strip 首尾空白导致的拼接差异）。
+6. **§5.6 契约镜像**：`CONTRACTS` 由 9 条扩到 11 条（`video_review` / `video_review_advice`，从内嵌 user 文本逐字抽出）；调用点用 `contract_for(...) + "\n"` 原位拼回，最终 user 文本逐字不变。
+7. **§5.7 API**：`/keys` 45 行；`save/enable/optimize` 注册表校验按设计返回 404/400；契约与探针只读。
+8. **§5.8 前端**：按设计实现分组清单 + 只读契约 + 只读详情 + 空/失败态；新增 4 个 vitest 用例；`schema.d.ts` 已用 `npm run gen:api` 重生成。
+9. **测试**：`test_r255_prompt_registry.py` 21 用例；`test_migrations.py` 期望值更新为 `ai_prompts=34`、`ai_prompt_defs=45`、head=`r255promptdefs`；全量后端 788 用例通过。
+10. **遗留（不在本需求范围）**：`video_review` 仍保持 `optimizable=true` 但素材/评测契约未补齐，点 AI 优化仍会报「样本不足」（与升级前一致）；新增 22 条已按设计 `optimizable=false`，后续可按 R-129 机制逐条开放。

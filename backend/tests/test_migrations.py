@@ -48,8 +48,10 @@ def test_empty_database_upgrade_and_repeat(migration_url):
     assert allowed_views() <= set(inspector.get_view_names())
     assert "verdict" in {column["name"] for column in inspector.get_columns("video_review_findings")}
     with engine.connect() as connection:
-        assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompts").scalar() == 10
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r248verdict"
+        # R-255：34 条系统提示词/探针各一条 v1（契约只进注册表、不版本化）
+        assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompts").scalar() == 34
+        assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompt_defs").scalar() == 45
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r255promptdefs"
     engine.dispose()
 
 
@@ -63,7 +65,7 @@ def test_matching_legacy_database_is_baselines(migration_url):
     run_migrations(migration_url)
 
     with engine.connect() as connection:
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r248verdict"
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r255promptdefs"
     engine.dispose()
 
 

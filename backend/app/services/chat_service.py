@@ -509,7 +509,7 @@ def _run_tool(db: Session, name: str, args: dict, context: dict | None) -> dict:
 
 
 CREATE_MODE_PROMPT = (
-    "\n\n【创作共创模式】当前作者在和你做**开放式创作共创**：允许发散、追问、一次给多个方向甚至反方向，"
+    "【创作共创模式】当前作者在和你做**开放式创作共创**：允许发散、追问、一次给多个方向甚至反方向，"
     "不要急着把话套进固定结构；先和作者把选题/角度聊开，需要时再落成脚本。"
     "数据使用规则与写操作确认规则依然有效。"
 )
@@ -543,8 +543,10 @@ class ChatService:
         deadline = time.monotonic() + max(5, int(settings.agent_timeout_seconds or 120))
         budget = budget_settings.budget_for(db, "chat")
 
+        # R-255：创作模式段改为可编辑提示词（库里存干净正文），分隔空行由程序拼接，最终文本与升级前逐字一致
+        create_mode_segment = f"\n\n{get_prompt('chat_create_mode', db)}" if mode == "create" else ""
         messages: list[dict] = [
-            {"role": "system", "content": get_prompt("chat") + (CREATE_MODE_PROMPT if mode == "create" else "") + TOOL_DATA_RULES + "\n\n" + _schema_section(db)}
+            {"role": "system", "content": get_prompt("chat") + create_mode_segment + TOOL_DATA_RULES + "\n\n" + _schema_section(db)}
         ]
         messages.extend(history[-20:])
         messages.append({"role": "user", "content": user_message})

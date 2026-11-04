@@ -22,6 +22,7 @@ from ..models.feedback import Feedback
 from . import draft_status, llm_router
 from .draft_versions import chains_with_sources, is_pure_manual, latest_comment_map
 from .llm import LLMError
+from .prompt_service import get_prompt
 
 log = get_logger("feedback_analysis")
 
@@ -80,7 +81,7 @@ def analyze(db: Session, draft: Draft, conclusion: str, llm=None) -> str:
     llm = llm or llm_router.primary_llm(db, TASK_KIND)  # R-139：模型1 主用，失败降级模型2
     text = llm.chat(
         [
-            {"role": "system", "content": ANALYSIS_SYSTEM},
+            {"role": "system", "content": get_prompt("feedback_insight", db)},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         temperature=0.3,

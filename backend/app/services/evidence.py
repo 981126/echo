@@ -29,6 +29,7 @@ from ..config import get_settings
 from ..core.log import get_logger
 from ..models.web_search import WebSearchLog
 from . import deepseek_search, web_search
+from .prompt_service import get_prompt
 
 log = get_logger("evidence")
 
@@ -356,6 +357,7 @@ def select_references(
     persona: str = "",
     min_pick: int | None = None,
     max_pick: int | None = None,
+    db: Session | None = None,
 ) -> list[dict]:
     """生成方按人设选 2–3 篇：返回带 `reason/picked` 的候选副本；失败自动兜底。"""
     settings = get_settings()
@@ -377,7 +379,12 @@ def select_references(
         lines.append(f"[{i}] {head}" + (f"（{meta}）" if meta else ""))
         if summary:
             lines.append(f"    {summary}")
-    system = _PICK_SYSTEM.format(min_pick=lo, max_pick=hi)
+    try:
+        system = get_prompt("evidence_pick", db).format(min_pick=lo, max_pick=hi)
+    except (KeyError, ValueError):
+        # 提示词正文被改出未转义的 {占位符} 时 format 会失败：回退代码默认，选文不能因此中断
+        log.warning("evidence_pick 提示词格式化失败，回退代码默认值")
+        system = _PICK_SYSTEM.format(min_pick=lo, max_pick=hi)
     user = (
         f"【博主人设】\n{persona[:1500] or '（暂无）'}\n\n"
         f"【选题】{topic}\n\n"
@@ -660,7 +667,7 @@ def gather_online(
     selected: list[dict] = []
     if kept:
         if settings.online_ref_pick and picker is not None:
-            selected = select_references(picker, kept, topic=topic, persona=persona)
+            selected = select_references(picker, kept, topic=topic, persona=persona, db=db)
         else:
             selected = _auto_pick(kept, int(settings.online_ref_pick_max or 3))
 

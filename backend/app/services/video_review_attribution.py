@@ -14,7 +14,7 @@ import re
 from sqlalchemy.orm import Session
 
 from ..models.platform import PlatformPostComment
-from . import budget_settings, model_settings
+from . import budget_settings, model_settings, prompt_contract
 from .llm_router import primary_llm
 from .prompt_service import get_prompt
 from .video_review_advices import _allowed_numbers, _fmt_value, _gap_text, _num
@@ -177,9 +177,7 @@ def _prompt(brief: dict) -> str:
         "4) 只能使用输入里出现的数字，不得新增数字、经历、评论、行业均值或提升幅度；"
         "内容层面的原因用「可能」表述；样本少（state=limited 或 sample_count<5）时不得断言整体好坏；\n"
         "5) 指标 value 为 null 的视为没有数据，不要引用；没有内容依据时 content_quotes 传空数组。\n"
-        '输出：{"findings":[{"dimension":"completion","title":"...","conclusion":"...",'
-        '"suggestion":"...","judgement_type":"fact|hypothesis","metric_keys":["finish_rate"],'
-        '"content_quotes":["...原句..."]}]}\n'
+        f"{prompt_contract.contract_for('video_review')}\n"
         f"输入：{json.dumps(brief, ensure_ascii=False, default=str)}"
     )
 

@@ -8,7 +8,7 @@
 >
 > 所有写死到代码中的ai提示词，包括页面上配置的ai提示词，全部理出来，专门建一张表存表里，以后就读这张表，表里需要有个字专门用中文描述清楚这个提示词用于哪个模块功能，干什么用的
 
-- **状态**: 🟡 已确认（需求 + 开发设计完成，待作者第二次「继续」后开发）
+- **状态**: ✅ 已完成（2026-11-05，`scripts/verify.sh` 全绿（后端 ruff + mypy + pytest 788 用例；前端 lint + vitest 29 文件 166 用例 + build；文档一致性 38 表 / 需求与设计成对） + 接口/数据库/页面冒烟）
 - **排期**: M256
 - **开发设计**: `development-design/R-255-prompt-registry.md`
 - **关联**: R-021（提示词版本管理）、R-129（按 key 语料/契约/评测）、R-130（人设与提示词边界）、R-131（提示词降权）、R-183（创作模式）、R-208（自动优化）、R-231（无启用版兜底）、R-254（生成提示词一次性补丁）、D-022/D-023、`ai_prompts` / `prompt_evals`
@@ -308,3 +308,12 @@
 | 新增接口字段破坏旧前端 | 接口只做「增字段」不做删改；旧字段（label/group/content/versions/eval）保持 |
 | 页面误改契约 | 契约只读展示、接口 400 拒绝编辑 |
 | `video_review` 升级内容不符预期 | 旧 v1 归档，可在页面一键启回；一次性标记失败则下次启动重试 |
+
+## 八、实施记录（2026-11-05）
+
+- **迁移/数据**：Alembic `r255promptdefs` 建 `ai_prompt_defs`（45 行：32 条产品系统提示词 + 2 条内部自检探针 + 11 条只读契约）并对缺失的系统提示词补 v1；开发库实测：defs 45 行、`ai_prompts` enabled 34 条、现有 10 个 key 的启用正文逐字未改（`video_review` 由 54 字旧种子升级为完整版 v2，v1 归档可回退）。
+- **后端**：新增 `app/services/prompt_catalog.py`（45 条 `PROMPT_SPECS`，含中文 `module_label` / `purpose` / 触发入口 / 代码位置 / 默认正文引用）；`prompt_service.get_prompt` 改为「ai_prompts enabled → ai_prompt_defs.default_content → 代码常量 → 空串并告警」三级降级；新增启动幂等 `ensure_prompt_catalog`（缺登记补登记、缺启用补 v1、已有版本绝不覆盖，接上 R-231 兜底）与 `video_review` 一次性升级（Kv 标记幂等）；22 条写死系统提示词调用点改为 `get_prompt(key, db)` 读表（debate/benchmark/pipeline/api-drafts/chat/feedback/video_review/inspiration/opportunity/evidence/model_health/prompt_service），静态指令段提到模块常量作代码默认，运行时上下文仍由代码拼接；`prompt_contract` 顺带把视频复盘 2 条内嵌契约抽成只读镜像（文本逐字不变，运行时仍读代码）。
+- **接口**：`GET /api/prompts/keys` 返回 45 行元数据 + 版本状态（旧字段全保留）；`save/enable/optimize` 增加注册表校验（未知 key 404、契约只读 400、未开放优化 400、空正文 400）。
+- **前端**：`/prompts`（AI 设置 → 高级 → 功能提示词）改为 14 个模块分组清单（每行中文名/模块/用途说明/类型徽章/当前版本），详情补 `purpose`/`entry`，只读项 readOnly 且隐藏保存与优化按钮，新增「程序固定输出契约（只读）」折叠区；空数据/失败态、移动端纵向布局按需求落地；`schema.d.ts` 由 OpenAPI 重新生成。
+- **验证**：后端新增 `test_r255_prompt_registry.py` 21 用例（注册表完整性/读表降级/幂等补种/不覆盖作者版本/契约只读镜像/video_review 升级/API 校验/读表生效）；全量后端 788 用例通过；前端 vitest 166 用例通过、lint/build 通过；开发库接口冒烟 `GET /api/prompts/keys` 45 行；Playwright 1440 页面点检：14 个模块分组、新增行含中文用途说明、只读契约 11 条、无 console error（截图 `.tmp/r255/prompts-page.png`）；`verify.sh` 全绿。
+- **服务**：后端 8000 已重启加载最新代码并执行迁移；前端 3000 运行中。

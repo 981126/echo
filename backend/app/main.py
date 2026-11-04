@@ -27,6 +27,10 @@ log = get_logger("main")
 async def lifespan(app: FastAPI):
     setup_logging()  # R-133：全后端此前零日志，失败不可观测
     run_migrations()
+    # R-255：提示词注册表幂等补种 + video_review 一次性升级（失败不阻断启动，下次重试）
+    from .services.prompt_service import init_prompt_registry_on_startup
+
+    init_prompt_registry_on_startup()
     mark_interrupted_tasks_on_startup()  # R-089：重启后清理遗留 running 任务
     # R-208：一次性按规则清理历史积压的人设待确认建议（Kv 标记保证只跑一次，后台线程）
     from .services.ingest import maybe_auto_confirm_backlog_on_startup

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..core.log import get_logger
 from ..models.hot_topic import TopicIdea
+from .prompt_service import get_prompt
 
 log = get_logger("opportunity")
 
@@ -273,7 +274,7 @@ def comment_clusters(db: Session, limit: int = 15, use_llm: bool = False) -> dic
     return _slice_clusters(full, limit)
 
 
-def _ask_groups(listing: str, deadline: float) -> list:
+def _ask_groups(listing: str, deadline: float, db: Session | None = None) -> list:
     """调模型1 做语义聚类，带硬超时（超时返回空 → 调用方回退本地）。
 
     R-240 M6 收尾：把这里的软超时预算下传给单次 LLM 调用。只靠外层
@@ -284,11 +285,14 @@ def _ask_groups(listing: str, deadline: float) -> list:
 
     from .persona import PersonaService
 
+    # 提示词在主线程取好再进工作线程（Session 不能跨线程）
+    system = get_prompt("opportunity_comment_cluster", db)
+
     def _run() -> list:
         data = PersonaService().call_json(
             "ideas",
             [
-                {"role": "system", "content": _LLM_CLUSTER_SYSTEM},
+                {"role": "system", "content": system},
                 {"role": "user", "content": f"作者赛道：求职/面试/赚钱/知识。\n评论区原话：\n{listing}\n\n请分组。"},
             ],
             temperature=0.3,
@@ -323,7 +327,7 @@ def _llm_comment_clusters(db: Session, limit: int) -> dict:
     owner_id, label = _source_labeler(db)
     listing = "\n".join(f"{i}. {_clean(r.title)[:60]}（赞{int(r.likes or 0)}）" for i, r in enumerate(rows, 1))
     try:
-        groups = _ask_groups(listing, _LLM_DEADLINE)
+        groups = _ask_groups(listing, _LLM_DEADLINE, db)
     except Exception:  # noqa: BLE001 模型不可用/超时 → 回退本地聚类
         return _comment_clusters(db, limit)
     if not groups:
@@ -556,7 +560,7 @@ def _gap_suggestions(db: Session, limit: int) -> dict:
     try:
         data = PersonaService().call_json(
             "ideas",
-            [{"role": "system", "content": _GAP_SYSTEM}, {"role": "user", "content": user}],
+            [{"role": "system", "content": get_prompt("opportunity_gap", db)}, {"role": "user", "content": user}],
             temperature=0.85,
         )
         items: list[dict] = []

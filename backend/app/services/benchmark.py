@@ -16,6 +16,7 @@ from ..models.kv import Kv
 from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video import Transcript, Video
 from . import budget_settings
+from .prompt_service import get_prompt
 from .text_tags import strip_hashtags
 
 # 互动权重：点赞1 + 收藏2 + 评论5（播放量只做参考不做主排序）
@@ -311,7 +312,7 @@ def _unit_is_ad(db: Session, unit: dict, text: str = "") -> bool:
         llm = _llm(db)
         data = llm.chat_json(
             [
-                {"role": "system", "content": _AD_JUDGE_SYSTEM},
+                {"role": "system", "content": get_prompt("benchmark_ad_judge", db)},
                 {"role": "user", "content": f"标题：{title}\n\n口播文案：\n{(text or '')[:3000]}"},
             ],
             temperature=0.1,
@@ -340,7 +341,7 @@ def _units_are_ad(db: Session, units: list[dict], texts: list[str]) -> dict[int,
     try:
         data = _llm(db).chat_json(
             [
-                {"role": "system", "content": _AD_BATCH_SYSTEM},
+                {"role": "system", "content": get_prompt("benchmark_ad_judge_batch", db)},
                 {"role": "user", "content": json.dumps(batch, ensure_ascii=False)},
             ],
             temperature=0.1,
@@ -694,6 +695,10 @@ def _llm(db: Session | None = None):
     return llm_router.primary_llm(db, "benchmark")
 
 
+# R-255：「我能不能讲」静态提示词（代码默认/回退），运行时调用点走 get_prompt 读表。
+ANALYZE_SYSTEM = "你是我的内容选题顾问。只输出 JSON：{\"can\":bool,\"reason\":string,\"suggestion\":string}"
+
+
 def analyze_text(db: Session, owner: Creator, text: str) -> dict:
     """对给定文案做“我能不能讲”分析（对标页用，文案来自前端已 prepare 数据）。"""
     if not (text or "").strip():
@@ -702,7 +707,7 @@ def analyze_text(db: Session, owner: Creator, text: str) -> dict:
     try:
         res = _llm(db).chat_json(
             [
-                {"role": "system", "content": "你是我的内容选题顾问。只输出 JSON：{\"can\":bool,\"reason\":string,\"suggestion\":string}"},
+                {"role": "system", "content": get_prompt("benchmark_analyze", db)},
                 {"role": "user", "content": f"我的人设/红线：\n{persona}\n\n这是对标博主的一条视频文案：\n{text[:3000]}\n\n判断我能不能讲（是否契合我人设、我能不能讲得动、是否与我已有内容重复）："},
             ],
             temperature=0.4,

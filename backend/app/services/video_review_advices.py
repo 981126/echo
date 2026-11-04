@@ -15,8 +15,9 @@ import re
 
 from sqlalchemy.orm import Session
 
-from . import budget_settings, model_settings
+from . import budget_settings, model_settings, prompt_contract
 from .llm_router import primary_llm
+from .prompt_service import get_prompt
 
 ADVICE_DIMENSIONS: list[dict] = [
     {"dimension": "completion", "metric": "finish_rate", "title": "如何优化完播率", "target_metric": "completion"},
@@ -299,7 +300,7 @@ def build_metric_advices(
         llm = primary_llm(db, "video_review", target="/video-review")
         result = llm.chat_json(
             [
-                {"role": "system", "content": SYSTEM},
+                {"role": "system", "content": get_prompt("video_review_advice", db)},
                 {
                     "role": "user",
                     "content": (
@@ -309,7 +310,7 @@ def build_metric_advices(
                         "3) actions 写 3~4 条具体动作，落到前 3 秒 / 每 15~30 秒 / 结尾 CTA 等位置，不要空话；\n"
                         "4) 只能使用输入里的数字，不得写同赛道/行业平均，不得承诺提升百分比；内容原因用「可能」表述；\n"
                         "5) 没有可比数据的 dimension 不生成。\n"
-                        '输出：{"advices":[{"dimension":"...","reasons":["..."],"actions":["..."],"copy_refs":["...原句..."]}]}\n'
+                        f"{prompt_contract.contract_for('video_review_advice')}\n"
                         f"输入：{json.dumps(brief, ensure_ascii=False)}"
                     ),
                 },

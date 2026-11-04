@@ -322,6 +322,34 @@ SOURCE_REWRITE_SYSTEM = (
     "script 是脚本正文；tags 是 3-6 个内容标签（如 求职/面试/赚钱/知识，可含具体主题词）。"
 )
 
+# R-255：讨论链静态提示词统一入库。以下常量是代码默认/回退（注册表 default_ref 懒加载引用），
+# 运行时调用点一律走 `get_prompt(key, db)` 读表，作者在「AI 设置」里编辑的版本优先。
+CRITIC_SYSTEM_GENERATE = (
+    "你是脚本评审专家。请对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、"
+    "哪些有 AI 感，并给出具体可执行的修改建议（每轮简短、直给）。"
+    "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
+    "有没有正确但没用的空话。"
+)
+REVISE_SYSTEM_GENERATE = (
+    "你是撰稿模型。根据评审意见，用作者的口吻重写整篇口播脚本，"
+    "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。"
+    "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
+    "有可引用的联网事实就口语化引用。"
+)
+CRITIC_SYSTEM_REWRITE = (
+    "你是脚本评审专家。对照**作者完整上下文**（人设/风格范本/语言习惯/禁用词/结构偏好）指出当前脚本"
+    "哪些地方不像作者、哪些有 AI 腔、哪些与原文句子逐字照抄"
+    "（参考改写要求：整篇不逐字照抄，但可以偶尔沿用素材的 1-2 句原句；素材里的经历/案例可以写成作者本人的）；"
+    "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
+    "有没有「要努力/要相信自己」这类正确但没用的空话；给出具体可执行的修改建议（简短直给）。"
+)
+REVISE_SYSTEM_REWRITE = (
+    "你是撰稿模型。根据评审意见，用作者口吻重写整篇口播脚本，只输出脚本正文，"
+    "不要解释、不要加标题，保持 1-2 分钟口播长度。"
+    "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
+    "有可引用的联网事实就口语化引用；删掉空话。"
+)
+
 
 def merge_tags(raw: str, new_tags: list[str]) -> str:
     """R-155：把 AI 新标签并入现有 JSON 标签（去重、保留现有顺序），返回 JSON 文本。"""
@@ -453,7 +481,7 @@ def run_debate(
         # R-155：基于原文讨论——原文可能是洗稿素材 ASR 文案（original_script）或自建稿正文
         if db.query(DraftDiscussion).filter(DraftDiscussion.draft_id == draft.id).count() > 0:
             _note(db, draft.id, 0, "—— 重新讨论（基于原文）——")
-        initial_system = SOURCE_REWRITE_SYSTEM
+        initial_system = get_prompt("rewrite_from_source", db)
         initial_user = (
             f"{author_style_context(db)}\n\n"
             f"【参考素材·可把其中的经历/案例/观点当作可用内容（整篇不逐字照抄）】\n"
@@ -527,27 +555,17 @@ def run_debate(
     # 2) N 轮讨论：评审方挑刺 → 生成方修订
     # R-228：证据块（联网+站内）拼进 system，每轮调用都可见；R-254：放开为可扩写素材、不再禁编造。
     critic_system = _with_evidence(
-        (
-            "你是脚本评审专家。请对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、"
-            "哪些有 AI 感，并给出具体可执行的修改建议（每轮简短、直给）。"
-            "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
-            "有没有正确但没用的空话。"
-            + ALLOW_EXPANSION_RULE
-            + f"\n作者人设：\n{persona_text}\n红线（不得违反）：\n{red_text}\n作者语言习惯：\n{ctx['profile']}"
-        ),
+        get_prompt("debate_critic_generate", db)
+        + ALLOW_EXPANSION_RULE
+        + f"\n作者人设：\n{persona_text}\n红线（不得违反）：\n{red_text}\n作者语言习惯：\n{ctx['profile']}",
         evidence_block,
     )
     if source_text:
         critic_system += f"\n参考原文（检查是否照搬/重复）：\n{source_text[:1500]}"
     revise_system = _with_evidence(
-        (
-            "你是撰稿模型。根据评审意见，用作者的口吻重写整篇口播脚本，"
-            "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。"
-            "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
-            "有可引用的联网事实就口语化引用。"
-            + ALLOW_EXPANSION_RULE
-            + f"\n作者语言习惯（自然贴近即可，不要硬塞口头禅/标志词）：\n{style_note}"
-        ),
+        get_prompt("debate_revise_generate", db)
+        + ALLOW_EXPANSION_RULE
+        + f"\n作者语言习惯（自然贴近即可，不要硬塞口头禅/标志词）：\n{style_note}",
         evidence_block,
     )
 
@@ -798,7 +816,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     # R-194：对标洗稿主链路必须与普通生成/草稿讨论同源——注入完整作者上下文
     # （人设四层 + 风格范本 + 改稿对照 + 禁用词 + 结构偏好 + 相关风格样本），
     # 不能只喂简化人设，否则洗稿仍不像作者。
-    from .benchmark import REWRITE_SYSTEM, _rewrite_user
+    from .benchmark import _rewrite_user
 
     author_ctx = author_style_context(db, source_title)
     settings = get_settings()
@@ -884,7 +902,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     )
 
     # R-194/R-254：初稿走统一「参考改写」契约 + 完整作者上下文（素材经历可写成作者本人）；R-227 注入联网证据
-    rewrite_system = REWRITE_SYSTEM
+    rewrite_system = get_prompt("rewrite_from_benchmark", db)
     rewrite_user = _rewrite_user(db, source_title, source_text, evidence_block)
 
     latest = None
@@ -939,20 +957,13 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     _add(db, draft.id, 0, gen, "draft", latest, llm=draft_llm)
 
     critic_system = (
-        "你是脚本评审专家。对照**作者完整上下文**（人设/风格范本/语言习惯/禁用词/结构偏好）指出当前脚本"
-        "哪些地方不像作者、哪些有 AI 腔、哪些与原文句子逐字照抄"
-        "（参考改写要求：整篇不逐字照抄，但可以偶尔沿用素材的 1-2 句原句；素材里的经历/案例可以写成作者本人的）；"
-        "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
-        "有没有「要努力/要相信自己」这类正确但没用的空话；给出具体可执行的修改建议（简短直给）。"
+        get_prompt("rewrite_critic", db)
         + ALLOW_EXPANSION_RULE
         + f"\n作者上下文：\n{author_ctx}"
         + (f"\n\n可参考/扩写的素材：\n{evidence_block}" if evidence_block else "")
     )
     revise_system = (
-        "你是撰稿模型。根据评审意见，用作者口吻重写整篇口播脚本，只输出脚本正文，"
-        "不要解释、不要加标题，保持 1-2 分钟口播长度。"
-        "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
-        "有可引用的联网事实就口语化引用；删掉空话。"
+        get_prompt("rewrite_revise", db)
         + ALLOW_EXPANSION_RULE
         + f"\n作者上下文（必须贴合）：\n{author_ctx}"
         + (f"\n\n可参考/扩写的素材：\n{evidence_block}" if evidence_block else "")

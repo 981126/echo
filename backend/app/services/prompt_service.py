@@ -11,11 +11,19 @@
 from __future__ import annotations
 
 import re
-from importlib import import_module
 
 from sqlalchemy.orm import Session
 
-from ..models.prompt import AiPrompt
+from ..core.log import get_logger
+from ..models.prompt import AiPrompt, AiPromptDef
+from .prompt_catalog import (
+    PROMPT_SPECS,
+    SPEC_BY_KEY,
+    default_content as _catalog_default_content,
+    sorted_specs,
+)
+
+log = get_logger("prompt")
 
 
 class PromptOptimizeError(RuntimeError):
@@ -25,18 +33,12 @@ class PromptOptimizeError(RuntimeError):
         super().__init__(reason)
         self.reason = reason
 
-# key -> (module, 常量名, 中文名)
+
+# key -> (模块路径, 常量名, 中文名)：由 R-255 注册表派生，保证旧 migration（7a6f…）与测试兼容。
 PROMPT_META: dict[str, tuple[str, str, str]] = {
-    "generation": ("app.services.generation", "GENERATION_SYSTEM", "生成脚本"),
-    "persona_init": ("app.services.persona", "PERSONA_INIT_SYSTEM", "人设逐篇提取"),
-    "persona_merge": ("app.services.persona", "PERSONA_MERGE_SYSTEM", "人设归纳合并"),
-    "video_tags": ("app.services.persona", "VIDEO_TAGS_SYSTEM", "视频预打标"),
-    "persona_updates": ("app.services.persona", "PERSONA_UPDATES_SYSTEM", "人设增量合并"),
-    "persona_compare": ("app.services.persona", "PERSONA_COMPARE_SYSTEM", "人设差异复核"),
-    "diff": ("app.services.diff_analysis", "DIFF_SYSTEM", "改稿差异"),
-    "chat": ("app.services.chat_service", "SYSTEM_PROMPT", "AI 对话"),
-    "correct": ("app.services.ingest", "CORRECT_SYSTEM", "转写校对"),
-    "video_review": ("app.services.video_review_attribution", "SYSTEM", "视频复盘"),
+    spec.key: (spec.default_ref[0], spec.default_ref[1], spec.title)
+    for spec in PROMPT_SPECS
+    if spec.category in ("system", "probe") and spec.default_ref is not None
 }
 
 OPT_SYSTEM = (
@@ -54,16 +56,40 @@ OPT_SYSTEM = (
 
 
 def default_content(key: str) -> str:
-    mod_name, attr, _ = PROMPT_META[key]
-    return str(getattr(import_module(mod_name), attr))
+    """代码默认正文（种子/兜底）；未知 key 或常量缺失返回空串。"""
+    return _catalog_default_content(key)
+
+
+def get_spec(key: str):
+    """提示词注册信息（R-255）；未知 key 返回 None。"""
+    return SPEC_BY_KEY.get(key)
+
+
+def is_editable(key: str) -> bool:
+    spec = SPEC_BY_KEY.get(key)
+    return bool(spec and spec.editable)
+
+
+def is_optimizable(key: str) -> bool:
+    spec = SPEC_BY_KEY.get(key)
+    return bool(spec and spec.optimizable)
 
 
 def label(key: str) -> str:
-    return PROMPT_META[key][2]
+    spec = SPEC_BY_KEY.get(key)
+    return spec.title if spec is not None else key
+
+
+_FALLBACK_WARNED: set[str] = set()
 
 
 def get_prompt(key: str, db: Session | None = None) -> str:
-    """取当前启用版本的提示词；无记录时回退代码默认值。"""
+    """取提示词（R-255 统一读表）。
+
+    优先级：`ai_prompts` 当前启用版本 → `ai_prompt_defs.default_content`（表内默认正文）
+    → 代码默认常量 → 空串（同一 key 只警告一次）。DB 不可用/未迁移时自动回退代码默认，
+    保证升级前后行为一致、最坏也不会把提示词变空。
+    """
     from ..db import SessionLocal
 
     own = db is None
@@ -75,15 +101,31 @@ def get_prompt(key: str, db: Session | None = None) -> str:
             .order_by(AiPrompt.version.desc())
             .first()
         )
-        if row:
+        if row is not None:
             return row.content
+        try:
+            definition = (
+                session.query(AiPromptDef)
+                .filter(AiPromptDef.key == key, AiPromptDef.is_active.is_(True))
+                .first()
+            )
+        except Exception:  # noqa: BLE001 表未迁移/查询失败时继续回退代码默认
+            definition = None
+        if definition is not None and (definition.default_content or "").strip():
+            return definition.default_content
     finally:
         if own:
             session.close()
-    try:
-        return default_content(key)
-    except Exception:
-        return ""
+    fallback = default_content(key)
+    if fallback:
+        if key not in _FALLBACK_WARNED:
+            _FALLBACK_WARNED.add(key)
+            log.warning("提示词 %s 库内无启用版本与默认正文，已回退代码常量", key)
+        return fallback
+    if key not in _FALLBACK_WARNED:
+        _FALLBACK_WARNED.add(key)
+        log.warning("提示词 %s 无任何可用内容（db/表默认/代码常量均为空）", key)
+    return ""
 
 
 def ensure_defaults(db: Session) -> None:
@@ -116,6 +158,158 @@ def ensure_enabled_fallback(db: Session) -> None:
         )
         if row is None:
             save_new_version(db, key, default_content(key), note="无启用版本，兜底启用代码默认")
+
+
+PROMPT_CATALOG_SEED_NOTE = "系统默认（R-255 统一入库补种）"
+
+
+def ensure_prompt_catalog(db: Session) -> dict[str, int]:
+    """R-255 幂等补种：注册表缺登记就补、缺启用版本就补 v1、已有数据一律不动。
+
+    - 每次启动同步 `ai_prompt_defs` 的元数据与 `default_content`（代码默认基准）；
+    - `ai_prompts` 只在「该 key 完全没有 enabled 版本」时补 v1，绝不覆盖作者改过的版本；
+    - 同时把 R-231 的「无启用版本兜底」接上（此前只被测试调用）。
+    """
+    from ..core.timeutil import now as _now
+
+    stats = {"registered": 0, "updated": 0, "seeded": 0, "skipped": 0}
+    now = _now()
+    for spec in sorted_specs():
+        content = default_content(spec.key)
+        row = db.query(AiPromptDef).filter(AiPromptDef.key == spec.key).first()
+        if row is None:
+            db.add(
+                AiPromptDef(
+                    key=spec.key,
+                    title=spec.title,
+                    module=spec.module,
+                    module_label=spec.module_label,
+                    purpose=spec.purpose,
+                    category=spec.category,
+                    editable=spec.editable,
+                    optimizable=spec.optimizable,
+                    llm_feature=spec.llm_feature,
+                    entry=spec.entry,
+                    default_content=content,
+                    code_ref=spec.code_ref,
+                    sort_order=spec.sort_order,
+                    is_active=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            stats["registered"] += 1
+        else:
+            desired = {
+                "title": spec.title,
+                "module": spec.module,
+                "module_label": spec.module_label,
+                "purpose": spec.purpose,
+                "category": spec.category,
+                "editable": spec.editable,
+                "optimizable": spec.optimizable,
+                "llm_feature": spec.llm_feature,
+                "entry": spec.entry,
+                "default_content": content,
+                "code_ref": spec.code_ref,
+                "sort_order": spec.sort_order,
+                "is_active": True,
+            }
+            changed = False
+            for field, value in desired.items():
+                if getattr(row, field) != value:
+                    setattr(row, field, value)
+                    changed = True
+            if changed:
+                row.updated_at = now
+                stats["updated"] += 1
+        if spec.category in ("system", "probe"):
+            enabled = (
+                db.query(AiPrompt).filter(AiPrompt.key == spec.key, AiPrompt.status == "enabled").first()
+            )
+            if enabled is None:
+                if content.strip():
+                    db.add(
+                        AiPrompt(
+                            key=spec.key,
+                            version=1,
+                            content=content,
+                            status="enabled",
+                            note=PROMPT_CATALOG_SEED_NOTE,
+                        )
+                    )
+                    stats["seeded"] += 1
+                else:
+                    stats["skipped"] += 1
+                    log.warning("R-255 注册表补种跳过 %s：代码默认正文为空", spec.key)
+    db.commit()
+    if stats["registered"] or stats["seeded"]:
+        log.info(
+            "R-255 提示词注册表补种：新增登记 %s，补启用版本 %s，更新元数据 %s",
+            stats["registered"],
+            stats["seeded"],
+            stats["updated"],
+        )
+    return stats
+
+
+# ---------- R-255：video_review 一次性升级为完整系统提示词 ----------
+
+VIDEO_REVIEW_UPGRADE_KV = "r255_video_review_prompt_upgraded"
+VIDEO_REVIEW_OLD_SEED = (
+    "只能依据输入证据解释视频表现和整理主题，不得创造数字、评论、经历或证据ID。输出必须符合调用方JSON契约。"
+)
+VIDEO_REVIEW_UPGRADE_NOTE = "R-255 统一入库：video_review 恢复完整系统提示词（旧精简种子归档）"
+
+
+def upgrade_video_review_prompt(db: Session) -> bool:
+    """把 R-237 migration 写入的 54 字精简种子升级为代码完整 SYSTEM；已手改过则不动。"""
+    row = (
+        db.query(AiPrompt)
+        .filter(AiPrompt.key == "video_review", AiPrompt.status == "enabled")
+        .order_by(AiPrompt.version.desc())
+        .first()
+    )
+    if row is None:
+        return False
+    if (row.content or "").strip() != VIDEO_REVIEW_OLD_SEED:
+        return False
+    target = default_content("video_review").strip()
+    if not target:
+        return False
+    old_version = row.version
+    save_new_version(db, "video_review", target, note=VIDEO_REVIEW_UPGRADE_NOTE)
+    log.info("R-255 video_review 提示词由 v%s 升级为完整版（旧版归档可回退）", old_version)
+    return True
+
+
+def run_r255_video_review_upgrade_once(db: Session) -> bool:
+    """执行一次 video_review 升级并写 Kv 标记；已标记返回 False。"""
+    from ..models.kv import Kv
+
+    if db.get(Kv, VIDEO_REVIEW_UPGRADE_KV) is not None:
+        return False
+    changed = upgrade_video_review_prompt(db)
+    db.add(Kv(key=VIDEO_REVIEW_UPGRADE_KV, value="1"))
+    db.commit()
+    if not changed:
+        log.info("R-255 video_review 提示词无需升级（已是完整版或已被作者修改），只写一次性标记")
+    return changed
+
+
+def init_prompt_registry_on_startup() -> None:
+    """R-255 启动初始化（注册表补种 + video_review 升级）；失败不阻断启动，下次重试。"""
+    from ..db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        ensure_prompt_catalog(db)
+        run_r255_video_review_upgrade_once(db)
+    except Exception:  # noqa: BLE001 初启动失败不阻断服务
+        db.rollback()
+        log.exception("R-255 提示词注册表启动初始化失败（下次启动重试）")
+    finally:
+        db.close()
 
 
 def save_new_version(db: Session, key: str, content: str, note: str = "") -> AiPrompt:
@@ -448,7 +642,7 @@ def optimize(db: Session, key: str, material: str = "") -> AiPrompt:
     for _attempt in range(2):  # 自检失败自动重试 1 次（R-129 确认口径）
         try:
             raw = llm.chat(
-                [{"role": "system", "content": OPT_SYSTEM}, {"role": "user", "content": user}],
+                [{"role": "system", "content": get_prompt("prompt_optimize", db)}, {"role": "user", "content": user}],
                 temperature=0.3,
                 max_tokens=budget_settings.budget_for(db, "prompt_optimize"),
             )

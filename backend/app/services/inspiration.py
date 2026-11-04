@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from . import llm_router
+from .prompt_service import get_prompt
 
 _SYSTEM = (
     "你是短视频选题策划。把作者随手记的一句观察/经历/想法，提炼成 1 个可直接写口播稿的选题标题："
@@ -25,7 +26,7 @@ def refine_topic(db: Session, text: str) -> str:
     try:
         llm = llm_router.primary_llm(db, "ideas")
         out = llm.chat(
-            [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": text[:2000]}],
+            [{"role": "system", "content": get_prompt("inspiration_refine", db)}, {"role": "user", "content": text[:2000]}],
             temperature=0.7,
             max_tokens=200,
         )

@@ -8,7 +8,9 @@ from ..models.draft import Draft
 from ..models.persona import PersonaTag
 from ..services import llm_router
 from ..services.llm import LLMError
+from ..services.prompt_service import get_prompt
 
+# R-255：代码默认/回退；运行时调用点走 get_prompt 读表。
 SUGGEST_META_SYSTEM = (
     "你是短视频包装专家。请根据下面的脚本正文和作者人设，生成 5 条视频标题、"
     "5 条封面字、5 条素材标签。\n"
@@ -98,7 +100,7 @@ def suggest_meta_task(db: Session, payload: dict) -> dict:
         parts.append("作者人设（参考，但请输出更吸睛爆款的结果）：\n" + "\n".join(f"- {p}" for p in persona))
 
     messages = [
-        {"role": "system", "content": SUGGEST_META_SYSTEM},
+        {"role": "system", "content": get_prompt("draft_meta", db)},
         {"role": "user", "content": "\n\n".join(parts)},
     ]
 

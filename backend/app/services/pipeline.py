@@ -27,6 +27,7 @@ from .ideas_service import annotate_items, persona_profile
 from .llm import LLMError
 from .notify import send_daily_best, send_daily_digest, send_failure_alert
 from .persona import PersonaService
+from .prompt_service import get_prompt
 from .sync_pool import gather, session_factory
 from .topic_mining import fetch_and_store
 
@@ -56,6 +57,25 @@ def _dedupe_candidates(cands: list[dict]) -> list[dict]:
     return out
 
 
+# R-255：流水线三条静态提示词的代码默认/回退（运行时调用点走 `get_prompt` 读表）。
+MATCH_SYSTEM = (
+    "你是自媒体选题匹配专家。从热点列表中挑出最匹配作者人设和赛道的选题，"
+    "改写为更贴合作者的标题。只输出 JSON："
+    '{"candidates":[{"title":"改写后的选题","platform":"来源平台",'
+    '"score":0-100,"reason":"为什么匹配"}]}'
+)
+DAILY_AI_SYSTEM = (
+    "你是了解作者人设的自媒体选题策划。请基于作者人设、今日热榜、评论区高频问题和赛道缺口，"
+    "给出**一条**作者适合讲、又可能出圈的选题（观点/角度要新，不能是别人都讲烂的）。"
+    '只输出 JSON：{"title":"完整选题标题","score":0-100,"reason":"为什么适合作者讲"}'
+)
+DAILY_BEST_SYSTEM = (
+    "你是作者的选题主编。今天已生成以下候选选题，请按「与作者人设的契合度 × 当下热度/传播潜力」"
+    "选出**最适合今天开拍的一条**。只输出 JSON："
+    '{"index":编号,"reason":"一句话说明为什么它今天最值得拍"}'
+)
+
+
 def _match_candidates(db: Session, hot_items: list[dict], settings) -> list[dict]:
     """人设×热点匹配（兜底/补充用）：先试 LLM，失败/无密钥时用关键词兜底。"""
     persona = PersonaService()
@@ -75,12 +95,7 @@ def _match_candidates(db: Session, hot_items: list[dict], settings) -> list[dict
             f"- [{i['platform']}] {i['title']} (热度:{i.get('heat','')})" for i in hot_items
         )
         tags = "\n".join(f"- {t}" for t in confirmed_keywords) or "（无）"
-        system = (
-            "你是自媒体选题匹配专家。从热点列表中挑出最匹配作者人设和赛道的选题，"
-            "改写为更贴合作者的标题。只输出 JSON："
-            '{"candidates":[{"title":"改写后的选题","platform":"来源平台",'
-            '"score":0-100,"reason":"为什么匹配"}]}'
-        )
+        system = get_prompt("ideas_match", db)
         user = f"作者赛道/风格关键词：\n{tags}\n\n今日热点：\n{items_text}"
         data = persona.call_json(
             "ideas",
@@ -209,11 +224,7 @@ def _ai_candidate(db: Session, hot_cands: list[dict], profile: dict) -> dict | N
     hot_lines = "\n".join(f"- [{c.get('platform','')}] {c['title']}" for c in hot_cands[:10]) or "（暂无）"
     kw_lines = "、".join(keywords[:30]) or "（暂无，作者需要先确认人设标签）"
     av_lines = "、".join(avoid[:20]) or "（无）"
-    system = (
-        "你是了解作者人设的自媒体选题策划。请基于作者人设、今日热榜、评论区高频问题和赛道缺口，"
-        "给出**一条**作者适合讲、又可能出圈的选题（观点/角度要新，不能是别人都讲烂的）。"
-        '只输出 JSON：{"title":"完整选题标题","score":0-100,"reason":"为什么适合作者讲"}'
-    )
+    system = get_prompt("ideas_daily_ai", db)
     user = (
         f"作者人设关键词：{kw_lines}\n"
         f"红线（不要提）：{av_lines}\n\n"
@@ -354,11 +365,7 @@ def _pick_daily_best_index(db: Session, items: list[dict]) -> int:
             f"{i}. [{SLOT_LABEL.get(it['slot'], it['slot'] or '自定义')}] {it['title']}"
             f"（人设契合分 {it['score']}；入选理由：{it['reason'][:60]}）"
         )
-    system = (
-        "你是作者的选题主编。今天已生成以下候选选题，请按「与作者人设的契合度 × 当下热度/传播潜力」"
-        "选出**最适合今天开拍的一条**。只输出 JSON："
-        '{"index":编号,"reason":"一句话说明为什么它今天最值得拍"}'
-    )
+    system = get_prompt("ideas_daily_best", db)
     user = "候选：\n" + "\n".join(lines)
     try:
         data = PersonaService().call_json(
