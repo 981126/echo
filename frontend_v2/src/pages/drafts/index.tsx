@@ -97,7 +97,6 @@ function DraftTile({
   const coverage = d.quality?.diagnostics?.style_coverage
   return (
     <motion.article
-      layout
       variants={itemVariants}
       initial="initial"
       animate="animate"
@@ -397,8 +396,8 @@ export default function DraftsPage() {
                   {{ draft: '暂无草稿，新建或从主页灵感生成', used: '暂无待制作（点草稿的「采用」会进这里）', done: '暂无完成', archived: '废稿箱是空的' }[t.key]}
                 </div>
               ) : (
-                <motion.div layout className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <AnimatePresence>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <AnimatePresence mode="popLayout">
                     {listOf(t.key).map((d, i) => (
                       <DraftTile
                         key={d.id}
@@ -410,7 +409,7 @@ export default function DraftsPage() {
                       />
                     ))}
                   </AnimatePresence>
-                </motion.div>
+                </div>
               )}
             </TabsContent>
           ))}

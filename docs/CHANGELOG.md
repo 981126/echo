@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-250] 2026-11-04 — 脚本工作台删除草稿时其他卡片不再「飞出去」 ✅
+
+- **已实现（2026-11-04）**：定位根因——`pages/drafts/index.tsx` 的网格容器 `<motion.div layout>` 与每张 `DraftTile` 根节点 `<motion.article layout>` 开了 Framer **layout 投影动画**：删除后网格重排被演绎成剩余卡片的「旧位置→新位置」动画（逐帧实测单帧位移 65~372px、`scaleY≈1.0757`、多卡错峰），叠加每卡 `delay:index*0.03` 与卡片 hover 的 CSS translate，视觉上就是「其他草稿飞出去」。修复：①移除容器与卡片的 `layout`（其余卡片由 CSS Grid 在数据变化同一帧重排，不再有位置动画）；②保留被删卡片自身 `exit` 淡出+缩到 0.94（约 0.1~0.2s 可见）；③列表 `AnimatePresence mode="popLayout"` 让退场卡不占位，避免「退场后再整体跳一下」；不改删除接口/逻辑删除语义/确认弹窗/其它页面。**验证**：Playwright rAF 逐帧采样——删除第 1 张与中间张，其余卡片仅同帧重排（`transform: none`、`multiFrameMoves=0`），被删卡片 0→60ms 淡出缩小→120ms 移除；console 0 error；`verify.sh` 全绿（后端 758 / 前端 161 / 文档 37 表）。需求：`requirements/R-250-drafts-delete-animation.md`；设计：`development-design/R-250-drafts-delete-animation.md`。
+
 ## [R-249] 2026-11-04 — 同行/低粉封面改 3:4 + 三处封面裂图兜底 ✅
 
 - **已实现（2026-11-04）**：①同行爆款/低粉爆款参考视频封面由 `aspect-[4/3]` 改为与抖音主页视频一致的 **`aspect-[3/4]` 竖版**（1440 宽实测 265×353，比例 0.750，网格仍一行 4 个/三列/两列/单列）；②新增共享 `CoverImage` 兜底组件：本地 `/covers/*` 先加载 `?w=400` 缩略图，失败（含坏图 `naturalWidth=0`）自动回退**原图 URL**（不同 URL 可绕开历史坏缩略图缓存），仍失败渲染 ECHO 占位，**绝不显示浏览器裂图**；接入素材库卡片与同行/低粉参考卡片（`url` 变化自动重置状态），素材库 4:3 框与点击/hover/多选交互不变；③历史过期的同行 4 张、低粉 5 张远程签名封面统一显示占位（低粉点「更新」可续期），不裂图、不跳高。**验证**：Playwright 1440 逐张加载——素材库 20/20、同行 16/20、低粉 15/20 正常，其余为占位，**三处裂图 0**、console error 0、封面 ratio 0.750、一行 4 个；`verify.sh` 全绿（后端 758 / 前端 161 + build / 文档 37 表）；新增 CoverImage 单测 3 例。需求：`requirements/R-249-cover-ratio-and-broken-fix.md`；设计：`development-design/R-249-cover-ratio-and-broken-fix.md`。
