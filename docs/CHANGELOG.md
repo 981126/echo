@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-247] 2026-11-04 — 视频复盘页精简 + 参考视频封面 + 统一「采用」生成草稿
+
+- **登记记录**：视频复盘页 4 项调整——①删除「这次准备重点改什么？」「怎样让观众愿意关注？」两个板块；②「下一条最推荐拍这个」与「两个备选主题」宽屏两列同排（左首选、右备选上下排，窄屏堆叠）；③同行爆款/低粉爆款卡片补 4:3 封面（后端已返回 `cover_url`，纯前端渲染、缺图占位；低粉为 TikHub 远程签名 URL，点「更新」续期）；④首选/备选/新话题统一「采用」，点击调现有 `POST /api/drafts/generate-async` 建草稿并跳 `/drafts?id=` 自动打开抽屉（后台双模型讨论、进行中可恢复）；同时按作者确认删除改进计划前后端（adopt/plans 5 个接口 + `video_improvement_plans` 表 + `adopted_at` 列 + 前端修改效果图表），Alembic `r247dropimprove`，表 38→37。需求：`requirements/R-247-video-review-adopt-draft.md`；设计：`development-design/R-247-video-review-adopt-draft.md`。**待作者第二次「继续」后开发**。
+
 ## [R-246] 2026-11-04 — TikHub 请求不再因共享连接池卡死而整体失败 ✅
 
 - **已实现（2026-11-04）**：TikHub 访问层稳定性修复——①TikHub 专用共享 httpx Client 默认**直连**（`trust_env=False`，不跟随系统/环境代理，`ECHO_TIKHUB_USE_PROXY=1` 可切回）；②新增进程级 **TikHub 全局并发闸门**（`ECHO_TIKHUB_MAX_CONCURRENCY` 默认 8，只包住真正发 HTTP 的片段，重试退避/令牌桶等待不占额度）；③`_get/_post` 捕获 `httpx.PoolTimeout` 时**重置共享 Client**（关闭+摘除，下次请求重建新池）并按现有 4 次重试继续，warning 日志留痕；④`core/http.py` 的 `get_client` 增加 `trust_env` 缓存维度与 `reset_client()`。不改前端/表结构/接口契约，其它服务代理行为不变。**真实联调**：看板「更新数据」3 次连续成功 5.20s/3.54s/3.19s；Top15 同步 12/12 博主完成（3 分 40 秒、无 `PoolTimeout`；2 个账号遇 TikHub 瞬时 HTTP 400，单独重试后均成功），同步期间到 `api.tikhub.io:443` 并发连接峰值 8、结束后池 8 条 IDLE 无泄漏；新进程日志 0 次 `PoolTimeout`/0 次重置；`scripts/verify.sh` 全绿。
