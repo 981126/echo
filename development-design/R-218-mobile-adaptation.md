@@ -5,6 +5,7 @@
 - **状态**: 📝 需求 + 开发设计完成，**待作者确认 §B 三项口径后开发**（开发仍分 M218 → M219 → M220 交付，M218 先给作者看手感）
 - **前置**: D-018 / D-045（导航与断点决策）、R-175（动效规范）、R-202（进行中）、R-205（抽屉退出动画）、R-199/R-204/R-206（既有动效）、R-244/R-237/R-252/R-253（看板/复盘）、R-203（tab 换行先例）
 - **原则**: 纯前端；**后端零改动**；不新增依赖；CSS 断点显隐优先（不 JS 条件挂载）；桌面 `md+` 尽量保持现状；每个改动可被探针验证
+- **作者 2026-11-05 三条硬要求（贯穿全部阶段）**: ①**一定要流畅**（关键动效 ≥50fps、p95 ≤34ms、无 >100ms 长帧、CLS < 0.1）；②**原本有动画的地方还是需要有动画**（现有 39 项动效在移动端保留/触屏等价，不删、不瞬切；仅 reduce 用户可收敛）；③**页面符合人的使用逻辑**（单手可达/返回先关弹层/滚动现场保持/键盘礼仪/按下反馈/破坏性操作确认）。
 - **点检基线（2026-11-05）**: `.tmp/audit/mobile/REPORT.md`（4 档视口 × 13 路由）、`static-layout.md`（80 条代码证据）、`motion.md`（39 项动效实测）
 
 ---
@@ -129,6 +130,8 @@ flowchart LR
 | M218-4 | 触控/字号/safe-area/hover/键盘基线（公共组件 + index.css/index.html） | 无（可与 2 并行） |
 | M218-5 | Drawer/Dialog 全屏化 | 无 |
 | M218-6 | 动效口径（转场 0.85、reduce、延迟卸载、filter none） | 无 |
+| M218-7 | **动画保留 + 流畅性基建**：动画保留矩阵落地（移动端并发上限、`<md` 去 blur/backdrop-filter、按下反馈统一） | M218-2/M218-6 |
+| M218-8 | **使用逻辑基建**：`use-back-to-close` / `use-main-scroll-restore` / 触屏 Enter 换行 / 弹层滚动隔离 / 顶部 Toast | M218-2 |
 | M219-1… | 逐页适配（P0 → P1 → 其余） | M218 |
 | M220 | 探针脚本 + 截图矩阵 + 回归 | M219 |
 
@@ -514,6 +517,168 @@ export const pageVariants: Variants = {
 | 删除重排 | `drafts/index.tsx`（R-250） | 删除卡片其余仅单帧重排，无飞行 |
 | 页面转场 | `app-shell.tsx` | 首帧 ≥0.85、落定 1/none/none |
 
+#### 5.14.5 移动端动画保留矩阵（作者硬要求 ②：不删、不瞬切）
+
+> 规则：下表每一项都必须在移动端保留可感知过渡；hover-only 的换成「常显/按下反馈/点击后过渡」，**不允许因适配删除或改成瞬间切换**。逐项在 M220 逐帧采样（≥2 帧中间状态）验收。
+
+| # | 动效（现有） | 位置 | 移动端保留方式 | 移动端验证 |
+|---|---|---|---|---|
+| 1 | 页面转场（opacity/y/filter） | `lib/motion.ts` + `app-shell.tsx` | 保留；`<md` 去大面积 blur（只留透明度+位移）；首帧 0.85 | rAF 采样 ≥2 中间帧、落定 1/none |
+| 2 | 顶栏标题切换 | `app-shell.tsx` | 保留 | 切换时 opacity/y 有过渡 |
+| 3 | 底部 Tab 选中滑块（新增） | `mobile-tab-bar.tsx` | 共享 layout spring（同 R-204 参数） | 滑块 x 有 ≥2 帧中间位置 |
+| 4 | 「更多」Sheet 进出 + 遮罩 | `more-sheet.tsx` | 保留 Radix slide/fade | 开/关各有中间帧；关闭后卸载 |
+| 5 | 通知角标 scale / 通知列表 layout | `notification-bell.tsx` | 保留 | 有过渡 |
+| 6 | 主题切换图标 rotate/scale | `theme-toggle.tsx` | 保留 | 有过渡 |
+| 7 | 抽屉 Drawer 进/出 | `ui/drawer.tsx` | 保留 spring；全屏化不改曲线、卸载 400ms | 开/关逐帧位移、无残留 |
+| 8 | Dialog 进/出（fade/zoom/slide） | `ui/dialog.tsx` | 保留；移动全屏时改为「淡入+上移」组合，不瞬切 | exit 播放后卸载 |
+| 9 | 确认弹窗 | `ui/confirm-dialog.tsx` | 同 Dialog | 有过渡 |
+| 10 | Select/Dropdown/Popover/多选浮层 | `ui/*`、`layout/*` | 保留 `animate-in/out` | 有过渡 |
+| 11 | 素材卡入场/退场 + R-199 换批逐格交接 | `videos/index.tsx`、`material-card.tsx` | 保留；同屏并发限制到第一屏可见卡（≤12），**时长/曲线不变** | 换批逐帧采样、无整片空白 |
+| 12 | 草稿卡 stagger/重排（R-250 `layout="position"`）/删除退场 | `drafts/index.tsx` | 保留 | 删除/重排逐帧采样 |
+| 13 | 参考视频切 tab 逐格交接（R-252/253） | `video-review/index.tsx` | 保留 | 不闪白、更新按钮 0 位移 |
+| 14 | 博主作品弹窗列表 stagger | `creators/posts-dialog.tsx` | 保留 | 有过渡 |
+| 15 | 主页灵感/对标/人设/通知列表入场与 layout | 各页 | 保留；大列表并发上限 ≤12 | 有过渡 |
+| 16 | Tabs 滑块（R-204）/ TabContent 入场（R-175）/ 讨论 tab（R-206） | `ui/tabs.tsx`、`drafts/edit-drawer.tsx` | 保留；移动端换行后滑块仍动画 | 有过渡 |
+| 17 | thinking-dots / 进度流光 / 进度条 | `ui/*`、`index.css` | 保留（reduce 收敛） | 两次采样值不同 |
+| 18 | 同步遮罩/进度条（R-219/R-220） | `videos/*`、`creators/*` | 保留 | 进行中可见可恢复 |
+| 19 | 图表入场/crossfade（R-244） | `dashboard/*`、`video-review/charts.tsx` | 保留；同屏图表动画并发 ≤6 | 有过渡、无长帧 |
+| 20 | Toast 进出 | `ui/toaster.tsx` | 保留；移动端顶部居中，不压 Tab | 有过渡 |
+| 21 | hover 播放提示（素材卡） | `material-card.tsx:138` | 触屏等价：常显小播放角标（`max-md:opacity-100`），桌面 hover 不变 | 移动端常显、可点击播放 |
+| 22 | hover 更换封面（素材抽屉） | `videos/edit-drawer.tsx:408` | 触屏等价：常显「更换封面」按钮（≥44） | 移动端可见可点 |
+| 23 | hover 会话重命名/删除（chat） | `chat/index.tsx:325,335` | 触屏等价：「⋯」菜单常显（≥44） | 移动端菜单可开 |
+| 24 | 登录页光斑漂浮 | `login.tsx` | 保留；reduce 停止 | 普通模式在动、reduce 静止 |
+| 25 | 按下反馈（桌面已有 hover/active） | `ui/button.tsx`、卡片/自定义按钮 | 统一 `active:scale-[0.98]` + `transition-transform`；触屏必可见 | 按下态采样到 scale 变化 |
+
+> 提词器（`pages/prompter/*`）不在本期范围，保持现状不动。
+
+#### 5.14.6 移动端流畅性预算与实现约束（作者硬要求 ①）
+
+**目标**：关键动效平均 ≥50fps、p95 帧间隔 ≤34ms、无 >100ms 长帧；CLS < 0.1。
+
+实现规则：
+
+1. **只动 GPU 属性**：新增/保留动画的逐帧属性只允许 `transform` / `opacity`；高度展开类仅限小区域（记反馈区、分析理由展开），大列表不做高度动画。
+2. **`<md` 去掉高成本毛玻璃**（滚动/动画期间省 GPU）：
+   - `header`：`bg-card md:bg-card/60 md:backdrop-blur`；
+   - `MobileTabBar`：`bg-card/95`（不加 blur）；
+   - 遮罩：`bg-black/45`（`md:backdrop-blur-[2px]`）；
+   - `Drawer` 遮罩同理；
+   - 桌面 `md+` 的毛玻璃效果保持现状。
+3. **页面转场 `<md` 去 blur**：`motion.ts` 增加移动变体（仅透明度+y），用 `matchMedia('(max-width: 767px)')` 选择 variant（这里 JS 只选动画参数、不切 DOM 结构，不违反「CSS 显隐优先」；初始值在首帧前读取，无闪动）。
+4. **同屏动画并发上限**：列表 stagger ≤12（超出直接落定）、图表动画 ≤6、换批交接沿用 R-199 但移动端同样限 12；`material-card` 已有 `content-visibility: auto` 保留。
+5. **长列表**：博主管理时间线移动视图只渲染最近 40 条（其余「查看更多」）；素材库继续无限滚动 + 缩略图。
+6. **不新增重库**：不引入动画/虚拟列表依赖。
+7. **探针**（M220）：`requestAnimationFrame` 采样脚本；`PerformanceObserver({type:'layout-shift'})` 统计 CLS；阈值见 §5.16。
+
+```ts
+// 探针片段：动画期间逐帧采样
+const samples: number[] = []
+let last = performance.now()
+const tick = (now: number) => { samples.push(now - last); last = now; if (samples.length < 120) requestAnimationFrame(tick) }
+requestAnimationFrame(tick)
+// p95 = samples.sort((a,b)=>a-b)[Math.floor(samples.length*0.95)]
+```
+
+#### 5.14.7 移动端使用逻辑规范与 hooks（作者硬要求 ③）
+
+**a) 返回键先关弹层（`useBackToClose`）**
+
+```ts
+// frontend_v2/src/hooks/use-back-to-close.ts
+export function useBackToClose(open: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!open) return
+    // hash 路由下 push 同 URL + state，返回键只会 popstate 而不改路由
+    history.pushState({ ...(history.state ?? {}), echoOverlay: true }, '', location.href)
+    const onPop = () => { onClose() }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      if (history.state?.echoOverlay) {
+        // 程序内关闭（点 X/遮罩）时把哨兵退掉，避免用户再按返回“卡”在这一层
+        history.replaceState({ ...(history.state ?? {}), echoOverlay: false }, '', location.href)
+      }
+    }
+  }, [open, onClose])
+}
+```
+
+- 应用：`MoreSheet`、`Drawer`、全屏 `Dialog` 在 `<md` 使用；桌面保持现状（Esc 关闭）。
+- 嵌套弹层：用计数/栈（后开的先关）；M220 断言：打开弹层 → `page.goBack()` → 弹层关闭且路由不变。
+
+**b) 滚动现场保持（`useMainScrollRestore`）**
+
+```ts
+// frontend_v2/src/hooks/use-main-scroll-restore.ts
+const positions = new Map<string, number>()
+export function useMainScrollRestore(pathname: string, mainRef: React.RefObject<HTMLElement>) {
+  const prev = useRef(pathname)
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) return
+    if (prev.current !== pathname) positions.set(prev.current, el.scrollTop)
+    prev.current = pathname
+    const target = positions.get(pathname) ?? 0
+    let tries = 0
+    const apply = () => {
+      const el = mainRef.current
+      if (!el) return
+      el.scrollTop = target
+      if (Math.abs(el.scrollTop - target) > 2 && tries++ < 4) setTimeout(apply, 60) // 等懒加载内容撑开
+    }
+    requestAnimationFrame(apply)
+  }, [pathname, mainRef])
+}
+```
+
+- 首次进入某页 → 顶部；切 Tab 回来/浏览器返回 → 恢复上次位置；开弹层不改 pathname，不触发重置。
+- M220 断言：videos 滚到 800px → 切 creators → 切回 videos，`main.scrollTop ≈ 800`。
+
+**c) 弹层滚动隔离**
+
+- Drawer/MoreSheet/Dialog 均 portal 到 body（Drawer 已是），弹层覆盖视口后背景 main 不再接收触摸滚动；M220 断言：打开抽屉后向 overlay 派发滚轮/触点，`main.scrollTop` 不变（若失败，再在 AppShell 加 `main.style.overflow='hidden'` 的 lock，最小改动）。
+- `overscroll-behavior: contain`（弹层内部滚动区）防止滚动链穿透。
+
+**d) 触屏键盘礼仪**
+
+```ts
+const coarse = window.matchMedia('(pointer: coarse)').matches
+onKeyDown: if (e.key === 'Enter' && !e.shiftKey && !coarse) { e.preventDefault(); send() }
+```
+
+- AI 对话：触屏回车换行（发送用按钮）；桌面保持回车发送。发送按钮始终 ≥44。
+- 页面加载不自动聚焦（全仓 `autoFocus` 检查并移除移动端无意义自动聚焦；草稿抽屉等用户主动打开的除外）。
+- 输入类页面（chat/inspiration/drafts 抽屉）聚焦时 `scrollIntoView({ block: 'center' })`（reduce 时 behavior auto）。
+
+**e) 按下反馈（`pressable`）**
+
+```css
+/* index.css：所有可点卡片/自定义按钮统一按下反馈（桌面 hover 动效保持） */
+.pressable { transition: transform 150ms ease; }
+.pressable:active { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) { .pressable, .pressable:active { transition: none; transform: none; } }
+```
+
+- 应用到：底部 Tab 格、素材卡信息区/封面、草稿卡、账号行操作、时间线条目、更多 Sheet 条目、列表行。
+- 视觉上「点了有反应」，同时补充桌面 hover 动画在触屏的缺失（不删桌面 hover）。
+
+**f) 逐页使用逻辑点检清单（M219/M220 人工 + 探针）**
+
+| 页面 | 返回先关弹层 | 滚动保持 | 键盘不遮挡/不自动弹 | 按下反馈 | 空态/失败指引 | 破坏性二次确认 |
+|---|---|---|---|---|---|---|
+| 主页 | 切入角度弹窗 | — | 无输入 | 按钮/卡片 | 现有 | — |
+| 数据看板 | 无弹层 | ✓ | — | 卡片/下拉 | 现有 | — |
+| 素材库 | 播放/删除/拆分弹窗、抽屉 | ✓ | 抽屉表单 | 卡片/操作 | 现有 | 删除/批量删除 |
+| 视频复盘 | 数据表/看图无弹层 | ✓ | — | 按钮/卡片 | 现有 | — |
+| 脚本工作台 | 编辑抽屉、版本弹窗 | ✓ | 编辑器/表单 | 卡片/操作 | 现有 | 删除/定稿 |
+| 灵感随手记 | 无弹层 | ✓ | 输入框可见 | 按钮 | 现有 | — |
+| 博主对标 | 洗稿弹窗 | ✓ | — | 按钮/卡片 | 现有 | — |
+| 博主管理 | 账号/博主/预算/作品弹窗 | ✓ | 表单 | 账号行/按钮 | 现有 | 删除博主/账号 |
+| 人设档案 | 无弹层 | ✓ | 输入框 | 标签操作 | 现有 | 推倒重建 |
+| AI 设置 | 保存确认 | ✓ | 输入框 | 控件 | 现有 | —（保存非破坏） |
+| AI 对话 | 会话 Sheet/工具确认 | ✓ | 回车换行、输入可见 | 按钮/消息 | 现有 | 写操作确认（现状） |
+| 登录 | 无弹层 | — | 不自动聚焦 | 按钮 | 现有 | — |
+
 ### 5.15 逐页适配设计（M219）
 
 > 每页：**现状证据 → 改造清单（组件/类名/交互）→ 移动端验收断言**。所有文件路径相对 `frontend_v2/src/`。通用项（触控/字号/安全区/弹窗全屏）不重复，只列页面特有改造。
@@ -537,6 +702,7 @@ export const pageVariants: Variants = {
   - 图表 SVG 字号移动 12；`h-[400px]`/`h-[380px]` 固定高度改 `max-h-[60vh]` 或保留但内部滚动可滚。
   - 作品分析 tab 行加边缘渐隐（`after:` 遮罩或 `mask-image`）+ 选中 tab `scrollIntoView({ inline: 'nearest', block: 'nearest' })`（reduce 时 behavior auto）；不改变 tab 结构。
   - KPI 2 列在 320 保持（124px/卡可读），字号提升后 `min-h` 自适应。
+- **动效保留**：图表入场/crossfade 保留；移动端同屏图表动画 ≤6，不删动画。
 - **验收**：320/390 下 KPI 文字 ≥12；tab 可滑动且当前项可见；图表不产生页面横溢；选择器 ≥44。
 
 #### 5.15.3 素材库 `pages/videos/*`
@@ -549,6 +715,8 @@ export const pageVariants: Variants = {
   - 抽屉：`Drawer` 全屏（5.7）；表单 `grid-cols-1 md:grid-cols-2`；标签/备注全宽；footer 按钮 ≥44。
   - 贴底状态栏：`h-9 → h-11` + `pb-[env(safe-area-inset-bottom)]` 使用；`main` 底部已有 padding，避免最后一行被盖。
   - 播放弹窗：全屏（5.8）；视频 `max-h-[70dvh]` 改为移动端横向全宽、高度自适应。
+- **动效保留**：R-199 换批逐格交接保留；移动端只把并发限制到第一屏可见卡（≤12），时长/曲线不变；hover 播放提示改常显角标（桌面 hover 不变）。
+- **使用逻辑**：开抽屉/播放弹窗时背景列表位置不跳；关闭后滚动位置保持；删除/批量删除二次确认。
 - **验收**：320 筛选只有 3–4 行且每控件可点；批量/卡片操作全部可达；抽屉全屏、保存/取消可见；无页面横溢。
 
 #### 5.15.4 视频复盘 `pages/video-review/*`
@@ -570,6 +738,8 @@ export const pageVariants: Variants = {
   - 抽屉：全屏（5.7）；抽屉内 tab 换行；表单 `grid-cols-1 md:grid-cols-2`、三列改 `grid-cols-1 md:grid-cols-3`。
   - 底栏：`<md` 两行结构——第一行 `保存`（主）+ `定稿` + `关闭`（图标按钮）；第二行自动保存状态文案（`text-xs`、truncate）；整体 `pb-[env(safe-area-inset-bottom)]`；桌面保持单行。
   - 卡片操作：采用/不采用/完成/退回/删除/记反馈 用 `min-h-11` 或收进菜单（保留全功能）。
+- **动效保留**：卡片 stagger/重排（R-250）/删除退场保留；采用/完成等状态切换保留按钮 loading 与列表退场，不因手机改瞬切。
+- **使用逻辑**：编辑抽屉打开时锁定背景滚动；关闭后列表位置保持；定稿/删除二次确认；键盘弹起时保存/定稿仍可达。
 - **验收**：320 列表 4 tab 全可见可点；抽屉 4 tab 全可见；表单单列可填；保存/定稿/关闭可见；页面无横溢；自动保存/断网提示不回归。
 
 #### 5.15.6 灵感随手记 `pages/inspiration/index.tsx`
@@ -622,6 +792,8 @@ export const pageVariants: Variants = {
   - 实现方式：同一份 `timeline model` 数据，渲染两个 DOM，`<div className="md:hidden">` / `<div className="hidden md:block">`，避免 JS 断点闪白。
   - 条数：首屏渲染最近 40 条（数据全量仍在 model 里），底部「查看更早」（若需要）；避免长列表卡顿。
 - **改造（其他）**：主博主条 `flex-wrap` + 按钮 ≥44；账号/博主/预算弹窗全屏 + 单列；嵌套 `ml-4 pl-4` 改 `ml-2 pl-2 md:ml-4 md:pl-4`；删除确认弹窗全屏。
+- **动效/反馈**：账号行、时间线条目、操作按钮统一下压反馈；移动时间线首次进入 120ms 轻淡入（原本无复杂动画，不新增大动效）；R-219 同步进度条入场/延迟淡出保留。
+- **使用逻辑**：账号/博主/预算/作品弹窗打开时背景列表不滚动；返回键先关弹窗；删除博主/账号二次确认；时间线纵向滚动不与页面嵌套抢手势。
 - **验收**：320/375/390 页面 main 无横溢（=0）；账号行数据完整显示非竖排（探针断言：文本行高 < 2 行）；时间线 `<md` 无横向滚动容器、纵向可读；所有操作 ≥44；R-219 同步进度条不回归。
 
 #### 5.15.9 人设档案 `pages/persona/index.tsx`
@@ -645,12 +817,16 @@ export const pageVariants: Variants = {
   - 高度：`h-[calc(100dvh-8.5rem-env(safe-area-inset-bottom))]` + `useVisualViewportHeight` 兜底；输入区 `pb-[env(safe-area-inset-bottom)]`。
   - 审批/复制等按钮 ≥44（`h-6 → h-11 md:h-6`）；字号替换。
   - 空态文案：`<md` 显示「选择会话或新建」，桌面保持「选择左侧会话」。
+- **动效保留**：消息入场/流式逐帧刷新保留；会话切换保留消息入场；回车在触屏=换行（`pointer: coarse`），发送用按钮；桌面保持回车发送。
+- **使用逻辑**：会话 Sheet 打开时背景对话不滚动；返回键先关 Sheet；输入框聚焦自动滚入可见区；页面加载不自动弹键盘。
 - **验收**：手机端能打开历史会话并切换/重命名/删除；输入框键盘弹起可见；审批按钮可点；页面无横溢。
 
 #### 5.15.12 登录 `pages/login.tsx`
 
 - **现状**：基本可用；input/button `h-10`（40px）。
 - **改造**：`h-11`；上下安全区 padding；装饰光斑在 reduce 下停止（5.14.2 全局兜底即可）。
+- **动效保留**：背景光斑漂浮保留（reduce 停止）；按钮按下反馈。
+- **使用逻辑**：不自动聚焦输入框；错误提示清晰。
 - **验收**：320 卡片不溢出；输入/按钮 ≥44；reduce 下无漂浮动画。
 
 #### 5.15.13 提词器（不改）
@@ -677,6 +853,14 @@ export const pageVariants: Variants = {
 9. reduce：`reducedMotion:'reduce'` 上下文，`document.getAnimations()` 中 running 的 CSSAnimation 数量 = 0（或仅 `spin` 等必要状态除外，白名单）；转场无位移。
 10. 控制台：`console.error`/`pageerror` = 0。
 11. 截图矩阵：`shots/m218-<vp>-<route>.png` + 抽屉/弹窗/Tab/更多/时间线；提交给作者看。
+
+12. **动画保留（硬要求 ②）**：切 Tab / 开合抽屉 / 切页面 / 列表换批，rAF 逐帧采样存在 ≥2 帧中间状态（非瞬切）；hover-only 交互在移动端有常显/按下等价；reduce 之外无「因手机删动画」。
+13. **流畅性（硬要求 ①）**：关键动效 rAF 采样平均 ≥50fps、p95 帧间隔 ≤34ms、无 >100ms 长帧（无头环境如受限需在报告注明）；CLS < 0.1；`<md` 顶栏/底栏/遮罩无 `backdrop-filter`，页面转场无大面积 blur。
+14. **使用逻辑-返回（硬要求 ③）**：打开 MoreSheet/Drawer/Dialog 后 `page.goBack()`（popstate）→ 弹层关闭且路由不变；无弹层时返回才切路由。
+15. **使用逻辑-现场保持**：videos 滚动 800px → 切 creators → 切回 videos，`main.scrollTop ≈ 800`；开弹层前后背景 `main.scrollTop` 不变；关闭弹层后列表位置不跳。
+16. **使用逻辑-键盘**：触屏上下文（isMobile/hasTouch）在 chat 输入框按 Enter 不发送、仅换行；聚焦输入框在视觉视口内可见；页面加载无自动聚焦。
+17. **按下反馈**：主要可点元素（底部 Tab/卡片/Tab/图标按钮）按下时 `transform` 有变化（或 `:active` 样式命中）。
+18. **逐页使用逻辑清单**：按 5.14.7(f) 表格逐项点检，无遗漏（弹层关闭方式/空态指引/破坏性确认）。
 
 **回归**：现有 `r206-discuss-tab-motion.mjs` / `r212-autosave.mjs` / `r213-offline.mjs` / `r214-prompter.mjs` / `r217-brand-text.mjs` 全部复跑必须绿。
 
@@ -759,7 +943,8 @@ export const pageVariants: Variants = {
 4. 手动点检动效清单（5.14.4）与 R-202 进行中；320/390 截图人工复核。
 5. `git diff --stat` 无 `backend/` 改动。
 6. 服务保持运行：后端 8000 / 前端 3000；health 与页面可访问。
-7. M218 单独交付给作者看手感，确认后才继续 M219/M220。
+7. **三原则验收（作者 2026-11-05 硬要求）**：动画保留矩阵 25 项逐项在移动端有过渡（探针 ≥2 中间帧）；关键动效流畅性达标（≥50fps / p95 ≤34ms / 无长帧 / CLS<0.1）；使用逻辑清单逐页通过（返回关弹层/现场保持/键盘/按下反馈/空态/确认）。
+8. M218 单独交付给作者看手感，确认后才继续 M219/M220。
 
 ---
 
@@ -771,6 +956,8 @@ export const pageVariants: Variants = {
 - `frontend_v2/src/components/layout/more-sheet.tsx`
 - `frontend_v2/src/components/layout/conversation-list.tsx`（从 chat 抽取，桌面+移动共用）
 - `frontend_v2/src/hooks/use-visual-viewport.ts`
+- `frontend_v2/src/hooks/use-back-to-close.ts`（返回键先关弹层）
+- `frontend_v2/src/hooks/use-main-scroll-restore.ts`（切 Tab/返回保持滚动位置）
 - `frontend_v2/src/components/timeline-list-mobile.tsx`（或并入 `timeline-card.tsx`）
 - `frontend_v2/mobile-probe.mjs`、`frontend_v2/mobile-probe.config.mjs`（M220）
 - `frontend_v2/src/components/layout/mobile-tab-bar.test.tsx`（可选：导航配置/选中判定单测）
@@ -794,7 +981,7 @@ export const pageVariants: Variants = {
 
 ## 12. 分阶段任务拆分与估时
 
-### M218（基座与导航）≈ 2–2.5 天
+### M218（基座与导航 + 三原则基建）≈ 3–3.5 天
 
 - [ ] M218-0 空白抽屉热修（0.5h）+ 回归 R-205
 - [ ] `lib/nav.ts` + 拆分 `SidebarNav`（0.5h）
@@ -802,6 +989,7 @@ export const pageVariants: Variants = {
 - [ ] 触控/字号/safe-area 基线：公共组件 + 145 处字号替换（0.5d）
 - [ ] Drawer/Dialog 全屏化 + 各页宽度类改 `md:`（0.5d）
 - [ ] 动效口径：转场 0.85、reduce 全站、延迟卸载 400ms、filter none（0.5d）
+- [ ] 三原则基建：动画保留矩阵落地（并发上限/去 blur/按下反馈）+ `useBackToClose`/`useMainScrollRestore`/触屏 Enter 换行 + Toast 顶部（0.75d）
 - [ ] M218 自测：手机逐页走查 + 既有 5 点检 + `verify.sh`（0.5d）
 - [ ] 交付作者看手感
 
@@ -822,7 +1010,7 @@ export const pageVariants: Variants = {
 - [ ] 既有 5 个 headless 回归 + 动效清单 + reduce/断点人工复核（0.25d）
 - [ ] `verify.sh` 全绿、合并 `feat/r218` → `main` 并 push、删除本地分支（保留远程）
 
-> 总计约 6–7.5 个工作日（M218 先交付确认；若作者手感需要调整，M218 可能多 0.5–1 天）。
+> 总计约 7–8.5 个工作日（M218 先交付确认；三原则验收占约 0.75–1 天；若作者手感需要调整，M218 可能多 0.5–1 天）。
 
 ---
 
@@ -835,3 +1023,5 @@ export const pageVariants: Variants = {
 5. 触控白名单（正文内联链接、复选框视觉本体、ProseMirror 工具栏 36px 热区）——确认可接受。
 
 作者回复「继续」后，从 M218-0 开始实现；M218 完成后再次交付手感确认。
+
+> **2026-11-05 作者三条硬要求（流畅 / 原有动画必须保留 / 符合人的使用逻辑）已确认并写入 §5.14.5–5.14.7、§5.16 与 §10，无需再拍板；实现时以此为准。**
