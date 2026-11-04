@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { Drawer, DrawerHeader, DrawerTitle, DrawerBody, DrawerFooter } from '@/components/ui/drawer'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
+import { CoverImage } from '@/components/ui/cover-image'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -395,11 +396,12 @@ export function EditDrawer({
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">封面</label>
                 <div className="flex items-start gap-3">
                   <div className="relative h-24 w-32 overflow-hidden rounded-md border border-border bg-muted">
-                    {detail.cover_url ? (
-                      <img src={detail.cover_url} alt="封面" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">无封面</div>
-                    )}
+                    <CoverImage
+                      url={detail.cover_url}
+                      alt="封面"
+                      className="h-full w-full object-cover"
+                      placeholder={<div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">无封面</div>}
+                    />
                     {hasRealFile(detail.filename) && (
                       <button
                         onClick={() => onPlay(detail.id, state.title)}

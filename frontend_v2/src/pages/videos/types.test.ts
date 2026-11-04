@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { COVER_CACHE_VERSION } from '@/lib/covers'
 import { DEFAULT_FILTERS, buildLibraryQuery, coverThumb, type Filters } from './types'
 
 // R-179：合并去重/筛选已搬到服务端（见 backend/tests/test_r179_library.py），
@@ -43,8 +44,8 @@ describe('buildLibraryQuery（筛选下推服务端）', () => {
 
 describe('coverThumb（封面缩略图）', () => {
   it('本地 /covers 走缩略图参数', () => {
-    expect(coverThumb('/covers/abc.jpg', 400)).toBe('/covers/abc.jpg?w=400')
-    expect(coverThumb('/covers/带中文 名.jpg', 800)).toBe('/covers/带中文 名.jpg?w=800')
+    expect(coverThumb('/covers/abc.jpg', 400)).toBe(`/covers/abc.jpg?w=400&v=${COVER_CACHE_VERSION}`)
+    expect(coverThumb('/covers/带中文 名.jpg', 800)).toBe(`/covers/带中文 名.jpg?w=800&v=${COVER_CACHE_VERSION}`)
   })
 
   it('远端图/空值原样返回（不硬套参数）', () => {

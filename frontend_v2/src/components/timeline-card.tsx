@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { CalendarDays } from 'lucide-react'
 import { apiJson } from '@/api/client'
-import { coverThumb } from '@/lib/covers'
+import { CoverImage } from '@/components/ui/cover-image'
 import { buildTimelineModel, type VideoLike, type WorkLike } from '@/lib/timeline'
 import { itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -64,20 +64,17 @@ export function TimelineCard() {
                     className="group absolute flex w-20 cursor-pointer flex-col items-center gap-1"
                     style={{ left: e.left - 40, top: 24 }}
                   >
-                    {e.coverUrl ? (
-                      <img
-                        src={coverThumb(e.coverUrl, 160)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        referrerPolicy="no-referrer"
-                        className="h-12 w-12 rounded-md border border-border object-cover transition-transform duration-300 group-hover:scale-105"
-                      />
-                    ) : (
-                      <span className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted text-[9px] font-semibold text-muted-foreground">
-                        ECHO
-                      </span>
-                    )}
+                    <CoverImage
+                      url={e.coverUrl}
+                      alt=""
+                      width={160}
+                      className="h-12 w-12 rounded-md border border-border object-cover transition-transform duration-300 group-hover:scale-105"
+                      placeholder={
+                        <span className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted text-[9px] font-semibold text-muted-foreground">
+                          ECHO
+                        </span>
+                      }
+                    />
                     <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                     <span className="w-full truncate text-center text-[10px] text-muted-foreground">{e.title}</span>
                     {e.srcLabel && (

@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { ExternalLink, RefreshCw, PackagePlus } from 'lucide-react'
 import { apiJson } from '@/api/client'
-import { coverThumb } from '@/lib/covers'
+import { CoverImage } from '@/components/ui/cover-image'
 import { platformName, fmtNum, fmtDate } from '@/lib/format'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -77,11 +77,12 @@ export function PostsDialog({
               {items.map((p) => (
                 <motion.li key={p.id} variants={itemVariants} className="overflow-hidden rounded-lg border border-border bg-card">
                   <div className="relative aspect-[4/3] bg-muted">
-                    {p.cover ? (
-                      <img src={coverThumb(p.cover, 400)} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-[10px] font-semibold text-muted-foreground/60">ECHO</div>
-                    )}
+                    <CoverImage
+                      url={p.cover}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      placeholder={<div className="flex h-full items-center justify-center text-[10px] font-semibold text-muted-foreground/60">ECHO</div>}
+                    />
                     {p.page_url && (
                       <a
                         href={p.page_url}

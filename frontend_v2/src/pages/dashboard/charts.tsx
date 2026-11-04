@@ -4,7 +4,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { ImageOff } from 'lucide-react'
-import { coverThumb } from '@/lib/covers'
+import { CoverImage } from '@/components/ui/cover-image'
 import { EASE_OUT_EXPO } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { formatPercent } from './format'
@@ -66,17 +66,15 @@ export function StatTile({ label, value, hint, icon }: { label: string; value: R
 
 /** 封面缩略图：本地 /covers/ 走 coverThumb 缩略；加载失败显示占位块 */
 export function Thumb({ url, alt, className }: { url: string | null | undefined; alt: string; className?: string }) {
-  const [failed, setFailed] = useState(false)
-  const src = coverThumb(url, 240)
   return (
     <div className={cn('overflow-hidden bg-muted', className)}>
-      {src && !failed ? (
-        <img src={src} alt={alt} loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-muted-foreground/70">
-          <ImageOff className="h-4 w-4" />
-        </div>
-      )}
+      <CoverImage
+        url={url}
+        alt={alt}
+        width={240}
+        className="h-full w-full object-cover"
+        placeholder={<div className="flex h-full w-full items-center justify-center text-muted-foreground/70"><ImageOff className="h-4 w-4" /></div>}
+      />
     </div>
   )
 }

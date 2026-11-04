@@ -5,7 +5,7 @@ import { RefreshCw, LoaderCircle, Sparkles, PenLine, Target, CircleCheck, Circle
 import { apiJson } from '@/api/client'
 import { startTask } from '@/api/task'
 import { useActiveWork } from '@/hooks/use-active-work'
-import { coverThumb } from '@/lib/covers'
+import { CoverImage } from '@/components/ui/cover-image'
 import { platformName, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -281,18 +281,12 @@ export default function BenchmarkPage() {
                           {/* R-172：封面框必须固定比例——absolute 的 img 不参与 min-content 计算，
                               否则 flex item 的 min-height:auto 会被竖版封面的原始高度撑开（344×459） */}
                           <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-muted">
-                            {it.cover ? (
-                              <img
-                                src={coverThumb(it.cover, 400)}
-                                alt=""
-                                loading="lazy"
-                                decoding="async"
-                                referrerPolicy="no-referrer"
-                                className="absolute inset-0 h-full w-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-xs font-semibold text-muted-foreground/60">ECHO</div>
-                            )}
+                            <CoverImage
+                              url={it.cover}
+                              alt=""
+                              className="absolute inset-0 h-full w-full object-cover"
+                              placeholder={<div className="flex h-full items-center justify-center text-xs font-semibold text-muted-foreground/60">ECHO</div>}
+                            />
                             <div className="absolute left-2 top-2 flex gap-1">
                               {it.platforms.map((p) => (
                                 <Badge key={p} variant="secondary" className="bg-black/45 text-white border-transparent">

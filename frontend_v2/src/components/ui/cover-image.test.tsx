@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
+import { COVER_CACHE_VERSION } from '@/lib/covers'
 import { CoverImage } from './cover-image'
 
 describe('封面图兜底（R-249）', () => {
   it('本地封面缩略图失败后回退原图，再失败显示占位（不出现裂图）', () => {
     render(<CoverImage url="/covers/测试-封面.jpg" alt="封面" placeholder={<span>占位</span>} />)
     let img = screen.getByAltText('封面') as HTMLImageElement
-    expect(img.getAttribute('src')).toBe('/covers/测试-封面.jpg?w=400')
+    expect(img.getAttribute('src')).toBe(`/covers/测试-封面.jpg?w=400&v=${COVER_CACHE_VERSION}`)
 
     fireEvent.error(img)
     img = screen.getByAltText('封面') as HTMLImageElement
