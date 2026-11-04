@@ -1,5 +1,9 @@
 # 变更记录
 
+## [R-248] 2026-11-04 — 视频复盘 AI 归因 + 版式/顺序 + 参考视频 4 列 + 低粉爆款方向相关 + 菜单顺序
+
+- **登记记录**：①「这条视频为什么好或差？」由「规则结论 + AI 只润色」改为 **AI 归因诊断**：程序算真实指标事实，单次 LLM 结合指标/文案原句/评论生成 2~5 条归因，程序判定方向（好在哪/差在哪/影响有限/无法判断）并做数字白名单 + 文案子串校验，模型不可用回退规则、样本不足明说不硬判，新增 `video_review_findings.verdict` 列（Alembic `r248verdict`），前端数据依据改为可读文字（不再显示 JSON）；②首选/备选两卡**等高 + 标题行统一 + 底部对齐**；③板块顺序改为 作品分析 → 为什么好/差 → 按指标优化建议 → 首选/备选；④参考视频**宽屏一行 4 个**、封面变小；⑤低粉爆款按主博主方向词（近 30 条作品 main_topics 前 3 + 同义扩展）自动抓取（最多 3 次 TikHub 请求）并展示侧相关度过滤，无关赛道不展示；⑥侧栏「数据看板」移到「素材库」下面。需求：`requirements/R-248-review-attribution-layout-relevance.md`；设计：`development-design/R-248-review-attribution-layout-relevance.md`。**待作者第二次「继续」后开发**。
+
 ## [R-247] 2026-11-04 — 视频复盘页精简 + 参考视频封面 + 统一「采用」生成草稿 ✅
 
 - **已实现（2026-11-04）**：①视频复盘删除「这次准备重点改什么？」「怎样让观众愿意关注？」两个板块，并删除改进计划/修改效果整条功能（前端 `PlanComparisonCharts` + 5 个接口 + `video_improvement_plans` 表 + `video_topic_recommendations.adopted_at` 列，Alembic `r247dropimprove` 接 `r244dashboard`，表 38→37；旧 `metrics_snapshot.charts.plan` 键在读取侧过滤）；②「下一条最推荐拍这个」与「两个备选主题」宽屏两列同排（左首选、右备选上下排），窄屏堆叠；③同行爆款/低粉爆款卡片加 4:3 封面（本地 `/covers` 缩略、远程原图、坏图 ECHO 占位）；④首选/备选/新话题统一「采用」→ `POST /api/drafts/generate-async`（topic=主题，query_source=理由/适合原因/开头/第一步）建草稿并跳 `/drafts?id=` 自动打开生成中抽屉，请求中全部采用按钮禁用。**验证**：`verify.sh` 全绿（后端 751 passed + 前端 158 passed + build + 文档一致性 37 表）；迁移 head=`r247dropimprove` 且 information_schema 无表/无列；Playwright 1440/900 点检（同排 top 一致/封面加载/低粉过期 4 张占位/采用跳转与抽屉「双模型讨论进行中」/切页恢复）0 console error。
