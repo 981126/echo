@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion, type Variants } from 'framer-motion'
 import { Plus, Trash2, PenLine, LoaderCircle } from 'lucide-react'
 import { apiJson } from '@/api/client'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { fmtDate, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants, EASE_OUT_EXPO } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
@@ -37,6 +38,56 @@ const draftTileVariants: Variants = {
     y: 0,
     transition: { duration: 0.34, ease: EASE_OUT_EXPO, delay: Math.min(index, 12) * 0.03 }
   })
+}
+
+/** R-258：瀑布流列数，断点与 R-257 一致（<640 1 列 / 640 2 列 / 1024 3 列 / 1280 4 列）。 */
+function useColumnCount(): number {
+  const sm = useMediaQuery('(min-width: 640px)')
+  const lg = useMediaQuery('(min-width: 1024px)')
+  const xl = useMediaQuery('(min-width: 1280px)')
+  return xl ? 4 : lg ? 3 : sm ? 2 : 1
+}
+
+/**
+ * R-258：按 tab 把草稿分到 N 列（每列尽量少），并按「tab + 草稿 id」记住列号。
+ * 删除/改状态时同一 tab 内其余卡片只在本列内上移，不会整墙换列跳动（R-250 的平滑重排保持）。
+ */
+function useDraftColumns(drafts: Draft[], count: number): Record<Status, Draft[][]> {
+  const layout = useRef<{ count: number; col: Record<Status, Map<number, number>> } | null>(null)
+  return useMemo(() => {
+    const empty = (): Record<Status, Map<number, number>> => ({
+      draft: new Map(),
+      used: new Map(),
+      done: new Map(),
+      archived: new Map()
+    })
+    if (!layout.current || layout.current.count !== count) layout.current = { count, col: empty() }
+    const col = layout.current.col
+    const out = {} as Record<Status, Draft[][]>
+    for (const t of STATUS_TABS) {
+      const rows = drafts.filter((d) => d.status === t.key)
+      const sizes = Array.from({ length: count }, () => 0)
+      for (const d of rows) {
+        const c = col[t.key].get(d.id)
+        if (c !== undefined && c < count) sizes[c]++
+      }
+      for (const d of rows) {
+        const c = col[t.key].get(d.id)
+        if (c !== undefined && c < count) continue
+        let best = 0
+        for (let i = 1; i < count; i++) if (sizes[i] < sizes[best]) best = i
+        col[t.key].set(d.id, best)
+        sizes[best]++
+      }
+      const buckets: Draft[][] = Array.from({ length: count }, () => [])
+      for (const d of rows) {
+        const c = col[t.key].get(d.id)
+        if (c !== undefined && c < count) buckets[c].push(d)
+      }
+      out[t.key] = buckets
+    }
+    return out
+  }, [drafts, count])
 }
 
 /** R-211：「记反馈」行内展开状态（每篇草稿一份） */
@@ -118,7 +169,7 @@ function DraftTile({
       className="group cursor-pointer rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)] transition-colors hover:border-accent/40"
     >
       <div className="flex items-start gap-2">
-        <h3 className="line-clamp-2 min-h-10 flex-1 text-[14px] font-semibold leading-snug">{d.title || '（无标题）'}</h3>
+        <h3 className="line-clamp-2 flex-1 text-[14px] font-semibold leading-snug">{d.title || '（无标题）'}</h3>
         {/* R-210：纯手写（AI 从未参与）标 */}
         {!!d.pure_manual && (
           <Badge variant="success" className="mt-0.5 shrink-0 text-xs md:text-[10px]">纯手写</Badge>
@@ -264,6 +315,9 @@ export default function DraftsPage() {
 
   const drafts = useMemo(() => draftsQ.data ?? [], [draftsQ.data])
   const listOf = (s: Status) => drafts.filter((d) => d.status === s)
+  // R-258：瀑布流列数 + 按「tab + 草稿 id」稳定的分列结果
+  const columnCount = useColumnCount()
+  const draftColumns = useDraftColumns(drafts, columnCount)
 
   // 深链 ?id=
   useEffect(() => {
@@ -398,9 +452,13 @@ export default function DraftsPage() {
           {STATUS_TABS.map((t) => (
             <TabsContent key={t.key} value={t.key}>
               {draftsQ.isLoading ? (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <Skeleton key={i} className="h-36 w-full" />
+                <div className="flex items-start gap-3">
+                  {Array.from({ length: columnCount }).map((_, ci) => (
+                    <div key={ci} className="flex min-w-0 flex-1 flex-col gap-3">
+                      {Array.from({ length: Math.max(2, Math.ceil(6 / columnCount)) }).map((_, i) => (
+                        <Skeleton key={i} className="h-36 w-full" />
+                      ))}
+                    </div>
                   ))}
                 </div>
               ) : !listOf(t.key).length ? (
@@ -408,19 +466,23 @@ export default function DraftsPage() {
                   {{ draft: '暂无草稿，新建或从主页灵感生成', used: '暂无待制作（点草稿的「采用」会进这里）', done: '暂无完成', archived: '废稿箱是空的' }[t.key]}
                 </div>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  <AnimatePresence mode="popLayout">
-                    {listOf(t.key).map((d, i) => (
-                      <DraftTile
-                        key={d.id}
-                        d={d}
-                        index={i}
-                        busy={busyId === d.id}
-                        fb={fbMap[d.id]}
-                        h={handlers}
-                      />
-                    ))}
-                  </AnimatePresence>
+                <div className="flex items-start gap-3">
+                  {draftColumns[t.key].map((col, ci) => (
+                    <div key={ci} className="flex min-w-0 flex-1 flex-col gap-3">
+                      <AnimatePresence mode="popLayout">
+                        {col.map((d, i) => (
+                          <DraftTile
+                            key={d.id}
+                            d={d}
+                            index={i}
+                            busy={busyId === d.id}
+                            fb={fbMap[d.id]}
+                            h={handlers}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  ))}
                 </div>
               )}
             </TabsContent>
