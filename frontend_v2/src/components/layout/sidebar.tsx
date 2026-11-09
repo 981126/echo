@@ -4,10 +4,10 @@ import { Waves } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SIDEBAR_NAV as NAV } from '@/lib/nav'
 
-// R-256：取消展开/收起，固定宽度 128px（原收起态 64px 的一倍）；每项图标在上、菜单汉字在下。
+// R-256：取消展开/收起，固定宽度 85px（v2：128px 再缩小三分之一）；每项图标在上、菜单汉字在下。
 export function Sidebar() {
   return (
-    <aside className="hidden h-full w-32 shrink-0 flex-col border-r border-border bg-card/60 backdrop-blur md:flex">
+    <aside className="hidden h-full w-[85px] shrink-0 flex-col border-r border-border bg-card/60 backdrop-blur md:flex">
       <div className="flex h-14 shrink-0 items-center justify-center">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground">
           <Waves className="h-4 w-4" />

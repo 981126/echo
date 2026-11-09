@@ -92,7 +92,7 @@ export function AppShell() {
               initial={reduce ? false : 'initial'}
               animate="animate"
               transition={reduce ? { duration: 0 } : pageTransition}
-              className="mx-auto w-full max-w-7xl px-4 py-6"
+              className="mx-auto w-full max-w-[1320px] px-4 py-6"
             >
               <Outlet />
             </motion.div>
