@@ -83,13 +83,13 @@ function KpiCardView({
       aria-pressed={active}
       title={`悬浮/点击查看「${kpi.label}」在近 ${days} 日的趋势`}
       className={cn(
-        'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-lg px-3 py-2.5 text-left transition-colors',
+        'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-lg px-3 py-1.5 text-left transition-colors',
         active ? 'bg-muted' : 'bg-transparent hover:bg-muted/40'
       )}
     >
       {/* 上：指标名 / 中：数字 / 下：较前 N 日对比（没有对比数据就留空，不显示提示文字） */}
       <div className={cn('text-xs md:text-[10px] text-muted-foreground', active && 'text-foreground')}>{kpi.label}</div>
-      <div className="tnum mt-0.5 text-lg font-semibold leading-6 tracking-tight">{valueText}</div>
+      <div className="tnum mt-0.5 text-lg font-semibold leading-5 tracking-tight">{valueText}</div>
       <div
         className={cn('mt-0.5 min-h-3.5 text-xs md:text-[10px] leading-3.5', deltaText ? deltaToneClass(kpi.delta) : 'text-muted-foreground')}
         title={deltaText ? `较前 ${days} 日对比：${deltaText}` : undefined}
@@ -127,7 +127,7 @@ function AccountOverview({
   const chartLabel = series ? `${series.label}${series.mode === 'daily' ? '（较上次同步增量）' : ''}` : '播放量'
   return (
     <section className="flex min-w-0 flex-col rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
-      <header className="flex min-h-[56px] items-center justify-between gap-2 px-4 py-2.5">
+      <header className="flex min-h-[48px] items-center justify-between gap-2 px-4 py-2">
           <div className="flex min-w-0 items-center gap-2.5">
             <Avatar className="h-9 w-9">
               {account?.avatar ? <AvatarImage src={coverThumb(account.avatar, 160)} alt={account.nickname} decoding="async" /> : null}
@@ -157,12 +157,12 @@ function AccountOverview({
           </Button>
       </header>
 
-      <div className="space-y-3 p-4 sm:p-5">
+      <div className="space-y-2 p-3.5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span>统计周期</span>
             <Select value={String(periodDays)} onValueChange={(value) => onPeriodChange(Number(value) as PeriodDays)}>
-              <SelectTrigger className="h-11 w-[104px] text-xs md:h-8" aria-label="统计周期">
+              <SelectTrigger className="h-11 w-[104px] text-xs md:h-7" aria-label="统计周期">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -202,13 +202,13 @@ function AccountOverview({
                 {chartLabel}
               </span>
             </div>
-            <div className="mt-1 min-h-[190px]">
+            <div className="mt-1 min-h-[140px]">
               <CrossfadeTrendLine
                 transitionKey={`${metricKey}-${dataVersion}`}
                 points={points}
                 ariaLabel={`${chartLabel}趋势`}
                 fillArea
-                height={300}
+                height={250}
                 emptyText={`该指标在当前统计周期有效数据点不足（${points.filter((point) => point.value !== null).length} 个），无法绘制曲线`}
               />
             </div>
@@ -220,7 +220,7 @@ function AccountOverview({
             initial={reduce ? false : { opacity: 0.85, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={softIn}
-            className="grid grid-cols-2 items-stretch gap-x-3 gap-y-2"
+            className="grid grid-cols-2 items-stretch gap-x-3 gap-y-1.5"
           >
             {data.kpis.map((kpi) => (
               <KpiCardView
