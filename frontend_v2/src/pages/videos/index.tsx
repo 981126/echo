@@ -13,6 +13,7 @@ import {
   Layers
 } from 'lucide-react'
 import { apiJson, uploadFile } from '@/api/client'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { listVariants } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,6 +50,50 @@ interface Creator {
   is_current?: boolean
 }
 
+/** R-259：素材库瀑布流列数——卡片宽度固定，沿用改前栅格的断点（2/3/4/5 列）。 */
+function useColumnCount(): number {
+  const sm = useMediaQuery('(min-width: 640px)')
+  const lg = useMediaQuery('(min-width: 1024px)')
+  const xl = useMediaQuery('(min-width: 1280px)')
+  return xl ? 5 : lg ? 4 : sm ? 3 : 2
+}
+
+/**
+ * R-259：素材库瀑布流分列——按卡片 key 记住列号，滚到底追加/删除时其余卡片不换列；
+ * 新卡进当前最短列，列内保持接口返回顺序；切筛选/换博主后只保留当前列表的列号。
+ */
+function useCardColumns(
+  cards: CardItem[],
+  count: number
+): { columns: CardItem[][]; indexOf: Map<string, number> } {
+  const layout = useRef<{ count: number; col: Map<string, number> } | null>(null)
+  return useMemo(() => {
+    if (!layout.current || layout.current.count !== count) layout.current = { count, col: new Map() }
+    const col = layout.current.col
+    const indexOf = new Map<string, number>()
+    cards.forEach((it, i) => indexOf.set(it.key, i))
+    for (const k of [...col.keys()]) if (!indexOf.has(k)) col.delete(k)
+    const sizes = Array.from({ length: count }, () => 0)
+    for (const it of cards) {
+      const c = col.get(it.key)
+      if (c !== undefined && c < count) sizes[c]++
+    }
+    for (const it of cards) {
+      const c = col.get(it.key)
+      if (c !== undefined && c < count) continue
+      let best = 0
+      for (let i = 1; i < count; i++) if (sizes[i] < sizes[best]) best = i
+      col.set(it.key, best)
+      sizes[best]++
+    }
+    const columns: CardItem[][] = Array.from({ length: count }, () => [])
+    for (const it of cards) {
+      const c = col.get(it.key)
+      if (c !== undefined && c < count) columns[c].push(it)
+    }
+    return { columns, indexOf }
+  }, [cards, count])
+}
 
 export default function VideosPage() {
   const navigate = useNavigate()
@@ -100,6 +145,9 @@ export default function VideosPage() {
   const filteredTotal = libQ.data?.pages[0]?.filtered_total ?? 0
   const allTags = libQ.data?.pages[0]?.facets?.tags ?? []
   const filtered = cards
+  // R-259：瀑布流列数 + 按卡片 key 稳定的分列（宽度固定、高度由内容决定）
+  const columnCount = useColumnCount()
+  const { columns: cardColumns, indexOf: cardIndex } = useCardColumns(filtered, columnCount)
 
   // R-199：首卡变了 = 换了一批结果（切博主 / 改筛选后查询）。此刻给新卡加基础延迟，
   // 让旧卡的退场动画先走完——否则两组卡在同一批网格位置上交叉淡入，看起来「结果卡没有动画」。
@@ -590,18 +638,22 @@ export default function VideosPage() {
 
       {/* 卡片墙 */}
       {loading ? (
-        // 骨架尺寸与真卡一致（4:3 封面 + 信息区 + 操作行）→ 数据到了不跳版
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-            <div key={i} className="overflow-hidden rounded-lg border border-border bg-card">
-              <Skeleton className="aspect-[4/3] w-full" />
-              <div className="space-y-2 p-3">
-                <Skeleton className="h-3.5 w-4/5" />
-                <Skeleton className="h-3 w-2/5" />
-              </div>
-              <div className="border-t border-border px-2 py-1.5">
-                <Skeleton className="h-7 w-24" />
-              </div>
+        // R-259：骨架与真卡同列宽（4:3 封面 + 信息区 + 操作行）→ 数据到了不跳版
+        <div className="flex items-start gap-3">
+          {Array.from({ length: columnCount }).map((_, ci) => (
+            <div key={ci} className="flex min-w-0 flex-1 flex-col gap-3">
+              {Array.from({ length: Math.ceil(PAGE_SIZE / columnCount) }).map((_, i) => (
+                <div key={i} className="overflow-hidden rounded-lg border border-border bg-card">
+                  <Skeleton className="aspect-[4/3] w-full" />
+                  <div className="space-y-2 p-3">
+                    <Skeleton className="h-3.5 w-4/5" />
+                    <Skeleton className="h-3 w-2/5" />
+                  </div>
+                  <div className="border-t border-border px-2 py-1.5">
+                    <Skeleton className="h-7 w-24" />
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -610,29 +662,36 @@ export default function VideosPage() {
           没有匹配的素材（换个关键词/标签，或去「博主管理」同步）
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          <AnimatePresence mode="popLayout">
-            {filtered.map((it, i) => (
-              <MaterialCard
-                key={it.key}
-                item={it}
-                index={i}
-                append={i >= firstPageLen}
-                replace={replaced}
-                selectMode={selectMode}
-                selected={selected.has(it.key)}
-                task={tasks[it.key]}
-                busy={!!busy[it.key]}
-                onOpen={openItem}
-                onToggle={toggleSel}
-                onPlay={onPlay}
-                onSync={onSyncCb}
-                onConfirmTags={onConfirmTags}
-                onDelete={onDeleteCb}
-                onSplit={onSplitCb}
-              />
-            ))}
-          </AnimatePresence>
+        <div className="flex items-start gap-3">
+          {cardColumns.map((col, ci) => (
+            <div key={ci} className="flex min-w-0 flex-1 flex-col gap-3">
+              <AnimatePresence mode="popLayout">
+                {col.map((it) => {
+                  const i = cardIndex.get(it.key) ?? 0
+                  return (
+                    <MaterialCard
+                      key={it.key}
+                      item={it}
+                      index={i}
+                      append={i >= firstPageLen}
+                      replace={replaced}
+                      selectMode={selectMode}
+                      selected={selected.has(it.key)}
+                      task={tasks[it.key]}
+                      busy={!!busy[it.key]}
+                      onOpen={openItem}
+                      onToggle={toggleSel}
+                      onPlay={onPlay}
+                      onSync={onSyncCb}
+                      onConfirmTags={onConfirmTags}
+                      onDelete={onDeleteCb}
+                      onSplit={onSplitCb}
+                    />
+                  )
+                })}
+              </AnimatePresence>
+            </div>
+          ))}
         </div>
       )}
 

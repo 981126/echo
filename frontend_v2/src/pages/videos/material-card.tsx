@@ -191,7 +191,7 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
 
       {/* 信息区 */}
       <div className="cursor-pointer p-3" onClick={() => (selectMode ? onToggle(item) : onOpen(item))}>
-        <p className="line-clamp-2 min-h-9 text-[13px] font-medium leading-snug">{item.title}</p>
+        <p className="line-clamp-2 text-[13px] font-medium leading-snug">{item.title}</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
           {item.platforms.map((p) => (
             <Tooltip key={p} delayDuration={0}>

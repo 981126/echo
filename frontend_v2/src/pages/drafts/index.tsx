@@ -40,12 +40,14 @@ const draftTileVariants: Variants = {
   })
 }
 
-/** R-258：瀑布流列数，断点与 R-257 一致（<640 1 列 / 640 2 列 / 1024 3 列 / 1280 4 列）。 */
+/** R-258/R-259：瀑布流列数（卡片宽度不固定，随窗口自适应；一行最多 5 个）。
+ *  <640 1 列 / 640 2 列 / 1024 3 列 / 1280 4 列 / >=1400 5 列（5 列时卡片仍 >=247px）。 */
 function useColumnCount(): number {
   const sm = useMediaQuery('(min-width: 640px)')
   const lg = useMediaQuery('(min-width: 1024px)')
   const xl = useMediaQuery('(min-width: 1280px)')
-  return xl ? 4 : lg ? 3 : sm ? 2 : 1
+  const wide = useMediaQuery('(min-width: 1400px)')
+  return wide ? 5 : xl ? 4 : lg ? 3 : sm ? 2 : 1
 }
 
 /**
