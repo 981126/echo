@@ -29,7 +29,6 @@ const TITLES: Record<string, string> = {
 }
 
 export function AppShell() {
-  const [collapsed, setCollapsed] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -45,7 +44,7 @@ export function AppShell() {
   return (
     <ActiveWorkProvider>
       <div className="flex h-full">
-        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
+        <Sidebar />
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* R-218：移动端顶栏瘦身——移除汉堡（底部 Tab 取代），标题单行截断，按钮热区 ≥44 */}
@@ -93,7 +92,7 @@ export function AppShell() {
               initial={reduce ? false : 'initial'}
               animate="animate"
               transition={reduce ? { duration: 0 } : pageTransition}
-              className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6"
+              className="mx-auto w-full max-w-7xl px-4 py-6"
             >
               <Outlet />
             </motion.div>

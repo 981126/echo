@@ -1,5 +1,11 @@
 # 变更记录
 
+## [R-256] 2026-11-09 — 左侧菜单改固定 128px「图标 + 汉字」竖排，正文左右留白减半 ✅
+
+- **登记记录**：按作者原话「1.左边菜单取消展开功能，收缩的菜单宽度宽一倍；2.每个菜单下面展示菜单的汉字；3.菜单所有右侧功能，现在两边的间隔空白占比太多了，间隔缩小一倍提供给正文」实现。改前：侧栏展开 216px / 收起 64px（仅图标 + 悬停 Tooltip 显示汉字，底部「收起/展开」按钮）；正文容器 `max-w-6xl`(1152) + 桌面 `px-6`(24)，1440×950 下正文左右各空约 60px、内容宽 1104px。
+- **已实现（2026-11-09）**：①**侧栏** `components/layout/sidebar.tsx` 删除 `collapsed`/`onToggle` 与底部切换按钮（同时移除 `PanelLeftClose/PanelLeftOpen` 图标与 Tooltip 导入），根节点由 `motion.aside` 宽度弹簧动画改为静态 `<aside w-32>`（**固定 128px** = 原收起态 64px 的一倍，`shrink-0`）；品牌区仅居中波浪图标；11 个菜单项改为 `flex-col`「图标在上、汉字在下」居中常驻（11px 不换行，最长「脚本工作台」完整显示），保留 `layoutId="nav-active"` 高亮底色/图标色与切页平滑移动，悬停浅底反馈，菜单区 `overflow-y-auto` 矮窗口可滚动。②**正文** `components/layout/app-shell.tsx` 去掉 `collapsed` 状态，正文包装层 `mx-auto w-full max-w-6xl px-4 py-6 md:px-6` → `mx-auto w-full max-w-7xl px-4 py-6`：1440 下左右空白 **60→32px**、内容宽 **1104→1248px**（+144）；1280 下空白 24→16px、内容 +104px；1920 下内容仍 +144px 且保留 1280 上限防过度拉伸。③**不变**：导航项/顺序/图标/路由、顶栏结构、各页面栅格与业务逻辑、移动端（<768px 仍为 R-218 底部 Tab + 更多 Sheet）、后端/接口/表均未改。
+- **验证**：`scripts/verify.sh` 全绿（backend ruff/mypy/pytest、frontend lint/vitest/build、文档一致性）；Playwright 登录后 1440×950 / 1280×800 / 1920×1000 + 移动端 390×844 点检：侧栏宽 128、11 项汉字齐全且单项 47px、1440 正文左右各 32px / 1280 各 16px / 1920 内容 1248px、三档 0 横向滚动条、0 console error，移动端侧栏 `display:none` 底部 Tab 正常；主页/数据看板/素材库/视频复盘/脚本工作台/灵感/AI 设置截图点检无布局错位。需求：`requirements/R-256-sidebar-rail-and-content-width.md`；设计：`development-design/R-256-sidebar-rail-and-content-width.md`。
+
 ## [R-218] 2026-11-05 — 移动端适配 M218–M220 完成（导航重构 + 全屏化 + 逐页 + 三原则） ✅
 
 - **已实现（2026-11-05）**：按作者「开始开发，把这些需求都开发测试完完」一次性交付 M218 基座与导航 → M219 逐页适配 → M220 点检回归。
