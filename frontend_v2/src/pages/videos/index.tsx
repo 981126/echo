@@ -591,7 +591,7 @@ export default function VideosPage() {
       {/* 卡片墙 */}
       {loading ? (
         // 骨架尺寸与真卡一致（4:3 封面 + 信息区 + 操作行）→ 数据到了不跳版
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {Array.from({ length: PAGE_SIZE }).map((_, i) => (
             <div key={i} className="overflow-hidden rounded-lg border border-border bg-card">
               <Skeleton className="aspect-[4/3] w-full" />
@@ -610,7 +610,7 @@ export default function VideosPage() {
           没有匹配的素材（换个关键词/标签，或去「博主管理」同步）
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           <AnimatePresence mode="popLayout">
             {filtered.map((it, i) => (
               <MaterialCard

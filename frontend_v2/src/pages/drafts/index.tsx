@@ -398,7 +398,7 @@ export default function DraftsPage() {
           {STATUS_TABS.map((t) => (
             <TabsContent key={t.key} value={t.key}>
               {draftsQ.isLoading ? (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-36 w-full" />
                   ))}
@@ -408,7 +408,7 @@ export default function DraftsPage() {
                   {{ draft: '暂无草稿，新建或从主页灵感生成', used: '暂无待制作（点草稿的「采用」会进这里）', done: '暂无完成', archived: '废稿箱是空的' }[t.key]}
                 </div>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   <AnimatePresence mode="popLayout">
                     {listOf(t.key).map((d, i) => (
                       <DraftTile
