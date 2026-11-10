@@ -145,6 +145,8 @@ flowchart LR
   - `test_r162_sync_all_queue.py` 6 条全过（原 3 + 新增 3：全量全失败不算已同步且任务 failed、部分失败记 partial、外层 worker 全失败抛错）；
   - `test_r109_daily_sync.py` 5 条全过（原 2 + 新增 3：日更成功/失败计数与明细、日更全失败抛错且不触发 rerun、手动单账号全失败抛错）；
   - `ruff check app tests` 通过、`mypy app` 通过；`scripts/verify.sh` 全绿（后端全量 pytest + 前端 lint/vitest/build + 文档一致性）。
+- **真实联调（2026-11-10 20:42，新代码已重启加载）**：TikHub 余额恢复后实际触发一次 `POST /api/platform/sync-all`（task 10868）——12/12 博主全部同步成功，`platform_posts` 更新 224 条、`platform_post_stats` 更新 227 条，后台任务 done；通知「平台数据同步完成：全量同步：共 12 个博主，全部同步成功（并发 4）；已自动触发「重新对标」」与真实结果一致（同场景旧代码 20:27 误报「已同步 12 个」，当时实际全 402 失败）。失败路径由 6 条单测覆盖（无需再消耗 TikHub 额度制造 402）。
+
 - **行为对照（修复后）**：
 
 | 场景 | 修复前通知 | 修复后 |
