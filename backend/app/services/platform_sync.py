@@ -2124,7 +2124,7 @@ def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=
                     s.commit()
                     publish("task.update", {"id": task_id, "status": "running", "progress": task_row.progress or 5, "note": "同步中…", "payload": {"creator_id": creator_id}})
             try:
-                run_sync(s, scope="daily", creator_id=creator_id, with_media=True, job=job)
+                sync_res = run_sync(s, scope="daily", creator_id=creator_id, with_media=True, job=job)
             except BudgetExceeded as exc:  # 预算耗尽：取消后续
                 s.rollback()
                 _fail_creator_task(s, task_id, str(exc))
@@ -2134,6 +2134,22 @@ def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=
                 s.rollback()
                 _fail_creator_task(s, task_id, str(exc))
                 return {"status": "failed", "name": name, "creator_id": creator_id, "reason": str(exc)[:80]}
+            # R-262：run_sync 内部「单账号失败」不抛异常，只会写进 accounts[].error；
+            # 原先这里一律算 done → TikHub 402 全失败也报「已同步」。这里按账号结果判定。
+            accounts = sync_res.get("accounts") if isinstance(sync_res, dict) else None
+            acc_rows = [a for a in (accounts or []) if isinstance(a, dict)]
+            acc_errors = [a for a in acc_rows if a.get("error")]
+            acc_reason = "；".join(
+                f"{a.get('platform') or '账号'}：{str(a.get('error'))[:60]}" for a in acc_errors
+            )[:300]
+            if acc_rows and len(acc_errors) == len(acc_rows):
+                _fail_creator_task(s, task_id, f"同步失败：{acc_reason or '全部账号同步失败'}")
+                return {
+                    "status": "failed",
+                    "name": name,
+                    "creator_id": creator_id,
+                    "reason": acc_reason or "全部账号同步失败",
+                }
             if task_row is not None:
                 task_row = s.get(BackgroundTask, task_id)
                 if task_row is not None:
@@ -2142,6 +2158,13 @@ def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=
                     task_row.note = "完成"
                     s.commit()
                     publish("task.update", {"id": task_id, "status": "done", "progress": 100, "note": "完成", "payload": {"creator_id": creator_id}})
+            if acc_errors:
+                return {
+                    "status": "partial",
+                    "name": name,
+                    "creator_id": creator_id,
+                    "reason": acc_reason or "部分账号同步失败",
+                }
             return {"status": "done", "name": name, "creator_id": creator_id}
         finally:
             s.close()
@@ -2155,20 +2178,37 @@ def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=
             update(max(5, min(95, int(n / total * 100))), f"[{n}/{total}] {name}：同步完成")
 
     results = gather(_one, entries, workers=workers, on_result=_on_result)
-    synced = sum(1 for _, r in results if isinstance(r, dict) and r.get("status") == "done")
+    # R-262：按真实结果统计——done=全部账号成功、partial=部分账号失败、failed/budget/cancelled=失败；
+    # synced 只代表「至少有数据同步成功的博主」，不再把全失败算成已同步。
+    done_rows = [r for _, r in results if isinstance(r, dict) and r.get("status") == "done"]
+    partial_rows = [r for _, r in results if isinstance(r, dict) and r.get("status") == "partial"]
+    failed_rows = [
+        r
+        for _, r in results
+        if isinstance(r, dict) and r.get("status") in ("failed", "budget", "cancelled")
+    ]
+    synced = len(done_rows) + len(partial_rows)
     failed: list[str] = []
-    for _, r in results:
-        if not isinstance(r, dict):
-            continue
-        if r.get("status") in ("failed", "budget", "cancelled"):
-            reason = r.get("reason") or ("已取消：预算不足" if r.get("status") == "cancelled" else "失败")
-            failed.append(f"{r.get('name')}({reason})")
+    for r in failed_rows:
+        reason = r.get("reason") or ("已取消：预算不足" if r.get("status") == "cancelled" else "失败")
+        failed.append(f"{r.get('name')}({reason})")
+    partial: list[str] = [
+        f"{r.get('name')}({r.get('reason') or '部分账号失败'})" for r in partial_rows
+    ]
     rerun = "no_sync"
     if synced:
         rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
-    parts = [f"全量同步：共 {len(entries)} 个博主，已同步 {synced} 个（并发 {workers}）"]
+    if not failed and not partial:
+        parts = [f"全量同步：共 {len(entries)} 个博主，全部同步成功（并发 {workers}）"]
+    else:
+        parts = [
+            f"全量同步：共 {len(entries)} 个博主，成功 {len(done_rows)}、部分失败 {len(partial_rows)}、"
+            f"失败 {len(failed_rows)}（并发 {workers}）"
+        ]
     if failed:
-        parts.append("失败：" + "、".join(failed))
+        parts.append("失败：" + "、".join(failed[:5]) + (f" 等 {len(failed)} 个" if len(failed) > 5 else ""))
+    if partial:
+        parts.append("部分失败：" + "、".join(partial[:5]) + (f" 等 {len(partial)} 个" if len(partial) > 5 else ""))
     if synced:
         if isinstance(rerun, str) and rerun.startswith("started:"):
             parts.append("已自动触发「重新对标」")
@@ -2180,6 +2220,8 @@ def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=
         "message": "；".join(parts),
         "creators": len(entries),
         "synced": synced,
+        "done": len(done_rows),
+        "partial": len(partial_rows),
         "failed": failed,
         "rerun": rerun,
     }
@@ -2200,7 +2242,12 @@ def all_top15_worker(db: Session, payload: dict, update=None) -> dict:
         owner = get_current_creator(db)
     if owner is None:
         raise ValueError("请先创建并切换到主博主")
-    return run_all_top15_sync(db, owner, entries, update=update)
+    result = run_all_top15_sync(db, owner, entries, update=update)
+    # R-262：无一博主同步成功（如 TikHub 402 全失败）→ 抛错让后台任务/通知按失败呈现，
+    # 不再出现「平台数据同步完成：已同步 12 个」而实际全部失败。
+    if int(result.get("synced") or 0) == 0 and result.get("failed"):
+        raise RuntimeError(str(result.get("message") or "全部博主同步失败"))
+    return result
 
 
 
@@ -2291,30 +2338,51 @@ def run_daily_sync_all(db: Session) -> dict:
     except Exception as exc:
         creator_sync["errors"].append(str(exc)[:300])
         db.rollback()
-    rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
     accounts = [a for res in results for a in (res.get("accounts") or [])]
+    # R-262：run_sync 单账号失败会写进 accounts[].error（不抛异常）；先按真实结果区分成功/失败，
+    # 全部账号失败时不再报「每日同步完成：共同步 N 个账号」，任务按失败上报。
+    ok_accounts = [a for a in accounts if not (isinstance(a, dict) and a.get("error"))]
+    err_accounts = [a for a in accounts if isinstance(a, dict) and a.get("error")]
     posts = sum(int(r.get("posts") or 0) for r in results)
     comments = sum(int(r.get("comments") or 0) for r in results)
     pool_ideas = sum(int(r.get("pool_ideas") or 0) for r in results)  # R-140：进灵感池条数
-    msg = (
-        f"每日同步完成：主博主 + {len(benchmarks)} 个对标，共同步 {len(accounts)} 个账号，"
-        f"更新作品 {posts}，采集评论 {comments}"
-    )
+    nothing_synced = bool(accounts) and not ok_accounts and not creator_sync["synced"]
+    rerun = "no_sync" if nothing_synced else maybe_start_benchmark_rerun(db, refetch=False)
+    if err_accounts:
+        account_part = f"成功 {len(ok_accounts)}、失败 {len(err_accounts)} 个账号"
+    else:
+        account_part = f"共同步 {len(ok_accounts)} 个账号"
+    if nothing_synced:
+        msg = (
+            f"每日同步失败：主博主 + {len(benchmarks)} 个对标，"
+            f"{len(err_accounts)} 个账号全部同步失败"
+        )
+    else:
+        msg = (
+            f"每日同步完成：主博主 + {len(benchmarks)} 个对标，{account_part}，"
+            f"更新作品 {posts}，采集评论 {comments}"
+        )
     if pool_ideas:
         msg += f"，灵感池新增 {pool_ideas}"
     if creator_sync["synced"]:
         msg += f"，抖音创作者指标更新 {creator_sync['synced']} 条"
     if creator_sync["errors"]:
         msg += f"，创作者指标 {len(creator_sync['errors'])} 条未完成"
+    if err_accounts:
+        msg += "；失败账号：" + "、".join(
+            f"{a.get('platform') or '账号'}({str(a.get('error'))[:60]})" for a in err_accounts[:3]
+        ) + (f" 等 {len(err_accounts)} 个" if len(err_accounts) > 3 else "")
     # R-240 M9：同行播放量补采已移出主链路（独立后台任务），日更 message 不再拼接其结果
     if isinstance(rerun, str) and rerun.startswith("started:"):
         msg += "；已自动触发「重新对标」"
     elif rerun == "already_running":
         msg += "；已有「重新对标」在跑，本轮跳过自动触发"
-    return {
+    result = {
         "job_id": results[-1].get("job_id") if results else None,
         "message": msg,
         "accounts": accounts,
+        "ok_accounts": len(ok_accounts),
+        "failed_accounts": len(err_accounts),
         "posts": posts,
         "comments": comments,
         "pool_ideas": pool_ideas,
@@ -2322,3 +2390,6 @@ def run_daily_sync_all(db: Session) -> dict:
         "creator_sync": creator_sync,
         "peer_plays": peer_plays,
     }
+    if nothing_synced:
+        raise RuntimeError(msg)
+    return result

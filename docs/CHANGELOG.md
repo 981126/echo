@@ -1,5 +1,12 @@
 # 变更记录
 
+## [R-262] 2026-11-10 — 同步任务完成通知按真实成功/失败统计（全失败不再报「已同步」，任务按失败上报） ✅
+
+- **登记记录**：按作者「修了吧」实现。背景：TikHub 余额不足导致全部接口 HTTP 402，15 个账号 `sync_status=failed`，但 20:27 的全量同步通知仍写「平台数据同步完成：共 12 个博主，已同步 12 个（并发 4）；已自动触发「重新对标」」，与实际不符。
+- **根因**：`run_sync` 内部单账号失败只写 `accounts[].error` 并 `return {"error": ...}`（不抛异常）；上层「同步所有博主」的 `_one` 只看是否抛异常 → 全部 402 也计为 `done`/`synced`；每日同步文案 `共同步 len(accounts) 个账号` 同样把失败算成功；手动单账号同步任务函数直接返回 → 任务也标 done。
+- **已实现（2026-11-10）**：①`run_all_top15_sync._one` 检查 `sync_res["accounts"]`：全失败→该博主任务 failed、部分失败→`partial`、全成功→`done`；汇总改为「成功 X、部分失败 Y、失败 Z（并发 W）」+ 失败/部分失败明细（各最多 5 条 + 等 N 个），全部成功时写「全部同步成功」；`synced = done + partial`，仅 `synced>0` 才触发「重新对标」。②`all_top15_worker`：`synced==0` 且有失败 → 抛错 → 任务 failed + 通知「平台数据同步失败」。③`run_daily_sync_all`：按 `ok_accounts/err_accounts` 统计，全成功保持「共同步 N 个账号」，有失败写「成功 X、失败 Y 个账号」+ 失败账号明细（≤3 条）；全部账号失败 → 抛错（任务 failed、通知失败、不触发重新对标）；返回值补 `ok_accounts/failed_accounts`。④`api/platform.py:_start_sync`：手动单账号/单博主同步全失败同样抛错（不再显示「同步完成」）。⑤TikHub 调用/预算/数据写入/接口/表/前端均不变。
+- **验证**：`scripts/verify.sh` 全绿；`ruff check app tests`、`mypy app` 通过；同步相关 11 条单测全过，其中新增 6 条：全量全失败不算已同步且任务 failed、全量部分失败记 partial、外层 worker 全失败抛错、日更成功/失败计数与明细、日更全失败抛错且不触发 rerun、手动单账号全失败抛错。需求：`requirements/R-262-sync-result-reporting.md`；设计：`development-design/R-262-sync-result-reporting.md`。
+
 ## [R-261] 2026-11-09 — 数据看板「账号数据（账号总览）」卡高度减少 15% ✅
 
 - **登记记录**：按作者原话「数据看板的账号数据这块的高度减少百分之15%」实现。该块 = 看板首屏左侧 `AccountOverview`（头像/昵称/粉丝/关注/获赞 + 统计周期 + 播放量趋势曲线 + 6 个 KPI + 更新数据）。改前实测高度：1440 415px、1920 515px、1280 384px、1024 392px、768 708px、390 674px。

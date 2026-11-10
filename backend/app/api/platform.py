@@ -377,7 +377,7 @@ def account_snapshots(account_id: int, db: Session = Depends(get_db)):
 # ---------- 同步触发与任务 ----------
 def _start_sync(payload: dict, scope: str = "daily"):
     def fn(db: Session, pl: dict):
-        return run_sync(
+        result = run_sync(
             db,
             scope=pl.get("scope", scope),
             account_id=pl.get("account_id"),
@@ -385,6 +385,13 @@ def _start_sync(payload: dict, scope: str = "daily"):
             top_n=pl.get("top_n"),
             with_media=(pl.get("scope", scope) == "daily"),  # R-085：前10条同步带视频下载+转写
         )
+        # R-262：单账号/单博主同步时 run_sync 内部失败不抛异常（写进 accounts[].error）；
+        # 全部账号失败（如 TikHub 402）→ 任务按失败上报，通知不再写「平台数据同步完成」。
+        accounts = result.get("accounts") if isinstance(result, dict) else None
+        errors = [a for a in (accounts or []) if isinstance(a, dict) and a.get("error")]
+        if accounts and len(errors) == len(accounts):
+            raise RuntimeError(str(result.get("message") or "同步失败"))
+        return result
 
     return start_task("platform_sync", payload, fn)
 
