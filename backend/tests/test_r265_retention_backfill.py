@@ -78,10 +78,34 @@ def test_coverage_and_plan_filters(db):
     _post(db, account, "no5s", days_ago=3, has_5s=False)
 
     stats = rb.coverage(db, account)
-    assert stats == {"total": 3, "covered": 1, "pending": 2}
+    assert stats == {"total": 3, "covered": 1, "pending": 2, "unsupported": 0}
     assert len(rb.plan_post_ids(db, account)) == 2
     recent = rb.plan_post_ids(db, account, scope="recent")
     assert [pid for pid in recent] == [rb.plan_post_ids(db, account)[0]]
+
+
+def test_empty_trend_is_marked_and_not_retried(db, monkeypatch):
+    _creator, account = _seed(db)
+    post = _post(db, account, "empty", days_ago=1)
+
+    class _Client:
+        requests_used = 0
+
+        def fetch_douyin_watch_trend(self, **_kwargs):
+            return {"analysis_trend": {"current_item": [], "similar_author": []}}
+
+    monkeypatch.setattr(rb, "make_client", lambda: _Client())
+    monkeypatch.setattr(rb, "_cookie", lambda db, account_id, client: "cookie")
+    monkeypatch.setattr(rb, "resolve_data_policy", lambda db, account: SimpleNamespace(is_blocked=False, is_creator=True))
+    monkeypatch.setattr(rb, "_charge_requests", lambda db, client, before: None)
+    monkeypatch.setattr(rb.time, "sleep", lambda _seconds: None)
+
+    result = rb.run_backfill(db, {"account_id": account.id, "post_ids": [post.id]}, None)
+    assert result["unsupported"] == 1
+    assert rb.plan_post_ids(db, account) == []
+    stats = rb.coverage(db, account)
+    assert stats["unsupported"] == 1
+    assert stats["pending"] == 0
 
 
 def test_save_trend_keeps_bounce_and_marks_reliable(db):
@@ -130,7 +154,7 @@ def test_run_backfill_counts_partial_failures(db, monkeypatch):
     )
     assert result["ok"] == 1
     assert result["failed"] == 1
-    assert "成功 1、失败 1" in result["message"]
+    assert "成功 1" in result["message"] and "失败 1" in result["message"]
     assert progress[-1] == 100
 
 
@@ -142,7 +166,7 @@ def test_run_backfill_all_failed_raises(db, monkeypatch):
         requests_used = 0
 
         def fetch_douyin_watch_trend(self, **_kwargs):
-            raise RuntimeError("接口未返回观看趋势")
+            raise RuntimeError("接口返回 402")
 
     monkeypatch.setattr(rb, "make_client", lambda: _Client())
     monkeypatch.setattr(rb, "_cookie", lambda db, account_id, client: "cookie")

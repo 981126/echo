@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
 from ..core.timeutil import now as _app_now
+from ..models.kv import Kv
 from ..models.platform import CreatorAccount, PlatformPost, PlatformPostStat
 from ..models.video_review import DouyinPostMetric
 from .douyin_account_policy import resolve_data_policy
@@ -22,6 +23,8 @@ from .platform.tikhub import make_client
 
 THROTTLE_SECONDS = 0.2
 RECENT_DAYS = 7
+EMPTY_MARKER_DAYS = 7  # 平台返回空趋势后 7 天内不重复请求，避免白烧额度
+EMPTY_MARKER_KEY = "trend_empty:{post_id}"
 
 
 def owner_account(db: Session, owner_id: int) -> CreatorAccount | None:
@@ -52,31 +55,62 @@ def _base_posts(db: Session, account: CreatorAccount):
     )
 
 
+def _empty_recently(db: Session, post_id: int) -> bool:
+    row = db.get(Kv, EMPTY_MARKER_KEY.format(post_id=post_id))
+    if row is None:
+        return False
+    try:
+        marked = date.fromisoformat(str(row.value))
+    except ValueError:
+        return False
+    return (_app_now().date() - marked).days < EMPTY_MARKER_DAYS
+
+
+def _pending_ids(db: Session, account: CreatorAccount, *, scope: str = "missing") -> list[int]:
+    query = _base_posts(db, account)
+    if scope == "recent":
+        query = query.filter(PlatformPost.publish_time >= _app_now() - timedelta(days=RECENT_DAYS))
+    rows = query.order_by(PlatformPost.publish_time.desc().nulls_last(), PlatformPost.id.desc()).all()
+    return [int(row.id) for row in rows]
+
+
 def coverage(db: Session, account: CreatorAccount) -> dict:
-    """待补数量：有 5 秒完播的作品数 vs 已有曲线的作品数。"""
-    all_posts = db.query(PlatformPost).filter(
-        PlatformPost.account_id == account.id,
-        PlatformPost.platform == "douyin",
-        _has_metric(db, with_trend=False),
+    """待补数量：unsupported=平台近期明确返回空、7 天内不再重试的作品。"""
+    total = (
+        db.query(PlatformPost)
+        .filter(
+            PlatformPost.account_id == account.id,
+            PlatformPost.platform == "douyin",
+            _has_metric(db, with_trend=False),
+        )
+        .count()
     )
-    pending_posts = _base_posts(db, account)
-    total = all_posts.count()
-    pending = pending_posts.count()
-    return {"total": total, "covered": max(0, total - pending), "pending": pending}
+    pending_all = _pending_ids(db, account)
+    unsupported = sum(1 for post_id in pending_all if _empty_recently(db, post_id))
+    return {
+        "total": total,
+        "covered": max(0, total - len(pending_all)),
+        "pending": max(0, len(pending_all) - unsupported),
+        "unsupported": unsupported,
+    }
 
 
 def plan_post_ids(
     db: Session, account: CreatorAccount, *, scope: str = "missing", limit: int = 300
 ) -> list[int]:
-    query = _base_posts(db, account)
-    if scope == "recent":
-        query = query.filter(PlatformPost.publish_time >= _app_now() - timedelta(days=RECENT_DAYS))
-    rows = (
-        query.order_by(PlatformPost.publish_time.desc().nulls_last(), PlatformPost.id.desc())
-        .limit(max(1, min(int(limit), 1000)))
-        .all()
-    )
-    return [int(row.id) for row in rows]
+    ids = [post_id for post_id in _pending_ids(db, account, scope=scope) if not _empty_recently(db, post_id)]
+    return ids[: max(1, min(int(limit), 1000))]
+
+
+def _mark_empty(db: Session, post_id: int) -> None:
+    key = EMPTY_MARKER_KEY.format(post_id=post_id)
+    row = db.get(Kv, key)
+    value = _app_now().date().isoformat()
+    if row is None:
+        db.add(Kv(key=key, value=value))
+    else:
+        row.value = value
+    db.commit()
 
 
 def _save_trend(db: Session, post: PlatformPost, current: list, similar: list) -> None:
@@ -140,7 +174,15 @@ def run_backfill(db: Session, payload: dict, update=None) -> dict:
                 )
                 current, similar = _trend(raw)
                 if not current:
-                    raise RuntimeError("接口未返回观看趋势")
+                    _mark_empty(db, post.id)
+                    failures.append(
+                        {"post_id": post.id, "title": (post.title or "")[:60], "error": "平台未提供观看趋势", "empty": True}
+                    )
+                    if update is not None and (index % 5 == 0 or index == total):
+                        update(int(index / total * 100), f"补齐留存曲线 {index}/{total}")
+                    if index < total:
+                        time.sleep(THROTTLE_SECONDS)
+                    continue
                 _save_trend(db, post, current, similar)
                 _charge_requests(db, client, before)
                 ok += 1
@@ -150,16 +192,32 @@ def run_backfill(db: Session, payload: dict, update=None) -> dict:
             except Exception as exc:  # noqa: BLE001 单条失败不中断整批
                 db.rollback()
                 failures.append(
-                    {"post_id": post.id, "title": (post.title or "")[:60], "error": str(exc)[:120]}
+                    {"post_id": post.id, "title": (post.title or "")[:60], "error": str(exc)[:120], "empty": False}
                 )
         if update is not None and (index % 5 == 0 or index == total):
             update(int(index / total * 100), f"补齐留存曲线 {index}/{total}")
         if index < total:
             time.sleep(THROTTLE_SECONDS)
 
-    if ok == 0 and failures:
-        raise RuntimeError(f"留存曲线补齐全部失败：{failures[0]['error']}")
-    message = f"成功 {ok}、失败 {len(failures)}"
-    if failures:
-        message += "（" + "；".join(f"{item['title'] or item['post_id']}：{item['error']}" for item in failures[:5]) + "）"
-    return {"ok": ok, "failed": len(failures), "message": message, "failures": failures[:5]}
+    empty = [item for item in failures if item.get("empty")]
+    real = [item for item in failures if not item.get("empty")]
+    if ok == 0 and real:
+        raise RuntimeError(f"留存曲线补齐全部失败：{real[0]['error']}")
+    if ok == 0 and not real:
+        return {
+            "ok": 0,
+            "failed": 0,
+            "unsupported": len(empty),
+            "message": f"平台未提供 {len(empty)} 条作品的观看趋势，已标记 7 天内不重复请求",
+            "failures": [],
+        }
+    message = f"成功 {ok}、平台无趋势 {len(empty)}、失败 {len(real)}"
+    if real:
+        message += "（" + "；".join(f"{item['title'] or item['post_id']}：{item['error']}" for item in real[:5]) + "）"
+    return {
+        "ok": ok,
+        "failed": len(real),
+        "unsupported": len(empty),
+        "message": message,
+        "failures": real[:5],
+    }
