@@ -306,7 +306,10 @@ const MaterialCardBase = forwardRef<HTMLDivElement, MaterialCardProps>(function 
             </span>
           ))}
           {item.tags.length > 3 && <span className="text-xs md:text-[10px] text-muted-foreground">+{item.tags.length - 3}</span>}
-          <span className="ml-auto whitespace-nowrap text-xs md:text-[11px] text-muted-foreground">{fmtDate(item.date)}</span>
+        </div>
+        {/* R-269：发布时间单独一行、靠右 */}
+        <div className="mt-1 flex justify-end">
+          <span className="whitespace-nowrap text-xs md:text-[11px] text-muted-foreground">{fmtDate(item.date)}</span>
         </div>
       </div>
 
