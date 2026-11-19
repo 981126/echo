@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { BarChart3, CircleAlert, Info, Loader2, RefreshCw, Users } from 'lucide-react'
+import { BarChart3, CircleAlert, Info, LineChart, Loader2, RefreshCw, Users } from 'lucide-react'
 import { apiJson } from '@/api/client'
 import { waitTaskResult } from '@/api/task'
 import { useTaskScope } from '@/hooks/use-task-scope'
@@ -105,6 +105,9 @@ function AccountOverview({
   dataVersion,
   busy,
   onRefresh,
+  backfillBusy,
+  backfillPending,
+  onBackfill,
   periodDays,
   onPeriodChange,
   metricKey,
@@ -114,6 +117,9 @@ function AccountOverview({
   dataVersion: number
   busy: boolean
   onRefresh: () => void
+  backfillBusy: boolean
+  backfillPending: number | null
+  onBackfill: () => void
   periodDays: PeriodDays
   onPeriodChange: (days: PeriodDays) => void
   metricKey: string
@@ -151,10 +157,27 @@ function AccountOverview({
               ) : null}
             </div>
           </div>
-          <Button variant="outline" size="sm" disabled={busy} onClick={onRefresh}>
-            {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-            {busy ? '更新中…' : '更新数据'}
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* R-265：补齐历史留存曲线（每条 1 次 TikHub 请求），待补 0 时置灰 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={backfillBusy || !backfillPending}
+                  onClick={onBackfill}
+                >
+                  {backfillBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <LineChart className="mr-1.5 h-3.5 w-3.5" />}
+                  {backfillBusy ? '补齐中…' : backfillPending ? `补齐留存曲线 · 待补 ${backfillPending} 条` : '留存曲线已补齐'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>给还没有逐秒观看趋势的作品补拉曲线，之后复盘才能定位「第几秒掉」</TooltipContent>
+            </Tooltip>
+            <Button variant="outline" size="sm" disabled={busy} onClick={onRefresh}>
+              {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+              {busy ? '更新中…' : '更新数据'}
+            </Button>
+          </div>
       </header>
 
       <div className="space-y-2 p-3.5">
@@ -358,6 +381,7 @@ export default function DashboardPage() {
   const [morePages, setMorePages] = useState<{ items: WorkItem[]; hasMore: boolean }>({ items: [], hasMore: false })
   const [loadingMore, setLoadingMore] = useState(false)
   const [overviewRunning, setOverviewRunning] = useState(false)
+  const [backfillRunning, setBackfillRunning] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
   const [postRunningId, setPostRunningId] = useState<number | null>(null)
   const [transcribing, setTranscribing] = useState(false)
@@ -371,6 +395,11 @@ export default function DashboardPage() {
     placeholderData: keepPreviousData,
     refetchInterval: (query) => (query.state.data?.updating_task_id ? 2500 : false)
   })
+  const coverageQ = useQuery({
+    queryKey: ['dashboard', 'retention-coverage'],
+    queryFn: () => apiJson<{ total: number; covered: number; pending: number }>('/api/douyin-dashboard/retention/coverage')
+  })
+
   const worksQ = useQuery({
     queryKey: ['dashboard', 'works'],
     queryFn: () => apiJson<WorksPage>('/api/douyin-dashboard/works?limit=20&offset=0')
@@ -424,6 +453,28 @@ export default function DashboardPage() {
     },
     [invalidateOverview]
   )
+
+  const backfillRetention = useCallback(async () => {
+    setBackfillRunning(true)
+    try {
+      const response = await apiJson<{ task_id: number | null; pending: number }>('/api/douyin-dashboard/retention/backfill', {
+        method: 'POST',
+        body: JSON.stringify({ scope: 'missing', limit: 300 })
+      })
+      if (!response.task_id) {
+        toast.success('留存曲线已全部补齐')
+        void coverageQ.refetch()
+        return
+      }
+      await waitTaskResult(response.task_id)
+      toast.success(`留存曲线补齐完成，待补 ${response.pending} 条`)
+      void coverageQ.refetch()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '留存曲线补齐失败')
+    } finally {
+      setBackfillRunning(false)
+    }
+  }, [coverageQ])
 
   const transcribePost = useCallback(
     async (postId: number) => {
@@ -592,6 +643,9 @@ export default function DashboardPage() {
             dataVersion={overviewQ.dataUpdatedAt}
             busy={overviewBusy}
             onRefresh={() => void refreshOverview()}
+            backfillBusy={backfillRunning}
+            backfillPending={coverageQ.data?.pending ?? null}
+            onBackfill={() => void backfillRetention()}
             periodDays={periodDays}
             onPeriodChange={setPeriodDays}
             metricKey={metricKey}

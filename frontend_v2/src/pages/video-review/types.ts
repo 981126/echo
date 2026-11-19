@@ -92,9 +92,31 @@ export interface NewTopic {
   target_metric?: string
 }
 
+/** R-265：留存流失点（与句子对齐；无时间轴时 sentence 为空）。 */
+export interface RetentionDrop {
+  start_seconds: number
+  end_seconds: number
+  time_label: string
+  drop: number
+  drop_ratio: number
+  category: '' | 'hook' | 'body' | 'tail'
+  confidence: 'sentence' | 'window' | 'none'
+  sentence?: { text: string; start_ms: number; end_ms: number } | null
+}
+
+/** R-265：复盘分诊（时长 + 推荐流量占比）。 */
+export interface RetentionTriage {
+  duration_seconds?: number | null
+  duration_bucket?: string
+  duration_known?: boolean
+  traffic?: { recommended_ratio?: number | null; level?: 'normal' | 'limited' | 'unknown' }
+  notes?: string[]
+}
+
 export interface Charts {
   comparison: Metric[]
-  retention: { points: Array<{ time_seconds: number; time_label: string; current?: number; similar_author?: number }>; reliable: boolean; plays?: number; has_timed_transcript: boolean }
+  retention: { points: Array<{ time_seconds: number; time_label: string; current?: number; similar_author?: number }>; reliable: boolean; plays?: number; has_timed_transcript: boolean; timeline_precision?: string; drops?: RetentionDrop[]; drops_reason?: string }
+  triage?: RetentionTriage | null
   traffic: Array<{ name: string; value: number; ratio: number }>
   search_terms: Array<{ term?: string; keyword?: string; value: number }>
   comment_questions: Array<{ group_title: string; commenter_count: number; likes: number; comments?: Array<{ id: number; text: string; likes: number }> }>
@@ -118,6 +140,8 @@ export interface Review {
   id: number
   status: string
   error?: string
+  rule_version?: string
+  rule_version_stale?: boolean
   post: VideoItem
   data_time: string
   summary: string

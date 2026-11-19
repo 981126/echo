@@ -94,21 +94,36 @@ def _metric_evidence(key: str, item: dict) -> dict:
 
 
 def _retention_drops(comparison: dict) -> list[dict]:
-    """观看趋势里下降最大的前 3 个点；趋势不可靠时不给（避免拿噪声当证据）。"""
+    """R-265：使用现场景对齐好的掉点（最多 3 条）；趋势不可靠时不给（避免拿噪声当证据）。"""
     retention = (comparison.get("charts") or {}).get("retention") or {}
     if not retention.get("reliable"):
         return []
-    points = [
-        point
-        for point in retention.get("points") or []
-        if isinstance(point, dict) and isinstance(point.get("current"), (int, float))
-    ]
     drops: list[dict] = []
-    for before, after in zip(points, points[1:]):
-        drop = float(before["current"]) - float(after["current"])
-        if drop > 0:
-            drops.append({"time": str(after.get("time_label") or ""), "drop": round(drop, 4)})
-    return sorted(drops, key=lambda item: item["drop"], reverse=True)[:3]
+    for item in retention.get("drops") or []:
+        if not isinstance(item, dict):
+            continue
+        raw_sentence = item.get("sentence")
+        sentence: dict = raw_sentence if isinstance(raw_sentence, dict) else {}
+        drops.append(
+            {
+                "time": str(item.get("time_label") or ""),
+                "drop": round(float(item.get("drop") or 0), 4),
+                "sentence": str(sentence.get("text") or ""),
+            }
+        )
+    return drops[:3]
+
+
+def _drop_sentences(comparison: dict) -> list[str]:
+    """本复盘已对齐的句子原文（引用校验只额外放宽这些，不放大到任意文本）。"""
+    texts: list[str] = []
+    for item in ((comparison.get("charts") or {}).get("retention") or {}).get("drops") or []:
+        if not isinstance(item, dict):
+            continue
+        sentence = item.get("sentence")
+        if isinstance(sentence, dict) and sentence.get("text"):
+            texts.append(str(sentence["text"]))
+    return texts
 
 
 def _comment_texts(comments: list[PlatformPostComment]) -> list[str]:
@@ -188,6 +203,7 @@ def _valid_candidates(
     facts: dict[str, dict],
     transcript: str,
     comment_texts: list[str],
+    drop_sentences: list[str] | None = None,
 ) -> list[dict]:
     """校验 LLM 输出并补齐程序判定：维度/指标真实性、数字白名单、文案与评论子串、条数上限。"""
     allowed = _allowed_numbers(brief)
@@ -211,7 +227,11 @@ def _valid_candidates(
         quotes: list[str] = []
         for quote in candidate.get("content_quotes") or []:
             text = str(quote).strip()
-            if text and (text in (transcript or "") or any(text in item for item in comment_texts)):
+            if text and (
+                text in (transcript or "")
+                or any(text in item for item in comment_texts)
+                or text in (drop_sentences or [])
+            ):
                 quotes.append(text)
         if not metric_keys and not quotes:
             continue
@@ -348,6 +368,7 @@ def build_attribution(
         facts,
         transcript,
         _comment_texts(comments),
+        _drop_sentences(comparison),
     )
     if len(valid) >= 2:
         return valid[:MAX_FINDINGS], llm.used_model, ""

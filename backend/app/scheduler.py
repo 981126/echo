@@ -122,6 +122,25 @@ def _publish_backfill_job() -> None:
         db.close()
 
 
+def _retention_backfill_job() -> None:
+    """R-265 每日 09:10：补发布 7 天内且缺留存曲线的作品（无主博主/无账号时静默跳过）。"""
+    from .tasks import start_task
+    from .services.douyin_dashboard import prepare_retention_backfill
+    from .services.retention_backfill import run_backfill
+
+    db = SessionLocal()
+    try:
+        plan = prepare_retention_backfill(db, scope="recent", limit=100)
+        if not plan["post_ids"]:
+            return
+        start_task("retention_backfill", plan, run_backfill)
+    except Exception as exc:  # noqa: BLE001 定时触发没有 BackgroundTask，必须自己告警
+        db.rollback()
+        log.info("留存曲线增量补齐跳过：%s", str(exc)[:200])
+    finally:
+        db.close()
+
+
 def _weekly_ideas_job() -> None:
     """每周一 08:30：生成「本周灵感补给」并推送（R-188）。
 
@@ -235,6 +254,14 @@ def setup_scheduler() -> None:
         _weekly_ideas_job,
         CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=settings.tz),
         id="weekly_ideas",
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # R-265：每日 09:10 补发布 7 天内的留存曲线
+    _scheduler.add_job(
+        _retention_backfill_job,
+        CronTrigger(hour=9, minute=10, timezone=settings.tz),
+        id="retention_backfill",
         misfire_grace_time=3600,
         coalesce=True,
     )

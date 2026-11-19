@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     # ASR（R-108/R-264）：asr_mode = mock（开发/测试假转写）| aliyun | siliconflow | tencent | deepseek
     asr_mode: str = "mock"  # mock | aliyun | siliconflow | tencent | deepseek（.env 配置用哪家，重启生效；界面可覆盖）
     asr_poll_interval: int = 15  # 阿里云 FileTrans 结果轮询间隔（秒）
+    # R-265：补齐句子时间轴用的服务商（DeepSeek 无分句，默认用腾讯；只在复盘时按需调用）
+    timeline_asr_mode: str = "tencent"
     asr_poll_timeout: int = 3600  # 转写最长等待（秒），超时任务标记失败可重试
 
     # 阿里云 ASR（asr_mode=aliyun 时使用）

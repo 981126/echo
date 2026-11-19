@@ -18,7 +18,7 @@ from aliyunsdkcore.request import CommonRequest
 from ..config import get_settings
 from .aliyun_oss import AliyunOss
 from .media_tools import extract_audio_to_wav, needs_audio_extraction
-from .transcription import TranscriptionError
+from .transcription import TranscriptResult, TranscriptionError
 
 PRODUCT = "nls-filetrans"
 API_VERSION = "2018-08-17"
@@ -95,7 +95,10 @@ class AliyunFileTrans:
         return self._call("GetTaskResult", "GET", query_params={"TaskId": task_id})
 
     def transcribe_file(self, video_path: Path | str) -> str:
-        """抽音轨(视频) → 上传 OSS → 提交任务 → 轮询结果 → 返回文本。
+        return self.transcribe_detailed(video_path).text
+
+    def transcribe_detailed(self, video_path: Path | str) -> TranscriptResult:
+        """R-265：额外返回 `Result.Sentences` 的分句时间轴（毫秒）。
 
         只把音频传上云：视频先用 ffmpeg 抽成 16k 单声道 wav（几 MB），
         识别完成后删除 OSS 临时对象与本地临时 wav。
@@ -113,13 +116,23 @@ class AliyunFileTrans:
         try:
             file_url = oss.sign_url(key)
             task_id = self.submit_task(file_url)
-            return self._poll(task_id)
+            payload = self._poll_payload(task_id)
+            sentences = self._extract_sentences(payload)
+            return TranscriptResult(
+                text=self._extract_text(payload),
+                sentences=sentences,
+                source="aliyun",
+                precision="sentence" if sentences else "none",
+            )
         finally:
             oss.delete_object(key)
             if extracted is not None:
                 extracted.unlink(missing_ok=True)
 
     def _poll(self, task_id: str) -> str:
+        return self._extract_text(self._poll_payload(task_id))
+
+    def _poll_payload(self, task_id: str) -> dict:
         settings = self.settings
         interval = max(POLL_MIN_INTERVAL, int(getattr(settings, "asr_poll_interval", 0) or POLL_MIN_INTERVAL))
         timeout = max(60, int(getattr(settings, "asr_poll_timeout", 0) or 3600))
@@ -128,10 +141,9 @@ class AliyunFileTrans:
             data = self.get_result(task_id)
             status = str(data.get("StatusText") or "")
             if status in _DONE_OK:
-                text = self._extract_text(data)
-                if not text:
+                if not self._extract_text(data):
                     raise TranscriptionError("识别成功但结果为空")
-                return text
+                return data
             if status in _DONE_EMPTY:
                 raise TranscriptionError("识别结果为空（SUCCESS_WITH_NO_VALID_FRAGMENT）")
             if status not in _RUNNING:
@@ -141,6 +153,23 @@ class AliyunFileTrans:
                     "阿里云转写等待超时，可在素材详情稍后重试（任务可能仍在服务端处理）"
                 )
             time.sleep(interval)
+
+    @staticmethod
+    def _extract_sentences(result: dict) -> list[dict]:
+        """Result.Sentences → [{start_ms,end_ms,text}]；缺时间戳/文本的项跳过。"""
+        sentences: list[dict] = []
+        for item in ((result.get("Result") or {}).get("Sentences")) or []:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("Text") or "").strip()
+            begin = item.get("BeginTime")
+            end = item.get("EndTime")
+            if not text or not isinstance(begin, (int, float)) or not isinstance(end, (int, float)):
+                continue
+            if end <= begin:
+                continue
+            sentences.append({"start_ms": int(begin), "end_ms": int(end), "text": text})
+        return sentences
 
     @staticmethod
     def _extract_text(result: dict) -> str:

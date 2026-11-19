@@ -20,6 +20,8 @@ KIND_LABELS = {
     "diff_analysis": "草稿差异分析",
     "feedback_analysis": "反馈学习分析",
     "generate_draft": "AI 文案生成",
+    "author_assets": "作者内容资产整理",
+    "generation_feedback": "作者改稿学习",
     "platform_sync": "平台数据同步",
     "platform_sync_single": "素材数据同步",
     "platform_media": "素材媒体补齐",
@@ -31,7 +33,6 @@ KIND_LABELS = {
     "opportunity_clusters": "观众提问榜",
     "opportunity_weekly": "每周灵感包",
     "opportunity_gap": "缺口选题",
-    "draft_angles": "生成角度",
     "draft_suggest_meta": "生成标题封面标签",
     "hot_refresh": "抓取热点",
     "publish_backfill": "回填历史发布",
@@ -45,6 +46,7 @@ KIND_LABELS = {
     "peer_plays_backfill": "同行播放量补齐",  # R-240：从日更主链路移出的独立补采任务
     "douyin_dashboard_overview": "数据看板账号更新",
     "douyin_dashboard_post": "数据看板作品更新",
+    "retention_backfill": "留存曲线补齐",
 }
 
 
@@ -70,7 +72,7 @@ def target(kind: str, payload: dict | None = None, result=None) -> str:
     if kind in ("prompt_rule_optimize", "prompt_optimize"):
         return f"/prompts?key={payload.get('key', '')}" if payload.get("key") else "/prompts"
     if kind == "prompt_refresh_hint":
-        return "/prompts?key=generation"
+        return "/prompts?key=author_write"
     if kind == "daily_pipeline":
         return "/home"
     if kind == "diff_analysis":
@@ -87,15 +89,13 @@ def target(kind: str, payload: dict | None = None, result=None) -> str:
         return "/benchmark"
     if kind in ("opportunity_clusters", "opportunity_weekly", "opportunity_gap", "hot_refresh", "publish_backfill"):
         return "/home"
-    if kind == "draft_angles":
-        return "/home"
     if kind == "draft_suggest_meta":
         return f"/drafts?id={payload.get('draft_id', '')}"
     if kind == "model_selfcheck":
         return "/prompts"
     if kind == "douyin_review_analyze":
         return f"/video-review?post={payload.get('post_id', '')}"
-    if kind in ("douyin_dashboard_overview", "douyin_dashboard_post"):
+    if kind in ("douyin_dashboard_overview", "douyin_dashboard_post", "retention_backfill"):
         return "/dashboard"
     if kind == "douyin_review_references":
         return "/video-review"

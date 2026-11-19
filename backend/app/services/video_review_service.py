@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 
 from sqlalchemy.orm import Session
 
@@ -19,10 +18,12 @@ from .douyin_references import refresh_references
 from .video_review_comparison import build_comparison, dumps, loads, low_fan_references, peer_references
 from .video_review_attribution import build_attribution
 from .video_review_advices import build_metric_advices
-from .video_review_rules import build_findings, comment_questions, homepage_analysis, summary_for
+from .video_review_rules import apply_triage, build_findings, comment_questions, homepage_analysis, summary_for
+from .video_review_timeline import align_drops
 from .video_review_topics import recommend_topics
+from .transcript_timeline import ensure_sentences
 
-RULE_VERSION = "1"
+RULE_VERSION = "2"  # R-265：掉点对齐 + 分诊；旧复盘按版本提示重跑
 
 
 def current_owner(db: Session) -> Creator:
@@ -59,6 +60,34 @@ def _transcript(db: Session, post: PlatformPost) -> str:
     return (video.transcript.corrected_text or video.transcript.transcript_text or "").strip()
 
 
+def _transcript_row(db: Session, post: PlatformPost):
+    """返回该作品本地视频的转写行（含 sentences/timeline_precision）。"""
+    if not post.local_video_id:
+        return None
+    video = db.get(Video, post.local_video_id)
+    return video.transcript if video is not None else None
+
+
+def _apply_timeline(comparison: dict, transcript) -> None:
+    """把曲线掉点与句子对齐结果写进 charts.retention（R-265）。"""
+    retention = comparison["charts"]["retention"]
+    sentences = loads(transcript.sentences, []) if transcript is not None else []
+    precision = (transcript.timeline_precision if transcript is not None else "none") or "none"
+    drops, reason = align_drops(
+        retention.get("points") or [],
+        sentences,
+        precision,
+        retention.get("plays"),
+        bool(retention.get("reliable")),
+        comparison.get("duration_seconds"),
+    )
+    retention["drops"] = drops
+    retention["timeline_precision"] = precision
+    retention["has_timed_transcript"] = precision == "sentence" and bool(sentences)
+    if reason != "ok":
+        retention["drops_reason"] = reason
+
+
 def fingerprint_for(db: Session, post: PlatformPost) -> str:
     from ..models.persona import PersonaTag
     from ..models.video_review import DouyinPostMetric
@@ -87,16 +116,9 @@ def create_review(db: Session, owner: Creator, post: PlatformPost, task_id: int 
 
 
 def _post_out(post: PlatformPost) -> dict:
-    duration = None
-    try:
-        raw = json.loads(post.raw or "{}")
-    except (TypeError, ValueError):
-        raw = {}
-    if isinstance(raw, dict):
-        # 抖音 app/v3 raw.duration 单位为毫秒（如 147469 = 147 秒）
-        value = raw.get("duration")
-        if isinstance(value, (int, float)) and value:
-            duration = round(value / 1000) if value > 1000 else int(value)
+    from .post_meta import parse_duration_seconds
+
+    duration = post.duration_seconds or parse_duration_seconds(post.raw)
     return {
         "post_id": post.id,
         "title": post.title,
@@ -247,8 +269,17 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
                     media_info = submit_media_task(db, post_id=post.id)
             except Exception as exc:  # noqa: BLE001 媒体补齐失败不影响复盘
                 media_info = {"status": "failed", "reason": str(exc)[:200]}
-        update(40, "比较相近视频")
+        update(40, "补齐句子时间轴")
+        timeline_warning = ""
+        if post.local_video_id:
+            video = db.get(Video, post.local_video_id)
+            if video is not None:
+                ok, reason = ensure_sentences(db, video)
+                if not ok:
+                    timeline_warning = f"本条没有句子时间轴，只能指出时间点（{reason}）"
+        update(50, "比较相近视频")
         comparison = build_comparison(db, post)
+        _apply_timeline(comparison, _transcript_row(db, post))
         comments = db.query(PlatformPostComment).filter_by(post_id=post.id).order_by(PlatformPostComment.likes.desc()).all()
         transcript = _transcript(db, post)
         findings = build_findings(comparison, transcript, comments, comparison["charts"]["retention"]["points"])
@@ -267,6 +298,7 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         findings, model_name, llm_warning = build_attribution(
             db, comparison, transcript, comments, questions, findings, post_title=post.title or ""
         )
+        findings = apply_triage(findings, comparison.get("charts", {}).get("triage"))
         recommendations = recommend_topics(db, owner, post, comparison, comments, peer_items, low_items)
         for index, finding in enumerate(findings):
             finding["comparison_post_ids"] = comparison["comparison"]["post_ids"]
@@ -314,6 +346,12 @@ def run_analysis(db: Session, payload: dict, update) -> dict:
         warnings = comparison["warnings"] + ([llm_warning] if llm_warning else [])
         if advice_warning:
             warnings.append(advice_warning)
+        if timeline_warning:
+            warnings.append(timeline_warning)
+        notes = (comparison.get("charts", {}).get("triage") or {}).get("notes") or []
+        for note in notes:
+            if note not in warnings:
+                warnings.append(note)
         if refresh_source == "public":
             warnings.append("当前账号未启用创作者数据，播放量/完播等私有指标暂缺，已使用公开数据")
         if not transcript:
@@ -422,7 +460,15 @@ def _topic_out(row: VideoTopicRecommendation) -> dict:
 
 _EMPTY_CHARTS: dict = {
     "comparison": [],
-    "retention": {"points": [], "reliable": False, "plays": None, "has_timed_transcript": False},
+    "retention": {
+        "points": [],
+        "reliable": False,
+        "plays": None,
+        "has_timed_transcript": False,
+        "timeline_precision": "none",
+        "drops": [],
+    },
+    "triage": None,
     "traffic": [],
     "search_terms": [],
     "comment_questions": [],
@@ -437,12 +483,16 @@ def review_out(db: Session, review: VideoReview) -> dict:
     topics = db.query(VideoTopicRecommendation).filter_by(review_id=review.id).order_by(VideoTopicRecommendation.id).all()
     # 失败/历史复盘可能没有图表快照，也必须返回完整 charts 结构，避免前端 undefined.filter 崩溃
     charts = {**_EMPTY_CHARTS, **(snapshot.get("charts") or {})}
+    # 历史快照可能缺 R-265 字段：按空态补齐，避免前端 undefined
+    charts["retention"] = {**_EMPTY_CHARTS["retention"], **(charts.get("retention") or {})}
     # R-247：改进计划已删除，历史快照里可能残留 plan 键，读取侧统一去掉（不清理历史 JSON）
     charts.pop("plan", None)
     return {
         "id": review.id,
         "status": review.status,
         "error": review.error,
+        "rule_version": review.rule_version or "",
+        "rule_version_stale": (review.rule_version or "") != RULE_VERSION,
         "post": _post_out(post) if post else None,
         "data_time": review.created_at,
         "summary": review.summary,

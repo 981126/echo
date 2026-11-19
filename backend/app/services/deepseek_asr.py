@@ -24,7 +24,7 @@ import httpx
 from ..config import get_settings
 from ..core.log import get_logger
 from .media_tools import audio_rms_frames, cut_wav_segments, extract_audio_to_wav, probe_duration_seconds
-from .transcription import TranscriptionError
+from .transcription import TranscriptResult, TranscriptionError
 
 log = get_logger("deepseek_asr")
 
@@ -145,6 +145,10 @@ class DeepSeekAsr:
         self.settings = settings or get_settings()
 
     def transcribe_file(self, video_path: Path | str) -> str:
+        return self.transcribe_detailed(video_path).text
+
+    def transcribe_detailed(self, video_path: Path | str) -> TranscriptResult:
+        """R-265：额外返回分片窗口（DeepSeek 无分句，precision=chunk）。"""
         path = Path(video_path)
         if not path.is_file():
             raise TranscriptionError(f"视频不存在: {path}")
@@ -195,7 +199,14 @@ class DeepSeekAsr:
             text = _join_texts(texts)
             if not text:
                 raise TranscriptionError("识别结果为空（DeepSeek：未识别到有效语音）")
-            return text
+            sentences = [
+                {"start_ms": int(round(start * 1000)), "end_ms": int(round(end * 1000)), "text": piece}
+                for (start, end, _source), piece in zip(cuts, texts, strict=True)
+                if piece.strip()
+            ]
+            return TranscriptResult(
+                text=text, sentences=sentences, source="deepseek", precision="chunk"
+            )
         finally:
             for segment in segments:
                 segment.unlink(missing_ok=True)

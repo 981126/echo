@@ -224,6 +224,16 @@ def _brief(comparison: dict, transcript: str, comments_questions: list[dict], po
         "video_title": post_title,
         # 允许动作里使用的时间点数字（前 3 秒/每 15~30 秒/结尾 10 秒），不视为编造数字
         "time_hints": "前 3 秒 / 每 15~30 秒 / 结尾 10 秒",
+        # R-265：已对齐的流失点（含原句），建议可据此点名具体时间与台词
+        "retention_drops": [
+            {
+                "time": str(item.get("time_label") or ""),
+                "drop": round(float(item.get("drop") or 0), 4),
+                "sentence": str((item.get("sentence") or {}).get("text") or ""),
+            }
+            for item in ((comparison.get("charts") or {}).get("retention") or {}).get("drops") or []
+            if isinstance(item, dict)
+        ],
         "transcript": (transcript or "")[:3000],
         "transcript_chars": len(re.sub(r"\s+", "", transcript or "")),
         "metrics": metrics,
@@ -243,6 +253,11 @@ def _valid_candidates(candidates: list, brief: dict) -> list[dict]:
     allowed = _allowed_numbers(brief)
     by_dimension = {str(spec["dimension"]): spec for spec in ADVICE_DIMENSIONS}
     metrics = {str(item["dimension"]): item for item in brief.get("metrics") or []}
+    drop_sentences = {
+        str(item.get("sentence") or "")
+        for item in brief.get("retention_drops") or []
+        if isinstance(item, dict) and item.get("sentence")
+    }
     out: list[dict] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -260,7 +275,7 @@ def _valid_candidates(candidates: list, brief: dict) -> list[dict]:
         text = json.dumps(candidate, ensure_ascii=False)
         if any(number not in allowed for number in re.findall(r"\d+(?:\.\d+)?", text)):
             continue
-        valid_refs = [ref for ref in refs if ref in transcript]
+        valid_refs = [ref for ref in refs if ref in transcript or ref in drop_sentences]
         if not valid_refs:
             continue
         gap = str(metrics[dimension].get("gap_text") or "")

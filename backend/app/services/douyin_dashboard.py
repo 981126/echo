@@ -1550,3 +1550,30 @@ def post_worker(db: Session, payload: dict, update) -> dict:
         "comments_skipped": bool(result.get("comments_skipped")),
         "media": result.get("media"),
     }
+
+
+def retention_coverage(db: Session) -> dict:
+    """R-265：留存曲线覆盖（总数/已覆盖/待补），供看板按钮角标。"""
+    ctx = _resolve(db)
+    if ctx["account"] is None:
+        raise ValueError(ctx["blocked_reason"] or "请先绑定当前主博主的抖音账号")
+    from .retention_backfill import coverage
+
+    return coverage(db, ctx["account"])
+
+
+def prepare_retention_backfill(db: Session, scope: str = "missing", limit: int = 300) -> dict:
+    """R-265：补齐计划（只读，不发请求）；真正计费在后台任务里。"""
+    ctx = _resolve(db)
+    if ctx["account"] is None:
+        raise ValueError(ctx["blocked_reason"] or "请先绑定当前主博主的抖音账号")
+    from .retention_backfill import plan_post_ids
+
+    normalized = "recent" if scope == "recent" else "missing"
+    ids = plan_post_ids(db, ctx["account"], scope=normalized, limit=limit)
+    return {
+        "account_id": ctx["account"].id,
+        "post_ids": ids,
+        "scope": normalized,
+        "limit": limit,
+    }

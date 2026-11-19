@@ -38,6 +38,27 @@ describe('视频复盘图表', () => {
     expect(screen.getByRole('img', { name: '观看趋势折线图' })).toBeInTheDocument()
     expect(screen.getByText('00:00')).toBeInTheDocument()
     expect(screen.getByText('00:10')).toBeInTheDocument()
-    expect(container.textContent).toContain('下降30.0个百分点')
+    expect(container.textContent).toContain('↓30.0')
+  })
+
+  it('有对齐好的流失点时标出全部掉点', () => {
+    const { container } = render(<WatchTrendChart data={{
+      reliable: true,
+      plays: 3200,
+      has_timed_transcript: true,
+      timeline_precision: 'sentence',
+      drops: [
+        { start_seconds: 4, end_seconds: 6, time_label: '00:04–00:06', drop: 0.22, drop_ratio: 0.3, category: 'hook', confidence: 'sentence', sentence: { text: '很多人以为简历改得越漂亮越好', start_ms: 4000, end_ms: 6000 } },
+        { start_seconds: 40, end_seconds: 42, time_label: '00:40–00:42', drop: 0.12, drop_ratio: 0.25, category: 'body', confidence: 'window', sentence: null }
+      ],
+      points: [
+        { time_seconds: 0, time_label: '00:00', current: 1 },
+        { time_seconds: 20, time_label: '00:20', current: 0.6 },
+        { time_seconds: 40, time_label: '00:40', current: 0.4 },
+        { time_seconds: 60, time_label: '00:60', current: 0.3 }
+      ]
+    }} />)
+    expect(container.textContent).toContain('↓22.0')
+    expect(container.textContent).toContain('↓12.0')
   })
 })

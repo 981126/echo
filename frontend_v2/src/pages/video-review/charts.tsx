@@ -120,17 +120,44 @@ export function WatchTrendChart({ data }: { data: Charts['retention'] }) {
     return [left + (p.time_seconds / maxTime) * (width - left - right), top + (1 - (typeof value === 'number' ? value : 0)) * (height - top - bottom)] as const
   }
   const path = (key: 'current' | 'similar_author') => points.filter((p) => typeof p[key] === 'number').map((p, i) => `${i ? 'L' : 'M'}${xy(p, key).join(',')}`).join(' ')
-  const drops = points.slice(1).map((p, i) => ({ index: i + 1, value: (points[i].current ?? 0) - (p.current ?? 0) }))
-  const biggest = drops.reduce((a, b) => (b.value > a.value ? b : a), { index: 0, value: 0 })
+  // R-265：优先标出后端对齐好的流失点（最多 3 个）；历史复盘没有 drops 时退回「最大掉点」
+  const markers = (() => {
+    const aligned = (data.drops ?? []).filter((drop) => drop.drop >= 0.05)
+    if (aligned.length) {
+      return aligned.map((drop) => {
+        const point = points.reduce((best, p) => (Math.abs(p.time_seconds - drop.end_seconds) < Math.abs(best.time_seconds - drop.end_seconds) ? p : best), points[0])
+        return {
+          key: drop.time_label,
+          x: xy(point, 'current')[0],
+          y: xy(point, 'current')[1],
+          text: `↓${(drop.drop * 100).toFixed(1)}`,
+          tip: `${drop.time_label} 下降 ${(drop.drop * 100).toFixed(1)} 个百分点${drop.sentence?.text ? `：${drop.sentence.text.slice(0, 40)}` : ''}`
+        }
+      })
+    }
+    const deltas = points.slice(1).map((p, i) => ({ index: i + 1, value: (points[i].current ?? 0) - (p.current ?? 0) }))
+    const biggest = deltas.reduce((a, b) => (b.value > a.value ? b : a), { index: 0, value: 0 })
+    if (biggest.value < 0.05) return []
+    const point = points[biggest.index]
+    return [{ key: 'top', x: xy(point, 'current')[0], y: xy(point, 'current')[1], text: `↓${(biggest.value * 100).toFixed(1)}`, tip: `${point.time_label} 下降 ${(biggest.value * 100).toFixed(1)} 个百分点` }]
+  })()
+  const conclusion = data.reliable
+    ? `实线是当前视频，虚线是平台同类作者参考。${markers.length ? '已标出这 3 处最明显的流失点。' : '异常下降点会直接标出。'}`
+    : '播放量较少，趋势仅供参考。'
   return (
-    <ChartFrame title="观众在哪些时间点继续看或离开？" conclusion={data.reliable ? '实线是当前视频，虚线是平台同类作者参考。异常下降点会直接标出。' : '播放量较少，趋势仅供参考。'} headers={['时间', '当前视频', '同类参考']} rows={points.map((p) => [p.time_label, formatMetric(p.current, 'ratio'), formatMetric(p.similar_author, 'ratio')])}>
+    <ChartFrame title="观众在哪些时间点继续看或离开？" conclusion={conclusion} headers={['时间', '当前视频', '同类参考']} rows={points.map((p) => [p.time_label, formatMetric(p.current, 'ratio'), formatMetric(p.similar_author, 'ratio')])}>
       <div className="overflow-x-auto">
         <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full md:min-w-[560px]" role="img" aria-label="观看趋势折线图">
           <title>观看趋势：当前视频与同类作者参考</title><desc>横轴为视频时间，纵轴为留存比例</desc>
           {[0, 0.25, 0.5, 0.75, 1].map((v) => <g key={v}><line x1={left} x2={width - right} y1={top + (1 - v) * (height - top - bottom)} y2={top + (1 - v) * (height - top - bottom)} stroke="var(--border)" /><text x={4} y={top + (1 - v) * (height - top - bottom) + 4} fill="var(--muted-foreground)" fontSize="10">{v * 100}%</text></g>)}
           <motion.path initial={{ opacity: 0.7 }} animate={{ opacity: 1 }} d={path('current')} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinejoin="round" />
           <path d={path('similar_author')} fill="none" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="6 5" />
-          {points.map((p, i) => <g key={i}><circle cx={xy(p, 'current')[0]} cy={xy(p, 'current')[1]} r={i === biggest.index && biggest.value >= 0.05 ? 5 : 2.5} fill={i === biggest.index && biggest.value >= 0.05 ? 'var(--warning)' : 'var(--accent)'}><title>{`${p.time_label}：当前${formatMetric(p.current, 'ratio')}，同类${formatMetric(p.similar_author, 'ratio')}`}</title></circle>{i === biggest.index && biggest.value >= 0.05 && <text x={Math.min(width - 130, xy(p, 'current')[0] + 8)} y={Math.max(14, xy(p, 'current')[1] - 10)} fill="var(--warning)" fontSize="11">下降{(biggest.value * 100).toFixed(1)}个百分点</text>}</g>)}
+          {points.map((p, i) => <circle key={i} cx={xy(p, 'current')[0]} cy={xy(p, 'current')[1]} r={2.5} fill="var(--accent)"><title>{`${p.time_label}：当前${formatMetric(p.current, 'ratio')}，同类${formatMetric(p.similar_author, 'ratio')}`}</title></circle>)}
+          {markers.map((marker) => <g key={marker.key}>
+            <line x1={marker.x} x2={marker.x} y1={top} y2={height - bottom} stroke="var(--warning)" strokeWidth="1" strokeDasharray="4 4" opacity={0.5} />
+            <circle cx={marker.x} cy={marker.y} r={5} fill="var(--warning)"><title>{marker.tip}</title></circle>
+            <text x={Math.min(width - 130, marker.x + 8)} y={Math.max(14, marker.y - 10)} fill="var(--warning)" fontSize="11">{marker.text}</text>
+          </g>)}
           {points.map((p, i) => (i === 0 || i === points.length - 1 || i === Math.floor(points.length / 2)) && <text key={`t${i}`} x={xy(p, 'current')[0] - 12} y={height - 8} fill="var(--muted-foreground)" fontSize="10">{p.time_label}</text>)}
         </svg>
       </div>

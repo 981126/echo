@@ -2,9 +2,26 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import get_settings
+
+TRANSCRIPT_PRECISION = ("sentence", "chunk", "none")
+
+
+@dataclass(frozen=True)
+class TranscriptResult:
+    """转写结果（R-265）：正文 + 分句时间轴 + 精度。
+
+    `sentences` 为 `[{"start_ms": int, "end_ms": int, "text": str}]`；
+    `precision=sentence` 才能把留存掉点指到具体句子，`chunk` 只到 ASR 分片窗口。
+    """
+
+    text: str
+    sentences: list[dict] = field(default_factory=list)
+    source: str = ""
+    precision: str = "none"
 
 
 class TranscriptionError(RuntimeError):
@@ -24,29 +41,42 @@ class Transcriber:
         self.model = model
 
     def transcribe(self, video_path: Path | str) -> str:
+        return self.transcribe_detailed(video_path).text
+
+    def transcribe_detailed(self, video_path: Path | str) -> TranscriptResult:
+        """转写并返回分句时间轴（R-265）；不支持分句的服务商 precision=none。"""
         path = Path(video_path)
         if not path.exists():
             raise TranscriptionError(f"视频不存在: {path}")
         mode = (self.mode or self.settings.asr_mode or "mock").strip().lower()
         if mode == "mock":
-            return self._mock_transcript(path)
+            return TranscriptResult(self._mock_transcript(path), [], "mock", "none")
         if mode == "aliyun":
             from .aliyun_filetrans import AliyunFileTrans  # 延迟导入，避免循环
 
-            return AliyunFileTrans(settings=self.settings).transcribe_file(path)
+            return self._detailed(AliyunFileTrans(settings=self.settings), path, "aliyun")
         if mode == "siliconflow":
             from .siliconflow_asr import SiliconFlowASR  # 延迟导入，避免循环
 
-            return SiliconFlowASR(settings=self.settings, model=self.model).transcribe_file(path)
+            provider = SiliconFlowASR(settings=self.settings, model=self.model)
+            return self._detailed(provider, path, "siliconflow")
         if mode == "tencent":
             from .tencent_asr import TencentAsr  # 延迟导入，避免循环
 
-            return TencentAsr(settings=self.settings, model=self.model).transcribe_file(path)
+            return self._detailed(TencentAsr(settings=self.settings, model=self.model), path, "tencent")
         if mode == "deepseek":
             from .deepseek_asr import DeepSeekAsr  # 延迟导入，避免循环
 
-            return DeepSeekAsr(settings=self.settings).transcribe_file(path)
+            return self._detailed(DeepSeekAsr(settings=self.settings), path, "deepseek")
         raise TranscriptionError(f"未知 asr_mode: {mode}")
+
+    @staticmethod
+    def _detailed(provider, path: Path, source: str) -> TranscriptResult:
+        """服务商支持分句就用分句；只实现文本的（或测试替身）退回 precision=none。"""
+        detailed = getattr(provider, "transcribe_detailed", None)
+        if callable(detailed):
+            return detailed(path)
+        return TranscriptResult(provider.transcribe_file(path), [], source, "none")
 
     def _mock_transcript(self, path: Path) -> str:
         """开发/测试用确定性假转写稿（明显标注，防止误用）。"""

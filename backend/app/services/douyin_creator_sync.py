@@ -453,6 +453,9 @@ def _apply_item_metrics(db: Session, post: PlatformPost, item: dict) -> tuple[Do
         for key in ("bounce_2s_rate", "finish_5s_rate", "finish_rate", "avg_play_seconds", "profile_visits", "follower_gain")
     }
     public.extra = _json(extra)
+    # R-265：作品时长落 platform_posts（复盘分桶用），已有值不覆盖
+    if post.duration_seconds is None and stats["extra"].get("duration_seconds") is not None:
+        post.duration_seconds = int(stats["extra"]["duration_seconds"])
     db.flush()
     return row, public
 

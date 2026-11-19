@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 import json
 import re
@@ -26,7 +27,7 @@ from tencentcloud.common.profile.http_profile import HttpProfile
 
 from ..config import get_settings
 from .media_tools import extract_audio_compact
-from .transcription import TranscriptionError
+from .transcription import TranscriptResult, TranscriptionError
 
 DEFAULT_ENGINE_MODEL = "16k_zh_en_2.0"
 DEFAULT_ENDPOINT = "asr.tencentcloudapi.com"
@@ -47,6 +48,83 @@ _ERROR_HINTS = {
 }
 
 
+_SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?；;…])")
+_PUNCT = re.compile(r"[\s。！？!?；;，,、…—“”\"'（）()：:]+")
+
+
+def _num(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _words(item: dict) -> list[dict]:
+    raw = item.get("Words")
+    if isinstance(raw, str):
+        try:
+            raw = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            return []
+    return [word for word in raw if isinstance(word, dict)] if isinstance(raw, list) else []
+
+
+def _time_at(spans: list[tuple[int, int, float, float]], index: int, *, at_end: bool) -> float | None:
+    for start, end, begin_ms, end_ms in spans:
+        if start <= index < end:
+            return end_ms if at_end else begin_ms
+    return None
+
+
+def _item_sentences(item: dict) -> list[tuple[str, int, int]]:
+    """把一个 ResultDetail 段落拆成带毫秒区间的句子。"""
+    text = str(item.get("FinalSentence") or "").strip()
+    if not text:
+        return []
+    begin = _num(item.get("BeginTime") if item.get("BeginTime") is not None else item.get("StartMs"))
+    end = _num(item.get("EndTime") if item.get("EndTime") is not None else item.get("EndMs"))
+    if begin is None or end is None or end <= begin:
+        return []
+    parts = [part.strip() for part in _SENTENCE_SPLIT.split(text) if part.strip()]
+    if not parts:
+        return []
+
+    spans: list[tuple[int, int, float, float]] = []
+    word_text = ""
+    for word in _words(item):
+        token = str(word.get("Word") or "")
+        if not token:
+            continue
+        start = len(word_text)
+        word_text += token
+        offset_start, offset_end = _num(word.get("OffsetStartMs")), _num(word.get("OffsetEndMs"))
+        if offset_start is None or offset_end is None:
+            continue
+        spans.append((start, start + len(token), offset_start, offset_end))
+
+    total_chars = sum(len(_PUNCT.sub("", part)) for part in parts) or 1
+    cursor = begin
+    out: list[tuple[str, int, int]] = []
+    for part in parts:
+        clean = _PUNCT.sub("", part)
+        share = (end - begin) * len(clean) / total_chars if clean else 0.0
+        start_ms = cursor
+        finish_ms = cursor + share
+        position = word_text.find(clean) if spans and clean else -1
+        if position >= 0:
+            mapped_start = _time_at(spans, position, at_end=False)
+            mapped_end = _time_at(spans, position + len(clean) - 1, at_end=True)
+            if mapped_start is not None:
+                start_ms = begin + mapped_start
+            if mapped_end is not None:
+                finish_ms = begin + mapped_end
+        start_ms = max(begin, min(start_ms, end))
+        finish_ms = max(start_ms, min(finish_ms, end))
+        out.append((part, int(round(start_ms)), int(round(finish_ms))))
+        cursor = finish_ms
+    return out
+
+
 class TencentAsr:
     def __init__(self, settings=None, model: str | None = None):
         self.settings = settings or get_settings()
@@ -55,6 +133,10 @@ class TencentAsr:
 
     def transcribe_file(self, video_path: Path | str) -> str:
         """抽/压音频 → 本地 base64 直传 → 轮询结果 → 返回文本。"""
+        return self.transcribe_detailed(video_path).text
+
+    def transcribe_detailed(self, video_path: Path | str) -> TranscriptResult:
+        """R-265：额外返回 `ResultDetail` 的分句时间轴（毫秒）。"""
         path = Path(video_path)
         if not path.is_file():
             raise TranscriptionError(f"视频不存在: {path}")
@@ -66,7 +148,7 @@ class TencentAsr:
             if is_temp:
                 prepared.unlink(missing_ok=True)
 
-    def _transcribe_local(self, audio_path: Path) -> str:
+    def _transcribe_local(self, audio_path: Path) -> TranscriptResult:
         data = audio_path.read_bytes()
         if not data:
             raise TranscriptionError(f"音频为空文件: {audio_path}")
@@ -74,13 +156,21 @@ class TencentAsr:
         params = {
             "EngineModelType": self._engine_model(),
             "ChannelNum": 1,  # 16k 引擎仅支持单声道
-            "ResTextFormat": 0,  # 基础识别结果（含整段文本与分段句）
+            # R-265：1=基础识别结果（含 ResultDetail 分句+毫秒时间戳）；0 只有带 [起,止] 标记的整段文本
+            "ResTextFormat": 1,
             "SourceType": 1,  # 音频数据（base64 post body）
             "Data": base64.b64encode(data).decode("ascii"),
             "DataLen": len(data),  # 未编码时的原始字节长度
         }
         task_id = self._create_task(client, params)
-        return self._poll(client, task_id)
+        payload = self._poll_payload(client, task_id)
+        sentences = self._extract_sentences(payload)
+        return TranscriptResult(
+            text=self._extract_text(payload),
+            sentences=sentences,
+            source="tencent",
+            precision="sentence" if sentences else "none",
+        )
 
     def _client(self):
         settings = self.settings
@@ -129,6 +219,9 @@ class TencentAsr:
         return payload.get("Data") or {}
 
     def _poll(self, client, task_id: int) -> str:
+        return self._extract_text(self._poll_payload(client, task_id))
+
+    def _poll_payload(self, client, task_id: int) -> dict:
         interval = max(5, int(getattr(self.settings, "asr_poll_interval", 0) or 15))
         timeout = max(60, int(getattr(self.settings, "asr_poll_timeout", 0) or 3600))
         deadline = time.time() + timeout
@@ -139,10 +232,9 @@ class TencentAsr:
                 code = data.get("Status")
                 status = _STATUS_BY_CODE.get(code if isinstance(code, int) else -1, "")
             if status in _DONE_OK:
-                text = self._extract_text(data)
-                if not text:
+                if not self._extract_text(data):
                     raise TranscriptionError("识别成功但结果为空")
-                return text
+                return data
             if status in _DONE_FAIL:
                 msg = str(data.get("ErrorMsg") or "").strip() or "任务失败"
                 raise TranscriptionError(f"腾讯云转写失败: {msg}")
@@ -172,6 +264,23 @@ class TencentAsr:
             if line:
                 lines.append(line)
         return "\n".join(lines)
+
+    @staticmethod
+    def _extract_sentences(data: dict) -> list[dict]:
+        """ResultDetail → [{start_ms,end_ms,text}]（毫秒）。
+
+        大模型引擎的 `FinalSentence` 是整段（一段可含几十秒），`Words` 才带逐词相对偏移，
+        所以按中文标点分句后，用词级偏移把每句映射回真实时间；词对不上时按字数比例分摊。
+        兼容老引擎的 `BeginTime/EndTime`（毫秒）。
+        """
+        sentences: list[dict] = []
+        for item in data.get("ResultDetail") or []:
+            if not isinstance(item, dict):
+                continue
+            for text, start_ms, end_ms in _item_sentences(item):
+                if end_ms > start_ms:
+                    sentences.append({"start_ms": start_ms, "end_ms": end_ms, "text": text})
+        return sentences
 
     @staticmethod
     def _sdk_error(prefix: str, exc: TencentCloudSDKException) -> str:

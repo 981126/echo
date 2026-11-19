@@ -680,6 +680,11 @@ def test_transcription_uses_runtime_asr_config(db, monkeypatch):
         def transcribe(self, _path):
             return "转写正文"
 
+        def transcribe_detailed(self, _path):
+            from app.services.transcription import TranscriptResult
+
+            return TranscriptResult("转写正文", [], "siliconflow", "none")
+
     monkeypatch.setattr(ingest, "Transcriber", _FakeTranscriber)
     monkeypatch.setattr(ingest, "correct_transcript", lambda text, source_text="", llm=None, db=None: text)
     monkeypatch.setattr(ingest, "enqueue_persona_incremental", lambda db, video=None, creator_id=None: None)

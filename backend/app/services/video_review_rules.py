@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from statistics import median
 
 from ..models.platform import CreatorAccount, PlatformPost, PlatformPostComment
 
@@ -98,28 +97,52 @@ def build_findings(comparison: dict, transcript: str, comments: list[PlatformPos
             facts, "plays", "plays", "reach_weak", "播放量低于平时",
             "当前主要差异是观看人数较少，其他原因还需要更多数据判断。", "先保留内容主题，下一条只重点调整封面或开头中的一项。", "plays",
         ))
-    if retention and comparison["charts"]["retention"]["reliable"]:
-        points = [p for p in retention if isinstance(p.get("current"), (int, float))]
-        drops = []
-        for before, after in zip(points, points[1:]):
-            drop = float(before["current"]) - float(after["current"])
-            if drop > 0:
-                drops.append(drop)
-        if drops:
-            typical = median(drops)
-            for before, after in zip(points, points[1:]):
-                drop = float(before["current"]) - float(after["current"])
-                if drop >= 0.05 and drop > typical * 2:
-                    out.append({
-                        "dimension": "completion", "rule_key": "trend_drop", "title": f"观众在 {after['time_label']} 附近离开增多",
-                        "judgement_type": "fact", "conclusion": f"留存曲线在这里下降了{drop * 100:.1f}个百分点。",
-                        "metric_evidence": [{"evidence_id": f"metric:trend:{after['time_label']}", "drop": drop, "time": after["time_label"]}],
-                        "content_evidence": [], "comparison_post_ids": [],
-                        "suggestion": "查看这个时间点附近是否进入新话题或重复解释；没有逐秒转写时，只能先检查内容，不能直接认定某句台词导致离开。",
-                        "target_metric": "completion",
-                    })
-                    break
+    # R-265：掉点由现场景对齐（同比跌幅 ≥5 个百分点且相对 ≥8%），有句子时间轴时直接引用原句
+    aligned = ((comparison.get("charts") or {}).get("retention") or {}).get("drops") or []
+    if aligned:
+        top = aligned[0]
+        sentence = top.get("sentence") or {}
+        content = []
+        if sentence.get("text"):
+            content.append({
+                "evidence_id": "content:drop:1",
+                "text": sentence["text"],
+                "source": f"视频转写（{top['time_label']}）",
+            })
+        suggestion = (
+            f"这条时间点对应的话是「{sentence['text']}」；下一条把这段的信息提前，或删掉这段的重复解释。"
+            if sentence.get("text")
+            else "查看这个时间点附近是否进入新话题或重复解释；没有逐句时间轴时，只能先检查内容，不能直接认定某句台词导致离开。"
+        )
+        out.append({
+            "dimension": "completion", "rule_key": "trend_drop",
+            "title": f"观众在 {top['time_label']} 附近离开增多",
+            "judgement_type": "fact",
+            "conclusion": f"留存曲线在这里下降了{top['drop'] * 100:.1f}个百分点。",
+            "metric_evidence": [{
+                "evidence_id": f"metric:trend:{top['time_label']}",
+                "drop": top["drop"], "time": top["time_label"],
+            }],
+            "content_evidence": content, "comparison_post_ids": [],
+            "suggestion": suggestion,
+            "target_metric": "completion",
+        })
     return out[:6]
+
+
+def apply_triage(findings: list[dict], triage: dict | None) -> list[dict]:
+    """R-265：推荐流量偏低时，涉完播的「事实」结论降为「推测」并补一句提示（不删证据）。"""
+    if not triage or (triage.get("traffic") or {}).get("level") != "limited":
+        return findings
+    note = "本条推荐流量占比偏低，先排除流量结构影响再改文案。"
+    for finding in findings:
+        if finding.get("dimension") != "completion" or finding.get("judgement_type") != "fact":
+            continue
+        finding["judgement_type"] = "hypothesis"
+        suggestion = str(finding.get("suggestion") or "")
+        if note not in suggestion:
+            finding["suggestion"] = f"{suggestion} {note}".strip()
+    return findings
 
 
 def summary_for(comparison: dict, findings: list[dict]) -> str:

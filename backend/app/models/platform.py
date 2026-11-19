@@ -110,6 +110,7 @@ class PlatformPost(Base):
     cover_path: Mapped[str] = mapped_column(String(255), default="")  # 本地封面缓存文件名
     video_url: Mapped[str] = mapped_column(String(1000), default="")  # 默认空：不下载视频
     publish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)  # R-265：作品时长（秒），来自 raw
     raw: Mapped[str] = mapped_column(Text, default="{}")  # 原始 JSON 全存
     local_video_id: Mapped[int | None] = mapped_column(
         ForeignKey("videos.id"), nullable=True

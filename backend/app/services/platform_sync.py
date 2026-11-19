@@ -35,6 +35,7 @@ from ..models.platform import (
 from .platform_assets import _cover_path_for, _ensure_account_avatar
 from .text_tags import strip_hashtags
 from .platform.budget import BudgetExceeded, _charge, ensure_budget, get_budget, set_budget  # noqa: F401
+from .post_meta import parse_duration_seconds
 from .events import publish
 from .creator_service import get_current_creator
 from .douyin_account_policy import resolve_data_policy
@@ -215,6 +216,7 @@ def _ensure_post(
             cover_url=post.cover_url,
             video_url=post.video_url,
             publish_time=post.publish_time,
+            duration_seconds=parse_duration_seconds(post.raw),
             raw=json.dumps(post.raw, ensure_ascii=False),
         )
         db.add(row)
@@ -228,6 +230,8 @@ def _ensure_post(
         row.publish_time = post.publish_time or row.publish_time
         if post.raw:
             row.raw = json.dumps(post.raw, ensure_ascii=False)
+        if row.duration_seconds is None:
+            row.duration_seconds = parse_duration_seconds(post.raw)
         if existing is not None:
             existing[key] = row
     if post.tags:

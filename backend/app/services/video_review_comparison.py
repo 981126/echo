@@ -16,6 +16,7 @@ from ..models.platform import Creator, CreatorAccount, PlatformPost, PlatformPos
 from ..models.video import Video
 from ..models.video_review import DouyinPostMetric, DouyinReferenceVideo
 from .douyin_references import _owner_keywords, reference_out, relevance_for
+from .post_meta import build_triage, duration_bucket, parse_duration_seconds
 
 
 @dataclass(frozen=True)
@@ -294,6 +295,16 @@ def build_comparison(db: Session, post: PlatformPost) -> dict:
     )
     comparison = ranked[:10]
     ids = [p.id for p in comparison]
+    # R-265：时长分层——同桶样本 ≥5 才用同桶基线，否则退回全部同题作品并标注
+    current_duration = _post_duration(post)
+    current_bucket = duration_bucket(current_duration)
+    same_bucket = (
+        [c for c in comparison if duration_bucket(_post_duration(c)) == current_bucket]
+        if current_bucket
+        else []
+    )
+    stratified = len(same_bucket) >= 5
+    baseline_posts = same_bucket if stratified else comparison
     stat_post_ids = [post.id, *ids]
     stat_map = _stats_by_post(db, stat_post_ids)
     private_map = _metrics_by_post(db, stat_post_ids)
@@ -304,7 +315,7 @@ def build_comparison(db: Session, post: PlatformPost) -> dict:
     facts: dict[str, dict] = {}
     for spec in SPECS:
         history: list[float] = []
-        for candidate in comparison:
+        for candidate in baseline_posts:
             value = _values(_stat_at(candidate, age, stat_map), _private_at(candidate, age, private_map))[spec.key]
             if value is not None:
                 history.append(float(value))
@@ -345,6 +356,12 @@ def build_comparison(db: Session, post: PlatformPost) -> dict:
     else:
         overall = "mixed"
     warnings = [] if valid_sample >= 5 else ["可比较的历史视频较少，暂时不做整体好坏判断"]
+    baseline_note = (
+        f"同类（{current_bucket} 秒）样本 {len(same_bucket)} 条"
+        if stratified
+        else (f"同类样本不足，已退回全部同题作品（{len(comparison)} 条）" if current_bucket else "时长未知，未按时长分层")
+    )
+    triage = build_triage(current_duration, current_private.traffic_sources if current_private else "[]", facts)
     return {
         "metrics": metrics,
         "facts": facts,
@@ -360,11 +377,25 @@ def build_comparison(db: Session, post: PlatformPost) -> dict:
         },
         "overall": overall,
         "warnings": warnings,
-        "charts": _charts(current_stat, current_private, metrics),
+        "duration_seconds": current_duration,
+        "baseline": {
+            "bucket": current_bucket,
+            "stratified": stratified,
+            "sample": len(baseline_posts),
+            "note": baseline_note,
+        },
+        "charts": _charts(current_stat, current_private, metrics, triage),
     }
 
 
-def _charts(stat: PlatformPostStat | None, private: DouyinPostMetric | None, metrics: list[dict]) -> dict:
+def _post_duration(post: PlatformPost) -> int | None:
+    """作品时长：优先列，其次 raw（同步漏写/老数据兜底）。"""
+    if post.duration_seconds:
+        return int(post.duration_seconds)
+    return parse_duration_seconds(post.raw)
+
+
+def _charts(stat: PlatformPostStat | None, private: DouyinPostMetric | None, metrics: list[dict], triage: dict | None = None) -> dict:
     traffic = loads(private.traffic_sources, {}) if private else {}
     if isinstance(traffic, dict):
         traffic_items = []
@@ -404,6 +435,7 @@ def _charts(stat: PlatformPostStat | None, private: DouyinPostMetric | None, met
             "has_timed_transcript": False,
         },
         "traffic": traffic_items,
+        "triage": triage or {},
         "search_terms": loads(private.search_terms, []) if private else [],
         "comment_questions": [],
         "follower_topics": [],

@@ -58,6 +58,10 @@ class Transcript(Base):
     transcript_text: Mapped[str] = mapped_column(Text, default="")  # ASR 转写稿
     corrected_text: Mapped[str] = mapped_column(Text, default="")  # AI 校对后（分析以此为准）
     asr_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|done|failed
+    # R-265：分句时间轴（毫秒）。sentence=逐句时间戳；chunk=ASR 分片窗口（DeepSeek）；none=无
+    sentences: Mapped[str] = mapped_column(Text, default="[]")
+    timeline_source: Mapped[str] = mapped_column(String(20), default="")  # tencent|aliyun|deepseek|""
+    timeline_precision: Mapped[str] = mapped_column(String(20), default="none")  # sentence|chunk|none
     asr_provider: Mapped[str] = mapped_column(String(20), default="")  # mock|aliyun|siliconflow（转写来源，R-112）
     asr_model: Mapped[str] = mapped_column(String(100), default="")  # 硅基流动模型名；阿里云未知为空
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_app_now)

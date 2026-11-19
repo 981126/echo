@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronDown, ExternalLink, Layers, Lightbulb, Loader2, Play, RefreshCw } from 'lucide-react'
+import { Check, ChevronDown, ExternalLink, History, Layers, Lightbulb, Loader2, Play, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiJson } from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -14,7 +14,7 @@ import { PostAnalysis } from '@/pages/dashboard/post-analysis'
 import type { PostDetail } from '@/pages/dashboard/types'
 import { BaselineBars, SimpleBars, WatchTrendChart, formatMetric } from './charts'
 import { waitForReviewTask } from './use-review-task'
-import type { FailedReview, FindingContentEvidence, FindingMetricEvidence, ReferenceItem, Review, VideoItem } from './types'
+import type { FailedReview, FindingContentEvidence, FindingMetricEvidence, ReferenceItem, RetentionTriage, Review, VideoItem } from './types'
 
 const judgementLabels = { fact: '数据直接显示', hypothesis: '结合内容推测', unknown: '目前无法判断' }
 
@@ -39,6 +39,67 @@ function metricEvidenceText(evidence: FindingMetricEvidence): string {
 
 function contentSourceLabel(evidence: FindingContentEvidence): string {
   return evidence.source ? `（${evidence.source}）` : ''
+}
+
+/** R-265：流失点分类标签。 */
+const dropCategoryLabel: Record<string, string> = { hook: '开头', body: '中段', tail: '结尾' }
+
+/** R-265：这条的时长与推荐流量分诊（数据事实，不做因果判断）。 */
+function TriageBar({ triage }: { triage: RetentionTriage }) {
+  const parts: string[] = []
+  parts.push(triage.duration_known && triage.duration_seconds ? `这条 ${triage.duration_seconds} 秒` : '时长未知')
+  const ratio = triage.traffic?.recommended_ratio
+  parts.push(typeof ratio === 'number' ? `推荐流量 ${(ratio * 100).toFixed(0)}%` : '流量来源未知')
+  const notes = triage.notes ?? []
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {parts.map((part) => <span key={part} className="rounded-full bg-muted px-2 py-1">{part}</span>)}
+      </div>
+      {notes.map((note) => <p key={note} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{note}</p>)}
+    </div>
+  )
+}
+
+/** R-265：留存流失点（曲线掉点 ∩ 句子时间窗）。 */
+function RetentionDrops({ retention }: { retention: Review['charts']['retention'] }) {
+  const drops = retention.drops ?? []
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-base font-semibold">留存流失点</h2>
+        <p className="mt-1 text-xs text-muted-foreground">只写曲线真实下降的位置；有句子时间轴时才指到具体台词。</p>
+      </div>
+      {drops.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+          {retention.reliable ? '这条没有明显掉点（或曲线点数不足），先不做流失点定位。' : '这条播放量较少，先不做流失点定位。'}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {drops.map((drop, index) => (
+            <motion.div
+              key={`${drop.time_label}-${index}`}
+              initial={{ opacity: 0.9, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.04, duration: 0.2 }}
+              className="rounded-xl border border-border bg-card p-4 shadow-card"
+            >
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="tnum font-medium">{drop.time_label}</span>
+                <span className="text-amber-600 dark:text-amber-400">下降 {(drop.drop * 100).toFixed(1)} 个百分点</span>
+                <span className="text-xs text-muted-foreground">相对 {(drop.drop_ratio * 100).toFixed(0)}%</span>
+                {dropCategoryLabel[drop.category] && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{dropCategoryLabel[drop.category]}</span>}
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{drop.confidence === 'sentence' ? '句子级' : '仅时间点'}</span>
+              </div>
+              {drop.sentence?.text
+                ? <blockquote className="mt-3 border-l-2 border-indigo-300 pl-3 text-sm leading-6">{drop.sentence.text}</blockquote>
+                : <p className="mt-2 text-xs text-muted-foreground">本条没有句子时间轴，只能定位到时间点。</p>}
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
 }
 
 /** R-247：采用主题时给生成链路的具体文本（「采用」→ 脚本工作台 AI 草稿）；空字段自动跳过。 */
@@ -308,6 +369,7 @@ export default function VideoReviewPage() {
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><span className="h-2 w-2 rounded-full bg-indigo-500" />{account?.nickname || '当前抖音账号'} · 只分析抖音</div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {review?.rule_version_stale && <Button variant="outline" disabled={!postId || !!task} onClick={() => void analyze(true)}><History className="mr-2 h-4 w-4" />用新口径重跑</Button>}
           <Button disabled={!postId || !!task} onClick={() => void analyze(true)}><RefreshCw className="mr-2 h-4 w-4" />更新数据并分析</Button>
         </div>
       </div>
@@ -352,6 +414,7 @@ export default function VideoReviewPage() {
 
       {review ? (
         <>
+          {review.charts?.triage && <TriageBar triage={review.charts.triage} />}
           {review.findings.length > 0 && <section className="space-y-3">
             <div>
               <h2 className="text-base font-semibold">这条视频为什么好或差？</h2>
@@ -385,6 +448,8 @@ export default function VideoReviewPage() {
               </details>
             ))}</div>
           </section>}
+
+          <RetentionDrops retention={review.charts.retention} />
 
           {review.advices.length > 0 && <section className="space-y-3">
             <div><h2 className="text-base font-semibold">按指标优化建议</h2><p className="mt-1 text-xs text-muted-foreground">结合这条视频的指标差距和文案原句，按每个指标给出具体改法。</p></div>

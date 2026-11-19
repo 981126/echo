@@ -7,10 +7,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..schemas.douyin_dashboard import RefreshIn
+from ..schemas.douyin_dashboard import RefreshIn, RetentionBackfillIn
 from ..services import douyin_dashboard as service
 from ..services.ingest import import_video_task
 from ..services.douyin_creator_sync import CredentialError
+from ..services.retention_backfill import run_backfill
 from ..tasks import find_running_task, start_task
 
 router = APIRouter()
@@ -98,5 +99,37 @@ def refresh_work(post_id: int, payload: RefreshIn | None = None, db: Session = D
             return plan
         task_id = start_task("douyin_dashboard_post", {**plan, "force": force}, service.post_worker)
         return JSONResponse(status_code=202, content={"task_id": task_id, "reused": False})
+
+    return _call(run)
+
+
+@router.get("/retention/coverage", response_model=dict)
+def retention_coverage(db: Session = Depends(get_db)):
+    """R-265：留存曲线覆盖数量（待补 N 条）。"""
+    return _call(lambda: service.retention_coverage(db))
+
+
+@router.post("/retention/backfill")
+def retention_backfill(payload: RetentionBackfillIn | None = None, db: Session = Depends(get_db)):
+    """R-265：补齐历史留存曲线（后台任务，每条 1 次 TikHub 请求）。"""
+
+    def run():
+        plan = service.prepare_retention_backfill(
+            db,
+            scope=(payload.scope if payload else "missing"),
+            limit=(payload.limit if payload else 300),
+        )
+        pending = len(plan["post_ids"])
+        if not pending:
+            return {"task_id": None, "pending": 0, "reused": False}
+        running = find_running_task("retention_backfill")
+        if running:
+            return JSONResponse(
+                status_code=202, content={"task_id": running, "pending": pending, "reused": True}
+            )
+        task_id = start_task("retention_backfill", plan, run_backfill)
+        return JSONResponse(
+            status_code=202, content={"task_id": task_id, "pending": pending, "reused": False}
+        )
 
     return _call(run)

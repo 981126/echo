@@ -16,7 +16,7 @@ from . import budget_settings, llm_router, model_settings
 from .llm import LLMError
 from .persona import PersonaService
 from .prompt_service import get_prompt
-from .transcription import Transcriber, TranscriptionError
+from .transcription import Transcriber, TranscriptResult, TranscriptionError
 from .creator_service import current_creator_id
 
 
@@ -283,7 +283,9 @@ def notify_asr_give_up_once(db, video: Video) -> bool:
         return False
 
 
-def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
+def _post_asr_llm(
+    db, video_id: int, text: str, asr: dict, timeline: TranscriptResult | None = None
+) -> None:
     """R-240 M8：ASR 落库 +「LLM 校对」∥「LLM 预打标」并发（2 线程、各自独立 Session）。
 
     - 校对/转写落库失败 → 向上抛（与串行版一致，任务判失败）；
@@ -296,6 +298,10 @@ def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
 
     provider = str(asr.get("mode") or "")
     model = str(asr.get("model") or "") if provider in ("siliconflow", "tencent", "deepseek") else ""
+    # R-265：分句时间轴（无则空数组 + none），三处写入共用
+    sentences = json.dumps(timeline.sentences if timeline else [], ensure_ascii=False)
+    timeline_source = timeline.source if timeline else ""
+    timeline_precision = timeline.precision if timeline else "none"
 
     def _correct_and_store() -> None:
         s = SessionLocal()
@@ -315,6 +321,9 @@ def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
                         asr_status="done",
                         asr_provider=provider,
                         asr_model=model,
+                        sentences=sentences,
+                        timeline_source=timeline_source,
+                        timeline_precision=timeline_precision,
                     )
                 )
             else:
@@ -323,6 +332,9 @@ def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
                 transcript.asr_status = "done"
                 transcript.asr_provider = provider
                 transcript.asr_model = model
+                transcript.sentences = sentences
+                transcript.timeline_source = timeline_source
+                transcript.timeline_precision = timeline_precision
             try:
                 s.commit()
             except IntegrityError:  # 唯一约束兜底：极端并发下别的写入者已建行 → 更新它
@@ -336,6 +348,9 @@ def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
                 transcript.asr_status = "done"
                 transcript.asr_provider = provider
                 transcript.asr_model = model
+                transcript.sentences = sentences
+                transcript.timeline_source = timeline_source
+                transcript.timeline_precision = timeline_precision
                 s.commit()
         except Exception:
             s.rollback()
@@ -393,7 +408,8 @@ def import_video_task(db, payload: dict) -> None:
         path = settings.videos_dir / video.filename
         transcriber = Transcriber(settings, mode=asr["mode"], model=asr["model"])
         try:
-            text = transcriber.transcribe(path)
+            result = transcriber.transcribe_detailed(path)
+            text = result.text
         except TranscriptionError as exc:
             # R-094：转写失败也落 asr_status=failed，并给可读原因
             model = asr["model"] if asr["mode"] in ("siliconflow", "tencent", "deepseek") else ""
@@ -414,7 +430,7 @@ def import_video_task(db, payload: dict) -> None:
                 msg += "（未识别到有效语音：视频可能无声/只有背景音乐/音量过低或音轨异常，可检查该视频音轨后重试）"
             record_asr_failure(db, video.id, msg)  # R-240 S7：记录次数 + 下次可重试时间
             raise TranscriptionError(msg) from exc
-        _post_asr_llm(db, video.id, text, asr)  # R-240 M8：校对 ∥ 预打标（独立 Session 并发）
+        _post_asr_llm(db, video.id, text, asr, result)  # R-240 M8：校对 ∥ 预打标（独立 Session 并发）
         clear_asr_failure(db, video.id)  # R-240 S7：成功后清退避计数
         db.expire_all()
         fresh = db.get(Video, video.id)

@@ -639,7 +639,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 
 ## `platform_posts`
 
-云端作品（平台原样数据，默认无本地视频）：platform+platform_post_id 唯一；local_video_id 绑定本地素材、work_id 跨平台同作品合并。
+云端作品（平台原样数据，默认无本地视频）：platform+platform_post_id 唯一；local_video_id 绑定本地素材、work_id 跨平台同作品合并。R-265 起 `duration_seconds` 存作品时长（秒，来自 raw 毫秒字段；缺失为 NULL），供复盘按时长分桶比较。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -656,6 +656,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `cover_path` | VARCHAR(255) |  | 否 |  |
 | `video_url` | VARCHAR(1000) |  | 否 |  |
 | `publish_time` | DATETIME |  | 是 |  |
+| `duration_seconds` | INTEGER |  | 是 |  |
 | `raw` | TEXT |  | 否 | {} |
 | `local_video_id` | INTEGER |  | 是 |  |
 | `work_id` | INTEGER |  | 是 |  |
@@ -786,9 +787,14 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `transcript_text` | TEXT |  | 否 |  |
 | `corrected_text` | TEXT |  | 否 |  |
 | `asr_status` | VARCHAR(20) |  | 否 | pending |
+| `sentences` | TEXT |  | 否 | [] |
+| `timeline_source` | VARCHAR(20) |  | 否 | "" |
+| `timeline_precision` | VARCHAR(20) |  | 否 | none |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 
 **索引**：`ix_transcripts_video_id`（video_id，**唯一**：一个视频最多一条转写，R-242）
+
+**R-265 说明**：`sentences` 为分句时间轴 JSON（`[{"start_ms","end_ms","text"}]`，毫秒）；`timeline_precision` = `sentence`（腾讯/阿里云逐句）| `chunk`（DeepSeek 分片窗口）| `none`；`timeline_source` 记录时间轴来自哪家。复盘时按需补时间轴只写这三列，**不改** `transcript_text`/`corrected_text`。
 
 **外键**：`video_id` → `videos.id`
 
