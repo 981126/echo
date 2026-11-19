@@ -5,7 +5,7 @@
 > 结构演进：R-236 起由 `backend/alembic/versions/` 管理；启动执行 `upgrade head`，现有完整旧库首次自动 baseline。新增表、字段、索引、视图或结构相关数据变更必须新增 revision，并同步本文。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（40 张）
+## 表总览（41 张）
 
 | 表 | 说明 |
 |---|---|
@@ -538,6 +538,42 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 **索引**：`ix_persona_checks_creator_id`（creator_id）
 
 **外键**：`creator_id` → `creators.id`
+
+---
+
+## `opening_samples`
+
+开头样本（R-266）：主博主与 benchmark 同行各一条视频一条，存首句、开头类型与真实指标，供生成时参考与程序化开头检查。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `creator_id` | INTEGER |  | 否 |  |
+| `source_kind` | VARCHAR(20) |  | 否 |  |
+| `video_id` | INTEGER |  | 否 |  |
+| `post_id` | INTEGER |  | 是 |  |
+| `platform` | VARCHAR(20) |  | 否 | douyin |
+| `text` | TEXT |  | 否 |  |
+| `chars` | INTEGER |  | 否 | 0 |
+| `hook_type` | VARCHAR(20) |  | 否 | statement |
+| `finish_5s_rate` | FLOAT |  | 是 |  |
+| `bounce_2s_rate` | FLOAT |  | 是 |  |
+| `plays` | INTEGER |  | 是 |  |
+| `likes` | INTEGER |  | 是 |  |
+| `duration_seconds` | INTEGER |  | 是 |  |
+| `published_at` | DATETIME |  | 是 |  |
+| `rank_score` | FLOAT |  | 否 | 0 |
+| `polarity` | VARCHAR(20) |  | 否 |  |
+| `baseline_note` | VARCHAR(200) |  | 否 |  |
+| `negative_reason` | VARCHAR(200) |  | 否 |  |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+| `updated_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**约束/索引**：`uq_opening_sample_video`（video_id + source_kind 唯一）；`ix_opening_samples_creator_id`；`ix_opening_samples_creator_polarity`（creator_id + source_kind + polarity）；`ix_opening_samples_source_score`（source_kind + rank_score）
+
+**外键**：`creator_id` → `creators.id`；`video_id` → `videos.id`；`post_id` → `platform_posts.id`
+
+**R-266 说明**：`source_kind=own` 时 `rank_score` 为 5 秒完播在「同话题+同时长桶」的分位（0~100），样本 <20 时 `polarity` 为空；`source_kind=peer` 时 `rank_score` 为「播放 ÷ 账号播放中位数」，`finish_5s_rate` 恒为 NULL（同行无创作者数据），`baseline_note` 固定提示「同行公开播放，非留人数据」；`negative_reason` 来自该作品复盘前 10 秒的第一个掉点。
 
 ---
 

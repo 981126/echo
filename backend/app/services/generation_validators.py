@@ -324,6 +324,7 @@ def compute_quality_passed(run: Any) -> bool:
     reviews = json_list(getattr(run, "reviews_json", "[]"))
     final_review = reviews[-1] if reviews and isinstance(reviews[-1], dict) else {}
     final_hash = getattr(run, "final_script_hash", "")
+    opening = stages.get("opening_check") if isinstance(stages, dict) else None
     return bool(
         getattr(run, "status", "") == "succeeded"
         and completed
@@ -335,6 +336,9 @@ def compute_quality_passed(run: Any) -> bool:
         and final_hash
         and final_review.get("logic_passed") is True
         and not final_review.get("hard_issues")
-        and float(final_review.get("attraction_score") or 0) >= 4
+        # R-266：吸引力分改为诊断项，不再参与硬门禁；开头检查成为必要条件
         and float(final_review.get("author_score") or 0) >= 4
+        and isinstance(opening, dict)
+        and opening.get("status") == "completed"
+        and opening.get("passed") is True
     )

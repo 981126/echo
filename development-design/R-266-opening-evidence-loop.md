@@ -113,14 +113,14 @@ flowchart LR
 
 **自己的样本**
 
-1. 候选集：主博主 `videos` + 转写非空 + `is_ad=false` + 关联 `platform_posts` 的最新 `douyin_post_metrics.finish_5s_rate` 非空。
+1. 候选集：主博主 `videos` + 转写非空 + `is_ad=false` + 关联 `platform_posts` 的 `douyin_post_metrics.finish_5s_rate` 非空；同一视频有多条帖子时取「最新且带指标」的那条（不是盲目取最新）。
 2. 分层：先按 `(main_topics 主类, duration_bucket)` 分组；组内 <5 条 → 退回「同主类」；仍 <5 → 退回全账号样本。`baseline_note` 记录实际用的层与样本数。
 3. `rank_score` = 该条 5 秒完播在所用层内的百分位（0~100，同值取平均位次）。
 4. 极性（仅当该创作者 own 样本 ≥20）：`≥75` → `high`，`≤25` → `low`，其余 `neutral`；样本 <20 时 `polarity=""`，页面/注入不得出现「高留人」字样。
 
 **同行的样本**
 
-1. 候选集：`creators.kind='benchmark'` 的 `videos` + 转写非空 + 关联帖子有公开播放。
+1. 候选集：`creators.kind='benchmark'` 的 `videos` + 转写非空 + 关联帖子有公开播放（644 条有转写，其中 253 条有播放）。
 2. `rank_score` = 该条播放 ÷ 该账号样本播放中位数（保留 2 位）；中位数为 0 → 该样本不入库。
 3. 极性：`≥2.0` → `high`；`0.5~2.0` → `neutral`；**不设 `low`**（公开播放受粉丝基数影响，不能当负例）。
 4. `baseline_note` 固定写「同行公开播放，非留人数据」。
@@ -272,7 +272,7 @@ passed_review = logic_passed and not hard_issues and author_score >= 4   # 移�
 - 响应 `200`：
 
 ```json
-{"own": 78, "peer": 644, "own_high": 19, "own_low": 18, "peer_high": 120,
+{"own": 66, "peer": 215, "own_high": 17, "own_low": 19, "peer_high": 45,
  "built_at": "2026-11-19T09:20:11", "samples_enough": true}
 ```
 

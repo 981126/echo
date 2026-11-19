@@ -1,12 +1,14 @@
 # 变更记录
 
-## [R-266] 2026-11-19 — 用「开头 × 真实留人」样本改造生成，取代 LLM 吸引力自评 🔲
+## [R-266] 2026-11-19 — 用「开头 × 真实留人」样本改造生成，取代 LLM 吸引力自评（Phase A 完成） 🔨
 
 - **作者问题**：AI 文案不够吸引人；确认四项口径：①吸引力分从硬门禁降为诊断；②可用同行开头但不得照抄、不是每篇都注入；③样本 <20 不排序；④先做开头库与检查器，注入等资产重建。
 - **只读查库结论**：130 次生成 0 成功（32 失败 / 15 待作者修改 / 14 待补信息 / 20 需评审）；通过评审的样本 `attraction_score=4` 仍被 `logic_passed=false` 拒，吸引力分一次都没起到拦截作用；作者资产 1251 条全部 `archived`（启动全量重建中，生成实际检索 0 条）；有「转写 + 5 秒完播」的主博主作品 78 条，`benchmark` 同行 644 条视频全部有转写，低粉爆款 348 条无转写不纳入。
 - **已确认方案**：新建 `opening_samples`（own=5 秒完播同话题同时长桶百分位；peer=播放÷账号中位倍数、不设 low；样本 <20 不排序）；`opening_checks` 四条程序规则替代 `attraction_score>=4`（首句 ≤25 字 / 前 70 字含具体性 / 禁背景起手 / payoff ≤30%），不过则只改开头重写一次并校验正文未被改动；生成时按「own ≥20 且相关度 ≥0.15」有选择注入（own 高 5 + 低 3 + peer 高 3，≤11 条；纯经历主题不注 peer），连续重合 ≥8 字判照抄；复盘首 10 秒掉点作反例。表 40→41，Alembic `r266openings`。
 - **不做**：稿→片→数据归因链（R-267）、抓低粉爆款正文、用同行数据推断留人、放宽 R-263 证据/逻辑门禁。
-- **当前状态**：需求 `requirements/R-266-opening-evidence-loop.md` + 开发设计 `development-design/R-266-opening-evidence-loop.md` 已出，**待开发**；Phase A（表+构建+检查器+门禁）可先做，Phase B（注入+防照抄+反例）等 R-263 资产重建完成。
+- **Phase A 已实现**：①新表 `opening_samples`（Alembic `r266openings`，表 40→41）：own 按「同话题+同时长桶」5 秒完播百分位、peer 按「播放÷账号播放中位数」，样本 <20 极性为空、peer 不设 low；同一视频多条帖子取「最新且带指标」那条；`negative_reason` 取复盘前 10 秒首个掉点；②`opening_checks` 四条规则（首句 ≤25 字 / 前 70 字含数字·结果·冲突 / 禁背景起手 / payoff ≤30%），`payoff` 缺失记 skipped；③生成链路 writing 后插入 `opening_check`，不过则只改开头重写 1 次，并要求「去开头后正文逐字保留」（不满足则不采用改写）；修订结束后终检覆盖该 stage；④`attraction_score` 从 `passed_review` 与 `compute_quality_passed` 中移除，改由 `opening_check.passed` 作硬门禁；草稿 `quality.opening_check` 可展示；⑤`GET /api/opening-samples/coverage`、`POST /api/opening-samples/rebuild` + 每日 09:20 重建任务。
+- **Phase A 验证**：真实重建 722 条候选 → 自己 **66** 条（17 high / 19 low / 30 neutral）、同行 **215** 条（45 high）；`negative_reason` 命中 1 条；`samples_enough=true`。同行真实上限 253 条（644 条有转写，但只有 253 条有公开播放），需求文档已按真实上限修正验收值。`scripts/verify.sh` 全绿（后端 ruff/mypy/pytest + 前端 175 用例 + build + 文档 41 表一致），新增 **17** 条单测（检查器 4 规则、构建分层/百分位/同行倍数/反例、门禁降权、只改开头与正文被改拒收）。
+- **未完成（Phase B）**：样本注入（相关度 ≥0.15 + 样本 ≥20 + 纯经历不注 peer）、8 字重合照抄检测、复盘反例注入；等 R-263 资产重建完成后再接。
 
 ## [R-265] 2026-11-19 — 视频复盘接入句子时间轴、留存曲线补齐与时长/流量分诊 ✅
 

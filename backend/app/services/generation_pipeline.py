@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from ..models.persona import PersonaTag
 from . import budget_settings, draft_status, llm_router
 from .author_assets import assets_prompt, public_asset, retrieve_author_assets
 from .evidence import gather_online_cached, mark_logs_used, public_items
+from .opening_checks import check_opening
 from .generation_validators import (
     GenerationValidationError,
     compute_quality_passed,
@@ -235,6 +237,60 @@ def _review_shape(raw: dict[str, Any], digest: str, script: str) -> dict[str, An
     }
 
 
+def _opening_suffix(script: str) -> str:
+    """前两句之后的内容，用于校验「只改开头、正文逐字保留」。"""
+    marks = list(re.finditer(r"[。！？!?…\n]", script or ""))
+    if len(marks) < 2:
+        return ""
+    return script[marks[1].end():]
+
+
+def _opening_only_changed(old: str, new: str) -> bool:
+    rest = _opening_suffix(old)
+    if len(rest) < 10:
+        return True
+    return new.endswith(rest) and len(new) <= len(old) + 200
+
+
+def _ensure_opening(
+    db: Session,
+    run: GenerationRun,
+    data: dict[str, Any],
+    blueprint: dict[str, Any],
+    writer: Any,
+    context: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """R-266：开头检查；不过则只改开头重写一次（正文被改动则不采用）。"""
+    payoff = str((blueprint.get("hook") or {}).get("payoff") or "")
+    script = str(data.get("script") or "")
+    result = check_opening(script, payoff)
+    if result["passed"]:
+        return data, {**result, "rewritten": False}
+    user = (
+        context
+        + "\n\n已验证内容蓝图：\n" + json.dumps(blueprint, ensure_ascii=False)
+        + "\n\n当前正文：\n" + json.dumps(data, ensure_ascii=False)
+        + "\n\n开头检查未通过：" + "；".join(item["detail"] for item in result["issues"])
+        + "\n只改开头（首句及紧邻 1~2 句），正文其余部分必须逐字保留；claims 要与正文一致；只输出完整稿件 JSON。"
+    )
+    try:
+        fixed = _call_json(
+            db, run, client=writer, stage="opening_fix", prompt_key="author_revise",
+            user=user, budget_key="debate_revise", require=("script",),
+        )
+    except Exception:  # noqa: BLE001 重写失败不阻断，交给终检判定
+        return data, {**result, "rewritten": False, "rewrite_failed": True}
+    new_script = str(fixed.get("script") or "")
+    if not new_script or not _opening_only_changed(script, new_script):
+        return data, {**result, "rewritten": False, "rewrite_rejected": "正文被改动"}
+    merged = dict(data)
+    for key in ("script", "title", "cover_text", "shells", "claims"):
+        if key in fixed:
+            merged[key] = fixed[key]
+    recheck = check_opening(new_script, payoff)
+    return merged, {**recheck, "rewritten": True, "issues_before": result["issues"]}
+
+
 def _sync_draft(db: Session, draft: Draft, run: GenerationRun, data: dict[str, Any], passed: bool) -> None:
     draft.title = str(data.get("title") or draft.title or run.topic).strip()
     draft.cover_text = str(data.get("cover_text") or "").strip()
@@ -243,6 +299,8 @@ def _sync_draft(db: Session, draft: Draft, run: GenerationRun, data: dict[str, A
     draft.prompt_version = get_prompt_version("author_write", db)
     reviews = json_list(run.reviews_json)
     latest = reviews[-1] if reviews else {}
+    stages = (json_dict(run.attempts_json).get("stages") or {})
+    opening = stages.get("opening_check") or {}
     draft.quality = json.dumps(
         {
             "run_id": run.id,
@@ -250,6 +308,12 @@ def _sync_draft(db: Session, draft: Draft, run: GenerationRun, data: dict[str, A
             "quality_passed": passed,
             "logic_passed": bool(latest.get("logic_passed")),
             "attraction_score": latest.get("attraction_score"),
+            "opening_check": {
+                "passed": opening.get("passed"),
+                "issues": opening.get("issues") or [],
+                "metrics": opening.get("metrics") or {},
+                "rewritten": bool(opening.get("rewritten")),
+            },
             "author_score": latest.get("author_score"),
             "issues": latest.get("issues") or [],
             "hard_issues": latest.get("hard_issues") or [],
@@ -437,6 +501,13 @@ def run_generation_pipeline(
             _save_attempts(db, run, attempts)
             continue
         _complete_stage(db, run, "writing")
+        data, opening_stage = _ensure_opening(db, run, data, blueprint, writer, context)
+        _complete_stage(db, run, "opening_check", opening_stage)
+        final_data = data
+        run.draft_json = json.dumps(data, ensure_ascii=False)
+        run.final_script_hash = script_hash(str(data.get("script") or ""))
+        _save_attempts(db, run, attempts)
+        db.commit()
         _set_stage(db, run, "review", "正在检查逻辑事实、吸引力与作者感…")
         raw_review = _call_json(
             db, run, client=reviewer, stage="review", prompt_key="author_review",
@@ -451,10 +522,10 @@ def run_generation_pipeline(
         attempts["review_count"] += 1
         _save_attempts(db, run, attempts)
         _complete_stage(db, run, "review", {"review_count": attempts["review_count"]})
+        # R-266：吸引力分只做诊断，不再参与放行判断
         passed_review = (
             final_review["logic_passed"]
             and not final_review["hard_issues"]
-            and final_review["attraction_score"] >= 4
             and final_review["author_score"] >= 4
         )
         if passed_review:
@@ -473,11 +544,24 @@ def run_generation_pipeline(
 
     if final_data is None or final_review is None:
         raise GenerationValidationError("写作或评审未实际执行")
+    # R-266 终检：修订之后再看一次开头（只检查、不再重写），作为最终门禁依据
+    opening_final = check_opening(
+        str(final_data.get("script") or ""),
+        str((blueprint.get("hook") or {}).get("payoff") or ""),
+    )
+    _complete_stage(db, run, "opening_check", {**opening_final, "final": True})
+    run.final_script_hash = script_hash(str(final_data.get("script") or ""))
     run.status = "succeeded"
     run.stage = "done"
     run.error = ""
     run.quality_passed = compute_quality_passed(run)
     if not run.quality_passed:
+        if not opening_final["passed"]:
+            run.status = "needs_review"
+            run.error = "；".join(item["detail"] for item in opening_final["issues"])
+            _sync_draft(db, draft, run, final_data, False)
+            db.commit()
+            return {"run_id": run.id, "draft_id": draft.id, "status": run.status, "message": run.error}
         raise GenerationValidationError("服务端质量门禁未通过")
     _sync_draft(db, draft, run, final_data, True)
     draft.original_script = draft.script

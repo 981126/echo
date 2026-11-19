@@ -12,6 +12,7 @@ from .inspiration import InspirationNote
 from .kv import Kv
 from .metrics import MetricsSnapshot
 from .notification import Notification
+from .opening_sample import OpeningSample
 from .persona import PersonaCheck, PersonaTag
 from .pipeline import PipelineRun
 from .platform import (
@@ -38,6 +39,7 @@ from .web_search import WebSearchLog
 from .work import Work
 
 __all__ = [
+    "OpeningSample",
     "Video",
     "Transcript",
     "PersonaTag",

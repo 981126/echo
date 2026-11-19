@@ -47,6 +47,7 @@ KIND_LABELS = {
     "douyin_dashboard_overview": "数据看板账号更新",
     "douyin_dashboard_post": "数据看板作品更新",
     "retention_backfill": "留存曲线补齐",
+    "opening_samples": "开头样本重建",
 }
 
 
@@ -97,6 +98,8 @@ def target(kind: str, payload: dict | None = None, result=None) -> str:
         return f"/video-review?post={payload.get('post_id', '')}"
     if kind in ("douyin_dashboard_overview", "douyin_dashboard_post", "retention_backfill"):
         return "/dashboard"
+    if kind == "opening_samples":
+        return "/drafts"
     if kind == "douyin_review_references":
         return "/video-review"
     return "/home"

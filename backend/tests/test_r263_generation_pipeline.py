@@ -176,7 +176,7 @@ def test_generation_runs_all_real_stages_and_passes(db, monkeypatch):
                 calls.append("writing")
                 return {
                     "title": "先确认目标", "cover_text": "别急着选",
-                    "script": "先确定目标，再检查必要条件，才能排除不可行建议。",
+                    "script": "投简历一直被拒。先确定目标，再检查必要条件。",
                     "shells": {}, "claims": [{"text": "先确定目标", "type": "opinion", "evidence_ids": []}],
                 }
             if system == pipeline.AUTHOR_REVIEW_SYSTEM:

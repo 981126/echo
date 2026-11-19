@@ -141,6 +141,25 @@ def _retention_backfill_job() -> None:
         db.close()
 
 
+def _opening_samples_job() -> None:
+    """R-266 每日 09:20：重建开头样本（纯 DB + 文本计算，不调 LLM）。"""
+    from .tasks import start_task
+    from .services.creator_service import get_current_creator
+    from .services.opening_sample import opening_samples_task
+
+    db = SessionLocal()
+    try:
+        owner = get_current_creator(db)
+        if owner is None:
+            return
+        start_task("opening_samples", {"owner_id": owner.id}, opening_samples_task)
+    except Exception as exc:  # noqa: BLE001 定时触发没有 BackgroundTask，必须自己告警
+        db.rollback()
+        log.info("开头样本重建跳过：%s", str(exc)[:200])
+    finally:
+        db.close()
+
+
 def _weekly_ideas_job() -> None:
     """每周一 08:30：生成「本周灵感补给」并推送（R-188）。
 
@@ -254,6 +273,14 @@ def setup_scheduler() -> None:
         _weekly_ideas_job,
         CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=settings.tz),
         id="weekly_ideas",
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # R-266：每日 09:20 重建开头样本（在曲线补齐之后）
+    _scheduler.add_job(
+        _opening_samples_job,
+        CronTrigger(hour=9, minute=20, timezone=settings.tz),
+        id="opening_samples",
         misfire_grace_time=3600,
         coalesce=True,
     )
