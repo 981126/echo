@@ -597,7 +597,7 @@ export function EditDrawer({
                   onChange={(e) => setState({ ...state, transcriptText: e.target.value })}
                   placeholder="暂无转写：可手动粘贴文稿，保存后用于人设与生成"
                 />
-                <p className="mt-1 text-[10px] text-muted-foreground">修改会覆盖校对稿并触发作者资产重新整理；原始 ASR 仍保留在上面的只读区。</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">修改只覆盖校对稿，不会重新整理作者资产；原始 ASR 仍保留在上面的只读区。</p>
               </div>
             </TabsContent>
 
