@@ -1,5 +1,13 @@
 # 变更记录
 
+## [配置] 2026-11-19 — ASR 默认从 DeepSeek 切回腾讯云
+
+- **原因**：作者要求把 ASR 转写默认改回腾讯。
+- **改动**：运行时 `app_kv` `asr_mode=tencent`、`asr_model=16k_zh_en_2.0`（`PUT /api/settings/models` 保存，立即生效，无需重启）；`.env` `ECHO_ASR_MODE=tencent` 同步修改，保证重启后仍是腾讯。
+- **影响**：转写与复盘补时间轴都走腾讯（`ECHO_TIMELINE_ASR_MODE` 原本就是 `tencent`）；DeepSeek 实现与配置保留，可随时回切。
+- **回滚**：`PUT /api/settings/models` 传 `asr_mode=deepseek`（或改 `app_kv`）+ `.env` 改回 `deepseek`。
+- **校验**：`GET /api/settings/asr` 返回 `{"mode":"tencent","model":"16k_zh_en_2.0"}`。
+
 ## [R-267] 2026-11-19 — 草稿→作品绑定与发布后效果回填 ✅
 
 - **作者问题**：AI 稿发布后到底表现如何，现在完全测不到；确认流程是「写完脚本 → 另一台设备录制 → 手动发布」，接受发布后手动标记一次，并要求能关联本地视频、回填互动与留存、工作台卡片也显示。
