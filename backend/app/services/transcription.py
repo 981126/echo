@@ -42,6 +42,10 @@ class Transcriber:
             from .tencent_asr import TencentAsr  # 延迟导入，避免循环
 
             return TencentAsr(settings=self.settings, model=self.model).transcribe_file(path)
+        if mode == "deepseek":
+            from .deepseek_asr import DeepSeekAsr  # 延迟导入，避免循环
+
+            return DeepSeekAsr(settings=self.settings).transcribe_file(path)
         raise TranscriptionError(f"未知 asr_mode: {mode}")
 
     def _mock_transcript(self, path: Path) -> str:

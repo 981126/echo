@@ -1,5 +1,15 @@
 # 变更记录
 
+## [R-264] 2026-11-19 — 接入 DeepSeek 语音识别（ASR）并设为默认（静音优先切点分片） ✅
+
+- **作者问题**：DeepSeek 已开放独立 ASR 接口，要求接入并「默认使用 deepseek」；同时担心分片会切在字中间导致转写不完整，密钥要求只用 `.env`。
+- **已确认方案**：新增第 5 家 `asr_mode=deepseek`（保留 mock/aliyun/siliconflow/tencent 四家实现不动），默认服务商从腾讯切到 DeepSeek。DeepSeek 单请求硬限制 ≤120 秒 / ≤8 MiB / 仅 16-bit PCM WAV 或 Ogg Opus，长音频必须分片；分片改为**静音优先切点**（乱切会丢字/错字，且后置 LLM 校对救不回丢掉的音）：统一转 16k 单声道 WAV → `astats` 逐 50ms 帧算 RMS → 每片窗口 [start+60s, start+118s] 内优先取「RMS ≤ -35dB 且 ≥80ms」静音段中点，无静音取窗口内最安静帧中心，分析失败才 110s 硬切并记 warning；每片 ≤118s、**不重叠**（按秒计费不重复），逐片调用后顺序拼接再由现有「LLM 校对 → 预打标」处理；失败中文可读 + 既有通知/退避，**不自动切换服务商**。
+- **实现**：新增 `backend/app/services/deepseek_asr.py`（切点规划纯函数 + 分片请求 + 429/503/504 退避重试 + 文本拼接）、`media_tools` 新增 `audio_rms_frames`/`cut_wav_segments`；`config.py` 白名单与 7 个配置项；`transcription.py` 路由；`model_settings` 模式/固定占位模型 `deepseek-asr`/无 Key 保存 400；`api/settings.py` 下发 `deepseek_models`；`ingest.py` 两处 `asr_model` 落库白名单。前端：AI 设置选 DeepSeek 时不显示模型下拉、改为 `softIn` 说明「自动识别语种（无模型参数）· 按音频时长计费」；素材编辑页来源标签显示「DeepSeek」。**不改表结构（无 Alembic）、不新增页面**。
+- **验证**：`scripts/verify.sh` 全绿（后端 ruff/mypy/pytest 含新增 23 例；前端 lint + 174 例 vitest + build；文档 40 表一致）；真实联调 2 条——98.8s 素材单片 605 字 5.5s，244.9s 素材 3 片（切点 110.3s/220.0s 均为 silence，尾部 tail）1453 字 12.5s；A/B 10 条对比腾讯大模型2.0：7 条字数差 ≤1.0%、1 条 1.8%，3 条长素材（分片）差异 0.1%/0.2%/1.8%、相似度 0.927~0.945；2 条离群（5.9%/20.5%）为背景音乐歌词被 DeepSeek 转出、数字写法差异（六点半 vs 6点半），非漏句；耗时 DeepSeek 5.2~16.5s 快于腾讯 16.1~17.3s。
+- **默认切换与回滚**：`.env` `ECHO_ASR_MODE=deepseek` + 运行时 `app_kv` `asr_mode=deepseek`/`asr_model=deepseek-asr`（DB 优先，只改 .env 不生效）；`GET /api/settings/asr` 与 `PUT /api/settings/models` 已验证；回滚把 `app_kv` 改回 `tencent`/`16k_zh_en_2.0` 即可，无需重启。
+- **页面点检**：Playwright 1440 视口——初始「腾讯云录音文件识别」→ 选「DeepSeek 语音识别」→ 出现说明且**无模型下拉** → 保存 toast「已保存并生效」→ 刷新仍为 DeepSeek，console error 0。
+- **成本/风险**：按项目约 14 小时/月，5 折（0.39 元/小时）约 5.5 元/月、原价（0.78）约 10.9 元/月，对比腾讯 0.8 元/小时约 11.2 元/月；促销结束基本持平，届时的主要价值是服务商收敛。残余风险：完全无停顿连读会被「最安静点」切（发生率低、日志记 `cut_source` 可查）；DeepSeek ASR 质量已 A/B 抽查但样本仅 10 条。
+
 ## [R-262] 2026-11-10 — 同步任务完成通知按真实成功/失败统计（全失败不再报「已同步」，任务按失败上报） ✅
 
 - **登记记录**：按作者「修了吧」实现。背景：TikHub 余额不足导致全部接口 HTTP 402，15 个账号 `sync_status=failed`，但 20:27 的全量同步通知仍写「平台数据同步完成：共 12 个博主，已同步 12 个（并发 4）；已自动触发「重新对标」」，与实际不符。

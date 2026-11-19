@@ -112,6 +112,7 @@ def _models_payload(db: Session) -> dict:
             "options": model_settings.ASR_MODES,
             "siliconflow_models": model_settings.ASR_SILICONFLOW_MODELS,
             "tencent_models": model_settings.ASR_TENCENT_MODELS,
+            "deepseek_models": model_settings.ASR_DEEPSEEK_MODELS,
         },
         "debate_rounds": get_rounds(db)["rounds"],
         "topics_count": model_settings.topics_count(db),

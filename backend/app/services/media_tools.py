@@ -166,3 +166,117 @@ def probe_duration_seconds(path: Path | str) -> float:
         raise TranscriptionError(f"无法读取媒体时长: {src.name}")
     hours, minutes, seconds = int(m.group(1)), int(m.group(2)), float(m.group(3))
     return hours * 3600 + minutes * 60 + seconds
+
+
+# ---------- R-264：DeepSeek 分片所需的音量分析与切片 ----------
+
+_PTS_TIME_RE = re.compile(r"pts_time:([\d.]+)")
+_RMS_LEVEL_RE = re.compile(r"RMS_level=(-?[\d.]+|-inf)")
+
+
+def audio_rms_frames(path: Path | str, frame_ms: int = 50) -> list[tuple[float, float]]:
+    """逐帧输出音量（RMS，dB），供 DeepSeek 分片切点选择（R-264）。
+
+    一次 ffmpeg 解码即得全部切点依据（实测约 139 倍速，168s 素材约 1.2s）：
+    `astats` 按 frame_ms 聚合（默认 50ms = 800 采样点），`ametadata` 把每帧 RMS 打到 stdout。
+
+    返回 [(帧起始秒, RMS dB)]；`-inf`（绝对静音）用 -200.0 表示。
+    任何失败（命令失败/无输出/解析为空）都返回空列表，由调用方降级硬切，不阻断转写。
+    """
+    src = Path(path)
+    if not src.is_file():
+        return []
+    samples = max(160, int(16000 * frame_ms / 1000))
+    cmd = [
+        _ffmpeg_exe(),
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        str(src),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-af",
+        f"asetnsamples={samples},astats=metadata=1:reset=1,"
+        "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=600)
+    except Exception:  # noqa: BLE001 分析失败不阻断转写，降级硬切
+        return []
+    if proc.returncode != 0:
+        return []
+    text = (proc.stdout or b"").decode("utf-8", errors="ignore")
+    frames: list[tuple[float, float]] = []
+    current: float | None = None
+    for line in text.splitlines():
+        m = _PTS_TIME_RE.search(line)
+        if m:
+            current = float(m.group(1))
+            continue
+        m = _RMS_LEVEL_RE.search(line)
+        if m and current is not None:
+            raw = m.group(1)
+            frames.append((current, -200.0 if raw == "-inf" else float(raw)))
+            current = None
+    frames.sort()
+    return frames
+
+
+def cut_wav_segments(
+    src: Path | str, cuts: list[tuple[float, float]]
+) -> list[Path]:
+    """按 (start, end) 秒切 16k 单声道 PCM WAV，返回临时文件（调用方负责删除）。
+
+    用「输入定位 -ss + 重编码 pcm_s16le」保证采样点级精确，避免切点漂移截到字（R-264）。
+    任一片失败会清理已生成文件并抛 TranscriptionError（带第几片）。
+    """
+    source = Path(src)
+    if not source.is_file():
+        raise TranscriptionError(f"音频不存在: {source}")
+    outputs: list[Path] = []
+    try:
+        for index, (start, end) in enumerate(cuts, start=1):
+            length = max(0.0, end - start)
+            fd, tmp = tempfile.mkstemp(prefix=f"echo_asr_seg{index:02d}_", suffix=".wav")
+            os.close(fd)
+            out = Path(tmp)
+            proc = subprocess.run(
+                [
+                    _ffmpeg_exe(),
+                    "-y",
+                    "-hide_banner",
+                    "-nostats",
+                    "-ss",
+                    f"{start:.3f}",
+                    "-i",
+                    str(source),
+                    "-t",
+                    f"{length:.3f}",
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(out),
+                ],
+                capture_output=True,
+                timeout=600,
+            )
+            if proc.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
+                detail = (proc.stderr or b"").decode("utf-8", errors="ignore")[-300:]
+                raise TranscriptionError(f"音频切片失败（第 {index} 片）: {detail or '未知原因'}")
+            outputs.append(out)
+        return outputs
+    except Exception:
+        for item in outputs:
+            item.unlink(missing_ok=True)
+        raise
+

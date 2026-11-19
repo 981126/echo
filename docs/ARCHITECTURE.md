@@ -60,6 +60,7 @@ echo/
 | 阿里云 FileTrans | 录音文件识别 4.0 | `aliyun_filetrans.py` | `ALIYUN_ASR_ACCESS_KEY_ID/SECRET/APP_KEY`、`ASR_MODE=aliyun` |
 | 硅基流动 | 音频直传转写（Qwen/Qwen3-ASR-1.7B，免费，R-108） | `siliconflow_asr.py` | `SILICONFLOW_API_KEY/BASE_URL/ASR_MODEL`、`ASR_MODE=siliconflow` |
 | 腾讯云 | 录音文件识别（本地音频 base64 直传 ≤5MB，引擎可选，R-200） | `tencent_asr.py` | `TENCENT_ASR_SECRET_ID/SECRET_KEY/REGION/ENGINE_MODEL`、`ASR_MODE=tencent` |
+| DeepSeek ASR | 语音识别（单请求 ≤120s/8MiB；长音频静音优先切点分片 ≤118s/片、不重叠、逐片调用后顺序拼接；R-264） | `deepseek_asr.py` | `DEEPSEEK_API_KEY`（复用）、`DEEPSEEK_ASR_URL/CHUNK_SECONDS/CHUNK_MAX_SECONDS/MAX_REQUEST_MB/MAX_TOTAL_SECONDS/RETRIES`、`ASR_MODE=deepseek` |
 | QQ SMTP | 邮件推送 | `services/notify.py` | `SMTP_HOST/PORT/USER/AUTH_CODE/MAIL_TO` |
 
 **数据源适配器（R-062）**：`services/platform/base.py` 定义 `DataSource` Protocol

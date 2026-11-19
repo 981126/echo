@@ -295,7 +295,7 @@ def _post_asr_llm(db, video_id: int, text: str, asr: dict) -> None:
     from ..db import SessionLocal
 
     provider = str(asr.get("mode") or "")
-    model = str(asr.get("model") or "") if provider in ("siliconflow", "tencent") else ""
+    model = str(asr.get("model") or "") if provider in ("siliconflow", "tencent", "deepseek") else ""
 
     def _correct_and_store() -> None:
         s = SessionLocal()
@@ -396,7 +396,7 @@ def import_video_task(db, payload: dict) -> None:
             text = transcriber.transcribe(path)
         except TranscriptionError as exc:
             # R-094：转写失败也落 asr_status=failed，并给可读原因
-            model = asr["model"] if asr["mode"] in ("siliconflow", "tencent") else ""
+            model = asr["model"] if asr["mode"] in ("siliconflow", "tencent", "deepseek") else ""
             if video.transcript is None:
                 # R-242：唯一约束下并发创建需串行：锁视频行后重读转写关系，仍无才创建
                 db.query(Video.id).filter(Video.id == video.id).with_for_update().scalar()

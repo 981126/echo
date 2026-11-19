@@ -51,12 +51,16 @@ ASR_MODES: dict[str, str] = {
     "aliyun": "阿里云 FileTrans",
     "siliconflow": "硅基流动",
     "tencent": "腾讯云录音文件识别",
+    "deepseek": "DeepSeek 语音识别",
     "mock": "模拟（不调用真实 ASR）",
 }
 ASR_SILICONFLOW_MODELS = ["Qwen/Qwen3-ASR-1.7B", "FunAudioLLM/SenseVoiceSmall"]
 # 腾讯云录音文件识别引擎（R-200）：大模型2.0 / 大模型1.0 / 通用
 ASR_TENCENT_MODELS = ["16k_zh_en_2.0", "16k_zh_en", "16k_zh"]
 ASR_TENCENT_DEFAULT = "16k_zh_en_2.0"
+# DeepSeek ASR（R-264）：接口无模型参数（语种自动识别），用固定占位名落库，便于来源追溯
+ASR_DEEPSEEK_MODELS = ["deepseek-asr"]
+ASR_DEEPSEEK_DEFAULT = "deepseek-asr"
 
 SLOT_KEYS = {
     "model1": ("model1_vendor", "model1_model", "model1_key"),
@@ -124,14 +128,18 @@ def default_asr_model(mode: str) -> str:
         return settings.siliconflow_asr_model
     if mode == "tencent":
         return (getattr(settings, "tencent_asr_engine_model", "") or ASR_TENCENT_DEFAULT).strip()
+    if mode == "deepseek":
+        return ASR_DEEPSEEK_DEFAULT
     return ""
 
 
 def _coerce_asr_model(mode: str, model: str) -> str:
-    """修正模型名：腾讯引擎必须命中白名单，缺失则回退该服务商默认。"""
+    """修正模型名：腾讯引擎必须命中白名单，DeepSeek 固定占位名，缺失则回退该服务商默认。"""
     model = (model or "").strip()
     if mode == "tencent" and model not in ASR_TENCENT_MODELS:
         return ASR_TENCENT_DEFAULT
+    if mode == "deepseek":
+        return ASR_DEEPSEEK_DEFAULT
     return model or default_asr_model(mode)
 
 
@@ -226,6 +234,12 @@ def save_model_config(db: Session, payload: dict) -> dict:
         if not (settings.tencent_asr_secret_id and settings.tencent_asr_secret_key):
             raise ModelConfigError(
                 "选择腾讯云 ASR 前请先在 .env 配置 ECHO_TENCENT_ASR_SECRET_ID / ECHO_TENCENT_ASR_SECRET_KEY"
+            )
+    if asr_mode == "deepseek":
+        asr_model = ASR_DEEPSEEK_DEFAULT  # 接口无模型参数（语种自动识别）
+        if not getattr(settings, "deepseek_api_key", ""):
+            raise ModelConfigError(
+                "选择 DeepSeek ASR 前请先在 .env 配置 ECHO_DEEPSEEK_API_KEY"
             )
 
     for slot, (kv_vendor, kv_model, kv_key) in SLOT_KEYS.items():

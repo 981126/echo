@@ -339,7 +339,7 @@ export function EditDrawer({
 
   const transcript = detail?.transcript
   const asrLabel = transcript?.asr_provider
-    ? { aliyun: '阿里云', siliconflow: '硅基流动', tencent: '腾讯云', mock: 'mock' }[transcript.asr_provider] || transcript.asr_provider
+    ? { aliyun: '阿里云', siliconflow: '硅基流动', tencent: '腾讯云', deepseek: 'DeepSeek', mock: 'mock' }[transcript.asr_provider] || transcript.asr_provider
     : ''
 
   return (

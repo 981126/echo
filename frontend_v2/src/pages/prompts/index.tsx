@@ -76,7 +76,15 @@ interface ModelsPayload {
   model2: ModelSlot
   gen_role: string
   referee_role: string
-  asr: { mode: string; model: string; options: Record<string, string>; siliconflow_models: string[]; tencent_models: string[] }
+  asr: {
+    mode: string
+    model: string
+    options: Record<string, string>
+    siliconflow_models: string[]
+    tencent_models: string[]
+    /** R-264：DeepSeek ASR 无模型参数，固定一个说明项 */
+    deepseek_models: string[]
+  }
   debate_rounds: number
   topics_count: number
   vendors: Record<string, VendorMeta>
@@ -325,6 +333,7 @@ export default function PromptsPage() {
     const defaults: Record<string, string> = {
       siliconflow: models?.asr.siliconflow_models[0] || '',
       tencent: models?.asr.tencent_models[0] || '',
+      deepseek: models?.asr.deepseek_models[0] || 'deepseek-asr',
       aliyun: '',
       mock: ''
     }
@@ -570,6 +579,18 @@ export default function PromptsPage() {
                               ))}
                             </SelectContent>
                           </Select>
+                        </motion.span>
+                      )}
+                      {asrMode === 'deepseek' && (
+                        <motion.span
+                          key="deepseek"
+                          initial={{ opacity: 0.85, x: 6 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={softIn}
+                          className="flex w-full flex-wrap items-center gap-2 md:w-auto"
+                        >
+                          <span className="text-xs text-muted-foreground">ASR 模型：</span>
+                          <span className="text-xs text-muted-foreground">自动识别语种（无模型参数）· 按音频时长计费</span>
                         </motion.span>
                       )}
                       <span className="text-xs text-muted-foreground">每日自动生成篇数：</span>

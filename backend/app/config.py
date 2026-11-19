@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _MODE_CHOICES = {
     "tikhub_mode": {"mock", "real"},
     "hot_source_mode": {"mock", "real"},
-    "asr_mode": {"mock", "aliyun", "siliconflow", "tencent"},  # R-108/R-200：ASR 服务商可切硅基流动/腾讯云
+    "asr_mode": {"mock", "aliyun", "siliconflow", "tencent", "deepseek"},  # R-108/R-200/R-264：ASR 服务商可切硅基流动/腾讯云/DeepSeek
 }
 _MODE_DEFAULTS = {"tikhub_mode": "mock", "hot_source_mode": "mock", "asr_mode": "mock"}
 
@@ -64,8 +64,8 @@ class Settings(BaseSettings):
     pool_ideas_per_post: int = 8
     pool_ideas_per_day: int = 40
 
-    # ASR（R-108）：asr_mode = mock（开发/测试假转写）| aliyun | siliconflow | tencent
-    asr_mode: str = "mock"  # mock | aliyun | siliconflow | tencent（.env 配置用哪家，重启生效；界面可覆盖）
+    # ASR（R-108/R-264）：asr_mode = mock（开发/测试假转写）| aliyun | siliconflow | tencent | deepseek
+    asr_mode: str = "mock"  # mock | aliyun | siliconflow | tencent | deepseek（.env 配置用哪家，重启生效；界面可覆盖）
     asr_poll_interval: int = 15  # 阿里云 FileTrans 结果轮询间隔（秒）
     asr_poll_timeout: int = 3600  # 转写最长等待（秒），超时任务标记失败可重试
 
@@ -92,6 +92,17 @@ class Settings(BaseSettings):
     tencent_asr_endpoint: str = "asr.tencentcloudapi.com"
     tencent_asr_engine_model: str = "16k_zh_en_2.0"  # 默认引擎（大模型2.0）；界面可覆盖
     tencent_asr_max_audio_mb: int = 5  # 本地音频直传上限（腾讯限制 5MB）
+
+    # DeepSeek ASR（R-264，asr_mode=deepseek 时使用）：POST /v1/tools/asr，multipart file
+    # 接口限制：单请求 ≤120 秒 / ≤8 MiB，仅 16-bit PCM WAV / Ogg Opus，不支持流式。
+    # 长音频在 deepseek_asr.py 里按「静音优先切点」分片（≤118s/片、不重叠）；
+    # 密钥复用 deepseek_api_key（.env 的 ECHO_DEEPSEEK_API_KEY），不新增独立 Key。
+    deepseek_asr_url: str = "https://api.deepseek.com/v1/tools/asr"  # ECHO_DEEPSEEK_ASR_URL
+    deepseek_asr_chunk_seconds: int = 110  # 目标片长（秒），必须小于 chunk_max
+    deepseek_asr_chunk_max_seconds: int = 118  # 单片硬上限（给 120 秒限制留余量），最大 120
+    deepseek_asr_max_request_mb: int = 8  # 单请求大小上限（MiB，官方 8 MiB）
+    deepseek_asr_max_total_seconds: int = 7200  # 单素材最长时长（秒），超过明确报错不自动切服务商
+    deepseek_asr_retries: int = 3  # 429/503/504 重试次数（不含首次）
 
     # QQ 邮箱 SMTP
     smtp_host: str = "smtp.qq.com"
