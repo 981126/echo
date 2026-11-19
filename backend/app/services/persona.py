@@ -155,7 +155,7 @@ def suggest_phrase_candidates(db, limit: int = 12) -> list[dict]:
 
     from ..models.video import Video
     from .creator_service import current_creator_id
-    from .generation import _engagement_map
+    from .author_style import _engagement_map
 
     cid = current_creator_id(db)
     q = (

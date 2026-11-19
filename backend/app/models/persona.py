@@ -22,6 +22,8 @@ class PersonaTag(Base):
     category: Mapped[str] = mapped_column(String(20), default="style")  # style | topic | redline | phrase
     layer: Mapped[str] = mapped_column(String(20), default="stance")  # R-182 四层：core_dna|stance|mode|forbidden
     evidence: Mapped[str] = mapped_column(Text, default="")  # R-182 证据原文短句
+    evidence_refs: Mapped[str] = mapped_column(Text, default="[]")  # R-263 可追溯原文区间
+    conditions_json: Mapped[str] = mapped_column(Text, default="{}")  # R-263 适用议题/场景/例外
     frequency: Mapped[int] = mapped_column(Integer, default=0)  # R-182 出现频次（命中素材篇数）
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # R-182 最后出现时间
     confirm_strength: Mapped[int] = mapped_column(Integer, default=1)  # R-182 作者确认强度（手动=3/AI建议确认=2）

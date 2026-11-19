@@ -76,11 +76,11 @@ def develop_note(note_id: int, db: Session = Depends(get_db)):
     if not topic:
         raise HTTPException(status_code=400, detail="内容为空，无法生成")
     # R-227：随手记原文作为联网检索的 query 源（比标题更具体）
-    task_id, draft_id = start_generation(db, topic, query_source=note.text)
+    task_id, draft_id, run_id = start_generation(db, topic, query_source=note.text)
     note.status = "used"
     note.draft_id = draft_id
     db.commit()
-    return {"task_id": task_id, "draft_id": draft_id, "topic": topic}
+    return {"task_id": task_id, "draft_id": draft_id, "run_id": run_id, "topic": topic}
 
 
 @router.delete("/{note_id}", response_model=dict)

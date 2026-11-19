@@ -110,6 +110,9 @@ def refresh_published_performance(db: Session, creator_id: int | None = None) ->
         if perf is None:
             continue
         d.performance = json.dumps(perf, ensure_ascii=False)
+        from .generation_feedback import mark_assets_feedback
+
+        mark_assets_feedback(db, d, None)
         updated += 1
     if updated:
         db.commit()

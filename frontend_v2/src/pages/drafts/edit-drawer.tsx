@@ -40,6 +40,7 @@ import { toast } from '@/components/ui/toaster'
 import { ScriptEditor } from './script-editor'
 import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { DraftAiStatus } from './draft-ai-status'
+import { GenerationRunPanels, type GenerationRun } from './generation-run-panels'
 import { createAutoSaver, draftFingerprint, type AutoSaveStatus } from './autosave'
 import { clearLocalCopy, readLocalCopy, type LocalDraftCopy } from './local-copy'
 import { countNewRows, isNearBottom, maxRowId } from './discuss-follow'
@@ -173,6 +174,7 @@ export function DraftEditDrawer({
   const startedAtRef = useRef(0) // 自己点【讨论】的时间（乐观 running 的兜底）
   // R-227：讨论进行中实时刷新的草稿 quality（证据/论点先落库，不必等跑完）
   const [liveQuality, setLiveQuality] = useState<Draft['quality'] | null>(null)
+  const [generationRun, setGenerationRun] = useState<GenerationRun | null>(null)
   const [versions, setVersions] = useState<DraftVersion[]>([])
   const [cmpLeft, setCmpLeft] = useState('')
   const [cmpRight, setCmpRight] = useState('')
@@ -331,6 +333,16 @@ export function DraftEditDrawer({
     }
   }
 
+  async function refreshGenerationRun(targetId = id) {
+    if (!targetId) return
+    try {
+      const run = await apiJson<GenerationRun>(`/api/drafts/${targetId}/generation-runs/latest`)
+      setGenerationRun(run)
+    } catch {
+      setGenerationRun(null)
+    }
+  }
+
   // 关联素材选项（R-243：模块级 60s 缓存——之前每次打开抽屉都重复拉 /api/videos?limit=500 约 45KB）
   useEffect(() => {
     if (!open) return
@@ -358,6 +370,7 @@ export function DraftEditDrawer({
     atBottomRef.current = true
     setPendingNew(0)
     setLiveQuality(null)
+    setGenerationRun(null)
     if (!open || !id) {
       setDiscussions([])
       setVersions([])
@@ -365,6 +378,7 @@ export function DraftEditDrawer({
       setDebate(null)
       return
     }
+    void refreshGenerationRun(id)
     apiJson<Discussion[]>(`/api/drafts/${id}/discussions`).then(setDiscussions).catch(() => setDiscussions([]))
     apiJson<DraftVersion[]>(`/api/drafts/${id}/versions`).then((vs) => {
       setVersions(vs)
@@ -387,6 +401,7 @@ export function DraftEditDrawer({
         const row = await apiJson<DebateStatusRow>(`/api/drafts/${id}/debate-status`)
         const rows = await apiJson<Discussion[]>(`/api/drafts/${id}/discussions`)
         setDiscussions(rows)
+        void refreshGenerationRun(id)
         if (row.state === 'running') {
           sawRunningRef.current = true
           setDebate(toDebateState(row))
@@ -428,6 +443,7 @@ export function DraftEditDrawer({
       }
     }, 3000)
     return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discussing, id, onSaved, setState, autoSaver])
 
   // R-178：最近一次讨论的运行头（配置的生成方/评审方）——必须在 early return 之前，遵守 hooks 规则
@@ -651,15 +667,19 @@ export function DraftEditDrawer({
     }
   }
 
-  async function rework() {
+  async function rework(angleId = '') {
     if (!id || reworking) return
     setReworking(true)
     try {
-      await apiJson(`/api/drafts/${id}/rework`, { method: 'POST', body: '{}' })
-      toast.success('已回炉重写')
-      void refreshDebate(id) // R-173：回炉期间也显示「正在回炉重写…」状态条
-      const d = await apiJson<Draft>(`/api/drafts/${id}`)
-      setState({ ...state, title: d.title, cover_text: d.cover_text, script: d.script })
+      await ensureSaved()
+      autoSaver.markSaved(state)
+      await apiJson(`/api/drafts/${id}/rework`, { method: 'POST', body: JSON.stringify(angleId ? { angle_id: angleId } : {}) })
+      toast.success('已保存当前版本并提交重新生成')
+      sawRunningRef.current = false
+      startedAtRef.current = Date.now()
+      setDebate({ state: 'running', kind: 'rework', note: '正在重新生成…', actor: '', phase: 'queued', round: null, rounds: null })
+      void refreshDebate(id)
+      void refreshGenerationRun(id)
       setCheckInfo(null)
       onSaved()
     } catch (e) {
@@ -822,7 +842,7 @@ export function DraftEditDrawer({
         <Tabs value={tab} onValueChange={setTab} className="mt-4">
           <TabsList>
             <TabsTrigger value="edit">编辑</TabsTrigger>
-            <TabsTrigger value="discuss">讨论（双模型留痕）</TabsTrigger>
+            {(!generationRun || generationRun.status === 'legacy') && <TabsTrigger value="discuss">讨论（双模型留痕）</TabsTrigger>}
             <TabsTrigger value="compare">正文对比</TabsTrigger>
             <TabsTrigger value="versions">版本{versions.length ? ` (${versions.length})` : ''}</TabsTrigger>
           </TabsList>
@@ -934,7 +954,7 @@ export function DraftEditDrawer({
                   {checkInfo.ok ? <Badge variant="success">通过</Badge> : <Badge variant="warning">建议回炉</Badge>}
                   <span className="flex-1" />
                   {!checkInfo.ok && (
-                    <Button variant="secondary" size="sm" onClick={rework} disabled={reworking}>
+                    <Button variant="secondary" size="sm" onClick={() => rework()} disabled={reworking}>
                       {reworking ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Recycle className="h-3.5 w-3.5" />}
                       一键回炉重写
                     </Button>
@@ -949,6 +969,10 @@ export function DraftEditDrawer({
                   </ul>
                 )}
               </motion.div>
+            )}
+
+            {generationRun && (
+              <GenerationRunPanels run={generationRun} onAngle={(angleId) => void rework(angleId)} reworking={reworking} />
             )}
 
             {!!info && (

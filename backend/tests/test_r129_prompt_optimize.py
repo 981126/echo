@@ -12,7 +12,6 @@ from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.draft import Draft
-from app.models.feedback import Feedback
 from app.models.persona import PersonaTag
 from app.models.platform import Creator
 from app.models.prompt import AiPrompt
@@ -104,23 +103,23 @@ def test_validate_candidate_blocks_written_in_redline_and_identity(db):
         )
     )
     db.commit()
-    contract = pc.contract_for("generation")
+    contract = pc.contract_for("video_tags")
     base = "你是脚本创作专家，围绕选题写作。\n\n" + contract
 
-    ok, reason = pc.validate_candidate("generation", base, db)
+    ok, reason = pc.validate_candidate("video_tags", base, db)
     assert ok, reason
 
     bad_redline = base + "\n不卖课不收费割韭菜"
-    ok, reason = pc.validate_candidate("generation", bad_redline, db)
+    ok, reason = pc.validate_candidate("video_tags", bad_redline, db)
     assert not ok and "红线" in reason
 
     bad_identity = "你是 R-128 本人，来上海打拼。\n\n" + contract
-    ok, reason = pc.validate_candidate("generation", bad_identity, db)
+    ok, reason = pc.validate_candidate("video_tags", bad_identity, db)
     assert not ok and "身份" in reason
 
 
 def test_validate_candidate_checks_markers_and_budget(db):
-    ok, reason = pc.validate_candidate("generation", "写了很长一段但没有任何契约字段的内容，长度足够二十字以上")
+    ok, reason = pc.validate_candidate("video_tags", "写了很长一段但没有任何契约字段的内容，长度足够二十字以上")
     assert not ok and "缺少输出契约字段" in reason
 
     ok, reason = pc.validate_candidate("correct", "修" * 2000)
@@ -194,40 +193,19 @@ def test_reject_candidate_marks_rejected(db):
     assert ps.reject_candidate(db, "generation", 2) is None  # 已处理不能再拒
 
 
-def test_version_effect_aggregates_feedback(db):
-    owner = _owner(db)
-    d1 = Draft(creator_id=owner.id, script="一稿", source="ai", prompt_version=3, status="done")
-    d2 = Draft(creator_id=owner.id, script="二稿", source="ai", prompt_version=3)
-    d3 = Draft(creator_id=owner.id, script="三稿", source="ai", prompt_version=1)
-    db.add_all([d1, d2, d3])
-    db.flush()
-    db.add_all(
-        [
-            Feedback(draft_id=d1.id, rating=5, liked=True),
-            Feedback(draft_id=d2.id, rating=3),
-            Feedback(draft_id=d3.id, rating=2),
-        ]
-    )
-    db.commit()
-    effect = ps.version_effect(db, "generation")
-    by_ver = {r["version"]: r for r in effect}
-    # R-211：used 口径=status done（完成即认可）；avg_rating 仅统计历史评分
-    assert by_ver[3]["drafts"] == 2 and by_ver[3]["avg_rating"] == 4.0 and by_ver[3]["used"] == 1
-    assert by_ver[1]["avg_rating"] == 2.0
-    assert ps.version_effect(db, "correct") == []
 
 
 # ---------- 评测 ----------
 
 
 def test_format_ok_and_score_outputs():
-    assert pe._format_ok("generation", '{"title":"t","script":"s"}')
-    assert not pe._format_ok("generation", '{"title":"t"}')
-    assert not pe._format_ok("generation", "```json\n{}\n```")
+    assert pe._format_ok("video_tags", '{"main_topics":["求职"],"is_ad":false,"tags":[]}')
+    assert not pe._format_ok("video_tags", '{"main_topics":[]}')
+    assert not pe._format_ok("video_tags", "```json\n{}\n```")
     assert pe._format_ok("correct", "这是校对后的文本。")
 
-    good = pe._score_outputs("generation", ['{"title":"t","script":"s"}'] * 2, [], [])
-    bad = pe._score_outputs("generation", ["不是 JSON", "也不是"], [], [])
+    good = pe._score_outputs("video_tags", ['{"main_topics":["求职"],"is_ad":false,"tags":[]}'] * 2, [], [])
+    bad = pe._score_outputs("video_tags", ["不是 JSON", "也不是"], [], [])
     assert good["score"] > bad["score"]
     assert good["format_rate"] == 1.0 and bad["format_rate"] == 0.0
 
@@ -248,13 +226,6 @@ def test_evaluate_without_golden_samples(db):
     assert "样本不足" in row.reason
 
 
-def test_generate_draft_records_prompt_version(db, monkeypatch):
-    from app.services import generation
-
-    _owner(db)
-    # 无密钥 → generate_draft 走 mock 兜底，仍应记录当前启用版本
-    draft = generation.generate_draft(db, "测试选题")
-    assert draft.prompt_version == 1
 
 
 # ---------- R-132：变更说明 / 长度约束 ----------

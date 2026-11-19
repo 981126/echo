@@ -19,12 +19,9 @@ import pytest
 from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.kv import Kv
 from app.models.prompt import AiPrompt
-from app.services import prompt_service
 from app.services.benchmark import REWRITE_SYSTEM
-from app.services.debate import ALLOW_EXPANSION_RULE, SOURCE_REWRITE_SYSTEM
-from app.services.generation import GENERATION_SYSTEM
+from app.services.rewrite_debate import ALLOW_EXPANSION_RULE, SOURCE_REWRITE_SYSTEM
 from app.services.station_evidence import build_block
 
 
@@ -37,14 +34,6 @@ def db(tmp_path):
     session.close()
 
 
-def test_generation_prompt_allows_reference_as_own() -> None:
-    """生成默认提示词：不再禁止「写成作者经历/编造」，改为允许补全扩写。"""
-    assert "禁止写成你自己的经历" not in GENERATION_SYSTEM
-    assert "严禁编造" not in GENERATION_SYSTEM
-    assert "【需作者补充】" not in GENERATION_SYSTEM
-    assert "也可以把其中的经历、案例、观点写成作者本人的" in GENERATION_SYSTEM
-    assert "允许基于素材补全、扩写细节" in GENERATION_SYSTEM
-    assert "观点要按作者本人的口吻和立场表达" in GENERATION_SYSTEM
 
 
 def test_rewrite_prompt_allows_reference_as_own() -> None:
@@ -108,50 +97,3 @@ def _old_generation_content() -> str:
         "论据缺素材处标【需作者补充】，不要编一个填上；\n"
         "观点必须用作者自己的。"
     )
-
-
-def test_prompt_patch_replaces_old_rules_and_archives_old(db) -> None:
-    """命中旧句 → 另存新启用版本，旧版归档且内容保留；第二次不再新增版本。"""
-    _seed_generation(db, _old_generation_content())
-
-    assert prompt_service.patch_generation_prompt_for_r254(db) is True
-
-    enabled = _enabled_generation(db)
-    assert enabled is not None
-    assert enabled.version == 2
-    assert enabled.note == prompt_service.R254_PATCH_NOTE
-    assert "禁止写成你自己的经历" not in enabled.content
-    assert "严禁编造" not in enabled.content
-    assert "【需作者补充】" not in enabled.content
-    assert "也可以把其中的经历、案例、观点写成作者本人的" in enabled.content
-    assert "写成作者能直接录的口播稿即可" in enabled.content
-    old = db.get(AiPrompt, 1)
-    assert old is not None and old.status == "archived"
-    assert "禁止写成你自己的经历" in old.content  # 旧版内容保留，可在 AI 设置回退
-
-    assert prompt_service.patch_generation_prompt_for_r254(db) is False
-    count = db.query(AiPrompt).filter(AiPrompt.key == "generation").count()
-    assert count == 2
-
-
-def test_prompt_patch_skips_clean_prompt(db) -> None:
-    """已是新规则（无旧句）→ 不新增版本，只写一次性标记。"""
-    _seed_generation(db, GENERATION_SYSTEM)
-
-    assert prompt_service.run_r254_prompt_patch_once(db) is False
-    assert db.get(Kv, prompt_service.R254_PATCH_DONE_KEY) is not None
-    assert db.query(AiPrompt).filter(AiPrompt.key == "generation").count() == 1
-
-
-def test_prompt_patch_once_idempotent_with_kv_marker(db) -> None:
-    """带 Kv 标记的启动补丁：首次替换并写标记，二次调用不再动提示词。"""
-    _seed_generation(db, _old_generation_content())
-
-    assert prompt_service.run_r254_prompt_patch_once(db) is True
-    assert db.get(Kv, prompt_service.R254_PATCH_DONE_KEY) is not None
-    enabled_v = _enabled_generation(db).version
-    assert enabled_v == 2
-
-    assert prompt_service.run_r254_prompt_patch_once(db) is False
-    assert _enabled_generation(db).version == enabled_v
-    assert db.query(AiPrompt).filter(AiPrompt.key == "generation").count() == 2

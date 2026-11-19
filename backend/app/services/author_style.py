@@ -1,8 +1,4 @@
-"""选题生成服务：DeepSeek 生成三件套（标题/封面字/脚本）+ 平台外壳。
-
-语气一致性：人设档案（标签+红线）+ 风格样本（本地 TF-IDF 检索）。
-无密钥时输出确定性 mock 稿，保证开发/测试离线可跑。
-"""
+"""洗稿、人设和提示词共享的作者风格上下文（R-263）。"""
 
 from __future__ import annotations
 
@@ -16,60 +12,12 @@ from datetime import date
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
-from ..config import get_settings
 from ..core.retrieval import TfidfIndex
 from ..core.style_profile import build_style_profile, default_avoid_words, format_style_profile
-from .prompt_service import get_prompt_version
 from ..models.draft import Draft
 from ..models.metrics import MetricsSnapshot
 from ..models.persona import PersonaTag
 from ..models.video import Video
-from .llm import LLMError
-
-# R-254：作者确认放开——对标/参考素材可以写成作者本人经历，允许基于素材补全/扩写细节。
-# 原「【对标】素材禁止写成你自己的经历」「严禁编造具体数字/人名/机构/经历/缺素材标【需作者补充】」已移除。
-GENERATION_SYSTEM = (
-    "你是这位作者的代笔，写出来要像他本人对着镜头说话：真实、具体、口语，"
-    "不要 AI 腔、不要书面套话、不要正确但没用的空话。\n"
-    "内容硬要求（评审会按这条挑）：\n"
-    "1) 全篇要有 2-4 条明确、可辩驳的论点，并在 outlines 里逐条列出；\n"
-    "2) 每条论点都要配一个具体事例/数据/经历（写进该条 support），不要只喊口号；\n"
-    "3) 优先用【站内真实素材】里的真实经历/说法；没有就用【联网事实素材】里的至少 1 条"
-    "（口语化转述，不要念 URL）；用到的联网编号写进 sources。"
-    "【对标】素材可以直接使用，也可以把其中的经历、案例、观点写成作者本人的；\n"
-    "4) 素材不够具体时，允许基于素材补全、扩写细节（包括第一人称经历、具体数字、人物/机构），"
-    "写成作者能直接录的口播稿即可；\n"
-    "5) 删掉「要努力/要相信自己/坚持就会成功」这类正确但没用的空话。\n"
-    "怎么写由「作者人设 + 本次创作模式 + 风格样本」决定，不要套固定模板；观点要按作者本人的口吻和立场表达。\n"
-    "严格按末尾的输出契约返回，不输出额外文字。\n"
-    "输出契约（系统固定，不得改动字段名与结构）：\n"
-    '只输出 JSON：{"title":"视频标题","cover_text":"封面字",'
-    '"script":"完整口播脚本（1-2 分钟，约200-400字，口语化，有钩子有收尾）",'
-    '"outlines":[{"claim":"本条论点(一句话)","support":"支撑它的具体事例/数据/经历"}],'
-    '"sources":[引用到的联网事实编号，如[1,3]；没有则[]],'
-    '"shells":{"douyin":"抖音发布文案+话题标签","bilibili":"B站简介","xiaohongshu":"小红书笔记正文（含emoji与话题）"}}'
-)
-
-# R-183：创作模式——把「是否犀利/独白/追热点/做实验」从提示词里拿出来，改成显式参数。
-CREATION_MODES: dict[str, dict[str, str]] = {
-    "sharp": {
-        "label": "犀利干货",
-        "guide": "以犀利干货为主：直接给判断和可执行动作，先破后立、观点鲜明，少铺垫。",
-    },
-    "monologue": {
-        "label": "个人独白",
-        "guide": "以个人独白为主：第一人称讲自己的经历、状态与感受，真诚、具体，不强行升华。",
-    },
-    "commentary": {
-        "label": "热点评论",
-        "guide": "以热点评论为主：借热点事件表达作者的鲜明立场，联系自己的经验，观点用作者自己的。",
-    },
-    "experiment": {
-        "label": "实验复盘",
-        "guide": "以实验复盘为主：把一件事当实验，讲清做法、过程与结果，结论留有余地。",
-    },
-}
-
 
 def _creator_filter(db: Session):
     """归属过滤：存在当前主博主时只学习该博主数据（多主博主隔离，D-028）。"""
@@ -233,7 +181,6 @@ def _material_version(db: Session) -> tuple:
     if cid:
         q = q.filter(Video.creator_id == cid)
     t_count, t_max, t_len = q.one()
-    from ..models.draft import Draft
     from ..models.feedback import Feedback
 
     return (
@@ -261,8 +208,7 @@ def _build_style_index(db: Session) -> "TfidfIndex":
         weights.append(round(weights_map.get(v.id, 0.0), 6))
     # R-022：作者认可的稿 = 黄金样本，更高权重
     # R-211：认可口径从「评分/点赞」改为 status 驱动——完成（done）即认可（历史 rating/liked 弃用）
-    from ..models.draft import Draft
-
+    
     dq = db.query(Draft).filter(Draft.status == "done", Draft.script != "")
     cid0 = _creator_filter(db)
     if cid0:
@@ -355,7 +301,6 @@ def _rewrite_examples(db: Session, limit: int = 2) -> str:
     `original_script → script`（老行为，仅 source="ai" 的稿有 original_script 语义）。
     R-211：样本权重从评分/点赞改为 status 驱动（done=5 / archived=1 / 其它=3）。
     """
-    from ..models.draft import Draft
     from .draft_versions import AUTHOR_SOURCES, chains_with_sources
 
     cid = _creator_filter(db)
@@ -405,7 +350,6 @@ def _reverted_lessons(db: Session, limit: int = 3) -> str:
     检测口径：版本链中某作者侧版本的正文与更早一版相同、且两版之间有 AI 侧版本
     （= AI 改了一轮，作者最终恢复旧版）。手稿讨论后被回退是最典型场景。
     """
-    from ..models.draft import Draft
     from .draft_versions import AI_SOURCES, AUTHOR_SOURCES, chains_with_sources
 
     cid = _creator_filter(db)
@@ -479,8 +423,7 @@ def _structure_templates(db: Session) -> str:
     优先用作者认可的稿；没有时退回真实互动最高的素材转写稿。
     R-211：认可口径改 status 驱动——完成（done）即认可（历史 rating/liked 弃用）。
     """
-    from ..models.draft import Draft
-
+    
     cid = _creator_filter(db)
     starters: list[str] = []
     q = db.query(Draft).filter(Draft.status == "done", Draft.script != "")
@@ -585,12 +528,6 @@ def _static_style_context(db: Session) -> dict[str, list[str]]:
     return static
 
 
-def _mode_line(mode: str) -> list[str]:
-    """创作模式说明（R-183 动态部分：随本次 mode 变化，不能进静态缓存）。"""
-    info = CREATION_MODES.get((mode or "").strip())
-    return [] if not info else ["", f"本次创作模式：{info['label']}——{info['guide']}"]
-
-
 def _topic_samples_block(db: Session, topic: str) -> list[str]:
     """按选题检索的风格样本（动态部分：样本文本随 topic 变化，不能进静态缓存）。"""
     samples = _style_samples(db, topic)
@@ -600,20 +537,13 @@ def _topic_samples_block(db: Session, topic: str) -> list[str]:
     ]
 
 
-def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
-    """作者人设 + 语言习惯 + 样本/范本/结构/分节范例/对标参考的共享上下文。
-
-    R-181：生成与「参考改写（洗稿）」共用同一份上下文，避免洗稿只拿到简化人设、
-    不像作者本人。`topic` 非空时按选题检索风格样本；`mode`（R-183）为创作模式。
-    R-240 M5：静态部分进程内缓存（见 `_static_style_context`），动态部分（按选题样本/
-    创作模式）每次现拼；拼接顺序与空行与改造前逐字一致。
-    """
+def author_style_context(db: Session, topic: str = "") -> str:
+    """洗稿、人设与提示词共享的作者上下文；按选题动态检索风格样本。"""
     static = _static_style_context(db)
     return "\n".join(
         [
             "作者人设：",
             *static["persona"],
-            *_mode_line(mode),
             "",
             "红线（不要违反）：",
             *static["redlines"],
@@ -631,15 +561,6 @@ def author_style_context(db: Session, topic: str = "", mode: str = "") -> str:
             *static["refs"],
         ]
     )
-
-
-def generation_user_message(db: Session, topic: str, mode: str = "", evidence_block: str = "") -> str:
-    """生成用的 user 上下文（R-129：抽出来，供「金样本回放评分」用同一份输入）；R-227 注入联网证据。"""
-    parts = [f"选题：{topic}", "", author_style_context(db, topic, mode)]
-    if evidence_block:
-        parts += ["", evidence_block]
-    return "\n".join(parts)
-
 
 
 def style_diagnostics(db: Session, script: str) -> dict:
@@ -675,89 +596,3 @@ def _self_check(db: Session, script: str) -> tuple[list[str], float]:
         if len(redline) >= 6 and redline in text:
             issues.append(f"命中红线：{redline[:20]}")
     return issues, style_diagnostics(db, text)["style_coverage"]
-
-
-def _mock_payload(topic: str) -> tuple[str, str, str, dict]:
-    title = f"{topic}（mock 标题）"
-    cover = (topic or "今日话题")[:8]
-    script = (
-        f"[mock 脚本] 大家好，今天想聊聊{topic}。"
-        "很多人对这件事有误区，其实只要抓住三个关键点，结果会完全不一样。"
-        "第一，先想清楚目标；第二，小步快跑试错；第三，持续复盘优化。"
-        "如果你也有类似困惑，评论区告诉我，我们下期见。"
-    )
-    shells = {
-        "douyin": f"#{topic} 短视频 干货分享",
-        "bilibili": f"{topic} | 亲测有效的 3 个方法",
-        "xiaohongshu": f"🔥 {topic}，建议收藏！",
-    }
-    return title, cover, script, shells
-
-
-def generate_draft(db: Session, topic: str, settings=None, snapshot: bool = True, mode: str = "") -> Draft:
-    """生成一篇脚本草稿（R-139：与工作台/每日自动生成完全相同的双模型讨论路径）。
-
-    流程：建占位稿 → `run_debate`（生成方初稿 + 评审方 N 轮挑刺 + 生成方修订 + 自检收口）
-    → 草稿上带 `quality`（含模型组合 / 是否降级 / 轮次 / 自检结果）。
-    无密钥或两个模型都不可用时回落到确定性 mock 稿（开发/离线可跑，`quality.mock=True`）。
-    R-157：默认生成完自动定稿留一版；`snapshot=False` 用于金样本自测 / 回炉中间稿（不留版）。
-    R-183：`mode` 为创作模式（sharp/monologue/commentary/experiment），空=不指定。
-    """
-    from .debate import PLACEHOLDER_SCRIPT, debate_rounds, run_debate
-
-    settings = settings or get_settings()
-    cid = _creator_filter(db)
-    from .persona_profile import current_persona_version
-
-    draft = Draft(
-        creator_id=cid,
-        title=topic,
-        cover_text="",
-        script=PLACEHOLDER_SCRIPT,
-        source="ai",
-        prompt_version=get_prompt_version("generation", db),  # R-129 M116：按提示词版本归因
-        persona_version=current_persona_version(db, cid),  # R-130：人设变化可控
-    )
-    db.add(draft)
-    db.commit()
-    db.refresh(draft)
-
-    try:
-        run_debate(db, draft, topic, settings, mode=mode)
-    except LLMError as exc:
-        # 无密钥 / 两个模型全挂 → 确定性 mock 稿（保留草稿，绝不静默丢稿）
-        db.rollback()
-        draft = db.get(Draft, draft.id) or draft
-        title, cover, script, shells = _mock_payload(topic)
-        draft.title = title
-        draft.cover_text = cover
-        draft.script = script
-        draft.platform_shells = json.dumps(shells, ensure_ascii=False)
-        draft.quality = json.dumps(
-            {
-                "mock": True,
-                "reason": str(exc)[:200],
-                "rounds": debate_rounds(db, settings),
-                "issues": [],
-                "passed": False,
-                "style_coverage": 0.0,
-                "diagnostics": {
-                    "style_coverage": 0.0,
-                    "style_matched": [],
-                    "style_missing": [],
-                    "ai_cliche": [],
-                },
-            },
-            ensure_ascii=False,
-        )
-        db.commit()
-        db.refresh(draft)
-
-    draft.original_script = draft.script
-    db.commit()
-    db.refresh(draft)
-    if snapshot:
-        from .draft_versions import finalize_version
-
-        finalize_version(db, draft, source="ai_generate", note="AI 生成")
-    return draft

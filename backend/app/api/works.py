@@ -128,6 +128,15 @@ def cloud_to_local(
         video.transcript.source_text = text.strip()
         video.transcript.corrected_text = text.strip()
     db.commit()
+    if text.strip() and video.creator_id is not None:
+        from ..services.author_assets import author_asset_task
+        from ..tasks import start_task
+
+        start_task(
+            "author_assets",
+            {"creator_id": video.creator_id, "video_id": video.id},
+            author_asset_task,
+        )
 
     # 各平台作品绑定到该本地素材
     for post in posts:

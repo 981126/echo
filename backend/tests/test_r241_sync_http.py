@@ -32,7 +32,8 @@ from app.config import get_settings
 from app.core import http as core_http
 from app.models.platform import Creator, SyncJob
 from app.models.video import Transcript, Video
-from app.services import debate, deepseek_search, evidence, station_evidence
+from app.services import deepseek_search, evidence, station_evidence
+from app.services import rewrite_debate as debate
 from app.services import platform_sync as platform_sync_mod
 from app.services.platform import budget, tikhub
 

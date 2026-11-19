@@ -8,7 +8,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.api import drafts as drafts_api
 from app.api import opportunities as opp_api
 from app.api.tasks import get_task, list_tasks
 from app.db import SessionLocal
@@ -97,23 +96,3 @@ def test_opportunity_gap_returns_task_and_dedups(monkeypatch):
         assert created[0][0] == "opportunity_gap"
     finally:
         _delete(r1["task_id"])
-
-
-def test_draft_angles_returns_task(monkeypatch):
-    created: list[str] = []
-
-    def fake_start(kind, payload, fn):
-        created.append(kind)
-        return _add(kind, "pending", payload)
-
-    monkeypatch.setattr(drafts_api, "start_task", fake_start)
-    db = SessionLocal()
-    try:
-        r = drafts_api.suggest_angles(drafts_api.AnglesIn(topic="面试自我介绍"), db=db)
-    finally:
-        db.close()
-    try:
-        assert r["task_id"] > 0
-        assert created == ["draft_angles"]
-    finally:
-        _delete(r["task_id"])

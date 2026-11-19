@@ -77,3 +77,64 @@ def test_incomplete_legacy_database_is_rejected(migration_url):
 
     with pytest.raises(RuntimeError, match="Cannot baseline"):
         run_migrations(migration_url)
+
+
+def test_legacy_discussions_migrate_only_clear_normal_generation(migration_url):
+    from alembic import command
+    from sqlalchemy import text
+
+    from app.migrations import _config
+
+    run_migrations(migration_url)
+    engine = create_engine(migration_url)
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.discussion import DraftDiscussion
+    from app.models.draft import Draft
+    from app.models.platform import Creator
+
+    session = sessionmaker(bind=engine)()
+    with session.begin():
+        owner = Creator(kind="owner", name="我", is_current=True)
+        session.add(owner)
+        session.flush()
+        normal = Draft(creator_id=owner.id, title="旧普通生成", source="ai", original_script="", script="最终稿")
+        benchmark = Draft(
+            creator_id=owner.id,
+            title="洗稿",
+            source="ai",
+            original_script="原文",
+            script="洗稿后",
+            source_ref='{"kind":"benchmark"}',
+        )
+        manual = Draft(creator_id=owner.id, title="历史原文讨论", source="manual", original_script="原文", script="讨论后")
+        session.add_all([normal, benchmark, manual])
+        session.flush()
+        for draft in (normal, benchmark, manual):
+            session.add_all(
+                [
+                    DraftDiscussion(draft_id=draft.id, actor="system", kind="run", content="留痕"),
+                    DraftDiscussion(draft_id=draft.id, actor="system", kind="draft", content="留痕"),
+                ]
+            )
+        session.flush()
+        normal_id, benchmark_id, manual_id = normal.id, benchmark.id, manual.id
+    session.close()
+    command.downgrade(_config(migration_url), "r255promptdefs")
+    run_migrations(migration_url)
+
+    with engine.connect() as connection:
+        legacy = connection.execute(
+            text("SELECT draft_id, attempts_json, quality_passed FROM generation_runs WHERE status = 'legacy'")
+        ).mappings().one()
+        assert legacy["draft_id"] == normal_id
+        assert legacy["quality_passed"] is False
+        import json
+
+        assert len(json.loads(legacy["attempts_json"])["legacy_discussions"]) == 2
+        remaining = {
+            row[0]
+            for row in connection.execute(text("SELECT DISTINCT draft_id FROM draft_discussions")).all()
+        }
+        assert remaining == {benchmark_id, manual_id}
+    engine.dispose()

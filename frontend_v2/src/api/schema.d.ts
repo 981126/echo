@@ -628,29 +628,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/drafts/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate
-         * @description 根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。
-         *
-         *     R-240 M7：**遗留同步接口**——请求线程同步跑完整生成链路（LLM 超时预算已由 M6 收紧），
-         *     前端请用 `/generate-async`；后续改为后台任务，本次不改返回结构。
-         */
-        post: operations["generate_api_drafts_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/drafts/generate-async": {
         parameters: {
             query?: never;
@@ -662,7 +639,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Async
-         * @description 双模型讨论生成（R-023）：先建占位草稿，后台 初稿→5轮讨论→定稿；完成后通知跳转草稿。
+         * @description 普通生成统一入口：返回草稿、后台任务和本次生成运行 ID。
          */
         post: operations["generate_async_api_drafts_generate_async_post"];
         delete?: never;
@@ -685,28 +662,6 @@ export interface paths {
          * @description 基于脚本正文 + 人设生成标题/封面字/素材标签候选（R-224）。
          */
         post: operations["suggest_meta_api_drafts__draft_id__suggest_meta_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/drafts/angles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Suggest Angles
-         * @description 选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。
-         *
-         *     R-202：改为后台任务（LLM 可能较慢），点完返回 `task_id`，角度在 `task.result`。
-         */
-        post: operations["suggest_angles_api_drafts_angles_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -744,9 +699,26 @@ export interface paths {
         put?: never;
         /**
          * Draft Rework
-         * @description 一键回炉（R-030⑦）：按原选题重新异步生成一轮，完成后替换草稿。
+         * @description 按原选题重跑，或从最近运行的备选角度重建；覆盖前先保存版本。
          */
         post: operations["draft_rework_api_drafts__draft_id__rework_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/drafts/{draft_id}/generation-runs/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Latest Generation Run */
+        get: operations["latest_generation_run_api_drafts__draft_id__generation_runs_latest_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -764,10 +736,7 @@ export interface paths {
         put?: never;
         /**
          * Draft Discuss
-         * @description R-155：基于原文（洗稿稿＝洗稿素材 ASR 文案 / 自建稿＝正文）跑双模型多轮讨论。
-         *
-         *     完成后更新 正文+标题+封面字+标签（标签合并去重）并写回 original_script 供【原文对照】；
-         *     讨论留痕追加、不清空旧记录。
+         * @description 仅为洗稿和历史原文讨论保留；新普通生成使用重新生成。
          */
         post: operations["draft_discuss_api_drafts__draft_id__discuss_post"];
         delete?: never;
@@ -2135,10 +2104,7 @@ export interface paths {
         put?: never;
         /**
          * Generate From Idea
-         * @description 从选题池灵感生成草稿（人工挑选后触发；不自动推送）。
-         *
-         *     遗留同步接口（R-240 M7 仅标注，不改契约）：前端等待完整生成（分钟级），
-         *     后续应迁到 `/api/drafts/generate-async` 后台任务；本次不动返回结构，避免前端改动。
+         * @description 从选题池灵感进入统一异步普通生成链路。
          */
         post: operations["generate_from_idea_api_platform_topic_pool__idea_id__generate_post"];
         delete?: never;
@@ -2947,16 +2913,6 @@ export interface components {
              */
             force: boolean;
         };
-        /** AnglesIn */
-        AnglesIn: {
-            /** Topic */
-            topic: string;
-            /**
-             * Platform
-             * @default
-             */
-            platform: string;
-        };
         /** BatchDeleteIn */
         BatchDeleteIn: {
             /**
@@ -3381,11 +3337,6 @@ export interface components {
             /** Topic */
             topic: string;
             /**
-             * Mode
-             * @default
-             */
-            mode: string;
-            /**
              * Query Source
              * @default
              */
@@ -3796,6 +3747,14 @@ export interface components {
              * @default false
              */
             force: boolean;
+        };
+        /** ReworkIn */
+        ReworkIn: {
+            /**
+             * Angle Id
+             * @default
+             */
+            angle_id: string;
         };
         /** RewriteSourceIn */
         RewriteSourceIn: {
@@ -5433,41 +5392,6 @@ export interface operations {
             };
         };
     };
-    generate_api_drafts_generate_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-access-token"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DraftOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     generate_async_api_drafts_generate_async_post: {
         parameters: {
             query?: never;
@@ -5540,43 +5464,6 @@ export interface operations {
             };
         };
     };
-    suggest_angles_api_drafts_angles_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-access-token"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AnglesIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     draft_check_api_drafts__draft_id__check_get: {
         parameters: {
             query?: never;
@@ -5613,6 +5500,45 @@ export interface operations {
         };
     };
     draft_rework_api_drafts__draft_id__rework_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-access-token"?: string;
+            };
+            path: {
+                draft_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReworkIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_generation_run_api_drafts__draft_id__generation_runs_latest_get: {
         parameters: {
             query?: never;
             header?: {

@@ -1,7 +1,7 @@
 """R-255：全部 AI 提示词统一入库（ai_prompt_defs 注册表 + 运行时读表 + 幂等补种）。
 
 覆盖：
-1. 注册表完整性：45 行 = 34 条系统提示词/探针 + 11 条程序固定契约；每条有中文名/模块/用途/代码位置/默认正文；
+1. 注册表完整性：47 行 = 35 条系统提示词 + 2 条探针 + 10 条程序固定契约；每条有中文名/模块/用途/代码位置/默认正文；
 2. 运行时读表优先级：ai_prompts enabled → ai_prompt_defs.default_content → 代码默认；
 3. 启动补种幂等：缺登记补登记、缺启用版本补 v1、已有作者版本绝不覆盖；
 4. 契约只读：editable/optimizable=false，镜像与 prompt_contract 一致；
@@ -66,10 +66,10 @@ def _enabled(db, key):
 
 def test_registry_complete() -> None:
     specs = prompt_catalog.PROMPT_SPECS
-    assert len(specs) == 45
-    assert len({s.key for s in specs}) == 45
+    assert len(specs) == 47
+    assert len({s.key for s in specs}) == 47
     by_category = {c: sum(1 for s in specs if s.category == c) for c in ("system", "probe", "contract")}
-    assert by_category == {"system": 32, "probe": 2, "contract": 11}
+    assert by_category == {"system": 35, "probe": 2, "contract": 10}
     module_names = {name for name, _label in prompt_catalog.MODULES}
     for spec in specs:
         assert spec.title, spec.key
@@ -77,7 +77,7 @@ def test_registry_complete() -> None:
         assert spec.module_label and spec.module_label == prompt_catalog.MODULE_LABELS[spec.module]
         assert spec.purpose and re.search(r"[\u4e00-\u9fff]", spec.purpose), spec.key
         assert spec.entry and spec.code_ref, spec.key
-    assert len({s.sort_order for s in specs}) == 45
+    assert len({s.sort_order for s in specs}) == 47
 
 
 def test_registry_default_content_all_available() -> None:
@@ -98,7 +98,6 @@ def test_contracts_cover_video_review() -> None:
 
 def test_only_existing_ten_optimizable() -> None:
     assert prompt_catalog.OPTIMIZABLE_KEYS == {
-        "generation",
         "persona_init",
         "persona_merge",
         "persona_updates",
@@ -117,7 +116,7 @@ def test_only_existing_ten_optimizable() -> None:
 
 def test_prompt_meta_backwards_compatible() -> None:
     """旧 migration（7a6f…）与测试仍用 PROMPT_META：34 条系统提示词/探针都要在。"""
-    assert len(prompt_service.PROMPT_META) == 34
+    assert len(prompt_service.PROMPT_META) == 37
     for key in prompt_service.PROMPT_META:
         assert prompt_service.default_content(key).strip(), key
 
@@ -149,22 +148,22 @@ def test_get_prompt_falls_back_to_code_when_defs_missing(db) -> None:
 
 def test_ensure_catalog_idempotent(db) -> None:
     first = _seed(db)
-    assert first["registered"] == 45
-    assert first["seeded"] == 34
+    assert first["registered"] == 47
+    assert first["seeded"] == 37
     second = _seed(db)
     assert second == {"registered": 0, "updated": 0, "seeded": 0, "skipped": 0}
-    assert db.query(AiPromptDef).count() == 45
+    assert db.query(AiPromptDef).count() == 47
     enabled_keys = {r.key for r in db.query(AiPrompt).filter(AiPrompt.status == "enabled").all()}
     assert enabled_keys == set(prompt_service.PROMPT_META)
 
 
 def test_ensure_catalog_keeps_author_versions(db) -> None:
-    db.add(AiPrompt(key="generation", version=7, content="作者改过的生成提示词", status="enabled", note="手动编辑"))
+    db.add(AiPrompt(key="rewrite_critic", version=7, content="作者改过的生成提示词", status="enabled", note="手动编辑"))
     db.commit()
     _seed(db)
-    row = _enabled(db, "generation")
+    row = _enabled(db, "rewrite_critic")
     assert row is not None and row.content == "作者改过的生成提示词" and row.version == 7
-    assert db.query(AiPrompt).filter(AiPrompt.key == "generation").count() == 1
+    assert db.query(AiPrompt).filter(AiPrompt.key == "rewrite_critic").count() == 1
 
 
 def test_ensure_catalog_metadata_synced(db) -> None:
@@ -234,7 +233,7 @@ def test_api_keys_returns_all_registry(api_client, db) -> None:
     res = api_client.get("/api/prompts/keys")
     assert res.status_code == 200
     data = res.json()
-    assert len(data) == 45
+    assert len(data) == 47
     keys = {item["key"] for item in data}
     assert "rewrite_critic" in keys and "chat.contract" in keys and "selfcheck_probe_json" in keys
     item = next(i for i in data if i["key"] == "rewrite_critic")

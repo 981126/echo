@@ -18,7 +18,7 @@ from app.models.persona import PersonaTag
 from app.models.platform import Creator
 from app.models.prompt import AiPrompt
 from app.models.video import Transcript, Video
-from app.services import generation as gen
+from app.services import author_style as gen
 from app.services import prompt_service as ps
 from app.services.prompt_service import PromptOptimizeError
 
@@ -71,19 +71,6 @@ def test_prompt_group_splits_persona_engine_from_production():
     assert set(ps.RULE_KEYS) == {"video_tags", "correct", "diff"}  # R-136：review 已随复盘下线
 
 
-def test_version_effect_marks_mixed_persona(db):
-    owner = _owner(db)
-    db.add_all(
-        [
-            Draft(creator_id=owner.id, script="一", source="ai", prompt_version=2, persona_version=5),
-            Draft(creator_id=owner.id, script="二", source="ai", prompt_version=2, persona_version=6),
-        ]
-    )
-    db.commit()
-    effect = ps.version_effect(db, "generation")
-    row = next(r for r in effect if r["version"] == 2)
-    assert row["persona_versions"] == [5, 6]
-    assert row["mixed_persona"] is True
 
 
 # ---------- R-131：生成上下文数据侧增强 ----------
@@ -148,87 +135,13 @@ def test_self_check_flags_redline_and_style_gap(db):
     assert coverage == 0.0
 
 
-def test_generate_draft_records_quality_and_model_pair(db, monkeypatch):
-    """R-139：generate_draft 走「生成方 + 评审方」双模型讨论，并记录模型组合与自检结果。"""
-    from app.services import llm_router, model_settings
-
-    owner = _owner(db)
-    db.add(
-        PersonaTag(
-            creator_id=owner.id,
-            label="不卖课不收费割韭菜",
-            description="",
-            category="redline",
-            status="confirmed",
-            version=7,
-        )
-    )
-    db.add(Kv(key="debate_rounds", value="1"))
-    db.commit()
-    gen_slot, critic_slot = model_settings.generation_roles(db)
-    assert gen_slot != critic_slot  # 默认两方不同模型
-
-    seen: list[str] = []
-
-    class _FakeClient:
-        def __init__(self, slot):
-            self.slot = slot
-
-        def chat_json(self, messages, **kwargs):  # noqa: ANN001, ANN003
-            seen.append(self.slot)
-            return {
-                "title": "标题",
-                "cover_text": "封面",
-                "script": "我不卖课不收费割韭菜，这是脚本正文。",
-                "shells": {},
-            }
-
-        def chat(self, messages, **kwargs):  # noqa: ANN001, ANN003
-            seen.append(self.slot)
-            if self.slot == gen_slot:
-                return "我不卖课不收费割韭菜，修订后的脚本正文。"
-            return "评审意见：太像 AI，改口语。"
-
-    monkeypatch.setattr(llm_router, "build_client", lambda slot: _FakeClient(slot["slot"]))
-    draft = gen.generate_draft(db, "测试选题")
-    quality = json.loads(draft.quality)
-    assert quality["models"]["gen"].startswith(gen_slot)
-    assert quality["models"]["critic"].startswith(critic_slot)
-    assert quality["rounds"] == 1
-    assert quality["rounds_done"] == 1  # 讨论真的跑了一轮
-    assert quality["fallback"] is False
-    assert quality["passed"] is False  # 自检收口后仍踩红线 → 如实记录
-    assert any("红线" in i for i in quality["issues"])
-    assert gen_slot in seen and critic_slot in seen  # 两方都真的参与了讨论
-    assert draft.persona_version == 7  # R-130：记录生成时的人设版本
-    assert draft.script  # 有正文
 
 
-def test_generate_draft_mock_path_records_version(db):
-    owner = _owner(db)
-    db.add(PersonaTag(creator_id=owner.id, label="风格", status="confirmed", version=4, category="style"))
-    db.commit()
-    draft = gen.generate_draft(db, "无密钥选题")  # 无密钥 → mock 兜底
-    quality = json.loads(draft.quality)
-    assert quality["mock"] is True
-    assert draft.persona_version == 4
 
 
 # ---------- R-131：降权（提醒 + 手动一键） ----------
 
 
-def test_maybe_auto_optimize_prompt_threshold(db, monkeypatch):
-    calls: list[tuple] = []
-    import app.tasks as tasks_mod
-
-    monkeypatch.setattr(tasks_mod, "start_task", lambda kind, payload, fn: calls.append((kind, payload)) or 1)
-    assert ps.maybe_auto_optimize_prompt(db, threshold=3) is False
-    assert ps.maybe_auto_optimize_prompt(db, threshold=3) is False
-    assert ps.maybe_auto_optimize_prompt(db, threshold=3) is True
-    assert calls == [("prompt_optimize", {"key": "generation"})]
-    from app.models.notification import Notification
-
-    assert db.query(Notification).filter(Notification.kind == "prompt_optimize").count() == 1
 
 
 def test_optimize_rule_keys_task_skips_when_no_samples(db):
@@ -309,39 +222,3 @@ def _fake_pair(db, monkeypatch, script: str):
     monkeypatch.setattr(llm_router, "build_client", lambda slot: _FakeClient(slot["slot"]))
     monkeypatch.setattr(debate, "_chat_once", _fake_chat_once)
     return counter, gen_slot, critic_slot
-
-
-def test_generate_draft_no_redline_skips_selfcheck_rewrite(db, monkeypatch):
-    _owner(db)
-    _set_kv(db, "debate_rounds", "1")
-    counter, _g, _c = _fake_pair(db, monkeypatch, "一段正常但没有任何口癖的脚本正文。")
-    draft = gen.generate_draft(db, "选题")
-    quality = json.loads(draft.quality)
-    assert quality["issues"] == []  # 无红线 → 无硬问题
-    assert quality["passed"] is True
-    assert counter["selfcheck"] == 0  # 覆盖率 0 也不再触发收口重写
-    assert quality["diagnostics"]["style_coverage"] == 0.0
-    assert quality["style_coverage"] == 0.0
-
-
-def test_generate_draft_redline_triggers_selfcheck_rewrite(db, monkeypatch):
-    owner = _owner(db)
-    db.add(
-        PersonaTag(
-            creator_id=owner.id,
-            label="不卖课不收费割韭菜",
-            description="",
-            category="redline",
-            status="confirmed",
-            version=1,
-        )
-    )
-    _set_kv(db, "debate_rounds", "1")
-    db.commit()
-    counter, _g, _c = _fake_pair(db, monkeypatch, "我不卖课不收费割韭菜，这是脚本正文。")
-    draft = gen.generate_draft(db, "选题")
-    quality = json.loads(draft.quality)
-    assert counter["selfcheck"] == 1  # 红线 → 收口重写一次
-    assert any("红线" in i for i in quality["issues"])
-    assert quality["passed"] is False
-    assert "diagnostics" in quality

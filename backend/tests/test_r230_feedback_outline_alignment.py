@@ -19,7 +19,7 @@ from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.draft import Draft
-from app.services.debate import detect_outline_drift
+from app.services.rewrite_debate import detect_outline_drift
 from app.services.prompt_service import feedback_context
 
 

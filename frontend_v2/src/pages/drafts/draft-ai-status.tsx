@@ -17,6 +17,7 @@ export function DraftAiStatus({ debate, className }: { debate?: DebateState | nu
   if (!debate || !debate.state) return null
   const running = debate.state === 'running'
   const note = debate.note || (running ? 'AI 处理中…' : '讨论中断')
+  const waiting = !running && (note.startsWith('待补信息') || note.startsWith('待作者修改'))
   const round = running && debate.round && debate.rounds ? `（第 ${debate.round}/${debate.rounds} 轮）` : ''
   return (
     <motion.div
@@ -35,10 +36,11 @@ export function DraftAiStatus({ debate, className }: { debate?: DebateState | nu
       {running ? <ThinkingDots className="mt-1 shrink-0" /> : <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />}
       <span className="min-w-0">
         {/* R-211：失败文案按 kind 区分（学习分析中断时给「重试」提示——下次完成/不采用会重新触发） */}
-        <b className="font-medium">{running ? aiKindLabel(debate.kind) : `上次${aiKindLabel(debate.kind)}中断`}</b>
+        <b className="font-medium">{running ? aiKindLabel(debate.kind) : waiting ? '生成需要处理' : `上次${aiKindLabel(debate.kind)}中断`}</b>
         <span className="ml-1 opacity-90">{note}</span>
         {round}
-        {!running && debate.kind !== 'feedback' && <span className="ml-1 opacity-75">，可【重新讨论】</span>}
+        {waiting && <span className="ml-1 opacity-75">，请查看创作思路与质量检查</span>}
+        {!running && !waiting && debate.kind !== 'feedback' && <span className="ml-1 opacity-75">，可【{['generate', 'rework'].includes(debate.kind) ? '重新生成' : '重新讨论'}】</span>}
         {!running && debate.kind === 'feedback' && <span className="ml-1 opacity-75">，下次完成/不采用会重试</span>}
       </span>
     </motion.div>

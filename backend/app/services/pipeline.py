@@ -22,7 +22,7 @@ from ..models.hot_topic import TopicCandidate, TopicIdea
 from ..models.pipeline import PipelineRun
 from .creator_service import current_creator_id
 from . import model_settings
-from .generation import generate_draft
+from .generation_pipeline import generate_author_draft
 from .ideas_service import annotate_items, persona_profile
 from .llm import LLMError
 from .notify import send_daily_best, send_daily_digest, send_failure_alert
@@ -463,14 +463,14 @@ def _generate_candidates(db: Session, candidates: list[dict], settings) -> tuple
     """
     workers = int(settings.pipeline_generate_concurrency or 1)
     if workers <= 1 or len(candidates) <= 1:
-        return [(c, generate_draft(db, c["title"], settings).id) for c in candidates], []
+        return [(c, generate_author_draft(db, c["title"]).id) for c in candidates], []
     factory = session_factory(db)
 
     def _gen(item: tuple[int, dict]) -> int:
         _idx, candidate = item
         session = factory()
         try:
-            return int(generate_draft(session, candidate["title"], settings).id)
+            return int(generate_author_draft(session, candidate["title"]).id)
         finally:
             session.close()
 
@@ -478,7 +478,7 @@ def _generate_candidates(db: Session, candidates: list[dict], settings) -> tuple
         results = gather(_gen, list(enumerate(candidates)), workers=workers)
     except Exception:  # noqa: BLE001 并发池不可用 → 回退串行（不丢已生成内容）
         log.exception("流水线并发生成池不可用，回退串行")
-        return [(c, generate_draft(db, c["title"], settings).id) for c in candidates], []
+        return [(c, generate_author_draft(db, c["title"]).id) for c in candidates], []
 
     by_index: dict[int, Any] = {idx: res for (idx, _candidate), res in results}
     generated: list[tuple[dict, int]] = []

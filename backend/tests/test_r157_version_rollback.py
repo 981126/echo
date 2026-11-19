@@ -111,7 +111,7 @@ def test_rollback_404_for_missing_or_foreign_version(db):
 
 
 def test_rewrite_creates_before_and_after_versions(db, monkeypatch):
-    from app.services.debate import run_rewrite_debate
+    from app.services.rewrite_debate import run_rewrite_debate
 
     owner = _owner(db)
     _configure_models(db)
@@ -143,24 +143,6 @@ def test_rewrite_creates_before_and_after_versions(db, monkeypatch):
 # ---------- AI 生成自动留版（snapshot 开关） ----------
 
 
-def test_generate_draft_snapshots_by_default(db, monkeypatch):
-    from app.services.generation import generate_draft
-
-    _owner(db)
-    monkeypatch.setattr("app.tasks.start_task", lambda *a, **k: 1)
-
-    def fake_run(db_, draft, topic, *a, **k):
-        draft.title = f"{topic}标题"
-        draft.script = f"{topic}正文"
-        db_.commit()
-        return {"draft_id": draft.id}
-
-    monkeypatch.setattr("app.services.debate.run_debate", fake_run)
-
-    d1 = generate_draft(db, "话题A")
-    assert [v.source for v in list_versions(db, d1.id)] == ["ai_generate"]
-    d2 = generate_draft(db, "话题B", snapshot=False)  # 金样本自测/回炉中间稿
-    assert list_versions(db, d2.id) == []
 
 
 # ---------- 首版不触发差异分析 ----------

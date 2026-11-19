@@ -18,8 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.kv import Kv
 from app.models.prompt import AiPrompt
 from app.services import budget_settings
-from app.services import debate as debate_mod
-from app.services import llm_router, model_settings
+from app.services import model_settings
 from app.services import prompt_service as ps
 
 
@@ -127,28 +126,5 @@ class _RecordingClient:
         return {"title": "t", "cover_text": "c", "script": "正文够长了吧", "shells": {}}
 
 
-def test_run_debate_uses_configured_budgets(db, monkeypatch):
-    """脚本生成各步都读「AI 设置」里的预算（改配置 → 调用参数跟着变）。"""
-    from app.models.draft import Draft
-    from app.models.platform import Creator
-
-    db.add(Creator(kind="owner", name="我", is_current=True))
-    db.add(Kv(key="debate_rounds", value="1"))
-    db.commit()
-    budget_settings.save_budgets(db, {"debate_initial": 13000, "debate_critique": 15000, "debate_revise": 17000})
-
-    seen: list[int] = []
-    monkeypatch.setattr(llm_router, "build_client", lambda slot: _RecordingClient(slot["slot"], seen))
-
-    draft = Draft(title="选题", script="（占位）", source="ai")
-    db.add(draft)
-    db.commit()
-    debate_mod.run_debate(db, draft, "选题")
-
-    # 1 次初稿(13000) + 1 轮评审(15000) + 1 次修订(17000)，若自检触发收口再加一次 17000
-    assert seen[0] == 13000
-    assert 15000 in seen
-    assert seen.count(17000) >= 1
-    assert set(seen) <= {13000, 15000, 17000}
 
 # 校准护栏（长输出功能的默认预算必须覆盖实测最坏值）在 tests/test_r142_thinking_budget.py，避免两处维护

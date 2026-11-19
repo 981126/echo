@@ -9,12 +9,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..services import draft_status
-from ..services.creator_service import current_creator_id
+from ..models.author_generation import GenerationRun
 from ..models.draft import Draft
 from ..models.draft_version import DraftVersion
 from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
-from ..services import draft_flow
+from ..services import draft_flow, draft_status
+from ..services.creator_service import current_creator_id
+from ..services.draft_meta_suggest import suggest_meta_task
 from ..services.draft_versions import (
     AI_SOURCES,
     finalize_version,
@@ -25,10 +26,7 @@ from ..services.draft_versions import (
 )
 from ..services.diff_analysis import diff_task
 from ..services.feedback import add_feedback
-from ..services.generation import generate_draft
-from ..services.draft_meta_suggest import suggest_meta_task
-from ..services.persona import PersonaService
-from ..services.prompt_service import get_prompt
+from ..services.generation_pipeline import generation_run_payload
 from ..tasks import find_running_task, start_task
 
 router = APIRouter()
@@ -43,13 +41,11 @@ def _persona_version(db: Session) -> int:
 
 class GenerateIn(BaseModel):
     topic: str
-    mode: str = ""  # R-183 创作模式：sharp/monologue/commentary/experiment，空=不指定
-    query_source: str = ""  # R-227：该入口能拿到的具体文本（评论原文/热点摘要/簇样本等），用于联网检索
+    query_source: str = ""
 
 
-class AnglesIn(BaseModel):
-    topic: str
-    platform: str = ""
+class ReworkIn(BaseModel):
+    angle_id: str = ""
 
 
 class FeedbackIn(BaseModel):
@@ -62,68 +58,19 @@ class FeedbackIn(BaseModel):
     style_score: int | None = Field(default=None, ge=1, le=5)
 
 
-def _rework_task(db: Session, payload: dict) -> dict:
-    """一键回炉（R-030⑦）：按原选题重新生成，并把内容替换回原草稿（保留 id/反馈/讨论记录）。
-
-    R-157：中间 fresh 稿不留版，回炉结果记到**原稿**上。
-    R-173：回炉期间在**原稿**上写 AI 状态（卡片显示「正在回炉重写…」），失败留中断标记。
-    """
-    from .generation import generate_draft
-    from ..services.draft_versions import finalize_version
-
-    draft_id = int(payload.get("draft_id") or 0)
-    draft = db.get(Draft, draft_id)
-    if draft is None:
-        return {"draft_id": 0}
-    topic = (payload.get("topic") or draft.title or "").strip() or "重新生成一条口播脚本"
-    draft_status.set_running(db, draft_id, "正在回炉重写…", kind="rework")
-    try:
-        fresh = generate_draft(db, topic, snapshot=False)
-    except Exception as exc:  # noqa: BLE001 R-173：留中断标记后原样抛出
-        try:
-            draft_status.set_failed(db, draft_id, f"回炉中断：{str(exc)[:150]}", kind="rework")
-        except Exception:  # noqa: BLE001
-            db.rollback()
-        raise
-    draft = db.get(Draft, draft_id) or draft
-    draft.title = fresh.title or draft.title
-    draft.cover_text = fresh.cover_text or draft.cover_text
-    draft.script = fresh.script or draft.script
-    draft.platform_shells = fresh.platform_shells or draft.platform_shells
-    draft.original_script = fresh.original_script or draft.original_script
-    draft.source = "ai"
-    db.delete(fresh)
-    db.commit()
-    finalize_version(db, draft, source="ai_generate", note="一键回炉")
-    draft_status.clear(db, draft_id)
-    return {"draft_id": draft.id, "title": draft.title}
-
-
-@router.post("/generate", response_model=DraftOut)
-def generate(payload: GenerateIn, db: Session = Depends(get_db)):
-    """根据选题生成三件套（标题/封面字/脚本）+ 平台外壳。
-
-    R-240 M7：**遗留同步接口**——请求线程同步跑完整生成链路（LLM 超时预算已由 M6 收紧），
-    前端请用 `/generate-async`；后续改为后台任务，本次不改返回结构。
-    """
-    return generate_draft(db, payload.topic, mode=payload.mode)
-
-
-# R-147：讨论任务体与占位稿创建抽到 services/draft_flow，供「AI 生成」按钮与 AI 对话的
-# agent 写操作共用（原来只写在 API 层，别处复用不了）。
-_debate_task = draft_flow.debate_task
-
-
 @router.post("/generate-async", response_model=dict)
 def generate_async(payload: GenerateIn, db: Session = Depends(get_db)):
-    """双模型讨论生成（R-023）：先建占位草稿，后台 初稿→5轮讨论→定稿；完成后通知跳转草稿。"""
+    """普通生成统一入口：返回草稿、后台任务和本次生成运行 ID。"""
     topic = (payload.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="选题不能为空")
-    task_id, draft_id = draft_flow.start_generation(
-        db, topic, mode=(payload.mode or "").strip(), query_source=(payload.query_source or "").strip()
-    )
-    return {"task_id": task_id, "draft_id": draft_id}
+    try:
+        task_id, draft_id, run_id = draft_flow.start_generation(
+            db, topic, query_source=(payload.query_source or "").strip()
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"task_id": task_id, "draft_id": draft_id, "run_id": run_id}
 
 
 @router.post("/{draft_id}/suggest-meta", response_model=dict)
@@ -141,74 +88,6 @@ def suggest_meta(draft_id: int, db: Session = Depends(get_db)):
         return {"task_id": tid}
     task_id = start_task("draft_suggest_meta", {"draft_id": draft_id}, suggest_meta_task)
     return {"task_id": task_id}
-
-
-# R-255：选题角度的静态提示词（代码默认/回退），运行时调用点走 get_prompt 读表。
-ANGLES_SYSTEM = (
-    "你是短视频选题策划。针对作者给出的选题，输出 3 个不同的切入角度。"
-    "每个角度要：标题抓人但不标题党、开头钩子一句能留住人、贴合作者口播风格。"
-    "只输出 JSON："
-    '{"angles":[{"title":"完整选题标题(直接可用于生成脚本)","hook":"开头钩子句","reason":"为什么这个角度能火"}]}'
-)
-
-
-def _compute_angles(db: Session, topic: str, platform: str) -> dict:
-    """选题→3 个切入角度（R-030）。抽出来供后台任务复用（R-202）。"""
-    from ..services.generation import benchmark_context_lines
-
-    persona = PersonaService()
-    refs = benchmark_context_lines(db)
-    system = get_prompt("ideas_angles", db)
-    user_parts = [f"选题：{topic}"]
-    if platform:
-        user_parts.append(f"目标平台：{platform}")
-    if refs:
-        user_parts.append("参考风格（可借鉴语气/结构/观点）：\n" + refs)
-    try:
-        data = persona.call_json(
-            "ideas",
-            [{"role": "system", "content": system}, {"role": "user", "content": "\n".join(user_parts)}],
-            temperature=0.8,
-        )
-        angles = []
-        for a in data.get("angles") or []:
-            if isinstance(a, dict) and str(a.get("title", "")).strip():
-                angles.append({
-                    "title": str(a["title"]).strip(),
-                    "hook": str(a.get("hook", "")).strip(),
-                    "reason": str(a.get("reason", "")).strip(),
-                })
-        if angles:
-            return {"topic": topic, "angles": angles}
-    except Exception:  # noqa: BLE001 无密钥/超时走启发式兜底
-        pass
-    return {
-        "topic": topic,
-        "angles": [
-            {"title": f"{topic}：大多数人没想明白的 3 件事", "hook": f"关于{topic}，先说一个反常识的结论。", "reason": "反常识钩子 + 清单结构"},
-            {"title": f"我亲测过{topic}，结果和你想的不一样", "hook": "一开始我也不信，直到自己踩了坑。", "reason": "第一人称故事 + 反转"},
-            {"title": f"聊{topic}前，先避开这 3 个坑", "hook": "如果你正在这个话题上，这条一定要看完。", "reason": "避坑清单，实用转发高"},
-        ],
-    }
-
-
-def _angles_task(db: Session, payload: dict) -> dict:
-    return _compute_angles(db, str(payload.get("topic") or ""), str(payload.get("platform") or ""))
-
-
-@router.post("/angles", response_model=dict)
-def suggest_angles(payload: AnglesIn, db: Session = Depends(get_db)):
-    """选题→角度→草稿 三级流水（R-030）：给 3 个切入角度，作者点选后直接生成。
-
-    R-202：改为后台任务（LLM 可能较慢），点完返回 `task_id`，角度在 `task.result`。
-    """
-    topic = (payload.topic or "").strip()
-    if not topic:
-        raise HTTPException(status_code=400, detail="topic 不能为空")
-    tid = find_running_task("draft_angles", {"topic": topic})
-    if tid:
-        return {"task_id": tid}
-    return {"task_id": start_task("draft_angles", {"topic": topic, "platform": payload.platform or ""}, _angles_task)}
 
 
 @router.get("/{draft_id}/check", response_model=dict)
@@ -231,29 +110,61 @@ def draft_check(draft_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{draft_id}/rework", response_model=dict)
-def draft_rework(draft_id: int, db: Session = Depends(get_db)):
-    """一键回炉（R-030⑦）：按原选题重新异步生成一轮，完成后替换草稿。"""
+def draft_rework(draft_id: int, payload: ReworkIn | None = None, db: Session = Depends(get_db)):
+    """按原选题重跑，或从最近运行的备选角度重建；覆盖前先保存版本。"""
     draft = db.get(Draft, draft_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="草稿不存在")
-    task_id = start_task(
-        "generate_draft",
-        {"draft_id": draft.id, "topic": draft.title or ""},
-        _rework_task,
-    )
-    return {"task_id": task_id, "message": "已提交回炉生成，完成后右上角通知"}
+    if draft.creator_id != current_creator_id(db):
+        raise HTTPException(status_code=403, detail="无权访问该草稿")
+    running_id = find_running_task("generate_draft", {"draft_id": draft_id})
+    if running_id:
+        latest = db.query(GenerationRun).filter(GenerationRun.draft_id == draft_id).order_by(GenerationRun.id.desc()).first()
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "这篇草稿正在生成", "task_id": running_id, "run_id": latest.id if latest else None},
+        )
+    try:
+        task_id, run_id = draft_flow.start_rework(db, draft_id, (payload.angle_id if payload else "").strip())
+    except LookupError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"task_id": task_id, "run_id": run_id, "message": "已提交重新生成"}
 
+
+@router.get("/{draft_id}/generation-runs/latest", response_model=dict)
+def latest_generation_run(draft_id: int, db: Session = Depends(get_db)):
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    if draft.creator_id != current_creator_id(db):
+        raise HTTPException(status_code=403, detail="无权访问该草稿")
+    run = (
+        db.query(GenerationRun)
+        .filter(GenerationRun.draft_id == draft_id)
+        .order_by(GenerationRun.id.desc())
+        .first()
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="暂无创作过程")
+    return generation_run_payload(run)
 
 
 @router.post("/{draft_id}/discuss", response_model=dict)
 def draft_discuss(draft_id: int, db: Session = Depends(get_db)):
-    """R-155：基于原文（洗稿稿＝洗稿素材 ASR 文案 / 自建稿＝正文）跑双模型多轮讨论。
-
-    完成后更新 正文+标题+封面字+标签（标签合并去重）并写回 original_script 供【原文对照】；
-    讨论留痕追加、不清空旧记录。
-    """
-    if db.get(Draft, draft_id) is None:
+    """仅为洗稿和历史原文讨论保留；新普通生成使用重新生成。"""
+    draft = db.get(Draft, draft_id)
+    if draft is None:
         raise HTTPException(status_code=404, detail="草稿不存在")
+    latest = (
+        db.query(GenerationRun)
+        .filter(GenerationRun.draft_id == draft_id, GenerationRun.status != "legacy")
+        .order_by(GenerationRun.id.desc())
+        .first()
+    )
+    if latest is not None:
+        raise HTTPException(status_code=409, detail="新普通生成请使用「重新生成」，不再进入旧讨论链路")
     try:
         task_id = draft_flow.start_discussion(db, draft_id)
     except ValueError as exc:
@@ -291,7 +202,7 @@ def list_discussions(draft_id: int, db: Session = Depends(get_db)):
     `kind='run'` 是某一次讨论的运行头（content 为 JSON：当时配置的生成方/评审方 + 轮次 + 是否降级）。
     """
     from ..models.discussion import DraftDiscussion
-    from ..services.debate import model_label
+    from ..services.discussion_service import model_label
 
     rows = (
         db.query(DraftDiscussion)
@@ -318,7 +229,8 @@ def list_discussions(draft_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{draft_id}/feedback", response_model=dict)
 def feedback(draft_id: int, payload: FeedbackIn, db: Session = Depends(get_db)):
-    if db.get(Draft, draft_id) is None:
+    draft = db.get(Draft, draft_id)
+    if draft is None:
         raise HTTPException(status_code=404, detail="草稿不存在")
     row = add_feedback(
         db,
@@ -331,6 +243,14 @@ def feedback(draft_id: int, payload: FeedbackIn, db: Session = Depends(get_db)):
         ending_score=payload.ending_score,
         style_score=payload.style_score,
     )
+    if not pure_manual_map(db, [draft]).get(draft.id, False):
+        from ..services.generation_feedback import generation_feedback_task
+
+        start_task(
+            "generation_feedback",
+            {"draft_id": draft.id, "comment": payload.comment or ""},
+            generation_feedback_task,
+        )
     return {
         "id": row.id,
         "liked": row.liked,
@@ -462,6 +382,10 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
         from ..services import feedback_analysis
 
         feedback_analysis.maybe_trigger(db, draft, str(new_status))
+    if new_status in ("done", "archived", "deleted") and not pure_manual_map(db, [draft]).get(draft.id, False):
+        from ..services.generation_feedback import generation_feedback_task
+
+        start_task("generation_feedback", {"draft_id": draft.id}, generation_feedback_task)
     return draft
 
 
@@ -536,6 +460,10 @@ def draft_finalize(draft_id: int, payload: FinalizeIn, db: Session = Depends(get
     db.commit()
     db.refresh(draft)
     version = finalize_version(db, draft, source="manual")  # R-157：≥2 版才触发差异分析
+    if not pure_manual_map(db, [draft]).get(draft.id, False):
+        from ..services.generation_feedback import generation_feedback_task
+
+        start_task("generation_feedback", {"draft_id": draft.id}, generation_feedback_task)
     return {"ok": True, "draft_id": draft.id, "version": version_payload(version)}
 
 
@@ -566,7 +494,10 @@ def draft_version_rollback(draft_id: int, version_id: int, db: Session = Depends
     db.refresh(draft)
     new_ver = finalize_version(db, draft, source="rollback", note=f"回退到版本 #{ver.id}")
     if crossed_ai:
-        from ..services.debate import mark_latest_run_reverted
+        from ..services.discussion_service import mark_latest_run_reverted
 
         mark_latest_run_reverted(db, draft_id)
+        from ..services.generation_feedback import mark_assets_feedback
+
+        mark_assets_feedback(db, draft, "reverted")
     return {"ok": True, "draft_id": draft.id, "rolled_back_to": ver.id, "version": version_payload(new_ver)}

@@ -82,7 +82,7 @@ def test_rewrite_system_requires_claim_example_and_contract():
 
 
 def test_parse_outlines_multi_and_legacy():
-    from app.services.debate import _parse_outlines
+    from app.services.rewrite_debate import _parse_outlines
 
     got = _parse_outlines(
         {"outlines": [{"claim": "论点一", "support": "事例A"}, {"claim": " 论点二 "}, "纯字符串论点", {"x": 1}]}
@@ -100,7 +100,7 @@ def test_rewrite_user_injects_topic_and_evidence(db, monkeypatch):
     from app.services import benchmark
 
     monkeypatch.setattr(
-        "app.services.generation.author_style_context",
+        "app.services.author_style.author_style_context",
         lambda _db, topic="", mode="": f"STYLE:{topic}",
     )
     text = benchmark._rewrite_user(db, "我的选题", "素材正文", "EVIDENCE-BLOCK")

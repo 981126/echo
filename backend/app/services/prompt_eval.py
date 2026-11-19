@@ -37,7 +37,6 @@ MAX_OUTPUT_TOKENS = 6000
 
 # 每个 key 期望的输出字段（None = 纯文本输出）
 OUTPUT_FIELDS: dict[str, list[str] | None] = {
-    "generation": ["title", "script"],
     "video_tags": ["main_topics", "is_ad", "tags"],
     "diff": ["suggestions"],
     "persona_init": ["tags"],
@@ -47,7 +46,7 @@ OUTPUT_FIELDS: dict[str, list[str] | None] = {
     "correct": None,
 }
 # 自然语言产出类：style 覆盖率参与计分
-STYLE_KEYS = {"generation", "correct"}
+STYLE_KEYS = {"correct"}
 UNSUPPORTED_REASON = "该功能暂不支持金样本回放评分（仅做候选契约自检）"
 
 
@@ -64,7 +63,7 @@ def _transcript(video) -> str:
 def _style_markers(db: Session) -> list[str]:
     try:
         from ..core.style_profile import build_style_profile
-        from .generation import _all_texts
+        from .author_style import _all_texts
 
         texts = [t for _v, t in _all_texts(db)]
         profile = build_style_profile(texts)
@@ -155,13 +154,6 @@ def _archive_json(db: Session) -> str:
 def _probes(db: Session, key: str, golden: dict) -> list[dict]:
     """返回 [{"label": str, "user": str}]；空列表 = 没有可用金样本。"""
     videos = golden.get("videos") or []
-    if key == "generation":
-        from .generation import generation_user_message
-
-        return [
-            {"label": f"高表现选题：{t[:30]}", "user": generation_user_message(db, t)}
-            for t in (golden.get("topics") or [])
-        ]
     if key == "video_tags":
         return [{"label": f"素材：{t[:30]}", "user": x[:1200]} for t, x in videos[:3]]
     if key == "correct":

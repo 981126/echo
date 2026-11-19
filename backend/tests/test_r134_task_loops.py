@@ -11,7 +11,6 @@ import pytest
 from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.draft import Draft
 from app.models.kv import Kv
 from app.models.notification import Notification
 from app.models.platform import Creator, CreatorAccount, SyncJob
@@ -19,7 +18,6 @@ from app.models.task import BackgroundTask
 from app.models.video import Video
 from app.services import ingest as ingest_mod
 from app.services import media_ensure
-from app.services.debate import FAILED_SCRIPT, clear_debate_state
 from app.tasks import _cleanup_stale_sync_state, mark_interrupted_tasks_on_startup
 
 
@@ -122,20 +120,6 @@ def test_fail_remaining_marks_rows_failed(db):
 # ---------- 讨论状态清理 ----------
 
 
-def test_clear_debate_state_resets_placeholder(db):
-    draft = Draft(title="选题", script="（双模型讨论生成中…）", source="ai")
-    db.add(draft)
-    db.commit()
-    _set_kv(db, f"debate:{draft.id}", "KIMI 正在起草…")
-    clear_debate_state(db, draft.id)
-    # R-173：旧键删除、新键留「中断」标记（卡片显示「上次讨论中断」，但不转圈）
-    assert db.get(Kv, f"debate:{draft.id}") is None
-    from app.services import draft_status
-
-    state = draft_status.read(db, draft.id)
-    assert state is not None and state["state"] == "failed" and state["running"] is False
-    db.refresh(draft)
-    assert draft.script == FAILED_SCRIPT
 
 
 def test_debate_status_route_registered():
@@ -207,3 +191,27 @@ def test_inbox_keeps_file_when_move_fails(tmp_path, monkeypatch):
     assert src.exists(), "移动失败时文件必须留在 inbox"
     assert db.query(Video).count() == 0, "移动失败时要回滚入库记录，避免库里有文件没有"
     db.close()
+
+
+def test_interrupted_generation_run_is_failed(tmp_path, monkeypatch):
+    from app.models.author_generation import GenerationRun
+
+    eng = fresh_engine()
+    ensure_schema(eng)
+    factory = sessionmaker(bind=eng, autoflush=False, autocommit=False)
+    monkeypatch.setattr("app.tasks.SessionLocal", factory)
+    session = factory()
+    session.add(Creator(kind="owner", name="我", is_current=True))
+    session.flush()
+    session.add(GenerationRun(creator_id=1, topic="中断主题", status="running", stage="writing", quality_passed=False))
+    session.commit()
+    session.close()
+
+    mark_interrupted_tasks_on_startup()
+
+    session = factory()
+    run = session.query(GenerationRun).one()
+    assert run.status == "failed"
+    assert run.quality_passed is False
+    assert "重启" in run.error
+    session.close()

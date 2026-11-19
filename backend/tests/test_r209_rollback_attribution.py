@@ -23,8 +23,8 @@ from app.models.discussion import DraftDiscussion
 from app.models.draft import Draft
 from app.models.platform import Creator
 from app.services import diff_analysis
-from app.services import generation as gen
-from app.services.debate import mark_latest_run_reverted
+from app.services import author_style as gen
+from app.services.discussion_service import mark_latest_run_reverted
 from app.services.draft_versions import chains_with_sources, snapshot_version
 
 

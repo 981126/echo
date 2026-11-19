@@ -16,7 +16,6 @@ from app.models.kv import Kv
 from app.models.hot_topic import TopicIdea
 from app.models.platform import Creator
 from app.models.task import BackgroundTask
-from app.services import generation as gen
 from app.services import media_ensure
 from app.services.platform.budget import BudgetExceeded, ensure_budget, get_budget
 from app.services.pipeline import _comment_candidates
@@ -99,46 +98,6 @@ def test_submit_media_task_starts_when_no_duplicate(db, monkeypatch):
 # ---------- 生成模型策略 ----------
 
 
-def test_generate_draft_follows_generation_pair(db, monkeypatch):
-    """R-139：脚本生成按「生成方 / 评审方」两个下拉解析模型，不再只看 generation_model。"""
-    from app.services import llm_router, model_settings
-
-    owner = Creator(kind="owner", name="我", is_current=True)
-    db.add(owner)
-    db.commit()
-    # 明确指定：生成方 = 模型1（DeepSeek），评审方 = 模型2（Kimi）
-    _set_kv(db, "model1_vendor", "deepseek")
-    _set_kv(db, "model1_model", "deepseek-flash")
-    _set_kv(db, "model2_vendor", "kimi")
-    _set_kv(db, "model2_model", "kimi-k2.6")
-    _set_kv(db, "gen_role", "model1")
-    _set_kv(db, "referee_role", "model2")
-    _set_kv(db, "debate_rounds", "1")
-    assert model_settings.generation_roles(db) == ("model1", "model2")
-
-    seen: list[tuple[str, str]] = []
-
-    class _FakeClient:
-        def __init__(self, vendor):
-            self.vendor = vendor
-
-        def chat_json(self, *_a, **_k):
-            seen.append((self.vendor, "json"))
-            return {"title": "t", "cover_text": "c", "script": "脚本正文内容够长了。", "shells": {}}
-
-        def chat(self, *_a, **_k):
-            seen.append((self.vendor, "chat"))
-            return "评审/修订正文"
-
-    monkeypatch.setattr(
-        llm_router, "build_client", lambda slot: _FakeClient(slot["vendor"])
-    )
-    draft = gen.generate_draft(db, "选题")
-    quality = json.loads(draft.quality)
-    assert quality["models"]["gen"].startswith("model1")
-    assert quality["models"]["critic"].startswith("model2")
-    assert ("deepseek", "json") in seen, "生成方（模型1=DeepSeek）应起草初稿"
-    assert ("kimi", "chat") in seen, "评审方（模型2=Kimi）应参与评审"
 
 
 # ---------- 选题池博主隔离 ----------

@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core import analytics_views
 from app.models.agent_action import AgentAction
 from app.models.draft import Draft
+from app.models.platform import Creator
 from app.models.prompt import AiPrompt
 from app.services import agent_actions, chat_service
 from app.services import prompt_service as ps
@@ -35,6 +36,7 @@ def db(tmp_path):
     session = sessionmaker(bind=eng, autoflush=False, autocommit=False)()
     for key in ps.PROMPT_META:
         session.add(AiPrompt(key=key, version=1, content=ps.default_content(key), status="enabled", note="t"))
+    session.add(Creator(kind="owner", name="我", is_current=True))
     session.commit()
     yield session
     session.close()

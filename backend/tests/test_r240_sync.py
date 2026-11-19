@@ -249,6 +249,11 @@ def test_import_video_task_runs_correction_and_tagging_concurrently(db, monkeypa
         def transcribe(self, _path):
             return "口播正文"
 
+        def transcribe_detailed(self, _path):
+            from app.services.transcription import TranscriptResult
+
+            return TranscriptResult("口播正文", [], "mock", "none")
+
     active = {"n": 0, "max": 0}
     lock = threading.Lock()
 

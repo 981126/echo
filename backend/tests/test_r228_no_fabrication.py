@@ -23,7 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.draft import Draft
 from app.models.kv import Kv
 from app.services import evidence, llm_router, station_evidence
-from app.services.debate import run_debate
+from app.services.rewrite_debate import run_source_discussion
 
 
 @pytest.fixture()
@@ -99,22 +99,6 @@ def _round_calls(calls: list) -> list:
     return [messages for kind, messages in calls[1:] if kind == "chat"]
 
 
-def test_normal_debate_evidence_in_every_round(db, monkeypatch):
-    _configure_models(db)
-    draft = Draft(title="选题", script="（双模型讨论生成中…）", source="ai")
-    db.add(draft)
-    db.commit()
-    calls: list = []
-    _fake_env(monkeypatch, calls)
-
-    run_debate(db, draft, "选题")
-
-    rounds = _round_calls(calls)
-    assert len(rounds) == 4  # 2 轮 ×（评审 + 修订）
-    for messages in rounds:
-        system = messages[0]["content"]
-        assert "EVIDENCE_MARK" in system  # 证据块每轮可见（此前仅初稿注入）
-        assert "参考/扩写的素材" in system  # R-254：证据块标签改为可参考/可扩写
 
 
 def test_source_debate_evidence_in_every_round(db, monkeypatch):
@@ -126,7 +110,7 @@ def test_source_debate_evidence_in_every_round(db, monkeypatch):
     calls: list = []
     _fake_env(monkeypatch, calls)
 
-    run_debate(db, draft, "选题", source_text="素材原文正文，其中的经历可以写成作者本人的。")
+    run_source_discussion(db, draft, "选题", source_text="素材原文正文，其中的经历可以写成作者本人的。")
 
     rounds = _round_calls(calls)
     assert len(rounds) == 4

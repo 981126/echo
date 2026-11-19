@@ -176,7 +176,7 @@ def test_diff_task_returns_added(db, monkeypatch):
 
 
 def test_rewrite_examples_uses_version_chain(db):
-    from app.services import generation as gen
+    from app.services import author_style as gen
 
     _owner(db)
     d = Draft(title="t", script="终版正文", source="ai", creator_id=1)
@@ -201,6 +201,7 @@ def test_finalize_updates_and_snapshots(db, monkeypatch):
     snapshot_version(db, d, source="ai_generate")  # AI 生成的第一版（如 AI 生成草稿落库时留的）
     kinds: list[str] = []
     monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 5)
+    monkeypatch.setattr("app.api.drafts.start_task", lambda kind, payload, fn: kinds.append(kind) or 5)
 
     r = _client(db).post(f"/api/drafts/{d.id}/finalize", json={"title": "新", "cover_text": "封面", "script": "定稿正文", "tags": ["求职"]})
     assert r.status_code == 200, r.text
@@ -209,8 +210,8 @@ def test_finalize_updates_and_snapshots(db, monkeypatch):
     assert body["version"]["source"] == "manual"
     assert db.get(Draft, d.id).title == "新"
     assert db.get(Draft, d.id).tags == '["求职"]'
-    # R-209：AI 版 → 作者定稿，链可归因，触发版本链分析
-    assert kinds == ["diff_analysis"]
+    # AI 版 → 作者定稿：既分析版本链，也整理可追溯的作者学习资产（R-263）
+    assert kinds == ["diff_analysis", "generation_feedback"]
 
     r2 = _client(db).get(f"/api/drafts/{d.id}/versions")
     assert r2.status_code == 200
@@ -258,7 +259,7 @@ def test_discussion_task_auto_snapshots_ai_version(db, monkeypatch):
     d = Draft(title="标题", script="讨论后正文", creator_id=1)
     db.add(d)
     db.commit()
-    monkeypatch.setattr(draft_flow, "run_debate", lambda db_, draft, topic, **kw: {"draft_id": draft.id})
+    monkeypatch.setattr(draft_flow, "run_source_discussion", lambda db_, draft, topic, **kw: {"draft_id": draft.id})
     kinds: list[str] = []
     monkeypatch.setattr("app.tasks.start_task", lambda kind, payload, fn: kinds.append(kind) or 1)
 

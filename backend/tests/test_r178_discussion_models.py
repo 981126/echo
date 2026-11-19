@@ -80,7 +80,7 @@ def _fake_llm(monkeypatch, *, json_payload=None, chat_text="评审/修订正文"
 
 
 def test_model_label_uses_vendor_label_and_model_id():
-    from app.services.debate import model_label
+    from app.services.discussion_service import model_label
 
     assert model_label("deepseek", "deepseek-flash") == "DeepSeek · deepseek-flash"
     assert model_label("kimi", "kimi-k2.6") == "Kimi（月之暗面） · kimi-k2.6"
@@ -95,7 +95,7 @@ def test_model_label_uses_vendor_label_and_model_id():
 
 
 def test_discussion_rows_record_actual_model_and_run_header(db, monkeypatch):
-    from app.services.debate import run_debate
+    from app.services.rewrite_debate import run_source_discussion
 
     _owner(db)
     _configure_models(db)
@@ -104,7 +104,7 @@ def test_discussion_rows_record_actual_model_and_run_header(db, monkeypatch):
     db.add(d)
     db.commit()
 
-    run_debate(db, d, "话题")
+    run_source_discussion(db, d, "话题", source_text="历史原文")
 
     rows = db.query(DraftDiscussion).filter(DraftDiscussion.draft_id == d.id).order_by(DraftDiscussion.id).all()
     run_rows = [r for r in rows if r.kind == "run"]
@@ -135,7 +135,7 @@ def test_discussion_rows_record_actual_model_and_run_header(db, monkeypatch):
 
 def test_run_header_kept_when_all_drafts_fail(db, monkeypatch):
     """两次初稿都失败也要留下运行头（事后能看出「那一次本来要用谁」）。"""
-    from app.services.debate import run_debate
+    from app.services.rewrite_debate import run_source_discussion
     from app.services.llm import LLMError
 
     _owner(db)
@@ -157,7 +157,7 @@ def test_run_header_kept_when_all_drafts_fail(db, monkeypatch):
     db.commit()
 
     with pytest.raises(LLMError):
-        run_debate(db, d, "话题")
+        run_source_discussion(db, d, "话题", source_text="历史原文")
 
     rows = db.query(DraftDiscussion).filter(DraftDiscussion.draft_id == d.id).all()
     run_rows = [r for r in rows if r.kind == "run"]

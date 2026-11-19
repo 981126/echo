@@ -330,7 +330,7 @@ def test_pipeline_keeps_done_when_mail_fails(db, monkeypatch):
         db.refresh(d)
         return d
 
-    monkeypatch.setattr(pl, "generate_draft", _fake_generate)
+    monkeypatch.setattr(pl, "generate_author_draft", _fake_generate)
     monkeypatch.setattr(pl, "send_daily_digest", lambda *_a, **_k: False)
     monkeypatch.setattr(
         "app.services.notify.mail_config_problem", lambda *_a, **_k: "ECHO_MAIL_TO 含非 ASCII 字符"

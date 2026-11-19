@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from ..core.log import get_logger
 from ..db import get_db
-from ..models.notification import Notification
 from ..models.prompt import AiPrompt, AiPromptDef
 from ..services import prompt_service
 from ..tasks import find_running_task, start_task
@@ -154,80 +153,6 @@ def list_versions(key: str, db: Session = Depends(get_db)):
     return [_out(r) for r in rows]
 
 
-def _selfcheck_task(db: Session, payload: dict) -> None:
-    """启用新版生成提示词后，用金样本选题自动生成一轮供作者打分（R-022）。
-
-    R-240 M1：多篇金样本改为独立 Session 并发生成（并发度 `prompt_selfcheck_concurrency`，默认 2），
-    主线程统计 made 并写原通知；单篇失败不阻断其余（并发度 ≤1 时等价原串行）。
-    """
-    from ..config import get_settings
-    from ..models.feedback import Feedback
-    from ..models.hot_topic import TopicCandidate
-    from ..services.generation import generate_draft
-    from ..services.sync_pool import gather, session_factory
-
-    version = payload.get("version", 0)
-    try:
-        ids = [
-            r[0]
-            for r in db.query(Feedback.draft_id)
-            .filter((Feedback.rating >= 4) | (Feedback.liked.is_(True)))
-            .distinct()
-            .limit(5)
-            .all()
-        ]
-        topics = []
-        if ids:
-            topics = [
-                r.title
-                for r in db.query(TopicCandidate)
-                .filter(TopicCandidate.draft_id.in_(ids))
-                .order_by(TopicCandidate.id.desc())
-                .limit(3)
-                .all()
-            ]
-        if not topics:
-            return  # 暂无金样本，跳过自测
-        workers = min(int(get_settings().prompt_selfcheck_concurrency or 1), len(topics))
-        if workers <= 1:
-            made = 0
-            for tp in topics:
-                try:
-                    generate_draft(db, tp, snapshot=False)  # R-157：金样本自测不留版本
-                    made += 1
-                except Exception:  # noqa: BLE001 单条失败不影响其余
-                    db.rollback()
-        else:
-            factory = session_factory(db)
-
-            def _gen(topic: str) -> None:
-                session = factory()
-                try:
-                    generate_draft(session, topic, snapshot=False)  # R-157：金样本自测不留版本
-                finally:
-                    session.close()
-
-            made = 0
-            for tp, res in gather(_gen, topics, workers=workers):
-                if isinstance(res, Exception):
-                    log.warning("提示词自测单篇生成失败：%s（%s）", tp, str(res)[:200])
-                else:
-                    made += 1
-        db.add(
-            Notification(
-                kind="prompt_selfcheck",
-                status="done",
-                title=f"提示词 v{version} 已启用 · 自测完成",
-                message=f"已按金样本选题生成 {made} 篇，请到脚本工作台打分",
-                target="/drafts",
-            )
-        )
-        db.commit()
-    except Exception:  # noqa: BLE001
-        db.rollback()
-        log.exception("提示词自测任务失败（version=%s）", version)
-
-
 @router.post("/{key}/save", response_model=dict)
 def save_prompt(key: str, payload: PromptSaveIn, db: Session = Depends(get_db)):
     spec = prompt_service.get_spec(key)
@@ -238,8 +163,6 @@ def save_prompt(key: str, payload: PromptSaveIn, db: Session = Depends(get_db)):
     if not (payload.content or "").strip():
         raise HTTPException(status_code=400, detail="提示词正文不能为空")
     row = prompt_service.save_new_version(db, key, payload.content)
-    if key == "generation":
-        start_task("prompt_selfcheck", {"version": row.version}, _selfcheck_task)
     return _out(row)
 
 
@@ -253,8 +176,6 @@ def enable_prompt(key: str, payload: PromptEnableIn, db: Session = Depends(get_d
     row = prompt_service.enable_version(db, key, payload.version)
     if row is None:
         raise HTTPException(status_code=404, detail="版本不存在")
-    if key == "generation":
-        start_task("prompt_selfcheck", {"version": row.version}, _selfcheck_task)
     return _out(row)
 
 

@@ -45,44 +45,44 @@ def _enabled(db, key):
 
 def test_fallback_enables_code_default_when_all_archived(db):
     """generation 全 archived（复刻线上状态）→ 兜底另存一版并启用代码默认。"""
-    row = AiPrompt(key="generation", version=10, content="旧内容", status="archived", note="历史")
+    row = AiPrompt(key="author_write", version=10, content="旧内容", status="archived", note="历史")
     db.add(row)
     db.commit()
 
     ensure_enabled_fallback(db)
 
-    enabled = _enabled(db, "generation")
+    enabled = _enabled(db, "author_write")
     assert enabled is not None
-    assert enabled.content == default_content("generation")
+    assert enabled.content == default_content("author_write")
     assert enabled.content != "旧内容"
     assert "兜底启用代码默认" in enabled.note
     # 历史版本留痕不删（1 条历史 + 1 条兜底）
-    assert db.query(AiPrompt).filter(AiPrompt.key == "generation").count() == 2
+    assert db.query(AiPrompt).filter(AiPrompt.key == "author_write").count() == 2
 
 
 def test_fallback_idempotent_when_enabled_exists(db):
     """已有 enabled 的 key 不被改动、不新增版本。"""
-    save_new_version(db, "generation", default_content("generation"), note="手动启用")
-    before = db.query(AiPrompt).filter(AiPrompt.key == "generation").count()
-    before_version = _enabled(db, "generation").version
+    save_new_version(db, "author_write", default_content("author_write"), note="手动启用")
+    before = db.query(AiPrompt).filter(AiPrompt.key == "author_write").count()
+    before_version = _enabled(db, "author_write").version
 
     ensure_enabled_fallback(db)
 
-    assert db.query(AiPrompt).filter(AiPrompt.key == "generation").count() == before
-    assert _enabled(db, "generation").version == before_version
+    assert db.query(AiPrompt).filter(AiPrompt.key == "author_write").count() == before
+    assert _enabled(db, "author_write").version == before_version
 
 
 def test_fallback_idempotent_on_second_run(db):
     """连续跑两次：第二次不再新增版本（启动幂等）。"""
-    db.add(AiPrompt(key="generation", version=1, content="x", status="archived"))
+    db.add(AiPrompt(key="author_write", version=1, content="x", status="archived"))
     db.commit()
 
     ensure_enabled_fallback(db)
     ensure_enabled_fallback(db)
 
-    versions = db.query(AiPrompt).filter(AiPrompt.key == "generation").all()
+    versions = db.query(AiPrompt).filter(AiPrompt.key == "author_write").all()
     assert len(versions) == 2  # 1 历史 + 1 兜底
-    assert get_prompt("generation", db) == default_content("generation")
+    assert get_prompt("author_write", db) == default_content("author_write")
 
 
 def test_fallback_covers_all_meta_keys(db):

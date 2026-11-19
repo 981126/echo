@@ -248,7 +248,7 @@ def style_overview(db: Session = Depends(get_db)):
     import json
 
     from ..core.style_profile import build_style_profile, default_avoid_words, format_style_profile
-    from ..services.generation import _all_texts, _weight_map
+    from ..services.author_style import _all_texts, _weight_map
     from ..models.kv import Kv
 
     rows = _all_texts(db)
@@ -266,7 +266,7 @@ def style_overview(db: Session = Depends(get_db)):
     ordered = sorted(rows, key=lambda vt: weights.get(vt[0].id, 0.0), reverse=True)
     weighted = ordered[:3]
     # R-131：风格范本（必定注入生成上下文）+ 风格样本条数
-    from ..services.generation import _style_anchor_ids
+    from ..services.author_style import _style_anchor_ids
 
     anchor_ids = _style_anchor_ids(db)
     candidates = ordered[:20]
@@ -329,7 +329,7 @@ def save_style_words(payload: dict, db: Session = Depends(get_db)):
             raise HTTPException(status_code=400, detail="sample_count 必须是数字") from None
         _set("style_sample_count", str(max(3, min(8, n))))
     db.commit()
-    from ..services.generation import _style_anchor_ids
+    from ..services.author_style import _style_anchor_ids
 
     return {"ok": True, "avoid_words": _avoid_words_out(db), "anchor_ids": _style_anchor_ids(db)}
 

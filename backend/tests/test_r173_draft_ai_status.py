@@ -204,7 +204,7 @@ class _FakeRoute:
 
 
 def _run_debate(db, draft, critic_fail_on=()):
-    from app.services import debate
+    from app.services import rewrite_debate as debate
 
     gen = _FakeLLM("model1")
     critic = _FakeLLM("model2", fail_chat_on=critic_fail_on)
@@ -213,7 +213,7 @@ def _run_debate(db, draft, critic_fail_on=()):
     original_snapshot = llm_router.snapshot
     llm_router.snapshot = lambda _db: _FakeRoute()  # type: ignore[assignment]
     try:
-        return debate.run_debate(db, draft, "测试选题")
+        return debate.run_source_discussion(db, draft, "测试选题", source_text="历史原文")
     finally:
         debate._side_llm = original  # type: ignore[assignment]
         llm_router.snapshot = original_snapshot  # type: ignore[assignment]

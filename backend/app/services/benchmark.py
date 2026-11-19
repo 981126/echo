@@ -673,7 +673,7 @@ REWRITE_SYSTEM = (
 
 def _rewrite_user(db: Session, title: str, text: str, evidence_block: str = "") -> str:
     """参考改写（洗稿）的 user 上下文：作者完整人设+风格上下文 + 素材 + 联网证据（R-181/R-227）。"""
-    from .generation import author_style_context
+    from .author_style import author_style_context
 
     parts = [
         author_style_context(db, title),
@@ -872,7 +872,7 @@ def rewrite_worker(db: Session, payload: dict, update=None) -> dict:
     否则卡片会一直显示「讨论中」。
     """
     from . import draft_status
-    from .debate import run_rewrite_debate
+    from .rewrite_debate import run_rewrite_debate
 
     if update:
         update(10, "启动双模型讨论…")

@@ -23,7 +23,11 @@ def _target(kind: str, payload: dict, result) -> str:
 
 def _notify(db, *, kind: str, payload: dict, status: str, result=None, error: str = "") -> None:
     label = KIND_LABELS.get(kind, kind)
-    if status == "done":
+    result_status = str(result.get("status") or "") if isinstance(result, dict) else ""
+    if status == "done" and result_status in {"needs_input", "needs_review"}:
+        title = f"{label}待补信息" if result_status == "needs_input" else f"{label}待作者修改"
+        message = str(result.get("message") or title)[:240]
+    elif status == "done":
         title = f"{label}完成"
         message = title
         if isinstance(result, dict) and result.get("title"):
@@ -213,7 +217,7 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
             _emit("done", 100, "完成")
         _notify(db, kind=kind, payload=payload, status="done", result=result)
         if kind == "import_video":
-            _maybe_optimize_prompt(db, payload)
+            _maybe_extract_author_assets(payload)
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         log.exception("后台任务失败 kind=%s task_id=%s", kind, task_id)
@@ -233,21 +237,26 @@ def _run_worker(task_id: int, kind: str, payload: dict, fn) -> None:
         slots.release()  # R-241：释放全局并发名额（异常/失败路径也必须释放）
 
 
-def _maybe_optimize_prompt(db, payload: dict) -> None:
-    """素材导入后的提示词优化（R-131→R-208）：累计到阈值时自动排队优化生成提示词。"""
+def _maybe_extract_author_assets(payload: dict) -> None:
+    """ASR 入库后异步整理作者资产；整理失败不影响原始转写。"""
     from .models.video import Video
-    from .services.prompt_service import maybe_auto_optimize_prompt
+    from .services.author_assets import author_asset_task
 
+    db = SessionLocal()
     try:
         video = db.get(Video, int(payload.get("video_id") or 0))
-        if video is None or not video.transcript:
+        text = video.transcript.corrected_text or video.transcript.transcript_text if video and video.transcript else ""
+        if video is None or video.creator_id is None or not text:
             return
-        text = video.transcript.corrected_text or video.transcript.transcript_text
-        if not text:
-            return
-        maybe_auto_optimize_prompt(db)
-    except Exception:  # noqa: BLE001 优化入队失败不影响导入主流程
+        start_task(
+            "author_assets",
+            {"creator_id": video.creator_id, "video_id": video.id},
+            author_asset_task,
+        )
+    except Exception:  # noqa: BLE001 资产任务入队失败不影响导入主流程
         db.rollback()
+    finally:
+        db.close()
 
 
 def mark_interrupted_tasks_on_startup() -> int:
@@ -265,6 +274,13 @@ def mark_interrupted_tasks_on_startup() -> int:
             row.error = "服务重启，任务中断"
             row.note = "任务中断"
             kinds[row.kind] = kinds.get(row.kind, 0) + 1
+        from .models.author_generation import GenerationRun
+
+        interrupted_runs = db.query(GenerationRun).filter(GenerationRun.status.in_(["queued", "running"])).all()
+        for run in interrupted_runs:
+            run.status = "failed"
+            run.quality_passed = False
+            run.error = "服务重启，任务中断"
         db.commit()
         n = len(rows)
         if n:

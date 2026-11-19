@@ -441,7 +441,7 @@ export default function PromptsPage() {
   return (
     <motion.div variants={listVariants} initial="initial" animate="animate" className="space-y-4">
       <motion.p variants={itemVariants} className="text-xs text-muted-foreground">
-        「基础」放日常要用的（模型 / Key / ASR / 每日篇数 / 讨论轮次），保存即生效；「高级」放推理预算、提示词与版本评测（默认不建议改）。「像不像作者」主要由人设页的运行时上下文决定。
+        「基础」放日常要用的（模型 / Key / ASR / 每日篇数 / 洗稿讨论轮次），保存即生效；「高级」放推理预算、提示词与版本评测（默认不建议改）。「像不像作者」主要由人设页的运行时上下文决定。
       </motion.p>
 
       <motion.div variants={itemVariants}>
@@ -595,7 +595,7 @@ export default function PromptsPage() {
                       )}
                       <span className="text-xs text-muted-foreground">每日自动生成篇数：</span>
                       <Input type="number" min={1} max={10} className="h-9 w-full text-xs md:w-20" value={topicsCount} onChange={(e) => setTopicsCount(Number(e.target.value))} />
-                      <span className="text-xs text-muted-foreground">讨论轮次：</span>
+                      <span className="text-xs text-muted-foreground">洗稿讨论轮次：</span>
                       <Input type="number" min={1} max={10} className="h-9 w-full text-xs md:w-20" value={debateRounds} onChange={(e) => setDebateRounds(Number(e.target.value))} />
                     </div>
                   </CardContent>

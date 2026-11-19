@@ -1,11 +1,4 @@
-"""双模型讨论生成（R-023；R-139 统一为所有脚本生成的唯一路径）。
-
-流程：按「生成方 / 评审方」两个下拉解析出两个模型槽位 → 生成方出初稿
-（失败自动换另一位）→ 交替 N 轮（评审方挑刺 → 生成方修订）→ 最终稿写回草稿。
-轮次取「AI 设置」里的讨论轮次（1–10），**手动工作台 / 回炉 / 灵感池一键 / AI 对话 /
-提示词自测 / 每日自动生成** 全部走这一条路径。
-每轮消息写入 draft_discussions（留痕），前端 tab 可查。
-"""
+"""洗稿与历史原文讨论；普通生成由 generation_pipeline 独立负责（R-263）。"""
 
 from __future__ import annotations
 
@@ -21,12 +14,18 @@ from ..models.discussion import DraftDiscussion
 from ..models.draft import Draft
 from ..models.kv import Kv
 from . import budget_settings, draft_status, llm_router
-from .generation import _persona_context, _style_profile_lines, _style_samples, author_style_context, generation_user_message
+from .author_style import _persona_context, _style_profile_lines, _style_samples, author_style_context
 from .llm import LLMError
-from .prompt_service import get_prompt, get_prompt_version
-from .creator_service import current_creator_id
+from .prompt_service import get_prompt
+from .discussion_service import (
+    add_discussion as _add,
+    add_note as _note,
+    finish_run_header as _finish_run_header,
+    slot_meta as _slot_meta,
+    start_run_header as _run_header,
+)
 
-log = get_logger("debate")
+log = get_logger("rewrite_debate")
 
 
 def debate_rounds(db: Session, settings=None) -> int:
@@ -122,138 +121,6 @@ def _evidence_and_station(
     return ev, station, station_meta
 
 
-def model_label(vendor: str, model_id: str) -> str:
-    """「厂家标签 · 模型 ID」——全站展示实际模型的唯一口径（R-178）。
-
-    厂家标签复用 `model_settings.VENDORS`（设置页「模型设置」的同一事实源），
-    例如 `DeepSeek · deepseek-flash`；厂家未知时退化成只显示模型 ID。
-    """
-    from .model_settings import VENDORS
-
-    label = (VENDORS.get(vendor or "") or {}).get("label") or ""
-    mid = model_id or ""
-    if label and mid:
-        return f"{label} · {mid}"
-    return label or mid or ""
-
-
-def _llm_model_fields(llm) -> dict:
-    """取某个模型客户端**实际出结果**的三元组（R-142/R-178）。"""
-    if llm is None:
-        return {"used_slot": "", "vendor": "", "model_id": ""}
-    return {
-        "used_slot": str(getattr(llm, "used_slot", "") or ""),
-        "vendor": str(getattr(llm, "used_vendor", "") or ""),
-        "model_id": str(getattr(llm, "used_model", "") or ""),
-    }
-
-
-def _add(
-    db: Session,
-    draft_id: int,
-    round_no: int,
-    actor: str,
-    kind: str,
-    content: str,
-    *,
-    llm=None,
-) -> None:
-    """写一条留痕。传 `llm` 时同时落库**实际出结果**的模型（R-178）。"""
-    db.add(
-        DraftDiscussion(
-            draft_id=draft_id,
-            round=round_no,
-            actor=actor,
-            kind=kind,
-            content=content,
-            **_llm_model_fields(llm),
-        )
-    )
-    db.commit()
-
-
-def _note(db: Session, draft_id: int, round_no: int, text: str) -> None:
-    _add(db, draft_id, round_no, "system", "note", text)
-
-
-def _run_header(db: Session, draft_id: int, gen_slot: dict, critic_slot: dict, rounds: int) -> int:
-    """一次讨论的运行头（R-178）：记录**当时配置**的生成方/评审方，返回该行 id 供结束时回填。
-
-    作者切模型后仍能从历史里看出「那一次用的是谁」；结束时会补 `rounds_done/degraded`。
-    """
-    payload = {
-        "gen": _slot_meta(gen_slot),
-        "critic": _slot_meta(critic_slot),
-        "rounds": rounds,
-        "rounds_done": None,
-        "degraded": None,
-    }
-    row = DraftDiscussion(
-        draft_id=draft_id,
-        round=0,
-        actor="system",
-        kind="run",
-        content=json.dumps(payload, ensure_ascii=False),
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row.id
-
-
-def _finish_run_header(db: Session, header_id: int, *, rounds_done: int, degraded: bool) -> None:
-    """讨论结束回填运行头（跑满/中断都留事实）。"""
-    row = db.get(DraftDiscussion, header_id)
-    if row is None:
-        return
-    try:
-        payload = json.loads(row.content or "{}")
-    except json.JSONDecodeError:
-        payload = {}
-    payload["rounds_done"] = rounds_done
-    payload["degraded"] = bool(degraded)
-    row.content = json.dumps(payload, ensure_ascii=False)
-    db.commit()
-
-
-def mark_latest_run_reverted(db: Session, draft_id: int) -> bool:
-    """R-209：作者回退跨过了 AI 讨论结果——把最近一次讨论运行头回填 ``reverted: true``。
-
-    「讨论后被作者改回旧版」是双模型讨论最强的负反馈，留在运行头上，
-    以后做生成方×评审方组合效果统计时可直接取用。
-    """
-    row = (
-        db.query(DraftDiscussion)
-        .filter(DraftDiscussion.draft_id == draft_id, DraftDiscussion.kind == "run")
-        .order_by(DraftDiscussion.id.desc())
-        .first()
-    )
-    if row is None:
-        return False
-    try:
-        payload = json.loads(row.content or "{}")
-    except json.JSONDecodeError:
-        payload = {}
-    if payload.get("reverted"):
-        return False
-    payload["reverted"] = True
-    row.content = json.dumps(payload, ensure_ascii=False)
-    db.commit()
-    return True
-
-
-def _slot_meta(slot: dict) -> dict:
-    """槽位配置（含可展示文案）——运行头用。"""
-    vendor = str(slot.get("vendor") or "")
-    model_id = str(slot.get("model") or "")
-    return {
-        "slot": str(slot.get("slot") or ""),
-        "vendor": vendor,
-        "model": model_id,
-        "label": model_label(vendor, model_id),
-    }
-
-
 def _status(
     db: Session,
     draft_id: int,
@@ -291,9 +158,6 @@ def _clear_status(db: Session, draft_id: int) -> None:
 # 就有一半概率被截断成「空正文」→ 误判降级。改默认值前请先重跑
 # `tests/test_r142_thinking_budget.py` 头部记录的量测方法。
 
-PLACEHOLDER_SCRIPT = "（双模型讨论生成中…）"
-FAILED_SCRIPT = "（生成失败，请重试或删除本稿）"
-
 # R-254：取代 R-228 的 NO_FABRICATION_RULE。作者确认放开：对标/站内/联网参考素材里的经历、案例、
 # 数字可以写成作者本人经历，也允许基于素材补全、扩写细节；不再要求缺素材标【需作者补充】。
 ALLOW_EXPANSION_RULE = (
@@ -324,18 +188,6 @@ SOURCE_REWRITE_SYSTEM = (
 
 # R-255：讨论链静态提示词统一入库。以下常量是代码默认/回退（注册表 default_ref 懒加载引用），
 # 运行时调用点一律走 `get_prompt(key, db)` 读表，作者在「AI 设置」里编辑的版本优先。
-CRITIC_SYSTEM_GENERATE = (
-    "你是脚本评审专家。请对照作者人设与语言习惯，指出当前脚本哪些地方不像作者、"
-    "哪些有 AI 感，并给出具体可执行的修改建议（每轮简短、直给）。"
-    "**并重点检查内容质量**：有没有 2-4 条明确论点、每条是否都有具体事例/数据支撑、"
-    "有没有正确但没用的空话。"
-)
-REVISE_SYSTEM_GENERATE = (
-    "你是撰稿模型。根据评审意见，用作者的口吻重写整篇口播脚本，"
-    "只输出脚本正文，不要解释、不要加标题。保持 1-2 分钟口播长度。"
-    "**优先满足内容质量**：确保有 2-4 条明确论点，且每条都有具体事例/数据支撑；"
-    "有可引用的联网事实就口语化引用。"
-)
 CRITIC_SYSTEM_REWRITE = (
     "你是脚本评审专家。对照**作者完整上下文**（人设/风格范本/语言习惯/禁用词/结构偏好）指出当前脚本"
     "哪些地方不像作者、哪些有 AI 腔、哪些与原文句子逐字照抄"
@@ -365,22 +217,6 @@ def merge_tags(raw: str, new_tags: list[str]) -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
-def clear_debate_state(db: Session, draft_id: int, reason: str = "") -> None:
-    """讨论失败/中断后的收尾（R-134；R-173 起保留「中断」标记）。
-
-    - R-134：占位稿改成可读的失败提示，避免永久「生成中…」；
-    - R-173：不再静默删状态，而是记成 `failed`——卡片显示「上次讨论中断（可重新讨论）」，
-      但不转圈（前端只对 `running` 画动画）。
-    """
-    if not draft_id:
-        return
-    draft_status.set_failed(db, draft_id, reason or "讨论中断", kind="debate")
-    draft = db.get(Draft, draft_id)
-    if draft is not None and (draft.script or "").strip() == PLACEHOLDER_SCRIPT:
-        draft.script = FAILED_SCRIPT
-        db.commit()
-
-
 def _chat_once(llm, system: str, user: str, temperature: float, max_tokens: int) -> str:
     """单次调用；空正文/异常都抛 LLMError（由上层决定是否换人）。"""
     try:
@@ -399,26 +235,18 @@ def _chat_once(llm, system: str, user: str, temperature: float, max_tokens: int)
     return text
 
 
-def run_debate(
+def run_source_discussion(
     db: Session,
     draft: Draft,
     topic: str,
     settings=None,
     source_text: str = "",
     source_title: str = "",
-    mode: str = "",
-    query_source: str = "",
 ) -> dict:
-    """在已有草稿上跑一次完整双模型讨论（所有脚本生成的唯一路径，R-139）。
-
-    R-155：传入 `source_text` 时走「基于原文」讨论——初稿按原文改写成作者口吻，产出
-    标题/封面字/正文/标签；写回 `original_script` 供【原文对照】，标签与现有合并去重。
-    不传 `source_text` 时行为与原来完全一致（按选题生成）。
-
-    返回 {draft_id, title, models, fallback, rounds, degraded}，其中 origin 信息用于
-    写入 `Draft.quality`，让作者一眼看出这篇稿子由哪两个模型产出、是否降级。
-    """
-    from .generation import _self_check, style_diagnostics
+    """基于洗稿素材或历史原文执行讨论，不接受普通选题生成。"""
+    if not source_text.strip():
+        raise ValueError("普通生成请使用 generation_pipeline")
+    from .author_style import _self_check, style_diagnostics
 
     settings = settings or get_settings()
     route = llm_router.snapshot(db)
@@ -456,7 +284,7 @@ def run_debate(
     ev, station, station_meta = _evidence_and_station(
         db,
         topic=topic,
-        material=source_text or query_source,
+        material=source_text,
         draft_id=draft.id,
         creator_id=draft.creator_id,
         persona=_persona_brief(ctx),
@@ -477,23 +305,16 @@ def run_debate(
 
     # 1) 初稿：优先生成方，失败自动换评审方（降级留痕）
     initial = None
-    if source_text:
-        # R-155：基于原文讨论——原文可能是洗稿素材 ASR 文案（original_script）或自建稿正文
-        if db.query(DraftDiscussion).filter(DraftDiscussion.draft_id == draft.id).count() > 0:
-            _note(db, draft.id, 0, "—— 重新讨论（基于原文）——")
-        initial_system = get_prompt("rewrite_from_source", db)
-        initial_user = (
-            f"{author_style_context(db)}\n\n"
-            f"【参考素材·可把其中的经历/案例/观点当作可用内容（整篇不逐字照抄）】\n"
-            f"素材标题：{source_title or topic}\n素材原文：\n{source_text[:4000]}"
-            + (f"\n\n{evidence_block}" if evidence_block else "")
-        )
-        initial_budget = budget_settings.budget_for(db, "rewrite")
-    else:
-        initial_system = get_prompt("generation", db)
-        # R-129：与金样本回放评分同一份输入；R-183 创作模式；R-227 注入联网证据
-        initial_user = generation_user_message(db, topic, mode, evidence_block)
-        initial_budget = budget_settings.budget_for(db, "debate_initial")
+    if db.query(DraftDiscussion).filter(DraftDiscussion.draft_id == draft.id).count() > 0:
+        _note(db, draft.id, 0, "—— 重新讨论（基于原文）——")
+    initial_system = get_prompt("rewrite_from_source", db)
+    initial_user = (
+        f"{author_style_context(db)}\n\n"
+        f"【参考素材·可把其中的经历/案例/观点当作可用内容（整篇不逐字照抄）】\n"
+        f"素材标题：{source_title or topic}\n素材原文：\n{source_text[:4000]}"
+        + (f"\n\n{evidence_block}" if evidence_block else "")
+    )
+    initial_budget = budget_settings.budget_for(db, "rewrite")
     for name, llm in ((gen, gen_llm), (critic, critic_llm)):
         _status(
             db,
@@ -509,7 +330,7 @@ def run_debate(
                     {"role": "system", "content": initial_system},
                     {"role": "user", "content": initial_user},
                 ],
-                temperature=0.8 if not source_text else 0.7,
+                temperature=0.7,
                 max_tokens=initial_budget,
                 require=("script",),
             )
@@ -555,15 +376,14 @@ def run_debate(
     # 2) N 轮讨论：评审方挑刺 → 生成方修订
     # R-228：证据块（联网+站内）拼进 system，每轮调用都可见；R-254：放开为可扩写素材、不再禁编造。
     critic_system = _with_evidence(
-        get_prompt("debate_critic_generate", db)
+        get_prompt("rewrite_critic", db)
         + ALLOW_EXPANSION_RULE
         + f"\n作者人设：\n{persona_text}\n红线（不得违反）：\n{red_text}\n作者语言习惯：\n{ctx['profile']}",
         evidence_block,
     )
-    if source_text:
-        critic_system += f"\n参考原文（检查是否照搬/重复）：\n{source_text[:1500]}"
+    critic_system += f"\n参考原文（检查是否照搬/重复）：\n{source_text[:1500]}"
     revise_system = _with_evidence(
-        get_prompt("debate_revise_generate", db)
+        get_prompt("rewrite_revise", db)
         + ALLOW_EXPANSION_RULE
         + f"\n作者语言习惯（自然贴近即可，不要硬塞口头禅/标志词）：\n{style_note}",
         evidence_block,
@@ -697,24 +517,9 @@ def run_debate(
         "models": {"gen": gen, "critic": critic},
         "fallback": degraded,
         "rounds": rounds_total,
-        "tags": json.loads(draft.tags or "[]") if source_text else [],
+        "tags": json.loads(draft.tags or "[]"),
         "references": public_items(ev.get("selected") or [], 5),
     }
-
-
-def run_debate_draft(db: Session, payload: dict) -> dict:
-    """后台任务体：payload {draft_id, topic}（工作台双模型讨论生成）。"""
-    draft = db.get(Draft, int(payload.get("draft_id") or 0))
-    if draft is None:
-        raise LLMError("草稿不存在")
-    if draft.creator_id is None:
-        draft.creator_id = current_creator_id(db)  # 兜底：老占位稿无归属时补当前主博主
-    if not draft.prompt_version:
-        draft.prompt_version = get_prompt_version("generation", db)  # R-129：按提示词版本归因
-    topic = str(payload.get("topic", "")).strip() or draft.title or "今日话题"
-    mode = str(payload.get("mode") or "").strip()
-    query_source = str(payload.get("query_source") or "").strip()
-    return run_debate(db, draft, topic, mode=mode, query_source=query_source)
 
 
 def _merge_quality(db: Session, draft: Draft, patch: dict) -> None:
@@ -847,7 +652,7 @@ def run_rewrite_debate(db: Session, payload: dict) -> dict:
     payload["draft_id"] = draft.id
     # R-227：联网事实证据（无 key/失败静默返回空），并写留痕
     # R-233：双源检索/正文补齐/去营销 + 生成方按当前主博主人设选文
-    # R-241：证据缓存 + 站内检索与联网检索并发（同 run_debate）
+    # R-241：证据缓存 + 站内检索与联网检索并发
     from .evidence import mark_logs_used, public_items, resolve_used
 
     rewrite_rounds = debate_rounds(db, settings)

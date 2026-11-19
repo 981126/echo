@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { RefreshCw, Shuffle, Sparkles, LoaderCircle, Lightbulb } from 'lucide-react'
 import { apiJson } from '@/api/client'
-import { startTask, waitTaskResult } from '@/api/task'
 import { useTaskScope } from '@/hooks/use-task-scope'
 import { platformName, fmtNum } from '@/lib/format'
 import { listVariants, itemVariants } from '@/lib/motion'
@@ -13,7 +12,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toaster'
 
@@ -35,11 +33,6 @@ interface IdeaItem {
   likes?: number
   matched?: boolean
   score?: number | null
-}
-interface Angle {
-  title: string
-  hook?: string
-  reason?: string
 }
 interface PackItem {
   title: string
@@ -73,15 +66,6 @@ interface Attribution {
   avg_engagement?: number
 }
 
-// R-183 创作模式（空 = 自动，由人设+样本决定）
-const GEN_MODES = [
-  { key: '', label: '自动' },
-  { key: 'sharp', label: '犀利干货' },
-  { key: 'monologue', label: '个人独白' },
-  { key: 'commentary', label: '热点评论' },
-  { key: 'experiment', label: '实验复盘' }
-]
-
 const normTitle = (s: string) => (s || '').toLowerCase().replace(/[\s\W_]+/g, '')
 const TIER_LABEL: Record<string, { label: string; variant: 'success' | 'warning' | 'secondary' }> = {
   mine: { label: '我的观众', variant: 'success' },
@@ -94,14 +78,8 @@ export default function HomePage() {
   const qc = useQueryClient()
   const [sourceTab, setSourceTab] = useState('all')
   const [batch, setBatch] = useState(0)
-  const [angleOpen, setAngleOpen] = useState(false)
-  const [angles, setAngles] = useState<Angle[]>([])
-  const [mode, setMode] = useState('')
   const [attr, setAttr] = useState<Attribution | null>(null)
   const [attrLoading, setAttrLoading] = useState(false)
-  const [pendingTopic, setPendingTopic] = useState('')
-  const [pendingSource, setPendingSource] = useState('')
-  const [angleLoading, setAngleLoading] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
 
   // R-202：内容机会/抓取/回填改为后台任务，scope 存在 sessionStorage → 切页/刷新可恢复
@@ -183,23 +161,6 @@ export default function HomePage() {
     return [...filtered.slice(off), ...filtered.slice(0, off)].slice(0, n)
   }, [ideas, sourceTab, batch])
 
-  async function pickAngle(topic: string, source = '') {
-    setPendingTopic(topic)
-    setPendingSource(source)
-    setAngleOpen(true)
-    setAngleLoading(true)
-    setAngles([])
-    try {
-      const id = await startTask('/api/drafts/angles', { topic })
-      const r = await waitTaskResult<{ angles?: Angle[] }>(id)
-      setAngles(r.angles ?? [])
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setAngleLoading(false)
-    }
-  }
-
   function loadPack() {
     void packScope.run('/api/opportunities/weekly?limit=20')
   }
@@ -238,10 +199,9 @@ export default function HomePage() {
     try {
       await apiJson('/api/drafts/generate-async', {
         method: 'POST',
-        body: JSON.stringify({ topic, mode, query_source: querySource }),
+        body: JSON.stringify({ topic, query_source: querySource }),
       })
       toast.success('已开始生成，去脚本工作台查看')
-      setAngleOpen(false)
       navigate('/drafts')
     } catch (e) {
       toast.error((e as Error).message)
@@ -436,7 +396,7 @@ export default function HomePage() {
                         variant="ghost"
                         className="text-accent"
                         disabled={generating !== null}
-                        onClick={() => pickAngle(it.title, [it.detail, it.post_title].filter(Boolean).join(' '))}
+                        onClick={() => generate(it.title, [it.detail, it.post_title].filter(Boolean).join(' '))}
                       >
                         {generating === it.title ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                         生成文案
@@ -450,75 +410,6 @@ export default function HomePage() {
         </Card>
       </motion.section>
 
-      {/* 角度选择 */}
-      <Dialog open={angleOpen} onOpenChange={setAngleOpen}>
-        <DialogContent className="md:w-[min(680px,94vw)]">
-          <DialogHeader>
-            <DialogTitle>选一个切入角度</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-muted-foreground">创作模式</span>
-            {GEN_MODES.map((m) => (
-              <button
-                key={m.key}
-                onClick={() => setMode(m.key)}
-                className={
-                  'cursor-pointer rounded-md border px-2 py-0.5 text-xs transition-colors ' +
-                  (mode === m.key ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted-foreground hover:text-foreground')
-                }
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          {angleLoading ? (
-            <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-              <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> 正在想 3 个角度…
-            </div>
-          ) : !angles.length ? (
-            <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-              暂时没想出来，直接按原话题生成
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {angles.map((a, i) => (
-                <motion.li
-                  key={i}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.07, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                >
-                  <button
-                    onClick={() => generate(a.title, [pendingSource, a.hook, a.reason].filter(Boolean).join(' '))}
-                    disabled={generating !== null}
-                    className="flex w-full items-start gap-3 rounded-lg border border-border p-3 text-left transition-all hover:border-accent/50 hover:bg-accent-soft cursor-pointer"
-                  >
-                    <span className="tnum flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold">
-                      {i + 1}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[13px] font-medium">{a.title}</span>
-                      {a.hook && <span className="mt-1 block text-xs text-muted-foreground">钩子:{a.hook}</span>}
-                      {a.reason && <span className="mt-0.5 block text-xs text-muted-foreground/80">{a.reason}</span>}
-                    </span>
-                    {generating === a.title && <LoaderCircle className="h-4 w-4 animate-spin text-accent" />}
-                  </button>
-                </motion.li>
-              ))}
-            </ul>
-          )}
-          {!angleLoading && (
-            <div className="mt-2 flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => generate(pendingTopic, pendingSource)} disabled={generating !== null}>
-                不选角度，直接生成
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setAngleOpen(false)}>
-                取消
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </motion.div>
   )
 }

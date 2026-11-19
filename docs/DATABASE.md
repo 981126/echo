@@ -5,12 +5,14 @@
 > 结构演进：R-236 起由 `backend/alembic/versions/` 管理；启动执行 `upgrade head`，现有完整旧库首次自动 baseline。新增表、字段、索引、视图或结构相关数据变更必须新增 revision，并同步本文。
 > 时间列统一存北京时间（core/timeutil.now，R-066）。JSON 类文本列默认 `[]` / `{}`。
 
-## 表总览（38 张）
+## 表总览（40 张）
 
 | 表 | 说明 |
 |---|---|
 | `ai_prompts` | AI 提示词版本库（R-021）：key 标识用途，version 递增，status=enabled 为当前生效版；R-129 起候选正文=可优化段+程序固定的输出契约段，支持候选拒绝(rejected)与历史回滚。 |
-| `ai_prompt_defs` | AI 提示词注册表（R-255）：一行一条提示词（34 条系统提示词/自检探针 + 11 条程序固定输出契约），含**中文模块名 `module_label`** 与**中文用途说明 `purpose`**（用于哪个模块功能、干什么用的）、是否可编辑/可 AI 优化、触发入口、代码位置、代码默认正文；运行时 `get_prompt` 先读 `ai_prompts` enabled 版本，缺失时回退本表 `default_content`。 |
+| `ai_prompt_defs` | AI 提示词注册表（R-255/R-263）：一行一条提示词（35 条系统提示词 + 2 条自检探针 + 10 条程序固定输出契约），含**中文模块名 `module_label`** 与**中文用途说明 `purpose`**、是否可编辑/可 AI 优化、触发入口、代码位置、代码默认正文；运行时 `get_prompt` 先读 `ai_prompts` enabled 版本，缺失时回退本表 `default_content`。 |
+| `author_assets` | 作者内容资产（R-263）：主博主 ASR、确认改稿、反馈与真实发布整理为事实/观点/经历/结构/表达，保存逐字证据、去重哈希、质量分、状态与使用统计。 |
+| `generation_runs` | 普通生成运行（R-263）：每次角度/蓝图/写作/评审的证据、模型、阶段、修订次数、正文哈希与程序质量门禁结果；legacy 仅作旧版未验证留痕。 |
 | `agent_actions` | AI 对话的写操作提案与审计（R-147 P2）：模型只**提议**（`status=pending`，含 `preview` 影响范围说明），作者在对话里点「确认执行」后才真正落库（`confirmed→done`），取消则 `cancelled`。`task_id` 记录入队的后台任务。 |
 | `app_kv` | 轻量键值表：预算计数(tikhub_budget_used:日期)、R-022 优化节流计数等。 |
 | `background_tasks` | 后台任务表：start_task 创建的异步任务（素材转写/每日流水线/平台同步/AI 生成等），记录 kind/payload/status/progress/note（阶段说明：下载中/转写中等，R-081）/error，结束自动写通知。 |
@@ -54,6 +56,67 @@
 - 本地素材：`videos` → `transcripts`（转写稿）/ `metrics_snapshots`（按天聚合指标）；`videos.work_id` 与 `platform_post_id` 关联云端
 - 内容生产：`hot_topics` → `topic_candidates` → `drafts` → `feedback` / `draft_discussions`
 - 任务/通知：`background_tasks` + `sync_jobs` 记录后台工作，结束写 `notifications`；`app_kv` 存预算等标记
+
+---
+
+## `author_assets`
+
+作者内容资产（R-263）：按当前主博主隔离，原始 ASR、作者输入、确认改稿、反馈与真实发布均可作为来源；每条资产必须有可追溯证据。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `creator_id` | INTEGER |  | 否 |  |
+| `asset_kind` | VARCHAR(20) |  | 否 |  |
+| `source_kind` | VARCHAR(20) |  | 否 |  |
+| `source_id` | VARCHAR(80) |  | 否 | '' |
+| `content` | TEXT |  | 否 |  |
+| `context_json` | TEXT |  | 否 | {} |
+| `evidence_refs` | TEXT |  | 否 | [] |
+| `content_hash` | VARCHAR(64) |  | 否 |  |
+| `quality_score` | FLOAT |  | 否 | 0 |
+| `usage_stats` | TEXT |  | 否 | {} |
+| `status` | VARCHAR(20) |  | 否 | candidate |
+| `last_used_at` | DATETIME |  | 是 |  |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+| `updated_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**约束/索引**：`uq_author_asset_hash`（creator_id, asset_kind, content_hash）唯一；`ix_author_assets_creator_kind_status`、`ix_author_assets_creator_status`。
+
+**外键**：`creator_id` → `creators.id`
+
+---
+
+## `generation_runs`
+
+普通生成运行记录（R-263）：保存角度、蓝图、证据、正文、评审、模型和真实阶段；`quality_passed` 只能由服务端门禁计算，legacy 一律为 false。
+
+| 字段 | 类型 | 主键 | 可空 | 默认 |
+|---|---|---|---|---|
+| `id` | INTEGER | ✔ | 否 |  |
+| `creator_id` | INTEGER |  | 否 |  |
+| `draft_id` | INTEGER |  | 是 |  |
+| `topic` | TEXT |  | 否 |  |
+| `input_context` | TEXT |  | 否 | {} |
+| `status` | VARCHAR(20) |  | 否 |  |
+| `stage` | VARCHAR(20) |  | 否 | queued |
+| `angles_json` | TEXT |  | 否 | [] |
+| `selected_angle_json` | TEXT |  | 否 | {} |
+| `blueprint_json` | TEXT |  | 否 | {} |
+| `evidence_json` | TEXT |  | 否 | {} |
+| `draft_json` | TEXT |  | 否 | {} |
+| `reviews_json` | TEXT |  | 否 | [] |
+| `attempts_json` | TEXT |  | 否 | {} |
+| `model_trace_json` | TEXT |  | 否 | {} |
+| `final_script_hash` | VARCHAR(64) |  | 否 | '' |
+| `quality_passed` | BOOLEAN |  | 否 | false |
+| `error` | TEXT |  | 否 | '' |
+| `created_at` | DATETIME |  | 否 | 当前时间（北京） |
+| `updated_at` | DATETIME |  | 否 | 当前时间（北京） |
+
+**索引**：`ix_generation_runs_draft_id_id`、`ix_generation_runs_creator_status`。
+
+**外键**：`creator_id` → `creators.id`；`draft_id` → `drafts.id`
 
 ---
 
@@ -492,6 +555,8 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `category` | VARCHAR(20) |  | 否 | style |
 | `layer` | VARCHAR(20) |  | 否 | stance |
 | `evidence` | TEXT |  | 否 |  |
+| `evidence_refs` | TEXT |  | 否 | [] |
+| `conditions_json` | TEXT |  | 否 | {} |
 | `frequency` | INTEGER |  | 否 | 0 |
 | `last_seen_at` | DATETIME |  | 是 |  |
 | `confirm_strength` | INTEGER |  | 否 | 1 |

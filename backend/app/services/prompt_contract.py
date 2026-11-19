@@ -17,12 +17,6 @@ from .creator_service import current_creator_id
 
 # ---------- 输出契约（程序固定，候选末尾自动拼接，优化器不得改写） ----------
 CONTRACTS: dict[str, str] = {
-    "generation": (
-        "输出契约（系统固定，不得改动字段名与结构）：\n"
-        "只输出 JSON："
-        '{"title":"视频标题","cover_text":"封面字","script":"完整口播脚本",'
-        '"shells":{"douyin":"抖音发布文案","bilibili":"B站简介","xiaohongshu":"小红书笔记正文"}}'
-    ),
     "video_tags": (
         "输出契约（系统固定）：\n"
         "只输出 JSON："
@@ -75,7 +69,6 @@ CONTRACTS: dict[str, str] = {
 
 # 契约/任务语义锚点：候选里必须出现，否则说明格式或任务本身被改坏了
 REQUIRED_MARKERS: dict[str, list[str]] = {
-    "generation": ["title", "cover_text", "script", "shells", "JSON"],
     "video_tags": ["main_topics", "is_ad", "tags", "JSON"],
     "correct": ["校对", "只输出"],
     "diff": ["suggestions", "label", "description", "reason", "JSON"],
@@ -88,11 +81,6 @@ REQUIRED_MARKERS: dict[str, list[str]] = {
 
 # 上下文模板：告诉优化器运行时 user 消息里已经有什么，避免它重复写进系统提示词
 CONTEXT_NOTES: dict[str, str] = {
-    "generation": (
-        "运行时 user 消息会动态注入：选题、作者人设档案（含维度）、红线清单、金句锚点、语言习惯画像、"
-        "AI 腔禁词、风格样本节选、对标风格参考、最佳实践。因此系统提示词里**不要**重复写这些内容，"
-        "更不要把作者姓名、学历、收入、经历等具体事实写死。"
-    ),
     "video_tags": "运行时 user 消息是**一条**视频的转写稿（无其它上下文）。",
     "correct": "运行时 user 消息是：原始文案（仅供参考，可能不准）+ 待校对转写稿。",
     "diff": "运行时 user 消息是 AI 原稿 + 作者改后稿。",
@@ -109,7 +97,6 @@ CONTEXT_NOTES: dict[str, str] = {
 
 # 长度预算（可优化段 + 契约段总字数上限）
 BUDGETS: dict[str, int] = {
-    "generation": 2000,
     "video_tags": 1200,
     "correct": 1000,
     "diff": 1200,
@@ -175,14 +162,6 @@ def _archive_text(db: Session) -> str:
 
 
 # ---------- 按 key 的语料 ----------
-
-
-def _material_generation(db: Session) -> tuple[str, list[str]]:
-    from .prompt_service import feedback_context, learning_material
-
-    parts = [learning_material(db), feedback_context(db)]
-    text = "\n\n".join(p for p in parts if p and p.strip())
-    return text, (["人设+风格画像+加权转写稿", "打分反馈"] if text else [])
 
 
 def _material_video_tags(db: Session) -> tuple[str, list[str]]:
@@ -306,7 +285,6 @@ def _material_chat(db: Session) -> tuple[str, list[str]]:
 
 
 _BUILDERS = {
-    "generation": _material_generation,
     "video_tags": _material_video_tags,
     "correct": _material_correct,
     "diff": _material_diff,

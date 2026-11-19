@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .agent_action import AgentAction
+from .author_generation import AuthorAsset, GenerationRun
 from .chat import ChatMessage
 from .discussion import DraftDiscussion
 from .draft import Draft
@@ -51,6 +52,8 @@ __all__ = [
     "DraftVersion",
     "ChatMessage",
     "AgentAction",
+    "AuthorAsset",
+    "GenerationRun",
     "HotTopic",
     "TopicIdea",
     "InspirationNote",

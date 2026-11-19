@@ -40,13 +40,12 @@ async def lifespan(app: FastAPI):
     from .services.title_cleanup import maybe_clean_hashtag_titles_on_startup
 
     maybe_clean_hashtag_titles_on_startup()
-    # R-254：一次性把 DB 已启用的生成提示词替换为「参考素材可写成作者本人」版本（Kv 标记幂等，后台线程）
-    from .services.prompt_service import maybe_patch_r254_generation_prompt_on_startup
-
-    maybe_patch_r254_generation_prompt_on_startup()
     from .services.pipeline import mark_stale_pipeline_runs_on_startup
 
     mark_stale_pipeline_runs_on_startup()  # R-133：流水线 running 卡死自愈
+    from .services.author_assets import maybe_rebuild_author_assets_on_startup
+
+    maybe_rebuild_author_assets_on_startup()
     setup_scheduler()
     start_inbox_watcher()
     # R-179：历史封面补缩略图（后台线程，幂等；首次约几分钟，之后秒过）

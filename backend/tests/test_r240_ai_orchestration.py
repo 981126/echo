@@ -189,7 +189,7 @@ def test_pipeline_generates_candidates_concurrently(db, monkeypatch):
             thread_names.append(threading.current_thread().name)
         return draft
 
-    monkeypatch.setattr(pl, "generate_draft", _fake_generate)
+    monkeypatch.setattr(pl, "generate_author_draft", _fake_generate)
     run = pl.run_daily_pipeline(db, force=True)
 
     assert run.status == "done" and run.generated_count == 3
@@ -220,7 +220,7 @@ def test_pipeline_single_failure_keeps_other_drafts(db, monkeypatch):
         session.refresh(draft)
         return draft
 
-    monkeypatch.setattr(pl, "generate_draft", _fake_generate)
+    monkeypatch.setattr(pl, "generate_author_draft", _fake_generate)
     candidates = _pipeline_candidates()
     candidates[1]["title"] = "坏选题"
     monkeypatch.setattr(pl, "_compose_daily_candidates", lambda *_a, **_k: candidates)
@@ -246,7 +246,7 @@ def test_pipeline_all_fail_marks_failed(db, monkeypatch):
     def _boom(session, topic, settings=None):
         raise RuntimeError("模型全挂")
 
-    monkeypatch.setattr(pl, "generate_draft", _boom)
+    monkeypatch.setattr(pl, "generate_author_draft", _boom)
     with pytest.raises(pl.PipelineError):
         pl.run_daily_pipeline(db, force=True)
     run = db.query(PipelineRun).order_by(PipelineRun.id.desc()).first()
@@ -280,52 +280,8 @@ def _seed_selfcheck(db, count: int = 3) -> None:
     db.commit()
 
 
-def test_prompt_selfcheck_generates_concurrently(db, monkeypatch):
-    """金样本自测：多篇独立 Session 并发生成，主线程按原通知口径统计 made。"""
-    from app.api import prompts as prompts_api
-    from app.models.notification import Notification
-
-    _seed_selfcheck(db)
-    monkeypatch.setattr("app.config.get_settings", lambda: types.SimpleNamespace(prompt_selfcheck_concurrency=3))
-
-    sessions: list = []
-    thread_names: list[str] = []
-    lock = threading.Lock()
-
-    def _fake_generate(session, topic, snapshot=True, **kwargs):
-        time.sleep(0.01)
-        with lock:
-            sessions.append(session)  # 持有对象引用，避免 id 被回收复用
-            thread_names.append(threading.current_thread().name)
-
-    monkeypatch.setattr("app.services.generation.generate_draft", _fake_generate)
-
-    prompts_api._selfcheck_task(db, {"version": 7})
-
-    row = db.query(Notification).filter(Notification.kind == "prompt_selfcheck").one()
-    assert "生成 3 篇" in row.message
-    assert len({id(item) for item in sessions}) == 3 and all(item is not db for item in sessions)
-    assert all(name.startswith("echo-sync") for name in thread_names)
 
 
-def test_prompt_selfcheck_single_failure_does_not_block(db, monkeypatch):
-    """单篇自测失败不阻断其余，通知里的 made 数按成功篇数统计。"""
-    from app.api import prompts as prompts_api
-    from app.models.notification import Notification
-
-    _seed_selfcheck(db)
-    monkeypatch.setattr("app.config.get_settings", lambda: types.SimpleNamespace(prompt_selfcheck_concurrency=3))
-
-    def _fake_generate(session, topic, snapshot=True, **kwargs):
-        if "金选题1" in topic:
-            raise RuntimeError("模型不可用")
-
-    monkeypatch.setattr("app.services.generation.generate_draft", _fake_generate)
-
-    prompts_api._selfcheck_task(db, {"version": 8})
-
-    row = db.query(Notification).filter(Notification.kind == "prompt_selfcheck").one()
-    assert "生成 2 篇" in row.message
 
 
 # ---------- M4：机会缓存单飞 + 缓存键去 limit + 预热 ----------
@@ -562,13 +518,6 @@ def test_ask_groups_soft_timeout_still_falls_back_to_local(db, monkeypatch):
 # ---------- M7：遗留同步 LLM 接口标记 ----------
 
 
-def test_legacy_sync_llm_endpoints_are_marked():
-    """M7：遗留同步 LLM 接口只加注释标记，不改契约。"""
-    from app.api import drafts as drafts_api
-    from app.api import inspiration as inspiration_api
-
-    assert "遗留同步接口" in (drafts_api.generate.__doc__ or "")
-    assert "遗留同步" in (inspiration_api.develop_note.__doc__ or "")
 
 
 def test_refine_topic_uses_ideas_feature_budget(monkeypatch):

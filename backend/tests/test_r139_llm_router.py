@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -20,12 +19,11 @@ import pytest
 from conftest import ensure_schema, fresh_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.draft import Draft
 from app.models.kv import Kv
 from app.models.notification import Notification
 from app.models.platform import Creator
 from app.models.prompt import AiPrompt
-from app.services import debate as debate_mod
+from app.services import rewrite_debate as debate_mod
 from app.services import llm_router, model_settings
 from app.services import prompt_service as ps
 from app.services.llm import LLMError, OpenAIClient
@@ -642,50 +640,8 @@ def _fake_debate_clients(monkeypatch, calls: list[tuple[str, str]], *, script: s
     monkeypatch.setattr(llm_router, "build_client", lambda slot: _Client(slot))
 
 
-def test_run_debate_uses_configured_pair_and_rounds(db, monkeypatch):
-    _configure(db, gen_role="model2", referee_role="model1")
-    _set_kv(db, "debate_rounds", "3")
-    calls: list[tuple[str, str]] = []
-    _fake_debate_clients(monkeypatch, calls)
-
-    draft = Draft(title="选题", script="（占位）", source="ai")
-    db.add(draft)
-    db.commit()
-    res = debate_mod.run_debate(db, draft, "选题")
-    assert res["models"] == {"gen": "model2", "critic": "model1"}
-    assert res["rounds"] == 3
-    quality = json.loads(draft.quality)
-    assert quality["rounds"] == 3
-    assert quality["rounds_done"] == 3, "讨论轮次必须跟随设置"
-    # 每轮：评审 + 修订
-    assert calls.count(("model1", "chat")) == 3
-    assert calls.count(("model2", "chat")) >= 3
 
 
-def test_run_debate_falls_back_to_other_slot_for_initial(db, monkeypatch):
-    _configure(db, gen_role="model1", referee_role="model2")
-    _set_kv(db, "debate_rounds", "1")
-
-    class _Client:
-        def __init__(self, slot):
-            self.slot = slot
-
-        def chat_json(self, *_a, **_k):
-            if self.slot["slot"] == "model1":
-                raise RuntimeError("生成方挂了")
-            return {"title": "备选标题", "cover_text": "封面", "script": "备选正文"}
-
-        def chat(self, *_a, **_k):
-            return "评审或修订后的正文"
-
-    monkeypatch.setattr(llm_router, "build_client", lambda slot: _Client(slot))
-    draft = Draft(title="选题", script="（占位）", source="ai")
-    db.add(draft)
-    db.commit()
-    res = debate_mod.run_debate(db, draft, "选题")
-    assert res["fallback"] is True
-    assert draft.title == "备选标题"
-    assert json.loads(draft.quality)["fallback"] is True
 
 
 def test_debate_rounds_reads_kv_then_env(db):

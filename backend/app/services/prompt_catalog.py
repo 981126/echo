@@ -91,57 +91,14 @@ def _s(
 
 
 PROMPT_SPECS: list[PromptSpec] = [
+    _s(10, "author_asset_extract", "作者资产提取", "generation", "从主博主 ASR 或确认改稿中提取事实、观点、经历、结构与表达，并附逐字证据。", "ASR 新增/校对与作者内容资产后台重建", "app/services/author_assets.py · AUTHOR_ASSET_EXTRACT_SYSTEM", ("app.services.author_assets", "AUTHOR_ASSET_EXTRACT_SYSTEM"), llm_feature="persona_updates"),
+    _s(11, "author_angle", "作者生成-角度", "generation", "识别真实目标、前提和证据，生成并筛选唯一核心承诺的候选角度；证据不足时允许不写。", "普通生成角度阶段", "app/services/generation_pipeline.py · AUTHOR_ANGLE_SYSTEM", ("app.services.generation_pipeline", "AUTHOR_ANGLE_SYSTEM"), llm_feature="generation"),
+    _s(12, "author_blueprint", "作者生成-内容蓝图", "generation", "写作前形成核心承诺、推理、证据、建议前提和开头兑现关系。", "普通生成蓝图阶段", "app/services/generation_pipeline.py · AUTHOR_BLUEPRINT_SYSTEM", ("app.services.generation_pipeline", "AUTHOR_BLUEPRINT_SYSTEM"), llm_feature="generation"),
+    _s(13, "author_write", "作者生成-正文", "generation", "按验证蓝图、作者资产、人设与外部证据写口播稿，逐项声明事实与经历来源。", "普通生成写作阶段", "app/services/generation_pipeline.py · AUTHOR_WRITE_SYSTEM", ("app.services.generation_pipeline", "AUTHOR_WRITE_SYSTEM"), llm_feature="generation"),
+    _s(14, "author_review", "作者生成-独立评审", "generation", "独立检查目标常识、逻辑事实、吸引力与作者感，未执行不得视为通过。", "普通生成评审阶段", "app/services/generation_pipeline.py · AUTHOR_REVIEW_SYSTEM", ("app.services.generation_pipeline", "AUTHOR_REVIEW_SYSTEM"), llm_feature="generation"),
+    _s(15, "author_revise", "作者生成-针对修订", "generation", "只针对已定位问题修订蓝图或正文，最多两次并重新执行完整门禁。", "普通生成修订阶段", "app/services/generation_pipeline.py · AUTHOR_REVISE_SYSTEM", ("app.services.generation_pipeline", "AUTHOR_REVISE_SYSTEM"), llm_feature="generation"),
+    _s(16, "author_edit_learn", "作者改稿学习", "learning", "从作者确认改稿和反馈中提取可追溯候选资产，不自动修改人设。", "草稿定稿、完成、反馈与发布学习", "app/services/generation_feedback.py · AUTHOR_EDIT_LEARN_SYSTEM", ("app.services.generation_feedback", "AUTHOR_EDIT_LEARN_SYSTEM"), llm_feature="feedback_analysis"),
     # ---------- 模块 1｜脚本生成 ----------
-    _s(
-        1,
-        "generation",
-        "生成脚本",
-        "generation",
-        "生成脚本主提示词：告诉生成方 AI 以作者代笔身份写作，并约束论点/支撑/素材可用性/口语化等硬要求；"
-        "输入选题+作者上下文，输出标题、封面字、口播脚本、论点、来源与平台外壳 JSON。"
-        "用于脚本工作台 AI 生成/回炉、每日自动生成、视频复盘「采用」、主页灵感与随手记生成等全部生成入口。",
-        "脚本工作台 AI 生成/回炉、每日自动生成、视频复盘「采用」、主页灵感/随手记生成、金样本自测",
-        "app/services/generation.py:31 · GENERATION_SYSTEM",
-        ("app.services.generation", "GENERATION_SYSTEM"),
-        optimizable=True,
-        llm_feature="generation",
-    ),
-    _s(
-        2,
-        "debate_critic_generate",
-        "讨论-评审（生成链）",
-        "generation",
-        "生成链双模型讨论的评审提示词：对照作者人设、红线与语言习惯，检查当前脚本哪里不像作者、哪里有 AI 感、"
-        "论点是否够硬、是否空洞，输出纯文本修改意见；每轮讨论调用一次。",
-        "双模型讨论 run_debate（生成/基于原文讨论）每轮评审",
-        "app/services/debate.py · CRITIC_SYSTEM_GENERATE",
-        ("app.services.debate", "CRITIC_SYSTEM_GENERATE"),
-        llm_feature="generation",
-    ),
-    _s(
-        3,
-        "debate_revise_generate",
-        "讨论-修订（生成链）",
-        "generation",
-        "生成链双模型讨论的修订提示词：按评审意见用作者口吻重写整篇口播稿（只输出脚本正文），"
-        "红线自检不通过时也用它做整篇重写。",
-        "双模型讨论 run_debate 每轮修订 + 红线自检重写",
-        "app/services/debate.py · REVISE_SYSTEM_GENERATE",
-        ("app.services.debate", "REVISE_SYSTEM_GENERATE"),
-        llm_feature="generation",
-    ),
-    _s(
-        4,
-        "generation.contract",
-        "生成脚本契约",
-        "generation",
-        "生成脚本的输出 JSON 契约：固定 title/cover_text/script/shells 字段与结构，程序按此解析生成结果（只读展示）。",
-        "提示词优化候选拼接与自检（运行时不从表读）",
-        "app/services/prompt_contract.py · CONTRACTS['generation']",
-        None,
-        category="contract",
-        editable=False,
-    ),
     # ---------- 模块 2｜对标洗稿 ----------
     _s(
         1,
@@ -151,8 +108,8 @@ PROMPT_SPECS: list[PromptSpec] = [
         "基于原文改写的系统提示词：把给定素材当作可用内容，用作者人设口吻写成可直接录的口播稿，"
         "输出标题/封面字/脚本/标签 JSON；用于草稿「基于原文讨论」首轮。",
         "草稿「基于原文讨论」首轮（POST /api/drafts/{id}/discuss）",
-        "app/services/debate.py:314 · SOURCE_REWRITE_SYSTEM",
-        ("app.services.debate", "SOURCE_REWRITE_SYSTEM"),
+        "app/services/rewrite_debate.py:314 · SOURCE_REWRITE_SYSTEM",
+        ("app.services.rewrite_debate", "SOURCE_REWRITE_SYSTEM"),
         llm_feature="generation",
     ),
     _s(
@@ -163,8 +120,8 @@ PROMPT_SPECS: list[PromptSpec] = [
         "洗稿链双模型讨论的评审提示词：对照作者完整上下文与参考原文，指出不像作者、AI 腔、逐字照抄和内容质量问题，"
         "输出纯文本修改意见。",
         "对标洗稿双模型讨论（POST /api/benchmark/rewrite）",
-        "app/services/debate.py · CRITIC_SYSTEM_REWRITE",
-        ("app.services.debate", "CRITIC_SYSTEM_REWRITE"),
+        "app/services/rewrite_debate.py · CRITIC_SYSTEM_REWRITE",
+        ("app.services.rewrite_debate", "CRITIC_SYSTEM_REWRITE"),
         llm_feature="generation",
     ),
     _s(
@@ -174,8 +131,8 @@ PROMPT_SPECS: list[PromptSpec] = [
         "rewrite",
         "洗稿链双模型讨论的修订提示词：按评审意见用作者口吻重写整篇口播稿，只输出脚本正文。",
         "对标洗稿双模型讨论",
-        "app/services/debate.py · REVISE_SYSTEM_REWRITE",
-        ("app.services.debate", "REVISE_SYSTEM_REWRITE"),
+        "app/services/rewrite_debate.py · REVISE_SYSTEM_REWRITE",
+        ("app.services.rewrite_debate", "REVISE_SYSTEM_REWRITE"),
         llm_feature="generation",
     ),
     _s(
@@ -538,18 +495,6 @@ PROMPT_SPECS: list[PromptSpec] = [
         "每日「今日最佳」推送",
         "app/services/pipeline.py · DAILY_BEST_SYSTEM",
         ("app.services.pipeline", "DAILY_BEST_SYSTEM"),
-        llm_feature="ideas",
-    ),
-    _s(
-        4,
-        "ideas_angles",
-        "选题 3 个切入角度",
-        "ideas",
-        "选题切入角度提示词：针对作者给出的选题输出 3 个不同切入角度（标题/开头钩子/为什么能火）JSON；"
-        "用于脚本工作台的「生成角度」。",
-        "POST /api/drafts/angles",
-        "app/api/drafts.py · ANGLES_SYSTEM",
-        ("app.api.drafts", "ANGLES_SYSTEM"),
         llm_feature="ideas",
     ),
     _s(

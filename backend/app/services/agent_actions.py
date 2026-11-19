@@ -7,8 +7,8 @@
 - 点「取消」→ `cancelled`，不动任何数据。
 
 可执行的动作（都复用既有服务，不新增数据操作方式）：
-- `generate_draft`：建占位稿 + 入队双模型讨论（`services/draft_flow.start_generation`）
-- `rework_draft`：在同一篇草稿上重跑讨论（`start_rework`）
+- `generate_draft`：建草稿与运行记录，入队作者生成链路（`services/draft_flow.start_generation`）
+- `rework_draft`：保存当前版本后在同一篇草稿上重新生成（`start_rework`）
 - `set_draft_status`：立即改草稿状态（采用/不采用/删除＝软删）
 """
 
@@ -67,10 +67,10 @@ def build_preview(db: Session, action: str, payload: dict) -> str:
         topic = str(payload.get("topic") or "").strip()
         if not topic:
             raise AgentActionError("生成草稿需要 topic")
-        return f"用「生成方 × 评审方」双模型讨论生成一篇关于《{topic[:40]}》的脚本草稿（约 3–5 分钟，完成后通知你）"
+        return f"先分析角度与内容蓝图，再生成并检查一篇关于《{topic[:40]}》的脚本草稿（完成后通知你）"
     if action == "rework_draft":
         did = int(payload.get("draft_id") or 0)
-        return f"把草稿《{_draft_label(db, did)}》按原选题重新跑一遍双模型讨论（保留该稿的反馈与讨论留痕）"
+        return f"把草稿《{_draft_label(db, did)}》按原选题重新生成并执行质量检查（保留当前版本与反馈）"
     if action == "set_draft_status":
         did = int(payload.get("draft_id") or 0)
         status = str(payload.get("status") or "")
@@ -189,11 +189,11 @@ def _execute(db: Session, row: AgentAction, payload: dict) -> tuple[int | None, 
     from . import draft_flow
 
     if row.action == "generate_draft":
-        task_id, draft_id = draft_flow.start_generation(db, str(payload.get("topic") or ""))
-        return task_id, f"已开始生成（任务 #{task_id}），完成后会通知你；草稿 id={draft_id}"
+        task_id, draft_id, run_id = draft_flow.start_generation(db, str(payload.get("topic") or ""))
+        return task_id, f"已开始生成（任务 #{task_id}，运行 #{run_id}），完成后会通知你；草稿 id={draft_id}"
     if row.action == "rework_draft":
-        task_id = draft_flow.start_rework(db, int(payload.get("draft_id") or 0))
-        return task_id, f"已开始回炉（任务 #{task_id}），完成后会通知你"
+        task_id, run_id = draft_flow.start_rework(db, int(payload.get("draft_id") or 0))
+        return task_id, f"已开始重新生成（任务 #{task_id}，运行 #{run_id}），完成后会通知你"
     if row.action == "set_draft_status":
         draft = db.get(Draft, int(payload.get("draft_id") or 0))
         if draft is None:

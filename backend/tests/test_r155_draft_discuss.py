@@ -106,7 +106,7 @@ def test_resolve_empty(db):
 
 
 def test_discuss_updates_fields_merges_tags_and_sets_original(db, monkeypatch):
-    from app.services.debate import run_debate
+    from app.services.rewrite_debate import run_source_discussion
 
     _owner(db)
     _configure_models(db)
@@ -119,7 +119,7 @@ def test_discuss_updates_fields_merges_tags_and_sets_original(db, monkeypatch):
     db.add(d)
     db.commit()
 
-    run_debate(db, d, "话题", source_text="我的正文", source_title="我的标题")
+    run_source_discussion(db, d, "话题", source_text="我的正文", source_title="我的标题")
 
     assert d.title == "新标题"
     assert d.cover_text == "新封面字"
@@ -130,7 +130,7 @@ def test_discuss_updates_fields_merges_tags_and_sets_original(db, monkeypatch):
 
 
 def test_discuss_appends_history_with_delimiter(db, monkeypatch):
-    from app.services.debate import run_debate
+    from app.services.rewrite_debate import run_source_discussion
 
     _owner(db)
     _configure_models(db)
@@ -141,7 +141,7 @@ def test_discuss_appends_history_with_delimiter(db, monkeypatch):
     db.add(DraftDiscussion(draft_id=d.id, round=0, actor="deepseek", kind="draft", content="旧记录"))
     db.commit()
 
-    run_debate(db, d, "标题", source_text="原文", source_title="素材")
+    run_source_discussion(db, d, "标题", source_text="原文", source_title="素材")
     rows = db.query(DraftDiscussion).filter(DraftDiscussion.draft_id == d.id).order_by(DraftDiscussion.id).all()
     assert rows[0].content == "旧记录", "旧留痕保留"
     assert any("重新讨论" in r.content for r in rows), "重新讨论应写分隔说明"

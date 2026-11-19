@@ -27,7 +27,7 @@ from app.models.metrics import MetricsSnapshot
 from app.models.persona import PersonaTag
 from app.models.platform import Creator, CreatorAccount, PlatformPost, PlatformPostStat
 from app.models.video import Transcript, Video
-from app.services import generation as gen
+from app.services import author_style as gen
 from app.services import library_service, persona, works_service
 from app.services.draft_versions import snapshot_version
 from app.services.library_service import CardFilters
@@ -360,15 +360,11 @@ def test_author_style_context_static_cache_and_invalidation(db, monkeypatch):
     assert fourth != third
 
 
-def test_author_style_context_dynamic_mode_and_topic_samples(db):
+def test_author_style_context_dynamic_topic_samples(db):
     c, _acc = _owner(db)
     _video(db, c.id, title="素材一", date="2026-09-01 10:00:00", text="如何谈薪这件事，我有三个具体建议。")
 
     plain = gen.author_style_context(db, "如何谈薪")
-    sharp = gen.author_style_context(db, "如何谈薪", mode="sharp")
-    assert "本次创作模式" not in plain
-    assert "本次创作模式：犀利干货" in sharp
-    # 同一数据版本 + 不同 mode：只差动态模式行，静态部分完全复用
     other = gen.author_style_context(db, "完全不同的选题")
     assert other != plain, "风格样本随选题检索变化，属于动态部分"
 

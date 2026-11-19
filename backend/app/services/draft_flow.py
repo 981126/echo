@@ -1,9 +1,4 @@
-"""草稿生成/回炉的入队流程（R-147）。
-
-抽出来的原因：AI 对话的 agent 写操作（确认后）与 `api/drafts.py` 的「AI 生成」按钮
-需要**完全一样**的入队逻辑（建占位草稿 → 入队双模型讨论 → 失败清理占位稿），
-以前只写在 API 层，agent 复用不了。这里做成服务层，两边共用。
-"""
+"""普通生成入队与洗稿/历史原文讨论入队（R-263）。"""
 
 from __future__ import annotations
 
@@ -11,47 +6,80 @@ import json
 
 from sqlalchemy.orm import Session
 
+from ..models.author_generation import GenerationRun
 from ..models.draft import Draft
-from ..services.creator_service import current_creator_id
 from ..tasks import start_task
 from . import draft_status
-from .debate import PLACEHOLDER_SCRIPT, clear_debate_state, run_debate, run_debate_draft
+from .creator_service import current_creator_id
+from .rewrite_debate import run_source_discussion
+from .generation_pipeline import (
+    GENERATION_PLACEHOLDER,
+    create_generation_run,
+    run_generation_pipeline,
+)
+from .generation_validators import json_dict
 
 
-def debate_task(db: Session, payload: dict) -> dict:
-    """后台任务体：跑双模型讨论；失败时清进度与占位稿（R-134），再抛出。
-
-    R-157：跑完自动定稿留一版（source=ai_generate）。
-    R-173：失败改为留「中断」标记（卡片显示「上次讨论中断（可重新讨论）」，但不转圈）。
-    """
+def generation_task(db: Session, payload: dict) -> dict:
+    draft_id = int(payload.get("draft_id") or 0)
+    run_id = int(payload.get("run_id") or 0)
+    draft = db.get(Draft, draft_id)
+    run = db.get(GenerationRun, run_id)
+    if draft is None or run is None or run.draft_id != draft.id:
+        raise ValueError("生成运行或草稿不存在")
     try:
-        res = run_debate_draft(db, payload)
+        result = run_generation_pipeline(
+            db,
+            run,
+            draft,
+            selected_angle_id=str(payload.get("angle_id") or ""),
+        )
     except Exception as exc:
-        try:
-            clear_debate_state(db, int(payload.get("draft_id") or 0), reason=f"生成中断：{str(exc)[:150]}")
-        except Exception:  # noqa: BLE001 清理失败不能掩盖原始错误
-            db.rollback()
+        db.rollback()
+        draft = db.get(Draft, draft_id) or draft
+        run = db.get(GenerationRun, run_id) or run
+        run.status = "failed"
+        run.quality_passed = False
+        run.error = str(exc)[:1000]
+        if (draft.script or "") == GENERATION_PLACEHOLDER:
+            draft.script = ""
+        draft.quality = json.dumps(
+            {"run_id": run.id, "passed": False, "review_executed": False, "error": run.error},
+            ensure_ascii=False,
+        )
+        db.commit()
+        draft_status.set_failed(db, draft_id, f"生成失败：{run.error[:150]}", kind="generate", phase=run.stage)
         raise
-    draft = db.get(Draft, int(payload.get("draft_id") or 0))
-    if draft is not None:
+    if result.get("status") == "succeeded":
         from .draft_versions import finalize_version
 
         finalize_version(db, draft, source="ai_generate", note="AI 生成")
-    return res
+        draft_status.clear(db, draft_id)
+    else:
+        label = "待补信息" if result.get("status") == "needs_input" else "待作者修改"
+        draft_status.set_failed(
+            db,
+            draft_id,
+            f"{label}：{str(result.get('message') or '')[:150]}",
+            kind="generate",
+            phase=run.stage,
+        )
+    return result
 
 
 def create_placeholder_draft(db: Session, topic: str) -> Draft:
-    """建一篇占位草稿（讨论结束后会被填上真实内容）。"""
     from .persona_profile import current_persona_version
 
-    cid = current_creator_id(db)
+    creator_id = current_creator_id(db)
+    if creator_id is None:
+        raise ValueError("请先选择当前主博主")
     draft = Draft(
-        title=topic,
+        title=topic.strip(),
         cover_text="",
-        script=PLACEHOLDER_SCRIPT,
+        script=GENERATION_PLACEHOLDER,
         source="ai",
-        creator_id=cid,  # 归属当前主博主，否则工作台看不到
-        persona_version=current_persona_version(db, cid),
+        creator_id=creator_id,
+        persona_version=current_persona_version(db, creator_id),
     )
     db.add(draft)
     db.commit()
@@ -59,39 +87,73 @@ def create_placeholder_draft(db: Session, topic: str) -> Draft:
     return draft
 
 
-def start_generation(db: Session, topic: str, mode: str = "", query_source: str = "") -> tuple[int, int]:
-    """建占位稿 + 入队双模型讨论；返回 (task_id, draft_id)。
-
-    R-183：可指定创作模式；R-227：`query_source` 为该入口能拿到的具体文本（随手记原文/评论原文等），
-    用于联网检索时构造搜索词。
-    """
-    draft = create_placeholder_draft(db, topic)
-    draft_status.set_running(db, draft.id, f"正在生成《{topic[:20]}》…", kind="generate", phase="queued")
+def start_generation(db: Session, topic: str, query_source: str = "") -> tuple[int, int, int]:
+    clean_topic = (topic or "").strip()
+    if not clean_topic:
+        raise ValueError("选题不能为空")
+    draft = create_placeholder_draft(db, clean_topic)
+    run = create_generation_run(
+        db,
+        creator_id=int(draft.creator_id or 0),
+        draft_id=draft.id,
+        topic=clean_topic,
+        query_source=query_source.strip(),
+    )
+    draft_status.set_running(db, draft.id, f"正在生成《{clean_topic[:20]}》…", kind="generate", phase="queued")
     task_id = start_task(
         "generate_draft",
-        {"draft_id": draft.id, "topic": topic, "mode": mode, "query_source": query_source},
-        debate_task,
+        {"draft_id": draft.id, "run_id": run.id},
+        generation_task,
     )
-    return task_id, draft.id
+    return task_id, draft.id, run.id
 
 
-def start_rework(db: Session, draft_id: int) -> int:
-    """在**同一篇草稿**上重跑双模型讨论（回炉）：保留 id 与反馈/讨论留痕。返回 task_id。"""
+def start_rework(db: Session, draft_id: int, angle_id: str = "") -> tuple[int, int]:
     draft = db.get(Draft, draft_id)
     if draft is None:
         raise ValueError("草稿不存在")
-    topic = (draft.title or "").strip() or "重新生成一条口播脚本"
-    draft_status.set_running(db, draft.id, "正在回炉重写…", kind="rework", phase="queued")
-    return start_task("generate_draft", {"draft_id": draft.id, "topic": topic}, debate_task)
+    latest = (
+        db.query(GenerationRun)
+        .filter(GenerationRun.draft_id == draft.id, GenerationRun.status != "legacy")
+        .order_by(GenerationRun.id.desc())
+        .first()
+    )
+    topic = latest.topic if latest is not None else (draft.title or "").strip()
+    if not topic:
+        raise ValueError("这篇草稿没有可重跑的选题")
+    if angle_id:
+        if latest is None:
+            raise ValueError("没有可复用的生成角度")
+        angles = json.loads(latest.angles_json or "[]")
+        angle = next((item for item in angles if item.get("angle_id") == angle_id), None)
+        if angle is None or angle.get("reject_reasons") or float(angle.get("total_score") or 0) < 65:
+            raise LookupError("角度不属于最近生成的合格备选角度")
+    from .draft_versions import finalize_version
+
+    finalize_version(db, draft, source="manual", note="重新生成前")
+    run = create_generation_run(
+        db,
+        creator_id=int(draft.creator_id or current_creator_id(db) or 0),
+        draft_id=draft.id,
+        topic=topic,
+        query_source=str(json_dict(latest.input_context).get("query_source") or "") if latest else "",
+    )
+    if angle_id and latest is not None:
+        run.angles_json = latest.angles_json
+        run.evidence_json = latest.evidence_json
+        db.commit()
+    draft_status.set_running(db, draft.id, "正在重新生成…", kind="rework", phase="queued")
+    task_id = start_task(
+        "generate_draft",
+        {"draft_id": draft.id, "run_id": run.id, "angle_id": angle_id},
+        generation_task,
+    )
+    return task_id, run.id
 
 
 def resolve_discussion_source(db: Session, draft: Draft) -> tuple[str, str]:
-    """R-155：讨论用的「原文」——洗稿稿用 original_script（=洗稿素材 ASR 文案），自建稿用当前正文。
-
-    返回 (原文文本, 原文标题)；都为空时返回空文本（由调用方判 400）。
-    """
-    src = (draft.original_script or "").strip()
-    if src:
+    source = (draft.original_script or "").strip()
+    if source:
         title = (draft.title or "").strip()
         try:
             ref = json.loads(draft.source_ref or "{}")
@@ -99,16 +161,11 @@ def resolve_discussion_source(db: Session, draft: Draft) -> tuple[str, str]:
             ref = {}
         if isinstance(ref, dict) and ref.get("source_title"):
             title = str(ref["source_title"]).strip()
-        return src, title
+        return source, title
     return (draft.script or "").strip(), (draft.title or "").strip()
 
 
 def discussion_task(db: Session, payload: dict) -> dict:
-    """后台任务体：基于原文跑双模型多轮讨论（R-155），完成后更新草稿并留痕。
-
-    R-157：若该草稿**还没有任何版本**，先把当前正文记成第一版（`讨论前`）；
-    讨论跑完再把结果记为后一版（`讨论后`）；版本数 ≥2 才触发改稿差异分析。
-    """
     from .draft_versions import finalize_version, list_versions
 
     draft_id = int(payload.get("draft_id") or 0)
@@ -123,19 +180,18 @@ def discussion_task(db: Session, payload: dict) -> dict:
     source_title = str(payload.get("source_title") or "")
     topic = (draft.title or "").strip() or source_title or "重新讨论"
     try:
-        res = run_debate(db, draft, topic, source_text=source_text, source_title=source_title)
-    except Exception as exc:  # noqa: BLE001 R-173：失败留下「中断」标记，不永久转圈
+        result = run_source_discussion(db, draft, topic, source_text=source_text, source_title=source_title)
+    except Exception as exc:
         try:
             draft_status.set_failed(db, draft_id, f"讨论中断：{str(exc)[:150]}", kind="discuss")
         except Exception:  # noqa: BLE001 标记失败不能掩盖原始错误
             db.rollback()
         raise
     finalize_version(db, draft, source="ai_discuss", note="讨论后")
-    return res
+    return result
 
 
 def start_discussion(db: Session, draft_id: int) -> int:
-    """基于原文入队一次讨论（R-155）；返回 task_id。无可讨论原文时抛 ValueError。"""
     draft = db.get(Draft, draft_id)
     if draft is None:
         raise ValueError("草稿不存在")
@@ -152,8 +208,8 @@ def start_discussion(db: Session, draft_id: int) -> int:
 
 __all__ = [
     "create_placeholder_draft",
-    "debate_task",
     "discussion_task",
+    "generation_task",
     "resolve_discussion_source",
     "start_discussion",
     "start_generation",

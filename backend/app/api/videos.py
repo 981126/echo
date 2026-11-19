@@ -257,6 +257,14 @@ def update_video(video_id: int, payload: VideoUpdate, db: Session = Depends(get_
         if video.ad_price and video.ad_price > 0 and "is_ad" not in data:
             video.is_ad = True  # 有价格即广告
     db.commit()
+    if "corrected_text" in data and video.creator_id is not None:
+        from ..services.author_assets import author_asset_task
+
+        start_task(
+            "author_assets",
+            {"creator_id": video.creator_id, "video_id": video.id},
+            author_asset_task,
+        )
     if ("title" in data or "platforms" in data) and (video.title or "").strip():
         _rename_by_title(db, video)
     _sync_local_to_posts(db, video)

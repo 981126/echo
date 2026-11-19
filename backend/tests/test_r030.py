@@ -17,7 +17,7 @@ from app.models.persona import PersonaTag
 from app.models.platform import Creator
 from app.models.video import Transcript, Video
 from app.services.feedback import add_feedback
-from app.services.generation import benchmark_context_lines
+from app.services.author_style import benchmark_context_lines
 from app.services.persona import suggest_phrase_candidates
 from app.core.draft_check import check_script
 

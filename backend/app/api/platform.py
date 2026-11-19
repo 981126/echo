@@ -579,22 +579,16 @@ def topic_pool(date: str = "", db: Session = Depends(get_db)):
 
 @router.post("/topic-pool/{idea_id}/generate", response_model=dict)
 def generate_from_idea(idea_id: int, db: Session = Depends(get_db)):
-    """从选题池灵感生成草稿（人工挑选后触发；不自动推送）。
-
-    遗留同步接口（R-240 M7 仅标注，不改契约）：前端等待完整生成（分钟级），
-    后续应迁到 `/api/drafts/generate-async` 后台任务；本次不动返回结构，避免前端改动。
-    """
+    """从选题池灵感进入统一异步普通生成链路。"""
     idea = db.get(TopicIdea, idea_id)
     if idea is None:
         raise HTTPException(status_code=404, detail="选题灵感不存在")
-    from .drafts import GenerateIn
-    from .drafts import generate as generate_draft_api
+    from ..services import draft_flow
 
-    # 复用草稿生成逻辑（同步生成，页面等待）
-    result = generate_draft_api(GenerateIn(topic=idea.title), db)
+    task_id, draft_id, run_id = draft_flow.start_generation(db, idea.title)
     idea.used = True
     db.commit()
-    return {"ok": True, "draft": result}
+    return {"ok": True, "task_id": task_id, "draft_id": draft_id, "run_id": run_id}
 
 
 @router.delete("/topic-pool/{idea_id}", response_model=dict)

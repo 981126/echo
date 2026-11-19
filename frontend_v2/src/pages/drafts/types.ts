@@ -48,6 +48,7 @@ export interface Draft {
     gen_model?: string
     referee_model?: string
     issues?: string[]
+    hard_issues?: { quote?: string; problem?: string; fix?: string }[]
     passed?: boolean
     style_coverage?: number
     /** R-207：风格诊断（只展示、不触发重写） */
