@@ -551,3 +551,14 @@ export interface RetentionDrop {
 | 分诊降级 | 在生成结论时处理 | `video_review_rules.apply_triage()` 在归因后统一降级 | 规则与 AI 两条来源都能覆盖，可单测 |
 
 真实联调（2026-11-19）：3 条作品补曲线成功（任务 13798，3/3，约 4 秒）；作品 2050（93 秒）重跑复盘后 `timeline_precision=sentence`、掉点 `00:01–00:03 下降 24.3 个百分点` 命中首句原文；页面 1440/390 无横向滚动、0 console error。
+
+## 14. 追加记录（2026-11-19，曲线补齐实况）
+
+真实对 252 条缺曲线作品跑补齐后发现：**平台只对部分作品返回观看趋势**——259 条里仅 16 条有数据，其余请求返回 `code=200` 但没有 `data.analysis_trend`。原实现把空响应当普通失败，会在每次手动补齐时重复请求 243 次，白烧 TikHub 额度。
+
+已改为：
+
+- 空响应写 `app_kv trend_empty:{post_id}`（7 天有效），`plan_post_ids` 排除；
+- `coverage` 增加 `unsupported` 字段，展示 covered / pending / unsupported 三档；
+- 补齐任务把「平台无数据」与「调用失败」分开计数，全是平台无数据时任务判 done 并提示「平台未提供 N 条」，不再报失败；
+- 验收口径改为「平台返回趋势的作品 100% 入库」，不再承诺历史全量覆盖。

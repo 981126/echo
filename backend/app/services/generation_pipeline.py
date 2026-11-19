@@ -15,7 +15,8 @@ from ..models.persona import PersonaTag
 from . import budget_settings, draft_status, llm_router
 from .author_assets import assets_prompt, public_asset, retrieve_author_assets
 from .evidence import gather_online_cached, mark_logs_used, public_items
-from .opening_checks import check_opening
+from .opening_checks import evaluate_opening
+from .opening_injection import select_opening_samples
 from .generation_validators import (
     GenerationValidationError,
     compute_quality_passed,
@@ -259,11 +260,12 @@ def _ensure_opening(
     blueprint: dict[str, Any],
     writer: Any,
     context: str,
+    samples: list[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """R-266：开头检查；不过则只改开头重写一次（正文被改动则不采用）。"""
+    """R-266：开头检查（含防照抄）；不过则只改开头重写一次（正文被改动则不采用）。"""
     payoff = str((blueprint.get("hook") or {}).get("payoff") or "")
     script = str(data.get("script") or "")
-    result = check_opening(script, payoff)
+    result = evaluate_opening(script, payoff, samples or [])
     if result["passed"]:
         return data, {**result, "rewritten": False}
     user = (
@@ -287,7 +289,7 @@ def _ensure_opening(
     for key in ("script", "title", "cover_text", "shells", "claims"):
         if key in fixed:
             merged[key] = fixed[key]
-    recheck = check_opening(new_script, payoff)
+    recheck = evaluate_opening(new_script, payoff, samples or [])
     return merged, {**recheck, "rewritten": True, "issues_before": result["issues"]}
 
 
@@ -314,6 +316,7 @@ def _sync_draft(db: Session, draft: Draft, run: GenerationRun, data: dict[str, A
                 "metrics": opening.get("metrics") or {},
                 "rewritten": bool(opening.get("rewritten")),
             },
+            "injection": (json_dict(run.attempts_json).get("injection") or {}),
             "author_score": latest.get("author_score"),
             "issues": latest.get("issues") or [],
             "hard_issues": latest.get("hard_issues") or [],
@@ -427,6 +430,24 @@ def run_generation_pipeline(
     online_ids = {str(item["id"]) for item in online}
     context = _context_text(run.topic, input_text, assets, _persona(db, run.creator_id), online)
     attempts = _attempts(run)
+    asset_kind_set = {str(kind) for kind in asset_kinds.values()}
+    injection = select_opening_samples(
+        db,
+        run.creator_id,
+        run.topic,
+        input_text,
+        has_experience="experience" in asset_kind_set,
+    )
+    attempts["injection"] = {
+        "injected": bool(injection["injected"]),
+        "reason": str(injection["reason"] or ""),
+        "counts": injection.get("counts") or {},
+    }
+    _save_attempts(db, run, attempts)
+    writing_context = context
+    injected_samples = [str(item["text"]) for item in injection.get("samples") or []]
+    if injection["injected"]:
+        writing_context = context + "\n\n" + str(injection["prompt"])
 
     blueprint: dict[str, Any] | None = None
     blueprint_problem = ""
@@ -463,7 +484,7 @@ def run_generation_pipeline(
     while True:
         _set_stage(db, run, "writing", "正在按作者观点与表达撰写正文…")
         prompt_key = "author_write" if not problem else "author_revise"
-        user = context + "\n\n选中角度：\n" + json.dumps(angle, ensure_ascii=False)
+        user = writing_context + "\n\n选中角度：\n" + json.dumps(angle, ensure_ascii=False)
         user += "\n\n已验证内容蓝图：\n" + json.dumps(blueprint, ensure_ascii=False)
         if problem:
             user += f"\n\n上一版正文：{json.dumps(final_data, ensure_ascii=False)}\n只修复这些问题：{problem}"
@@ -501,7 +522,9 @@ def run_generation_pipeline(
             _save_attempts(db, run, attempts)
             continue
         _complete_stage(db, run, "writing")
-        data, opening_stage = _ensure_opening(db, run, data, blueprint, writer, context)
+        data, opening_stage = _ensure_opening(
+            db, run, data, blueprint, writer, writing_context, injected_samples
+        )
         _complete_stage(db, run, "opening_check", opening_stage)
         final_data = data
         run.draft_json = json.dumps(data, ensure_ascii=False)
@@ -545,9 +568,10 @@ def run_generation_pipeline(
     if final_data is None or final_review is None:
         raise GenerationValidationError("写作或评审未实际执行")
     # R-266 终检：修订之后再看一次开头（只检查、不再重写），作为最终门禁依据
-    opening_final = check_opening(
+    opening_final = evaluate_opening(
         str(final_data.get("script") or ""),
         str((blueprint.get("hook") or {}).get("payoff") or ""),
+        injected_samples,
     )
     _complete_stage(db, run, "opening_check", {**opening_final, "final": True})
     run.final_script_hash = script_hash(str(final_data.get("script") or ""))

@@ -194,7 +194,7 @@ passed_review = logic_passed and not hard_issues and author_score >= 4   # 移�
 **触发条件**（全部满足）：
 
 1. own 样本 ≥20 条；
-2. 主题与样本的最高 TF-IDF 余弦 ≥0.15（`TfidfIndex` + 与资产检索相同的 cosine 计算）；
+2. 主题与样本的最高 TF-IDF 余弦 ≥0.08（`TfidfIndex` + 与资产检索相同的 cosine 计算）；
 3. 若本次资产里有 `experience` 类型证据（第一人称经历主题）→ 只注入 own，不注入 peer；
 4. 若本次是「纯经历、无外部事实」且 own 高留人样本 <3 条 → 放弃注入（宁缺毋滥）。
 

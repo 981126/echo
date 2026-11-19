@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 
 MAX_FIRST_CHARS = 25
 WINDOW_CHARS = 70
@@ -125,3 +126,39 @@ def check_opening(script: str, payoff: str = "") -> dict:
             "payoff_state": payoff_state,
         },
     }
+
+
+MIN_SAMPLE_OVERLAP = 8
+OVERLAP_SCAN_CHARS = 150
+
+
+def max_sample_overlap(script: str, samples: list[str]) -> int:
+    """生成稿开头与样本的最长连续重合字数（忽略标点与空白）。"""
+    head = clean_text(script)[:OVERLAP_SCAN_CHARS]
+    best = 0
+    for sample in samples or []:
+        other = clean_text(sample)
+        if not head or not other:
+            continue
+        match = SequenceMatcher(None, head, other, autojunk=False).find_longest_match(
+            0, len(head), 0, len(other)
+        )
+        best = max(best, match.size)
+    return best
+
+
+def evaluate_opening(script: str, payoff: str = "", samples: list[str] | None = None) -> dict:
+    """check_opening + 防照抄；任一不过即 passed=False。"""
+    result = check_opening(script, payoff)
+    overlap = max_sample_overlap(script, samples or [])
+    result["metrics"]["max_overlap"] = overlap
+    if overlap >= MIN_SAMPLE_OVERLAP:
+        result["issues"].append(
+            {
+                "rule": "opening_sample_overlap",
+                "detail": f"与开头样本连续重合 {overlap} 字（上限 {MIN_SAMPLE_OVERLAP}）",
+                "fix": "换一种说法，只借结构与节奏，不要照抄",
+            }
+        )
+    result["passed"] = not result["issues"]
+    return result
