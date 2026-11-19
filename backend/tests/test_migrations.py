@@ -51,7 +51,7 @@ def test_empty_database_upgrade_and_repeat(migration_url):
         # R-263：38 条系统提示词/探针 + 3 条 v2；47 条注册项（契约不版本化）
         assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompts").scalar() == 41
         assert connection.exec_driver_sql("SELECT count(*) FROM ai_prompt_defs").scalar() == 47
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r266openings"
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r267draftpost"
     engine.dispose()
 
 
@@ -65,7 +65,7 @@ def test_matching_legacy_database_is_baselines(migration_url):
     run_migrations(migration_url)
 
     with engine.connect() as connection:
-        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r266openings"
+        assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "r267draftpost"
     engine.dispose()
 
 

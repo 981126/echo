@@ -32,12 +32,17 @@ export interface Draft {
   status: 'draft' | 'used' | 'done' | 'archived'
   prompt_version: number
   persona_version: number
+  post_id?: number
   publish_url?: string
   publish_platform?: string
   published_at?: string | null
   performance?: {
     totals?: { plays?: number; likes?: number; favorites?: number; comments?: number }
     refreshed_at?: string
+    private_metrics?: boolean
+    baseline_note?: string
+    data_time?: string | null
+    metrics?: Record<string, { value?: number | null; baseline?: number | null; sample_count?: number; unit?: string; missing?: boolean }>
     [k: string]: unknown
   }
   quality: {

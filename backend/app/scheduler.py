@@ -107,7 +107,7 @@ def _housekeep_job() -> None:
 
 
 def _publish_backfill_job() -> None:
-    """每日 05:00：刷新已发布草稿的表现回填（R-189）。"""
+    """每日 05:00：刷新已发布草稿的表现回填（R-189）与绑定作品的效果（R-267）。"""
     db = SessionLocal()
     try:
         from .services.draft_performance import refresh_published_performance
@@ -115,6 +115,11 @@ def _publish_backfill_job() -> None:
         n = refresh_published_performance(db)
         if n:
             log.info("发布表现回填：更新 %d 篇", n)
+        from .services.draft_publish import refresh_all
+
+        bound = refresh_all(db)
+        if bound:
+            log.info("绑定作品效果回填：更新 %d 篇", bound)
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         _alert("publish_backfill", "发布表现回填失败", str(exc))

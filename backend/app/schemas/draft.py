@@ -14,6 +14,7 @@ class DraftOut(BaseModel):
     id: int
     video_id: Optional[int] = None
     work_id: Optional[int] = None
+    post_id: Optional[int] = None
     title: str = ""
     cover_text: str = ""
     script: str = ""
@@ -129,3 +130,11 @@ class DraftUpdate(BaseModel):
     publish_platform: Optional[str] = None
     published_at: Optional[datetime] = None
     status: Optional[str] = Field(default=None, pattern="^(draft|used|done|archived|deleted)$")
+
+
+class DraftPublishIn(BaseModel):
+    """R-267：绑定云端作品（发布效果回填）。"""
+
+    post_id: int
+    video_id: Optional[int] = None
+    publish_url: str = ""

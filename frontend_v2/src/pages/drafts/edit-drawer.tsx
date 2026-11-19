@@ -86,6 +86,7 @@ export function ModelChip({ label, tone }: { label: string; tone: 'gen' | 'criti
 export type { DraftEditState } from './edit-state'
 export { EMPTY_DRAFT } from './edit-state'
 import type { DraftEditState } from './edit-state'
+import { PublishPanel } from './publish-panel'
 
 interface CheckInfo {
   ok: boolean
@@ -813,6 +814,8 @@ export function DraftEditDrawer({
               />
             </div>
           </div>
+          {/* R-267 发布绑定：选作品回填播放/完播/留存 */}
+          {draft && <PublishPanel draft={draft} onChanged={onSaved} />}
           {/* R-184 发布回填：记录发布链接/平台/时间，关联素材后可看表现 */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>

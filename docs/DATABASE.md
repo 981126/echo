@@ -368,7 +368,7 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 
 ## `drafts`
 
-脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 `draft`=草稿 / `used`=待制作 / `done`=完成 / `archived`=不采用(废稿) / `deleted`=逻辑删除（R-159）；素材双向关联 video_id；prompt_version / persona_version 记录生成时启用的提示词版本与人设档案版本（R-129/R-130，0=历史/未知）；quality 存生成后自检结果 JSON（attempts/issues/passed/style_coverage，R-131）；publish_url/publish_platform/published_at 记录发布回填（R-184）；performance 存发布表现回填 JSON（R-189）；work_id 关联作品（历史发布回填，R-197）。
+脚本草稿：每日选题/手动生成的 AI 稿 + 作者改写稿（source 留底供改稿差异分析）；状态 `draft`=草稿 / `used`=待制作 / `done`=完成 / `archived`=不采用(废稿) / `deleted`=逻辑删除（R-159）；素材双向关联 video_id；prompt_version / persona_version 记录生成时启用的提示词版本与人设档案版本（R-129/R-130，0=历史/未知）；quality 存生成后自检结果 JSON（attempts/issues/passed/style_coverage，R-131）；publish_url/publish_platform/published_at 记录发布回填（R-184）；performance 存发布表现回填 JSON（R-189）；work_id 关联作品（历史发布回填，R-197）；post_id 显式绑定云端作品，发布效果按它回填（R-267）。
 
 | 字段 | 类型 | 主键 | 可空 | 默认 |
 |---|---|---|---|---|
@@ -390,11 +390,12 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 | `published_at` | DATETIME |  | 是 |  |
 | `performance` | TEXT |  | 否 | {} |
 | `work_id` | INTEGER |  | 是 |  |
+| `post_id` | INTEGER |  | 是 |  |
 | `version` | INTEGER |  | 否 | 1 |
 | `created_at` | DATETIME |  | 否 | 当前时间（北京） |
 | `updated_at` | DATETIME |  | 否 | 当前时间（北京） |
 
-**索引**：`ix_drafts_video_id`（video_id）；`ix_drafts_creator_id`（creator_id）
+**索引**：`ix_drafts_video_id`（video_id）；`ix_drafts_creator_id`（creator_id）；`ix_drafts_post_id`（post_id，R-267）
 
 **外键**：`creator_id` → `creators.id`；`video_id` → `videos.id`
 

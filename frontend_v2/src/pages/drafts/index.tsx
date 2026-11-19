@@ -192,7 +192,19 @@ function DraftTile({
           已发布{d.publish_platform ? ` · ${PLATFORM_LABEL[d.publish_platform] || d.publish_platform}` : ''}
         </a>
       )}
-      {!!d.performance?.totals && (
+      {!!d.post_id && (() => {
+        const metrics = d.performance?.metrics || {}
+        const plays = metrics.plays?.value
+        const five = metrics.finish_5s_rate?.value
+        return (
+          <p className="tnum mt-0.5 truncate text-xs md:text-[11px] text-emerald-700 dark:text-emerald-300">
+            已发布{d.publish_platform ? ` · ${PLATFORM_LABEL[d.publish_platform] || d.publish_platform}` : ''}
+            {plays != null ? ` · 播放 ${fmtNum(plays)}` : ''}
+            {five != null ? ` · 5s ${(five * 100).toFixed(0)}%` : ''}
+          </p>
+        )
+      })()}
+      {!d.post_id && !!d.performance?.totals && (
         <p className="tnum mt-0.5 text-xs md:text-[11px] text-muted-foreground">
           表现：播放 {fmtNum(d.performance.totals.plays || 0)} · 赞 {fmtNum(d.performance.totals.likes || 0)} · 藏{' '}
           {fmtNum(d.performance.totals.favorites || 0)} · 评 {fmtNum(d.performance.totals.comments || 0)}

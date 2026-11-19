@@ -12,7 +12,7 @@ from ..db import get_db
 from ..models.author_generation import GenerationRun
 from ..models.draft import Draft
 from ..models.draft_version import DraftVersion
-from ..schemas.draft import DraftCreate, DraftOut, DraftUpdate
+from ..schemas.draft import DraftCreate, DraftOut, DraftPublishIn, DraftUpdate
 from ..services import draft_flow, draft_status
 from ..services.creator_service import current_creator_id
 from ..services.draft_meta_suggest import suggest_meta_task
@@ -345,6 +345,61 @@ def publish_links_revert(db: Session = Depends(get_db)):
     from ..services.publish_backfill import revert
 
     return revert(db)
+
+
+@router.get("/publish-candidates", response_model=dict)
+def publish_candidates(query: str = "", limit: int = 20, db: Session = Depends(get_db)):
+    """R-267：绑定作品选择器——当前主博主账号下按标题搜索的作品。"""
+    from ..services import draft_publish
+
+    try:
+        items = draft_publish.candidates(db, query=query, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"items": items}
+
+
+@router.post("/{draft_id}/publish", response_model=dict)
+def publish_draft(draft_id: int, payload: DraftPublishIn, db: Session = Depends(get_db)):
+    """R-267：绑定作品（+ 可选本地视频）并立即回填发布效果。"""
+    from ..services import draft_publish
+
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    try:
+        performance = draft_publish.bind(
+            db, draft, post_id=payload.post_id, video_id=payload.video_id, publish_url=payload.publish_url
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"draft_id": draft.id, "post_id": draft.post_id, "performance": performance}
+
+
+@router.delete("/{draft_id}/publish", response_model=dict)
+def unpublish_draft(draft_id: int, db: Session = Depends(get_db)):
+    """R-267：解除绑定（幂等）。"""
+    from ..services import draft_publish
+
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    draft_publish.unbind(db, draft)
+    return {"draft_id": draft.id, "unbound": True}
+
+
+@router.get("/{draft_id}/publish", response_model=dict)
+def get_publish(draft_id: int, refresh: bool = False, db: Session = Depends(get_db)):
+    """R-267：绑定信息 + 发布效果（refresh=true 忽略 6h 缓存）。"""
+    from ..services import draft_publish
+
+    draft = db.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    if not draft.post_id:
+        return {"draft_id": draft.id, "post_id": None, "performance": None}
+    performance = draft_publish.refresh(db, draft, force=refresh)
+    return {"draft_id": draft.id, "post_id": draft.post_id, "performance": performance}
 
 
 @router.get("/{draft_id}", response_model=DraftOut)

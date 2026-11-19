@@ -1,12 +1,13 @@
 # 变更记录
 
-## [R-267] 2026-11-19 — 草稿→作品绑定与发布后效果回填 🔲
+## [R-267] 2026-11-19 — 草稿→作品绑定与发布后效果回填 ✅
 
 - **作者问题**：AI 稿发布后到底表现如何，现在完全测不到；确认流程是「写完脚本 → 另一台设备录制 → 手动发布」，接受发布后手动标记一次，并要求能关联本地视频、回填互动与留存、工作台卡片也显示。
 - **只读查库结论**：262 篇草稿里 `publish_url/published_at/work_id` 全为 0、仅 3 篇有 `video_id`；94 篇有标题的草稿与 1197 条作品标题相似度 ≥0.6 的**只有 2 篇**；R-197 的自动匹配（used/done + work/video 皆空 + 标题 ≥0.8）实测候选 **0 条**。→ 自动匹配不可行，必须显式绑定。
 - **方案**：草稿抽屉「标记已发布」→ 选当前账号作品（必填）+ 本地视频（可选）+ 链接；绑定后立即回填，之后每日 05:10 刷新、抽屉 6h 缓存可手动刷新；回填播放/点赞/收藏/评论/转发 + 5 秒完播/2 秒跳出/完整完播/平均播放占比，并用 `build_comparison` 给同话题同时长基线（样本 <5 标不足）；抽屉效果卡 + 工作台卡片小标；AI 稿所用资产按 5 秒分位中位数写 `usage_stats.performance`。新增 `drafts.post_id`（Alembic `r267draftpost`），表数不变。
 - **不做**：标题自动匹配、录制时自动带 draft_id、跨平台归因（仅抖音有私有指标）。
-- **当前状态**：需求 `requirements/R-267-draft-publish-attribution.md` + 开发设计 `development-design/R-267-draft-publish-attribution.md` 已出，**待开发**。
+- **已实现**：①`drafts` 新增 `post_id`（Alembic `r267draftpost`，表数不变 41）；②`draft_publish`：`bind` 校验作品属于当前主博主、可带本地视频、写 post/work/video/平台/URL/发布时间；`unbind` 清空绑定与 performance、保留手填 video_id；③回填复用 `build_comparison` 的「同话题+同时长桶+同发布天数」基线，写 9 项指标（播放/赞/藏/评/转 + 5 秒完播/2 秒跳出/完整完播/平均播放占比）与 baseline/percentile/sample_count，6 小时缓存、force 可刷；④每日 05:00 任务追加刷新全部已绑定草稿；⑤AI 稿用到的资产按 5 秒分位（最近 5 次中位数）写 `usage_stats.performance`，无分位跳过；⑥接口 `GET /api/drafts/publish-candidates`、`POST/DELETE/GET /api/drafts/{id}/publish`；⑦前端草稿抽屉「标记已发布/已绑定作品 + 9 项指标卡 + 刷新/解绑」，脚本工作台卡片显示「已发布·平台·播放·5s」小标。
+- **验证**：`scripts/verify.sh` 全绿（41 表一致、前端 175 用例、build）+ **7 条**新单测（绑定校验/候选过滤/解绑保留视频/6h 缓存/资产回流/无私有指标跳过）。真实联调：草稿 266 绑定作品 2050 → 回填 `播放 13281、5 秒完播 25.4%（你平时 46.1%）、平均播放占比 11.3%（平时 19.3%）` 等 9 项；3 条被引用资产写入 `performance=0.0`（该作品分位 0）与 `published.count=1`；Playwright 打开草稿抽屉显示「已绑定作品」与 9 项指标、0 console error；解绑后 `post_id/publish_*/performance` 全部清空。
 
 ## [R-266] 2026-11-19 — 用「开头 × 真实留人」样本改造生成，取代 LLM 吸引力自评 ✅
 
