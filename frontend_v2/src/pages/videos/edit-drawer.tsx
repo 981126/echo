@@ -72,6 +72,7 @@ export interface EditState {
   publishedTs: string
   tagsText: string
   sourceText: string
+  transcriptText: string
   links: Record<string, string>
 }
 
@@ -151,6 +152,7 @@ export function EditDrawer({
           publishedTs: toLocalTs(d.published_at),
           tagsText: [...new Set([...(d.main_topics || []), ...(d.tags || [])])].join(', '),
           sourceText: d.transcript?.source_text || '',
+          transcriptText: d.transcript?.corrected_text || d.transcript?.transcript_text || '',
           links
         }
         setState(st)
@@ -239,6 +241,7 @@ export function EditDrawer({
         body.tags = parts.filter((x) => !MAIN_TOPICS.includes(x))
       }
       if (state.sourceText !== orig.sourceText) body.source_text = state.sourceText || null
+      if (state.transcriptText !== orig.transcriptText) body.corrected_text = state.transcriptText || ''
       if ((state.adPrice ?? null) !== (orig.adPrice ?? null))
         body.ad_price = state.adPrice == null ? null : Number(state.adPrice)
       await apiJson(`/api/videos/${videoId}`, { method: 'PATCH', body: JSON.stringify(body) })
@@ -577,23 +580,24 @@ export function EditDrawer({
                 </div>
               )}
 
-              {/* 文稿 */}
+              {/* 文稿：R-268 起 ASR 转写稿可直接修改保存（写入校对稿，分析以此为准） */}
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                  文稿（转写稿/原文；保存后用于人设与生成）
+                  转写文稿（可修改；保存后用于人设与生成）
                 </label>
                 {transcript?.transcript_text && (
                   <details className="mb-2 rounded-md border border-border bg-muted/40 px-3 py-2">
-                    <summary className="cursor-pointer text-xs text-muted-foreground">查看 ASR 转写稿（只读）</summary>
+                    <summary className="cursor-pointer text-xs text-muted-foreground">查看 ASR 原始转写（只读，含识别误差）</summary>
                     <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed">{transcript.transcript_text}</p>
                   </details>
                 )}
                 <Textarea
-                  rows={7}
-                  value={state.sourceText}
-                  onChange={(e) => setState({ ...state, sourceText: e.target.value })}
-                  placeholder="可在此粘贴/修改文稿"
+                  rows={10}
+                  value={state.transcriptText}
+                  onChange={(e) => setState({ ...state, transcriptText: e.target.value })}
+                  placeholder="暂无转写：可手动粘贴文稿，保存后用于人设与生成"
                 />
+                <p className="mt-1 text-[10px] text-muted-foreground">修改会覆盖校对稿并触发作者资产重新整理；原始 ASR 仍保留在上面的只读区。</p>
               </div>
             </TabsContent>
 
