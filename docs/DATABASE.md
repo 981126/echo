@@ -831,6 +831,8 @@ R-178 起每条**实际出结果**的模型也落库（`used_slot/vendor/model_i
 
 **索引**：`ix_transcripts_video_id`（video_id，**唯一**：一个视频最多一条转写，R-242）
 
+**R-268 说明**：`corrected_text` = 「当前采用文案」（LLM 校对后被作者手动修改也写这里），**全项目读取文案一律优先它**（`corrected_text or transcript_text`）；`transcript_text` 只作为原始 ASR 留底与只读对照。
+
 **R-265 说明**：`sentences` 为分句时间轴 JSON（`[{"start_ms","end_ms","text"}]`，毫秒）；`timeline_precision` = `sentence`（腾讯/阿里云逐句）| `chunk`（DeepSeek 分片窗口）| `none`；`timeline_source` 记录时间轴来自哪家。复盘时按需补时间轴只写这三列，**不改** `transcript_text`/`corrected_text`。
 
 **外键**：`video_id` → `videos.id`

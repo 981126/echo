@@ -169,13 +169,14 @@ def _probes(db: Session, key: str, golden: dict) -> list[dict]:
             tr = getattr(v, "transcript", None)
             if tr is None:
                 continue
-            raw = (tr.transcript_text or "").strip()
-            if not raw:
+            # R-268：与全项目口径一致——优先用「手动修改后的文案」（corrected_text）
+            text = (tr.corrected_text or tr.transcript_text or "").strip()
+            if not text:
                 continue
             out.append(
                 {
                     "label": f"转写稿：{(v.title or '')[:30]}",
-                    "user": f"原始文案（仅供参考，可能与口播不一致）：\n无\n\n转写稿：\n{raw[:1200]}",
+                    "user": f"原始文案（仅供参考，可能与口播不一致）：\n无\n\n转写稿：\n{text[:1200]}",
                 }
             )
             if len(out) >= 3:
