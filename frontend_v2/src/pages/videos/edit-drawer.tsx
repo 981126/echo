@@ -117,6 +117,7 @@ export function EditDrawer({
   const [transcribing, setTranscribing] = useState(false)
   const [videoUploading, setVideoUploading] = useState(false)
   const [confirmRemoveVideo, setConfirmRemoveVideo] = useState(false)
+  const [confirmRetranscribe, setConfirmRetranscribe] = useState(false)
   const [confirmRemoveCover, setConfirmRemoveCover] = useState(false)
 
   const isNonMain = !!currentCreatorId && !!detail?.creator_id && detail.creator_id !== currentCreatorId
@@ -271,12 +272,13 @@ export function EditDrawer({
     }
   }
 
-  async function startTranscribe() {
+  async function startTranscribe(force = false) {
     if (!videoId || transcribing) return
     try {
-      await apiJson(`/api/videos/${videoId}/transcribe`, { method: 'POST' })
+      await apiJson(`/api/videos/${videoId}/transcribe${force ? '?force=true' : ''}`, { method: 'POST' })
       setTranscribing(true)
-      toast.success('已开始语音转文字')
+      setConfirmRetranscribe(false)
+      toast.success(force ? '已开始重新转写（完成后覆盖旧稿）' : '已开始语音转文字')
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -556,7 +558,12 @@ export function EditDrawer({
                       <Badge variant="secondary">未转写</Badge>
                     )}
                     <span className="flex-1" />
-                    <Button variant="outline" size="sm" onClick={startTranscribe} disabled={transcribing}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => (transcript?.transcript_text ? setConfirmRetranscribe(true) : void startTranscribe())}
+                      disabled={transcribing}
+                    >
                       {transcribing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Mic className="h-3.5 w-3.5" />}
                       {transcribing ? '识别中…' : transcript?.transcript_text ? '重新转写' : '语音转文字'}
                     </Button>
@@ -620,6 +627,16 @@ export function EditDrawer({
         confirmText="移除"
         destructive
         onConfirm={removeVideo}
+      />
+      <ConfirmDialog
+        open={confirmRetranscribe}
+        onOpenChange={setConfirmRetranscribe}
+        title="重新转写会覆盖现有文稿"
+        description="将用当前 ASR 服务商重新识别，覆盖这篇转写稿与校对稿；旧内容不可恢复。素材评测与人设依据会按新稿重新计算。"
+        confirmText="重新转写"
+        destructive
+        loading={transcribing}
+        onConfirm={() => void startTranscribe(true)}
       />
       <ConfirmDialog
         open={confirmRemoveCover}

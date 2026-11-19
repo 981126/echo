@@ -1,5 +1,11 @@
 # 变更记录
 
+## [修复] 2026-11-19 — 「重新转写」支持覆盖已有转写（换服务商后可重转）
+
+- **问题**：素材已转写完成时，编辑页「重新转写」返回 400「该素材已转写完成，无需重复转写」；且后台任务见到已有正文也会直接跳过。作者把 ASR 从 DeepSeek 切回腾讯后，想用腾讯重转旧稿却做不到。
+- **改动**：`POST /api/videos/{id}/transcribe?force=true` 允许覆盖；`import_video_task` 识别 `force` 后重新识别并覆盖 `transcript_text/corrected_text/asr_provider/asr_model`；编辑页「重新转写」改为二次确认弹窗（提示旧稿不可恢复），确认后带 `force` 调用。
+- **验证**：真实对素材 742（原 DeepSeek 稿）执行 force 重转，任务 14462 done，`asr_provider` 变为 `tencent` / `16k_zh_en_2.0`，正文 441 字、校对稿 442 字；Playwright 打开编辑页点「重新转写」出现确认弹窗、取消正常，0 console error；`scripts/verify.sh` 全绿。
+
 ## [配置] 2026-11-19 — ASR 默认从 DeepSeek 切回腾讯云
 
 - **原因**：作者要求把 ASR 转写默认改回腾讯。

@@ -97,8 +97,8 @@ def upload_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
 
 
 @router.post("/{video_id}/transcribe", response_model=dict)
-def transcribe_video(video_id: int, db: Session = Depends(get_db)):
-    """R-033：手动触发语音转文字（后台任务，完成后右上角提醒并可跳转）。"""
+def transcribe_video(video_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """R-033：手动触发语音转文字；R-267 起支持 `force=true` 覆盖已有转写（换服务商重转）。"""
     settings = get_settings()
     video = db.get(Video, video_id)
     if video is None:
@@ -107,8 +107,8 @@ def transcribe_video(video_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="该素材没有本地视频文件，请先在编辑页上传视频")
     if not (settings.videos_dir / video.filename).is_file():
         raise HTTPException(status_code=400, detail="本地视频文件缺失，请重新上传")
-    if video.transcript and video.transcript.transcript_text and video.transcript.asr_status == "done":
-        raise HTTPException(status_code=400, detail="该素材已转写完成，无需重复转写")
+    if not force and video.transcript and video.transcript.transcript_text and video.transcript.asr_status == "done":
+        raise HTTPException(status_code=400, detail="该素材已转写完成，无需重复转写（要覆盖请用重新转写）")
     # R-135：同一素材已在转写中则拒绝重复入队（连点会重复调用真实 ASR 并重复计费）
     for row in (
         db.query(BackgroundTask)
@@ -120,8 +120,11 @@ def transcribe_video(video_id: int, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=409, detail="该素材正在转写中，请稍候")
         except (TypeError, ValueError):
             continue
-    task_id = start_task("import_video", {"video_id": video.id}, import_video_task)
-    return {"ok": True, "task_id": task_id}
+    payload = {"video_id": video.id}
+    if force:
+        payload["force"] = True
+    task_id = start_task("import_video", payload, import_video_task)
+    return {"ok": True, "task_id": task_id, "force": force}
 
 
 @router.get("", response_model=VideoListOut)

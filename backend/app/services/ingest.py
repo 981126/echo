@@ -402,7 +402,8 @@ def import_video_task(db, payload: dict) -> None:
     asr = model_settings.asr_config(db)  # R-138：ASR 走运行时配置 → 保存即生效
     post_processed = False
 
-    if video.transcript is None or (
+    force = bool(payload.get("force"))
+    if force or video.transcript is None or (
         not video.transcript.transcript_text and video.transcript.asr_status != "done"
     ):
         path = settings.videos_dir / video.filename
