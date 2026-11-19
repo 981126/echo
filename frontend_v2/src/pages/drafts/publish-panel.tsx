@@ -39,6 +39,8 @@ type Performance = {
   metrics?: Record<string, MetricItem>
 }
 
+const PLATFORM_LABELS: Record<string, string> = { douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' }
+
 const METRIC_LABELS: Array<[string, string]> = [
   ['plays', '播放'],
   ['likes', '点赞'],
@@ -207,7 +209,8 @@ export function PublishPanel({ draft, onChanged }: { draft: Draft; onChanged: ()
           <SelectContent>
             {candidates.map((item) => (
               <SelectItem key={item.post_id} value={String(item.post_id)}>
-                {item.title || `#${item.post_id}`} · {item.publish_time?.slice(0, 10) || '未知日期'}
+                {PLATFORM_LABELS[item.platform] || item.platform} · {item.title || `#${item.post_id}`} ·{' '}
+                {item.publish_time?.slice(0, 10) || '未知日期'}
                 {item.plays != null ? ` · 播放 ${item.plays}` : ''}
               </SelectItem>
             ))}
