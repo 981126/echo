@@ -2255,6 +2255,31 @@ def all_top15_worker(db: Session, payload: dict, update=None) -> dict:
 
 
 
+def claim_daily_sync_slot(db: Session, slot: str) -> bool:
+    """R-268：跨进程抢占「某天某时段」的定时同步执行权。
+
+    多个后端实例各自跑 APScheduler，`start_task` 的进程内锁挡不住跨进程重复触发。
+    这里用 `app_kv` 唯一主键 + `ON CONFLICT DO NOTHING` 做原子占位：只有一方能插入成功，
+    另一方返回 False 直接跳过，保证同一时段全局只跑一次。
+
+    返回 True＝本次抢到；False＝已有实例跑过。
+    """
+    key = f"platform_sync_fired:{today_key()}:{slot}"
+    row = db.execute(
+        text("INSERT INTO app_kv (key, value) VALUES (:k, '1') ON CONFLICT (key) DO NOTHING RETURNING key"),
+        {"k": key},
+    ).first()
+    db.commit()
+    return row is not None
+
+
+def release_daily_sync_slot(db: Session, slot: str) -> None:
+    """R-268：释放占位（仅用于「抢到占位但任务入队失败」，让本时段可重试）。"""
+    key = f"platform_sync_fired:{today_key()}:{slot}"
+    db.execute(text("DELETE FROM app_kv WHERE key = :k"), {"k": key})
+    db.commit()
+
+
 def run_daily_sync_all(db: Session) -> dict:
     """R-109：每日定时两轮（06:00/17:00）统一同步——主博主 + 全部对标博主。
 

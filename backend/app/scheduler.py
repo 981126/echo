@@ -61,21 +61,44 @@ def _daily_metrics_job() -> None:
         db.close()
 
 
-def _platform_sync_job() -> None:
+def _platform_sync_job(slot: str = "") -> None:
     """每日两轮平台数据同步（06:00/17:00，配置 ECHO_PLATFORM_SYNC_TIMES；R-109）。
 
     主博主 + 全部对标博主统一同步（每账号最新 15 条 + 下载视频 + 自动转写），
     同步完成后自动触发一次「重新对标」（refetch=False，不重复拉取 TikHub）。
+    R-268：入队前用 `app_kv` 唯一键抢占「当天 + 时段」，多实例同时触发也只跑一次。
     """
+    from .core.timeutil import now as _now
+    from .services.platform_sync import claim_daily_sync_slot, release_daily_sync_slot, run_daily_sync_all
     from .tasks import start_task
-    from .services.platform_sync import run_daily_sync_all
+
+    slot = slot or _now().strftime("%H:%M")
 
     def fn(db, payload):
         return run_daily_sync_all(db)
 
+    db = SessionLocal()
     try:
-        start_task("platform_sync", {"scope": "daily", "source": "scheduler"}, fn)
+        claimed = claim_daily_sync_slot(db, slot)
+    except Exception as exc:  # noqa: BLE001 抢不到执行权不执行，避免与其它实例撞车
+        _alert("platform_sync", "定时平台同步抢占失败", str(exc))
+        return
+    finally:
+        db.close()
+    if not claimed:
+        log.info("本时段定时同步已执行过，跳过（slot=%s）", slot)
+        return
+    try:
+        start_task("platform_sync", {"scope": "daily", "source": "scheduler", "slot": slot}, fn)
     except Exception as exc:  # noqa: BLE001 入队失败要告警（R-133）
+        db = SessionLocal()
+        try:
+            release_daily_sync_slot(db, slot)
+        except Exception:  # noqa: BLE001 释放失败只记日志，占位留到明天自然失效
+            db.rollback()
+            log.exception("释放定时同步占位失败（slot=%s）", slot)
+        finally:
+            db.close()
         _alert("platform_sync", "定时平台同步入队失败", str(exc))
 
 
@@ -245,6 +268,7 @@ def setup_scheduler() -> None:
         _scheduler.add_job(
             _platform_sync_job,
             CronTrigger(hour=sh, minute=sm, timezone=settings.tz),
+            args=[time_str],
             id=f"platform_sync_{time_str}",
             misfire_grace_time=3600,
             coalesce=True,
