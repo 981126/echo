@@ -1,5 +1,13 @@
 # 变更记录
 
+## [优化/修复] 2026-11-27 — 同步成本三连修：定时不再双跑、同一天不重复拉、抖音播放量补全
+
+- **R-268 定时同步跨进程幂等**：两个后端实例各跑一套 APScheduler，而 `start_task` 的 `_START_LOCK` 只在进程内生效 → 06:00/17:00 每个时段各生成 2 条 `platform_sync`、每个博主 2 条 `sync_jobs`（11-27/11-25 的 06:00 均为 24 条 = 12 博主 × 2），有余额时双倍扣费。改为入队前用 `app_kv` 唯一键 `platform_sync_fired:{日期}:{时段}` 做 `INSERT … ON CONFLICT DO NOTHING` 抢占，抢到才入队，异常释放占位。
+- **R-269 同步节流与增量**：指标取值改为「列表免费指标 → 当天已有统计行复用 → 仅新帖/发布 ≤48h 请求单帖」；评论 TTL 按作品年龄分档（≤24h 6h、1~7 天 24h、>7 天不主动拉，从未拉过仍补一次）；B站「补完仍为 0」写 `extra.backfill_miss_at`，7 天内不再重补；小红书播放量映射 `pre_view_count → view_count`。
+- **R-270 抖音播放量批量补齐**：`backfill_peer_plays` 从「近 30 天 / 120 次 / 仅日更触发」扩为「365 天（0=全部）/ 300 次 / 每账号 100 条配额 / 手动同步后也触发」；写入口径改为只更新最新统计行（不再给老帖新增今天的数据点）；新增 `POST /api/platform/backfill-plays` 与 `app_kv` 暂停开关；一次性脚本 `scripts/backfill_raw_extra.py` 把 raw 里的下载/推荐/转发/赞赏/直播观看补进 `extra`（0 请求）。
+- **验证**：`scripts/verify.sh` 全绿（新增 26 条单测：9 + 8 + 9）。真实对比同一博主连续两次 weekly 同步：首次 33 次请求、第二次 **4 次**（-88%），B站补全候选 30→1；回补接口冒烟 4 次请求补 8 条作品，抖音缺播放 **609→601**，当日用量 350→354。
+- **配置**：`ECHO_METRIC_BACKFILL_DAYS=365`、`ECHO_METRIC_BACKFILL_MAX_REQUESTS=300`、`ECHO_METRIC_BACKFILL_PER_ACCOUNT=100`；暂停开关 `app_kv.metric_backfill_paused=1`。
+
 ## [优化] 2026-11-19 — 素材卡片日期独立一行右下角；侧栏宽度再缩 20%
 
 - **素材库卡片**：发布时间从「标签行右侧」移到**单独一行、靠右**（标签行只留标签与 +N）。
