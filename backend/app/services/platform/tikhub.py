@@ -1186,8 +1186,9 @@ class TikHubClient:
             data = self._get("/xiaohongshu/app_v2/get_video_note_detail", {"note_id": post_id})
             note = _note_payload(data) or {}
             # App V2：笔记字段直接平铺（liked_count/comments_count/...），旧 interact_info 兜底
+            # R-269：App V2 播放量字段是 view_count（pre_view_count 为旧字段兜底）
             stat = note.get("interact_info") or {
-                "play_count": note.get("pre_view_count"),
+                "play_count": note.get("view_count") or note.get("pre_view_count"),
                 "digg_count": note.get("liked_count") or note.get("likes"),
                 "collected_count": note.get("collected_count"),
                 "share_count": note.get("share_count"),

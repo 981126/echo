@@ -11,6 +11,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime
 from typing import Any
 from ..core.timeutil import now as _app_now
 
@@ -172,17 +173,19 @@ def _ensure_post(
     *,
     commit: bool = True,
     existing: dict[tuple[str, str], PlatformPost] | None = None,
+    today_stat: PlatformPostStat | None = None,
 ) -> PlatformPost:
     """确保单条 PlatformPost 存在并写入当天统计。
 
     R-222：新增 `commit=False` 批量模式与 `existing` 预加载字典，用于消除 N+1 与逐行 commit。
     批量模式下调用方负责在合适的时机统一 commit；封面下载仍由调用方在事务外处理。
+    R-269：`today_stat` 非空时表示当天统计已在库里——复用，不再请求单帖指标，也不重复写库。
     """
     key = (account.platform, post.platform_post_id)
     # R-242：先在**不写库**的情况下拿单条统计；详情接口偶发失败只丢当天统计，绝不再 rollback
     # （旧实现失败时 db.rollback() 会连同批量模式下同批未提交的其它作品一起回滚）。
     stats = post.stats or None
-    if stats is None:
+    if stats is None and today_stat is None:
         try:
             stats = client.fetch_post_stats(account.platform, post.platform_post_id, account)
             _charge(db, commit=False)  # 批量模式不提前提交，交给调用方统一 commit
@@ -748,7 +751,12 @@ def _collect_comments(db: Session, account: CreatorAccount, client: DataSource, 
     R-222：对最近 10 条作品的评论抓取改为并发，写入仍由主 Session 批量完成。
     """
     # v33：同一帖评论 6 小时内已同步 → 复用，不再打评论接口（博主管理 daily 限量请求）
-    posts = [post for post in posts if not _comments_synced_recently(db, post.id)]
+    # R-269：按作品年龄分档（≤24h 6h、≤7 天 24h、>7 天不主动拉；从没拉过的仍补一次）
+    posts = [
+        post
+        for post in posts
+        if not _comments_synced_recently(db, post.id, hours=_comment_ttl_hours(post.publish_time))
+    ]
     if not posts:
         return 0
     # 预加载当天已有灵感池，避免循环内 N+1
@@ -941,15 +949,6 @@ def sync_account(
     if posts_data:
         _job_progress(db, job_id, total=len(posts_data), note=f"{label}：拉取到 {len(posts_data)} 条作品")
 
-    # R-222：对列表未带统计的作品，并发抓取单条详情（如 B站），再进入写入循环
-    posts_need_stats = [pd for pd in posts_data if not pd.stats and pd.platform_post_id]
-    if posts_need_stats:
-        _job_progress(db, job_id, note=f"{label}：并发补全 {len(posts_need_stats)} 条作品指标…", force=True)
-        stats_results = _fetch_post_stats_parallel(account, client, posts_need_stats, platform=account.platform)
-        for pd, fetched_stats, error in stats_results:
-            if fetched_stats and error is None:
-                pd.stats = fetched_stats
-
     # R-222：预加载该账号已有作品，消除循环内 N+1
     post_ids_in_data = [pd.platform_post_id for pd in posts_data if pd.platform_post_id]
     existing_posts: dict[tuple[str, str], PlatformPost] = {}
@@ -964,6 +963,36 @@ def sync_account(
             .all()
         }
 
+    # R-269：预加载当天统计行——列表没带指标且当天已拉过的老帖直接复用，不再请求。
+    today_stats: dict[int, PlatformPostStat] = {}
+    existing_ids = [p.id for p in existing_posts.values() if p.id]
+    if existing_ids:
+        today_stats = {
+            row.post_id: row
+            for row in db.query(PlatformPostStat)
+            .filter(PlatformPostStat.post_id.in_(existing_ids), PlatformPostStat.stat_date == today_key())
+            .all()
+        }
+
+    # R-222/R-269：只对「列表没带指标 + 新帖或发布 ≤48h + 当天还没有统计」的作品补单帖详情
+    posts_need_stats: list[PostData] = []
+    for pd in posts_data:
+        if not pd.platform_post_id or pd.stats:
+            continue
+        existed = existing_posts.get((account.platform, pd.platform_post_id))
+        if existed is not None:
+            if existed.id in today_stats:
+                continue
+            if not _in_incremental_window(existed.publish_time):
+                continue
+        posts_need_stats.append(pd)
+    if posts_need_stats:
+        _job_progress(db, job_id, note=f"{label}：并发补全 {len(posts_need_stats)} 条作品指标…", force=True)
+        stats_results = _fetch_post_stats_parallel(account, client, posts_need_stats, platform=account.platform)
+        for pd, fetched_stats, error in stats_results:
+            if fetched_stats and error is None:
+                pd.stats = fetched_stats
+
     synced: list[PlatformPost] = []
     new_posts: list[PlatformPost] = []
     post_data_map: dict[int, PostData] = {}
@@ -975,7 +1004,15 @@ def sync_account(
             continue
         existed = existing_posts.get((account.platform, pd.platform_post_id))
         try:
-            post = _ensure_post(db, account, pd, client, commit=False, existing=existing_posts)
+            post = _ensure_post(
+                db,
+                account,
+                pd,
+                client,
+                commit=False,
+                existing=existing_posts,
+                today_stat=today_stats.get(existed.id) if existed is not None else None,
+            )
             synced.append(post)
             if existed is None:
                 new_posts.append(post)
@@ -1090,6 +1127,8 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
     missing = []
     for post in posts:
         st = latest_stats.get(post.id)
+        if st is not None and _bili_miss_in_cooldown(st.extra):
+            continue  # R-269：7 天内补过仍是 0，本轮不再重复请求
         if st is None or st.likes == 0:
             missing.append(post)
         if len(missing) >= limit:
@@ -1106,6 +1145,11 @@ def _backfill_bili_stats(db: Session, account: CreatorAccount, client: DataSourc
         if error is not None or stats is None:
             continue
         try:
+            if not int(stats.get("likes") or 0):
+                # R-269：补完仍为 0 → 打冷却标记，7 天内不再重复补
+                extra = dict(stats.get("extra") or {})
+                extra["backfill_miss_at"] = today_key()
+                stats["extra"] = extra
             _write_stat(db, post, stats, commit=False, source=str(stats.get("source") or "tikhub"))
             done += 1
             # R-241：每 10 条或阶段末才强制 flush，避免每条补全一次 commit+publish（~150 次/轮）
@@ -1335,6 +1379,49 @@ def _fetch_post_comments_isolated(s: Session, primitive: dict) -> dict:
 
 POST_SYNC_COMMENT_TTL_HOURS = 6
 POST_SYNC_METRIC_TTL_HOURS = 6
+# R-269：增量口径——新帖/48h 内才主动补指标；评论按作品年龄分档；B站「补不到」冷却 7 天。
+INCREMENTAL_METRIC_WINDOW_HOURS = 48
+COMMENT_TTL_RECENT_HOURS = 6.0
+COMMENT_TTL_WEEK_HOURS = 24.0
+BILI_BACKFILL_RETRY_DAYS = 7
+
+
+def _comment_ttl_hours(publish_time: datetime | None) -> float:
+    """R-269：评论区按作品年龄分档（≤24h 每 6h、≤7 天每 24h、更久不主动拉）。"""
+    if publish_time is None:
+        return COMMENT_TTL_WEEK_HOURS
+    age_hours = (_app_now() - publish_time).total_seconds() / 3600
+    if age_hours <= 24:
+        return COMMENT_TTL_RECENT_HOURS
+    if age_hours <= 24 * 7:
+        return COMMENT_TTL_WEEK_HOURS
+    return float("inf")
+
+
+def _in_incremental_window(publish_time: datetime | None) -> bool:
+    """R-269：新作品 / 发布 ≤48h 的作品需要主动补指标，其余老帖当天已有时直接跳过。"""
+    if publish_time is None:
+        return True
+    return (_app_now() - publish_time).total_seconds() <= INCREMENTAL_METRIC_WINDOW_HOURS * 3600
+
+
+def _bili_miss_in_cooldown(extra_json: str | None, *, today: str | None = None) -> bool:
+    """R-269：B站「补完仍为 0」的标记 7 天内生效，避免每轮重复补同一批。"""
+    if not extra_json:
+        return False
+    try:
+        data = json.loads(extra_json)
+    except (TypeError, ValueError):
+        return False
+    at = str(data.get("backfill_miss_at") or "")
+    if len(at) != 10:
+        return False
+    try:
+        missed = date.fromisoformat(at)
+        current = date.fromisoformat(today or today_key())
+    except ValueError:
+        return False
+    return (current - missed).days < BILI_BACKFILL_RETRY_DAYS
 
 
 def _metric_updated_recently(db: Session, post_id: int, hours: float = POST_SYNC_METRIC_TTL_HOURS) -> bool:
@@ -1352,15 +1439,16 @@ def _metric_updated_recently(db: Session, post_id: int, hours: float = POST_SYNC
 
 
 def _comments_synced_recently(db: Session, post_id: int, hours: float = POST_SYNC_COMMENT_TTL_HOURS) -> bool:
-    """该帖评论最近已同步过（默认 6 小时内）→ 复用之，不再打第三方接口。"""
-    from datetime import timedelta
+    """该帖评论最近已同步过（默认 6 小时内）→ 复用之，不再打第三方接口。
 
+    R-269：支持 `hours=inf`（超过 7 天的老帖不主动拉），用秒比较避免 timedelta 溢出。
+    """
     from ..core.timeutil import now as _now
 
     latest = db.query(func.max(PlatformPostComment.created_at)).filter(PlatformPostComment.post_id == post_id).scalar()
     if latest is None:
         return False
-    return (_now() - latest) < timedelta(hours=hours)
+    return (_now() - latest).total_seconds() < hours * 3600
 
 
 def _sync_one_post(db: Session, post: PlatformPost, *, reuse_fresh_comments: bool = False) -> dict:
