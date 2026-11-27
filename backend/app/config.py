@@ -143,6 +143,10 @@ class Settings(BaseSettings):
     sync_media_concurrency: int = 6  # R-240：进程级全局媒体并发数（下载/转写较重，独立池），ECHO_SYNC_MEDIA_CONCURRENCY
     sync_commit_batch_size: int = 20  # 批量写库提交阈值，ECHO_SYNC_COMMIT_BATCH_SIZE（R-222）
     sync_progress_debounce_seconds: float = 2.0  # 同步进度更新防抖秒数，ECHO_SYNC_PROGRESS_DEBOUNCE_SECONDS（R-222）
+    # R-270：抖音对标账号播放量回补（公开接口不返回 play_count，只能批量 statistics 补）
+    metric_backfill_days: int = 365  # 回补时间窗（0 = 全部历史），ECHO_METRIC_BACKFILL_DAYS
+    metric_backfill_max_requests: int = 300  # 单轮回补请求上限，ECHO_METRIC_BACKFILL_MAX_REQUESTS
+    metric_backfill_per_account: int = 100  # 单账号单轮作品上限，ECHO_METRIC_BACKFILL_PER_ACCOUNT
 
     # R-240 性能优化可调项（批次 1+2）
     prompt_eval_concurrency: int = 3  # 金样本评测并发 LLM 数（1~5），ECHO_PROMPT_EVAL_CONCURRENCY

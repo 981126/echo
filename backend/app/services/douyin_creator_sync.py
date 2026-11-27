@@ -837,28 +837,41 @@ def _mark_peer_plays_fresh(db: Session) -> None:
     db.commit()
 
 
+METRIC_BACKFILL_PAUSED_KV = "metric_backfill_paused"
+
+
+def metric_backfill_paused(db: Session) -> bool:
+    """R-270：回补暂停开关（`app_kv.metric_backfill_paused=1` 时任务不发请求）。"""
+    row = db.get(Kv, METRIC_BACKFILL_PAUSED_KV)
+    return bool(row is not None and str(row.value).strip() == "1")
+
+
 def backfill_peer_plays(
     db: Session,
     owner: Creator,
     *,
     days: int = 30,
     max_requests: int = 120,
+    per_account_limit: int = 100,
     force: bool = False,
     concurrency: int = 1,
 ) -> dict:
-    """补采对标账号最近作品播放量：列表接口不返回播放量，只有 fetch_video_statistics 有。
+    """补采对标账号作品播放量：列表接口不返回播放量，只有 fetch_video_statistics 有。
 
-    每请求最多 2 个作品 id；结果写入当天 PlatformPostStat，供「同行爆款」规则使用。
-    默认 6 小时内复用，避免反复扣额度。
+    每请求最多 2 个作品 id；结果写入该作品**最新一条** PlatformPostStat，供「同行爆款」规则使用
+    （R-270：不再给老帖凭空新增「今天」的数据点）。默认 6 小时内复用，避免反复扣额度。
     R-240 M9：`concurrency>1` 时按批并发（日更补采任务用 3）；每个成功批仍保留 0.25s
     降速保护（真实联调 87 次连发出现 400）；默认 1 = 原串行语义（手动刷新路径不变）。
+    R-270：`days=0` 表示全部历史；`per_account_limit` 保证每个账号都能轮到。
     """
+    if metric_backfill_paused(db):
+        return {"updated": 0, "requests": 0, "remaining": 0, "paused": True, "warnings": []}
     if not force and _peer_plays_fresh(db):
         return {"updated": 0, "requests": 0, "remaining": 0, "reused": True, "warnings": []}
     client = make_client()
     if client.mode != "real":
         return {"updated": 0, "requests": 0, "remaining": 0, "reused": False, "warnings": []}
-    cutoff = _app_now() - timedelta(days=days)
+    cutoff = _app_now() - timedelta(days=days) if days > 0 else None
     accounts = (
         db.query(CreatorAccount)
         .join(Creator, CreatorAccount.creator_id == Creator.id)
@@ -866,15 +879,22 @@ def backfill_peer_plays(
         .all()
     )
     today = today_key()
+    now = _app_now()
+
+    def _priority(post: PlatformPost) -> tuple[int, datetime]:
+        """新帖（≤48h）优先，其余按发布时间升序（越老越先补，历史逐步覆盖）。"""
+        publish_time = post.publish_time
+        fresh = publish_time is not None and (now - publish_time).total_seconds() <= 48 * 3600
+        return (0 if fresh else 1, publish_time or now)
+
     pending: list[PlatformPost] = []
+    total_candidates = 0
     for account in accounts:
-        posts = (
-            db.query(PlatformPost)
-            .filter_by(account_id=account.id, platform="douyin", is_ad=False)
-            .filter(PlatformPost.publish_time >= cutoff)
-            .all()
-        )
-        for post in posts:
+        query = db.query(PlatformPost).filter_by(account_id=account.id, platform="douyin", is_ad=False)
+        if cutoff is not None:
+            query = query.filter(PlatformPost.publish_time >= cutoff)
+        candidates: list[PlatformPost] = []
+        for post in query.all():
             stat = (
                 db.query(PlatformPostStat)
                 .filter_by(post_id=post.id)
@@ -883,11 +903,14 @@ def backfill_peer_plays(
             )
             if stat is not None and (stat.plays or 0) > 0:
                 continue
-            pending.append(post)
+            candidates.append(post)
+        total_candidates += len(candidates)
+        candidates.sort(key=_priority)
+        pending.extend(candidates[: max(0, int(per_account_limit))])
     updated = 0
     requests = 0
     warnings: list[str] = []
-    limit = max(0, min(max_requests, 120))
+    limit = max(0, int(max_requests))
     batches: list[list[PlatformPost]] = []
     for index in range(0, len(pending), 2):
         if len(batches) >= limit:
@@ -896,7 +919,7 @@ def backfill_peer_plays(
     if len(pending) > len(batches) * 2:
         warnings.append(
             f"同行播放量补齐达到本次上限（{limit} 次请求），"
-            f"剩余 {len(pending) - len(batches) * 2} 条下次继续"
+            f"剩余 {total_candidates - len(batches) * 2} 条下次继续"
         )
 
     def _fetch_batch(batch: list[PlatformPost]) -> dict:
@@ -965,17 +988,33 @@ def backfill_peer_plays(
                 stats_item = stats.get(str(post.platform_post_id))
                 if not stats_item:
                     continue
-                stat_row = db.query(PlatformPostStat).filter_by(post_id=post.id, stat_date=today).first()
+                # R-270：只更新该作品最新一条统计行的缺失字段，不新增「今天」的数据点
+                stat_row = (
+                    db.query(PlatformPostStat)
+                    .filter_by(post_id=post.id)
+                    .order_by(PlatformPostStat.stat_date.desc())
+                    .first()
+                )
                 if stat_row is None:
                     stat_row = PlatformPostStat(post_id=post.id, stat_date=today, source="tikhub_statistics")
                     db.add(stat_row)
-                stat_row.plays = int(_number(stats_item.get("play_count")) or stat_row.plays or 0)
-                if stat_row.likes is None or stat_row.likes == 0:
-                    stat_row.likes = int(_number(stats_item.get("digg_count")) or stat_row.likes or 0)
-                if stat_row.comments is None or stat_row.comments == 0:
-                    stat_row.comments = int(_number(stats_item.get("comment_count")) or stat_row.comments or 0)
-                if stat_row.shares is None or stat_row.shares == 0:
-                    stat_row.shares = int(_number(stats_item.get("share_count")) or stat_row.shares or 0)
+                plays = int(_number(stats_item.get("play_count")) or 0)
+                if plays > 0:
+                    stat_row.plays = plays
+                if not stat_row.likes:
+                    stat_row.likes = int(_number(stats_item.get("digg_count")) or 0)
+                if not stat_row.comments:
+                    stat_row.comments = int(_number(stats_item.get("comment_count")) or 0)
+                if not stat_row.shares:
+                    stat_row.shares = int(_number(stats_item.get("share_count")) or 0)
+                downloads = int(_number(stats_item.get("download_count")) or 0)
+                if downloads > 0:
+                    try:
+                        extra = json.loads(stat_row.extra or "{}")
+                    except (TypeError, ValueError):
+                        extra = {}
+                    extra["downloads"] = downloads
+                    stat_row.extra = json.dumps(extra, ensure_ascii=False)
                 updated += 1
         db.commit()
         _mark_peer_plays_fresh(db)
@@ -992,7 +1031,7 @@ def backfill_peer_plays(
                 log.warning("同行播放量补采：预算剩余不足，仅计费 %d/%d 次", charge_count, requests)
         except Exception as exc:  # noqa: BLE001 预算计费失败不覆盖主流程（与 _charge_requests 一致）
             log.warning("TikHub 预算计费失败：%s", exc)
-    remaining = max(0, len(pending) - updated)
+    remaining = max(0, total_candidates - updated)
     return {"updated": updated, "requests": requests, "remaining": remaining, "reused": False, "warnings": warnings}
 
 
@@ -1008,13 +1047,22 @@ def peer_plays_worker(db: Session, payload: dict, update=None) -> dict:
     if owner is None:
         raise ValueError("请先创建并切换到主博主")
     concurrency = max(1, min(3, int((payload or {}).get("concurrency") or 3)))
+    settings = get_settings()
+    payload = payload or {}
+    days = payload.get("days")
+    max_requests = payload.get("max_requests")
+    per_account_limit = payload.get("per_account_limit")
     if update is not None:
         update(10, "补采同行播放量…")
     result = backfill_peer_plays(
         db,
         owner,
-        days=int((payload or {}).get("days") or 30),
-        max_requests=int((payload or {}).get("max_requests") or 120),
+        days=int(days if days is not None else settings.metric_backfill_days),
+        max_requests=int(max_requests if max_requests is not None else settings.metric_backfill_max_requests),
+        per_account_limit=int(
+            per_account_limit if per_account_limit is not None else settings.metric_backfill_per_account
+        ),
+        force=bool(payload.get("force")),
         concurrency=concurrency,
     )
     if update is not None:

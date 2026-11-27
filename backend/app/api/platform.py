@@ -467,6 +467,40 @@ def trigger_sync_all(db: Session = Depends(get_db)):
     return {"task_id": task_id, "creator_count": len(enq["entries"]), "skipped": enq["skipped"]}
 
 
+@router.post("/backfill-plays", response_model=dict)
+def trigger_backfill_plays(payload: dict | None = None, db: Session = Depends(get_db)):
+    """R-270：手动触发对标账号播放量回补（批量 statistics；预算/冷却/暂停沿用后台任务）。"""
+    from ..config import get_settings
+    from ..services.douyin_creator_sync import metric_backfill_paused, peer_plays_worker
+    from ..tasks import find_running_task
+
+    owner = get_current_creator(db)
+    if owner is None:
+        raise HTTPException(status_code=400, detail="请先创建并切换到主博主")
+    if metric_backfill_paused(db):
+        raise HTTPException(status_code=400, detail="播放量回补已暂停（app_kv metric_backfill_paused=1）")
+    running = find_running_task("peer_plays_backfill")
+    if running:
+        return {"task_id": running, "dedup": True}
+    body = payload or {}
+    settings = get_settings()
+    days = int(body.get("days", settings.metric_backfill_days))
+    max_requests = int(body.get("max_requests", settings.metric_backfill_max_requests))
+    task_id = start_task(
+        "peer_plays_backfill",
+        {
+            "owner_id": owner.id,
+            "days": days,
+            "max_requests": max_requests,
+            "per_account_limit": settings.metric_backfill_per_account,
+            "concurrency": 3,
+            "force": bool(body.get("force")),
+        },
+        peer_plays_worker,
+    )
+    return {"task_id": task_id, "dedup": False, "days": days, "max_requests": max_requests}
+
+
 @router.post("/videos/{video_id}/sync", response_model=dict)
 def sync_video_data(video_id: int, db: Session = Depends(get_db)):
     """素材库本地卡"同步数据"（R-067/R-077）：同步绑定平台指标+评论 Top50；缺转写则自动补齐。

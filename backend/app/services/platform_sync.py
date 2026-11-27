@@ -2170,6 +2170,36 @@ def _fail_creator_task(db: Session, task_id: int, error: str) -> None:
         db.rollback()
 
 
+def _maybe_start_peer_plays_backfill(db: Session, owner: Creator) -> None:
+    """R-270：手动「同步所有博主」完成后补一次对标播放量（已有运行中任务则复用）。
+
+    mock 模式没有真实可补数据，不投递无意义任务（与日更链路口径一致）。
+    """
+    from ..tasks import find_running_task, start_task
+
+    from .douyin_creator_sync import peer_plays_worker
+
+    settings = get_settings()
+    if str(getattr(settings, "tikhub_mode", "") or "").strip().lower() != "real":
+        return
+    try:
+        if find_running_task("peer_plays_backfill"):
+            return
+        start_task(
+            "peer_plays_backfill",
+            {
+                "owner_id": owner.id,
+                "days": settings.metric_backfill_days,
+                "max_requests": settings.metric_backfill_max_requests,
+                "per_account_limit": settings.metric_backfill_per_account,
+                "concurrency": 3,
+            },
+            peer_plays_worker,
+        )
+    except Exception as exc:  # noqa: BLE001 补播放量失败不影响同步结果
+        log.warning("手动同步后补采播放量入队失败：%s", exc)
+
+
 def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=None) -> dict:
     """R-163：并发消费者——线程池并行同步 entries 里的博主（daily 同口径：评论+缺视频下载+缺转写）。
 
@@ -2290,6 +2320,7 @@ def run_all_top15_sync(db: Session, owner: Creator, entries: list[dict], update=
     rerun = "no_sync"
     if synced:
         rerun = maybe_start_benchmark_rerun(db, refetch=False)  # 同步完自动重新对标（不重捞）
+        _maybe_start_peer_plays_backfill(db, owner)  # R-270：补对标播放量（不阻塞同步结果）
     if not failed and not partial:
         parts = [f"全量同步：共 {len(entries)} 个博主，全部同步成功（并发 {workers}）"]
     else:
@@ -2445,7 +2476,13 @@ def run_daily_sync_all(db: Session) -> dict:
                 else:
                     peer_task_id = start_task(
                         "peer_plays_backfill",
-                        {"owner_id": owner.id, "days": 30, "max_requests": 120, "concurrency": 3},
+                        {
+                            "owner_id": owner.id,
+                            "days": get_settings().metric_backfill_days,
+                            "max_requests": get_settings().metric_backfill_max_requests,
+                            "per_account_limit": get_settings().metric_backfill_per_account,
+                            "concurrency": 3,
+                        },
                         peer_plays_worker,
                     )
                     peer_plays = {"queued": True, "dedup": False, "task_id": peer_task_id}

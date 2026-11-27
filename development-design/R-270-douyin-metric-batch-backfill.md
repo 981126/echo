@@ -4,13 +4,13 @@
 - **日期**：2026-11-27
 - **状态**：设计完成，待开发
 - **排期**：M271
-- **范围**：复用并扩展 `fetch_benchmark_plays`（时间窗/配额/手动触发/写入口径）、batch 请求封装、raw 存量字段补全；不新增表、不换接口、不碰小红书
+- **范围**：复用并扩展 `backfill_peer_plays`（时间窗/配额/手动触发/写入口径）、batch 请求封装、raw 存量字段补全；不新增表、不换接口、不碰小红书
 
 ## 1. 开发背景
 
 抖音公开接口（列表 `fetch_user_post_videos`、单条 `fetch_one_video_v2`）已不返回 `play_count`，唯一来源是 `fetch_video_statistics`，但它一次最多 2 个 `aweme_id`（官方文档明确）。
 
-现有 `douyin_creator_sync.fetch_benchmark_plays` 已经实现了「2 个一批 + 0.25s 降速 + 6h 复用 + 失败重试」，但有三个限制：`days=30`、`max_requests=120`、只在日更链路触发。于是 11 个对标账号 608 条作品（含主账号 1 条共 609 条）播放量长期为 0，而作者手动点同步也不会补。
+现有 `douyin_creator_sync.backfill_peer_plays` 已经实现了「2 个一批 + 0.25s 降速 + 6h 复用 + 失败重试」，但有三个限制：`days=30`、`max_requests=120`、只在日更链路触发。于是 11 个对标账号 608 条作品（含主账号 1 条共 609 条）播放量长期为 0，而作者手动点同步也不会补。
 
 另有一个零成本收益：1257 条抖音 raw 里已经带了 `recommend_count` / `download_count` 等未解析字段。
 
@@ -82,17 +82,17 @@ def fetch_statistics_raw(client, ids: list[str], *, retries: int = 1, throttle: 
 - 降速：成功批次后 `time.sleep(0.25)`；
 - 计费：整任务结束后按 `attempts` 汇总一次 `_charge`（沿用现状，减少事务）。
 
-### 5.2 回补任务改造（`fetch_benchmark_plays`）
+### 5.2 回补任务改造（`backfill_peer_plays`）
 
-**签名扩展**：
+**签名扩展**（默认值保持向后兼容；调用方从 `config` 传新值）：
 
 ```python
-def fetch_benchmark_plays(
+def backfill_peer_plays(
     db, owner, *,
-    days: int = 365,             # 0 = 全部历史
-    max_requests: int = 300,     # 本轮请求上限
-    per_account_limit: int = 100,  # 每账号作品上限
-    concurrency: int = 3,
+    days: int = 30,                # 0 = 全部历史；任务/接口传 settings.metric_backfill_days(365)
+    max_requests: int = 120,       # 本轮请求上限；任务/接口传 settings.metric_backfill_max_requests(300)
+    per_account_limit: int = 100,  # 每账号作品上限；任务/接口传 settings.metric_backfill_per_account(100)
+    concurrency: int = 1,
     force: bool = False,
 ) -> dict:
 ```
